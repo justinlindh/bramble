@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mergeFirmwareMessages } from '../../src/store/actions';
 import { useStore } from '../../src/store/index';
-import type { IncomingMessage, Message } from '../../src/types/bramble';
+import type { Message } from '../../src/types/bramble';
 
 const PEER = 0xa1b2c3d4;
 const ME = 0x0badcafe;
+
+// The wire row type mergeFirmwareMessages accepts, derived from its signature
+// so this test tracks the real contract instead of restating it.
+type FwRow = Parameters<typeof mergeFirmwareMessages>[0][number];
 
 /**
  * Shape a row the way `bramble.getMessages` actually emits it: hex address
@@ -12,7 +16,7 @@ const ME = 0x0badcafe;
  * firmware handler never sets, so the synthetic fallback id is the only id
  * these rows ever get.
  */
-function fwRow(overrides: Partial<Record<string, unknown>> = {}): IncomingMessage {
+function fwRow(overrides: Partial<Record<string, unknown>> = {}): FwRow {
   return {
     from: 'A1B2C3D4',
     to: '0BADCAFE',
@@ -21,7 +25,7 @@ function fwRow(overrides: Partial<Record<string, unknown>> = {}): IncomingMessag
     channel: -1,
     timestamp_s: 1000,
     ...overrides,
-  } as unknown as IncomingMessage;
+  } as unknown as FwRow;
 }
 
 function ctx(existing: Message[] = []) {

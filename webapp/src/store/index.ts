@@ -266,7 +266,10 @@ export const useStore = create<AppState & Actions>((set) => ({
   setNeighbors: (n) => set(state => {
     const names = new Map(state.peerNames);
     for (const nb of n) {
-      if ((nb as any).name) names.set(nb.addr, (nb as any).name);
+      // normalizeNeighbor (store/actions/telemetry.ts) attaches the firmware's
+      // display name when present; the store's Neighbor type does not carry it.
+      const { name } = nb as Neighbor & { name?: string };
+      if (name) names.set(nb.addr, name);
     }
     return { neighbors: n, peerNames: names };
   }),
