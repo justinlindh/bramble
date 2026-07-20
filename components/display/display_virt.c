@@ -70,6 +70,8 @@ int display_init(void) {
     return 0;
 }
 
+void display_request_full_refresh(void) { ssd1680_engine_request_full_refresh(); }
+
 void display_flush(void) {
     if (!s_initialized)
         return;

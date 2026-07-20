@@ -88,6 +88,10 @@ int display_init(void) {
     return 0;
 }
 
+/* Virtual OLED has no e-paper-style residue: every flush ships the whole
+ * frame, so there is nothing to clear. */
+void display_request_full_refresh(void) {}
+
 void display_flush(void) {
     if (!s_initialized)
         return;

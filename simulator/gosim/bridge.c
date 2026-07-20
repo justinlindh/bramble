@@ -54,6 +54,37 @@ void bridge_set_flood_hop_limit(uint8_t hops) { g_flood_hop_limit = flood_hop_li
 
 uint8_t bridge_get_flood_hop_limit(void) { return g_flood_hop_limit; }
 
+/* ─── RREQ source-route install trust (issue #74 attack repro) ──────────── */
+/* Firmware's handle_rreq, after answering an RREQ, installs a route back
+ * toward the RREQ source (dest = next_hop = the unauthenticated prev_hop).
+ * gosim's _handle_rreq historically skipped that install, so it never modeled
+ * the route-poisoning surface of issue #74. This knob lets a gosim test opt in
+ * and A/B the trust class the install uses, exactly the axis firmware changed:
+ *   RREQ_SRC_ROUTE_OFF (default) -> do not install; every existing scenario is
+ *     byte-for-byte unchanged.
+ *   ROUTE_SRC_DISCOVERED (0)     -> the pre-fix vulnerable behavior.
+ *   ROUTE_SRC_BREADCRUMB (1)     -> the shipped fix.
+ * It drives the SAME route_install arbitration (routing.c) firmware uses, so
+ * the demonstration exercises the real shared code path, not a mock. */
+#define RREQ_SRC_ROUTE_OFF (-1)
+static int g_rreq_src_route_trust = RREQ_SRC_ROUTE_OFF;
+
+void bridge_set_rreq_src_route_trust(int trust) { g_rreq_src_route_trust = trust; }
+
+int bridge_get_rreq_src_route_trust(void) { return g_rreq_src_route_trust; }
+
+/* Install the reverse route toward the RREQ source that firmware's handle_rreq
+ * installs after answering an RREQ, gated on g_rreq_src_route_trust. The sim
+ * passes rreq.metric through without a link penalty, matching _handle_rrep's
+ * convention in this file. */
+static void rreq_maybe_install_src_route(sim_node_t* rx, const bramble_rreq_t* rreq,
+                                         uint32_t now_ms) {
+    if (g_rreq_src_route_trust == RREQ_SRC_ROUTE_OFF)
+        return;
+    route_install(&rx->routes, rreq->prev_hop, rreq->prev_hop, rreq->hop_count, rreq->metric,
+                  ROUTE_ACTIVE, (route_source_t)g_rreq_src_route_trust, now_ms);
+}
+
 /* Public channel state (one global instance) */
 static bramble_channel_t g_pub_channels[16];
 static int g_num_pub_channels = 0;
@@ -543,6 +574,9 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
         /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. */
         budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
                           now_us);
+
+        /* issue #74: mirror firmware's source-route install (default OFF). */
+        rreq_maybe_install_src_route(rx, &rreq, now_ms);
     } else if (g_intermediate_rrep_enabled &&
                intermediate_rrep_route_usable(route_lookup(&rx->routes, rreq.header.dest_addr),
                                               now_ms)) {
@@ -583,6 +617,9 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
          * rationale): no fall-through to the forward branch below. */
         budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
                           now_us);
+
+        /* issue #74: mirror firmware's source-route install (default OFF). */
+        rreq_maybe_install_src_route(rx, &rreq, now_ms);
     } else if (rreq.header.hop_limit > 1) {
         /* Global forwarded-RREQ token bucket (SEC-M4), same decision point as
          * firmware's handle_rreq (main/mesh_task.c:2460): gated AFTER the

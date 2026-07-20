@@ -108,6 +108,15 @@ function conversationTargetForMessage(msg: Message): ConversationTarget {
 // Exported for tests that pin the id/peerAddr/channelIndex agreement.
 export const __conversationTargetForMessage = conversationTargetForMessage;
 
+// Narrow accessor for callers that only need the conversation bucket id, such
+// as delivery-event correlation and notification routing in store/actions.ts.
+// It derives the id through the one classifier above so those paths cannot
+// drift from the store the way earlier hand-rolled copies did (#124, #153,
+// #168, #189).
+export function conversationIdForMessage(msg: Message): string {
+  return conversationTargetForMessage(msg).id;
+}
+
 function formatAddr(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
   if (id === 'broadcast') return 'Broadcast';
   if (id.startsWith('ch:')) {

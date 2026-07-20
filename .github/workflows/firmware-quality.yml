@@ -40,6 +40,20 @@ jobs:
           for tool in shellcheck clang-format cppcheck actionlint uv; do
             command -v "$tool" >/dev/null || { echo "::error::$tool missing from runner image"; exit 1; }
           done
+      - name: Assert clang-format matches the pinned version
+        # .clang-format-version is the single source of truth (see docs/ci.md
+        # and issue #161). clang-format versions disagree on macro and
+        # designated-initializer layout, so a runner drift here does not fail
+        # loud, it fails as a confusing formatting diff that no local run can
+        # reproduce. Fail fast and name both versions instead.
+        run: |
+          want="$(tr -d '[:space:]' < .clang-format-version)"
+          got="$(clang-format --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          if [[ "$got" != "$want" ]]; then
+            echo "::error::clang-format version mismatch: runner image has ${got:-unknown}, pinned version is ${want} (see .clang-format-version and docs/ci.md). Bump the runner image or .clang-format-version so they agree."
+            exit 1
+          fi
+          echo "clang-format ${got} matches the pinned version (${want})."
       - name: No internal refs
         run: bash scripts/lint/check-no-internal-refs.sh
       - name: No em dash

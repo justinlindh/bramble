@@ -28,6 +28,9 @@ dependencies.lock
 
 # Temp/evidence artifacts
 tmp-e2e/
+# libFuzzer crash/timeout/OOM reproducers; CI uploads them as job artifacts
+# instead, and the committed seeds live in test/fuzz/corpus/.
+test/fuzz/artifacts/
 *.log
 .cache/
 

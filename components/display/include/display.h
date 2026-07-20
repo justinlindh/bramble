@@ -59,6 +59,14 @@ void display_pixel(int x, int y, bool on);
 /** Flush the framebuffer to the display via I2C. */
 void display_flush(void);
 
+/**
+ * Request that the next display_flush() perform a full (flashing) refresh
+ * instead of a partial one. On the pager's SSD1680 e-paper panel this
+ * clears residue accumulated from prior partial refreshes; on OLED/LCD
+ * boards there is no such residue and this is a no-op.
+ */
+void display_request_full_refresh(void);
+
 /** Turn the display on or off (power save). */
 void display_power(bool on);
 

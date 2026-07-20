@@ -88,7 +88,12 @@ export function cspPlugin() {
             'http-equiv': 'Content-Security-Policy',
             content: isDev ? DEVELOPMENT_CSP : PRODUCTION_CSP,
           },
-          injectTo: 'head-prepend' as const,
+          // 'head' appends after index.html's existing head children rather
+          // than prepending before them, so the CSP meta tag lands after
+          // <meta charset="UTF-8">. Harmless either way (ASCII content, well
+          // inside the 1024-byte charset detection window) but charset is
+          // conventionally expected first.
+          injectTo: 'head' as const,
         },
       ];
     },

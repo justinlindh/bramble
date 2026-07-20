@@ -1006,7 +1006,12 @@ much a breadcrumb can override real routing state
 
 - A route learned this way is installed with a distinct trust class,
   `ROUTE_SRC_BREADCRUMB`, separate from `ROUTE_SRC_DISCOVERED` (routes
-  learned from RREQ/RREP/beacon, all HMAC-gated end to end). A
+  learned from RREP/beacon, both HMAC-authenticated end to end). The route a
+  node learns back toward an RREQ source in `handle_rreq` is classed
+  `ROUTE_SRC_BREADCRUMB` too, for the same reason a DATA breadcrumb is: an
+  RREQ carries no HMAC on the wire (there is no `rreq_verify`), so its
+  `prev_hop`/`hop_count`/`metric` are an unauthenticated hint, not a
+  control-plane fact (see the RREQ subsection under section 5). A
   `ROUTE_SRC_DISCOVERED` install always reclaims an existing
   `ROUTE_SRC_BREADCRUMB` entry for the same destination, unconditionally,
   regardless of metric or hop count; a `ROUTE_SRC_BREADCRUMB` install can
@@ -1179,6 +1184,22 @@ same PR that fixes it.
   (future). Under sustained flood the global cap also drops some
   legitimate forwarded RREQs (accepted airtime-vs-reach tradeoff;
   discovery retries).
+- **An unauthenticated RREQ is a route hint, not a route fact (issue #74).**
+  There is no `rreq_verify`: RREQ carries no HMAC field on the wire, so a
+  keyless attacker can flood an RREQ with an arbitrary `prev_hop`,
+  `hop_count`, and `metric`. `handle_rreq` still learns a route back toward
+  that source (so it can answer and be reachable), but installs it as
+  `ROUTE_SRC_BREADCRUMB`, the same low-trust class a DATA breadcrumb gets,
+  never `ROUTE_SRC_DISCOVERED`. The `route_install` trust rules (section 4)
+  therefore forbid it from displacing or evicting a real HMAC-authenticated
+  DISCOVERED route or locking one out, and the signed RREP this RREQ triggers
+  installs the genuine DISCOVERED route that always wins. `hop_count`
+  arithmetic in `components/routing/discovery.c` also saturates at 255 instead
+  of wrapping, so a forged maximal hop count can no longer be laundered into a
+  zero-hop (maximally attractive) advertisement. This is a mitigation, not a
+  fix of the root cause: full RREQ authentication (a wire-format change gated
+  on a protocol-version bump) remains future work, and until then an RREQ
+  source route is treated as exactly what it is, an unauthenticated hint.
 - **The identity private key, all channel keys, the RPC auth token, and,
   once provisioned, the network key are stored as plaintext NVS entries,
   and message history is plaintext SPIFFS**, with flash encryption, NVS

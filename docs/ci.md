@@ -118,7 +118,7 @@ changed. When in doubt, run the real checks rather than silently skip them.
 
 | Output | Marks changed when the diff touches |
 | --- | --- |
-| `firmware` | `main/`, `components/`, `test/`, `api/`, `scripts/`, `CMakeLists.txt`, `sdkconfig.*`, `partitions*.csv`, `.clang-format`, `.clang-tidy`, `.shellcheckrc`, `.markdownlint-cli2.yaml` |
+| `firmware` | `main/`, `components/`, `test/`, `api/`, `scripts/`, `CMakeLists.txt`, `sdkconfig.*`, `partitions*.csv`, `.clang-format`, `.clang-format-version`, `.clang-tidy`, `.shellcheckrc`, `.markdownlint-cli2.yaml` |
 | `simulator` | `simulator/` |
 | `emulator` | `emulator/` |
 | `webapp` | `webapp/` |
@@ -174,12 +174,25 @@ THE universal gate: it must run (and report) on every PR, including a docs-only
 PR where it is the only job that executes. The individual checks are cheap and
 pass trivially when their scope did not change.
 
+The clang-format version is pinned, not just the binary's presence. The
+`.clang-format-version` file at the repo root is the single source of truth
+(currently `14.0.6`, matching what the runner image bakes); a dedicated step
+runs `clang-format --version` and fails with a clear message naming both the
+expected and actual version when they disagree, instead of letting a version
+skew masquerade as a formatting violation (issue #161: two prior incidents
+where a contributor's local clang-format and CI's disagreed on macro/designated-
+initializer layout, with no text satisfying both). `run-clang-format-check.sh`
+performs the same comparison locally and prints a warning banner (not a hard
+failure, so a contributor without the exact version can still get advisory
+signal) naming the mismatch and pointing at this file.
+
 ### `quality.yml`
 
 | Job (context name) | Runs when | Required? |
 | --- | --- | --- |
 | `Detect changed areas` (via reusable `detect`) | always | no |
 | `Host tests` | `firmware` or `workflows` | yes |
+| `Parser fuzzing` | `firmware` or `workflows` | yes |
 | `Release config` | `firmware` or `workflows` | yes |
 | `gosim integration` | `firmware`, `simulator`, or `workflows` | yes |
 | `Board build smoke (heltec-v3)` | `firmware` or `workflows` | yes |
@@ -187,6 +200,20 @@ pass trivially when their scope did not change.
 | `Board build smoke (heltec-v4)` | `firmware` or `workflows` | yes |
 | `Board build smoke (bramble-pager)` | `firmware` or `workflows` | yes |
 | `Emulator suite` | `firmware`, `simulator`, `emulator`, or `workflows` | yes |
+
+`Parser fuzzing` runs `test/fuzz/run_fuzz.sh`, a bounded libFuzzer campaign
+(30 seconds per target, two targets) under ASan and UBSan against the wire-frame
+parsers in `components/packet/packet.c` and the fragment reassembler in
+`components/fragment/fragment.c`. Those parsers run on attacker-controlled LoRa
+bytes before any AEAD tag or HMAC is verified, which is what earns them a
+dedicated gate. The seed corpora are committed under `test/fuzz/corpus/`, so the
+run starts from valid frames of every wire type and the budget is spent on
+mutation rather than on rediscovering the formats. The job needs `clang` with
+the libFuzzer and sanitizer runtimes on the runner image; a first step asserts
+the toolchain is present and fails the job when it is not, because skipping on a
+missing tool would make the check advisory. A finding uploads its reproducing
+input as a CI artifact, and the same input replays locally with
+`test/fuzz/build/fuzz_packet <file>`.
 
 `Emulator suite` merges the former `emulator-scenarios` and `emulator-e2e`
 jobs into one job that builds the linux firmware node, gosim, and the UI once,

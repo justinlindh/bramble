@@ -506,6 +506,83 @@ void test_change_fraction_threshold_boundary(void) {
     TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_FULL, flush(&ops, &n, &busy));
 }
 
+/* ── requested full refresh (bramble#196) ────────────────────────────── */
+
+/* A caller-requested full refresh must win over the cadence and the
+ * change-fraction heuristic: a tiny update that would otherwise stay
+ * PARTIAL is promoted when requested. */
+void test_requested_full_refresh_overrides_partial(void) {
+    const ssd1680_op_t* ops;
+    size_t n;
+    uint32_t busy;
+    flush(&ops, &n, &busy); /* first: FULL */
+
+    touch(); /* tiny change: well under the change-fraction threshold */
+    ssd1680_engine_request_full_refresh();
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_FULL, flush(&ops, &n, &busy));
+    TEST_ASSERT_EQUAL_UINT32(SSD1680_BUSY_MS_FULL, busy);
+}
+
+/* A requested full refresh must emit even when nothing changed since the
+ * last flush, overriding the NONE elision: a caller may ask for a clearing
+ * refresh on an otherwise-static screen. */
+void test_requested_full_refresh_overrides_none(void) {
+    const ssd1680_op_t* ops;
+    size_t n;
+    uint32_t busy;
+    flush(&ops, &n, &busy); /* first: FULL */
+
+    /* Nothing changed: would normally elide to NONE. */
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_NONE, flush(&ops, &n, &busy));
+
+    ssd1680_engine_request_full_refresh();
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_FULL, flush(&ops, &n, &busy));
+    TEST_ASSERT_NOT_NULL(ops);
+    TEST_ASSERT_TRUE(n >= 14);
+}
+
+/* The request is consumed by the next flush: it does not force every
+ * following flush to be FULL too. */
+void test_requested_full_refresh_is_one_shot(void) {
+    const ssd1680_op_t* ops;
+    size_t n;
+    uint32_t busy;
+    flush(&ops, &n, &busy); /* first: FULL */
+
+    ssd1680_engine_request_full_refresh();
+    touch();
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_FULL, flush(&ops, &n, &busy));
+
+    touch();
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_PARTIAL, flush(&ops, &n, &busy));
+}
+
+/* A requested full refresh consumes the every-N cadence exactly like an
+ * organically-triggered one: the count of PARTIALs before the next
+ * cadence-driven FULL still starts fresh from the requested flush. */
+void test_requested_full_refresh_resets_cadence(void) {
+    const ssd1680_op_t* ops;
+    size_t n;
+    uint32_t busy;
+    flush(&ops, &n, &busy); /* refresh #1: FULL (init) */
+
+    touch();
+    touch();
+    touch();
+    ssd1680_engine_request_full_refresh();
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_FULL, flush(&ops, &n, &busy)); /* refresh #2: forced */
+
+    /* Refreshes #3..#10: PARTIAL (8 partials fit before the next every-10th,
+     * since the forced refresh at #2 advanced the cadence counter same as
+     * any other emitted FULL would). */
+    for (int i = 0; i < 8; i++) {
+        touch();
+        TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_PARTIAL, flush(&ops, &n, &busy));
+    }
+    touch();
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_FULL, flush(&ops, &n, &busy)); /* refresh #11: cadence */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_fb_geometry_row_major_msb_first);
@@ -520,5 +597,9 @@ int main(void) {
     RUN_TEST(test_refresh_policy_every_10th_flush_full);
     RUN_TEST(test_clean_flush_is_none_and_does_not_advance_policy);
     RUN_TEST(test_deep_sleep_terminates_every_stream);
+    RUN_TEST(test_requested_full_refresh_overrides_partial);
+    RUN_TEST(test_requested_full_refresh_overrides_none);
+    RUN_TEST(test_requested_full_refresh_is_one_shot);
+    RUN_TEST(test_requested_full_refresh_resets_cadence);
     return UNITY_END();
 }

@@ -24,6 +24,23 @@ if ! command -v clang-format >/dev/null 2>&1; then
   exit 0
 fi
 
+# CI pins an exact clang-format version (see .clang-format-version and
+# docs/ci.md, issue #161) because clang-format versions disagree on macro and
+# designated-initializer layout: there is no single text that satisfies both,
+# so a version mismatch here makes local runs and CI findings diverge in
+# confusing, non-convergent ways. Report the mismatch loudly rather than
+# silently producing output that will not match CI.
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+pinned_version_file="${repo_root}/.clang-format-version"
+if [[ -f "$pinned_version_file" ]]; then
+  pinned_version="$(tr -d '[:space:]' < "$pinned_version_file")"
+  actual_version="$(clang-format --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  if [[ -n "$pinned_version" && "$actual_version" != "$pinned_version" ]]; then
+    echo "[clang-format] WARNING: local clang-format is ${actual_version:-unknown}, CI is pinned to ${pinned_version} (see .clang-format-version and docs/ci.md)."
+    echo "[clang-format] Findings below may not match, or may miss, what CI reports. Install ${pinned_version} to reproduce CI exactly."
+  fi
+fi
+
 if [[ "$mode" == "changed" ]]; then
   diff_range=""
   if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" && -n "${GITHUB_BASE_REF:-}" ]]; then

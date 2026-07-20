@@ -199,6 +199,26 @@ void test_rreq_forward(void) {
     TEST_ASSERT_TRUE(fwd.metric < 255); /* penalty applied */
 }
 
+/* Issue #74: hop_count is a single attacker-controlled wire byte on an
+ * unauthenticated RREQ. A plain ++ / + wraps 255 -> 0, laundering a forged
+ * maxed hop_count into a zero-hop (maximally attractive) advertisement.
+ * rreq_forward and rrep_build_destination must saturate at 255 instead of
+ * wrapping (rrep_build_intermediate's saturation is checked below, next to the
+ * fresh_discovered_route helper it needs). */
+void test_rreq_forward_hop_count_saturates(void) {
+    bramble_rreq_t r = rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE, 8);
+    r.hop_count = 255;
+    bramble_rreq_t fwd = rreq_forward(&r, ADDR_B, -70, 8);
+    TEST_ASSERT_EQUAL(255, fwd.hop_count); /* not 0 */
+}
+
+void test_rrep_build_destination_hop_count_saturates(void) {
+    bramble_rreq_t r = rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE, 8);
+    r.hop_count = 255;
+    bramble_rrep_t rrep = rrep_build_destination(&r, ADDR_C);
+    TEST_ASSERT_EQUAL(255, rrep.hop_count); /* not 0 */
+}
+
 void test_rrep_build_destination(void) {
     bramble_rreq_t rreq = rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE, 4);
     bramble_rreq_t fwd = rreq_forward(&rreq, ADDR_B, -70, 8);
@@ -487,6 +507,18 @@ void test_rrep_build_intermediate_hop_and_metric_math(void) {
     TEST_ASSERT_TRUE(rrep_verify(&rrep));
 }
 
+/* Issue #74 (intermediate branch): a forged maxed rreq.hop_count must not wrap
+ * through rrep_build_intermediate's (hop+1)+route_hops arithmetic into a tiny
+ * total that advertises a bogus short path on the destination's behalf. */
+void test_rrep_build_intermediate_hop_count_saturates(void) {
+    bramble_rreq_t rreq = rreq_build_originator(ADDR_A, ADDR_D, QUERY, 0xEEEE, 8);
+    rreq.hop_count = 255;
+    route_entry_t route_to_d = fresh_discovered_route(ADDR_D, ADDR_B, 5, 180, 5000);
+    bramble_rrep_t rrep = rrep_build_intermediate(&rreq, &route_to_d, ADDR_C, -70, 8);
+    /* (255 + 1 -> 255) + 5 -> 255, never wraps to a tiny forged total. */
+    TEST_ASSERT_EQUAL(255, rrep.hop_count);
+}
+
 void test_rrep_build_intermediate_tamper_fails_verify(void) {
     bramble_rreq_t rreq = rreq_build_originator(ADDR_A, ADDR_D, QUERY, 0xEEEE, 8);
     route_entry_t route_to_d = fresh_discovered_route(ADDR_D, ADDR_B, 1, 200, 5000);
@@ -557,6 +589,8 @@ int main(void) {
     RUN_TEST(test_rreq_build_originator);
     RUN_TEST(test_rreq_build_originator_expanded_ring);
     RUN_TEST(test_rreq_forward);
+    RUN_TEST(test_rreq_forward_hop_count_saturates);
+    RUN_TEST(test_rrep_build_destination_hop_count_saturates);
     RUN_TEST(test_rrep_build_destination);
     RUN_TEST(test_rrep_forward);
     RUN_TEST(test_rrep_rx_decide_originator_delivers);
@@ -570,6 +604,7 @@ int main(void) {
     RUN_TEST(test_intermediate_rrep_route_usable_rejects_stale_and_broken);
     RUN_TEST(test_intermediate_rrep_route_usable_rejects_too_old);
     RUN_TEST(test_rrep_build_intermediate_hop_and_metric_math);
+    RUN_TEST(test_rrep_build_intermediate_hop_count_saturates);
     RUN_TEST(test_rrep_build_intermediate_tamper_fails_verify);
     RUN_TEST(test_intermediate_reply_suppresses_forward);
     return UNITY_END();
