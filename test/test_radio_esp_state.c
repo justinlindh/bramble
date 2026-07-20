@@ -144,6 +144,12 @@ int sx1262_init(void) { return fake_rc("init"); }
 bool sx1262_needs_reinit(void) { return false; }
 void sx1262_clear_reinit(void) {}
 
+/* Referenced by radio_cad_check's fail-closed path (issue #118). The CAD policy
+ * itself is covered by test_cad_timeout_policy and test_radio_virt; here the
+ * semaphore stub always succeeds so the timeout branch is never taken, and this
+ * only has to exist for linking. */
+void sx1262_request_reinit(void) {}
+
 int sx1262_write_register(uint16_t addr, const uint8_t* data, size_t len) {
     (void)addr;
     (void)data;

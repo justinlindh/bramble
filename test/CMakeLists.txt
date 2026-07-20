@@ -415,6 +415,15 @@ target_include_directories(test_radio_bw_mapping PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
 )
 
+# CAD-timeout fail-open/closed policy (issue #118)
+add_executable(test_cad_timeout_policy
+    test_cad_timeout_policy.c
+    unity/unity.c
+)
+target_include_directories(test_cad_timeout_policy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+
 # Crypto tests
 add_executable(test_crypto
     test_crypto.c
