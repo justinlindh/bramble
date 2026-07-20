@@ -86,10 +86,14 @@ fail_setup() { red "SETUP FAIL: $*"; exit 2; }
 
 # --- preconditions --------------------------------------------------------
 [ -x "$NODE_BIN" ] || fail_setup "node binary missing: $NODE_BIN (build it: cd emulator/node && idf.py build)"
-if [ ! -x "$GOSIM_BIN" ]; then
-    info "building gosim..."
-    ( cd "$GOSIM_DIR" && go build -o bramble-gosim . ) || fail_setup "gosim build failed"
-fi
+# Always build, never build-if-missing: `go build` is itself the staleness
+# check and a near no-op when nothing changed (CI's earlier Build-gosim step
+# keeps it a cache hit there). The old existence check once let a
+# checked-out gosim binary from an older commit run as the broker, and a
+# scenario then failed for reasons that looked like a firmware regression
+# (the pre-NMEA broker never fed the GPS fix scenario).
+info "building gosim..."
+( cd "$GOSIM_DIR" && go build -o bramble-gosim . ) || fail_setup "gosim build failed"
 
 # run_scenario <name> <wall_timeout_s> <logvar>
 # Boots gosim headless for the named scenario, writing its event log to a temp
