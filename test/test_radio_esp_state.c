@@ -140,6 +140,58 @@ static int fake_rc(const char* call) {
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Instrumented semaphore layer (issue #225)                          */
+/* ------------------------------------------------------------------ */
+
+/* The shared stub semaphore is a no-op, but these tests need to observe that
+ * radio_task's RX-done read and radio_reconfigure take and release the SAME
+ * rx-sequence mutex, and that a reconfigure landing mid-read contends on it
+ * (i.e. would block, so it cannot splice into the read). Defining the stub's
+ * include guard here makes radio_esp.c pick up these instrumented versions
+ * instead. Only the handle the test tracks (s_tracked_mutex) is counted; every
+ * other semaphore behaves like the stub. */
+#define FREERTOS_SEMPHR_H_STUB
+typedef void* SemaphoreHandle_t;
+
+static int s_sem_next_handle;
+static void* s_tracked_mutex; /* set by setUp to radio_esp.c's s_rx_seq_mutex */
+static int s_rxseq_depth;     /* current held depth of the tracked mutex */
+static int s_rxseq_max_depth; /* max simultaneous depth (2 == a mid-read take) */
+static int s_rxseq_takes;     /* total takes of the tracked mutex */
+
+static inline SemaphoreHandle_t xSemaphoreCreateMutex(void) {
+    return (SemaphoreHandle_t)(intptr_t)(++s_sem_next_handle);
+}
+static inline SemaphoreHandle_t xSemaphoreCreateBinary(void) {
+    return (SemaphoreHandle_t)(intptr_t)(++s_sem_next_handle);
+}
+static inline int xSemaphoreTake(SemaphoreHandle_t s, unsigned long ticks) {
+    (void)ticks;
+    if (s && s == s_tracked_mutex) {
+        s_rxseq_takes++;
+        s_rxseq_depth++;
+        if (s_rxseq_depth > s_rxseq_max_depth) {
+            s_rxseq_max_depth = s_rxseq_depth;
+        }
+    }
+    return 1;
+}
+static inline int xSemaphoreGive(SemaphoreHandle_t s) {
+    if (s && s == s_tracked_mutex) {
+        s_rxseq_depth--;
+    }
+    return 1;
+}
+static inline void vSemaphoreDelete(SemaphoreHandle_t s) { (void)s; }
+
+/* RX-read fake controls: length GetRxBufferStatus reports, the lock depth seen
+ * inside GetPacketStatus, and an optional hook fired inside ReadBuffer to
+ * simulate a concurrent reconfigure arriving mid-read. */
+static int s_fake_rx_len;
+static int s_depth_in_get_pkt_status;
+static void (*s_rx_read_hook)(void);
+
 int sx1262_init(void) { return fake_rc("init"); }
 bool sx1262_needs_reinit(void) { return false; }
 void sx1262_clear_reinit(void) {}
@@ -169,6 +221,11 @@ int sx1262_read_buffer(uint8_t offset, uint8_t* data, size_t len) {
     (void)offset;
     (void)data;
     (void)len;
+    /* Simulate a concurrent reconfigure landing between ReadBuffer and
+     * GetPacketStatus, i.e. right in the middle of the RX read sequence. */
+    if (s_rx_read_hook) {
+        s_rx_read_hook();
+    }
     return fake_rc("read_buffer");
 }
 
@@ -259,13 +316,15 @@ int sx1262_set_cad_params(uint8_t symbol_num, uint8_t det_peak, uint8_t det_min,
 
 int sx1262_get_rx_buffer_status(uint8_t* payload_len, uint8_t* rx_start_offset) {
     if (payload_len)
-        *payload_len = 0;
+        *payload_len = (uint8_t)s_fake_rx_len;
     if (rx_start_offset)
         *rx_start_offset = 0;
     return 0;
 }
 
 int sx1262_get_packet_status(int16_t* rssi, int8_t* snr) {
+    /* Record whether the RX-sequence lock is held at the innermost read. */
+    s_depth_in_get_pkt_status = s_rxseq_depth;
     if (rssi)
         *rssi = -80;
     if (snr)
@@ -340,9 +399,20 @@ void setUp(void) {
     atomic_store(&s_tx_waiter, (TaskHandle_t)NULL);
     s_tx_done_cb_calls = 0;
     s_tx_done_cb = NULL;
+    s_rx_cb = NULL;
     s_gate_lock_depth = 0;
     s_gate_lock_max_depth = 0;
     s_gate_lock_calls = 0;
+    /* RX-sequence lock (issue #225): create the mutex radio_init would make and
+     * point the instrumented semaphore layer at it, then reset the counters. */
+    s_rx_seq_mutex = xSemaphoreCreateMutex();
+    s_tracked_mutex = s_rx_seq_mutex;
+    s_rxseq_depth = 0;
+    s_rxseq_max_depth = 0;
+    s_rxseq_takes = 0;
+    s_fake_rx_len = 0;
+    s_depth_in_get_pkt_status = -1;
+    s_rx_read_hook = NULL;
 }
 
 void tearDown(void) {}
@@ -561,6 +631,59 @@ static void test_reconfigure_releases_the_gate_lock_on_failure(void) {
     TEST_ASSERT_EQUAL_INT(0, s_gate_lock_depth);
 }
 
+/* ---------- RX-done read serialization (issue #225) ---------- */
+
+/* radio_task's RX-done read runs the whole GetRxBufferStatus -> ReadBuffer ->
+ * GetPacketStatus sequence under the RX-sequence lock, held (not nested) across
+ * the reads and released after. */
+static void test_rx_read_runs_under_the_rx_seq_lock(void) {
+    s_fake_rx_len = 16; /* a frame is waiting */
+    uint8_t buf[64];
+    radio_handle_rx_done(buf, sizeof(buf));
+    TEST_ASSERT_TRUE(s_rxseq_takes > 0);
+    TEST_ASSERT_EQUAL_INT(1, s_depth_in_get_pkt_status); /* held during the read */
+    TEST_ASSERT_EQUAL_INT(1, s_rxseq_max_depth);         /* held once, not nested */
+    TEST_ASSERT_EQUAL_INT(0, s_rxseq_depth);             /* released */
+}
+
+/* An empty RX (GetRxBufferStatus reports zero length) must still take and
+ * release the lock in balance, never leak it. */
+static void test_rx_read_releases_lock_when_no_frame(void) {
+    s_fake_rx_len = 0;
+    uint8_t buf[64];
+    radio_handle_rx_done(buf, sizeof(buf));
+    TEST_ASSERT_TRUE(s_rxseq_takes > 0);
+    TEST_ASSERT_EQUAL_INT(0, s_rxseq_depth);
+}
+
+/* radio_reconfigure takes and releases the SAME rx-sequence lock, so it is
+ * mutually exclusive with the RX-done read. */
+static void test_reconfigure_takes_the_rx_seq_lock(void) {
+    radio_config_t cfg = test_config();
+    TEST_ASSERT_EQUAL_INT(0, radio_reconfigure(&cfg));
+    TEST_ASSERT_TRUE(s_rxseq_takes > 0);
+    TEST_ASSERT_EQUAL_INT(0, s_rxseq_depth);
+}
+
+static void reconfigure_from_within_read(void) {
+    radio_config_t cfg = test_config();
+    radio_reconfigure(&cfg);
+}
+
+/* The interleave itself: a reconfigure arriving in the middle of the RX read
+ * contends on the rx-sequence lock the read already holds (depth reaches 2). On
+ * real hardware that second take blocks until the read releases, so reconfigure
+ * cannot splice into the read. Non-vacuous: if reconfigure took a different
+ * lock, or none, the depth would stay 1 and the interleave would be live. */
+static void test_reconfigure_mid_read_contends_on_the_rx_seq_lock(void) {
+    s_fake_rx_len = 16;
+    s_rx_read_hook = reconfigure_from_within_read;
+    uint8_t buf[64];
+    radio_handle_rx_done(buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_INT(2, s_rxseq_max_depth);
+    TEST_ASSERT_EQUAL_INT(0, s_rxseq_depth); /* both releases happened */
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -588,6 +711,11 @@ int main(void) {
 
     RUN_TEST(test_reconfigure_holds_the_gate_lock_across_the_sequence);
     RUN_TEST(test_reconfigure_releases_the_gate_lock_on_failure);
+
+    RUN_TEST(test_rx_read_runs_under_the_rx_seq_lock);
+    RUN_TEST(test_rx_read_releases_lock_when_no_frame);
+    RUN_TEST(test_reconfigure_takes_the_rx_seq_lock);
+    RUN_TEST(test_reconfigure_mid_read_contends_on_the_rx_seq_lock);
 
     return UNITY_END();
 }
