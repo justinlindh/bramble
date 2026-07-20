@@ -443,6 +443,11 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 		// Trust-anchor campaign (P2 red-team): runtime setAnchor equivalent;
 		// (re-)anchors a node and drops any stale un-endorsed pins.
 		s.handleProvisionAnchor(evt)
+	case C.EVT_GENERATE_LOCATION:
+		// Location sharing (issue #172): position broadcasts always go
+		// through the real firmware C path in bridge.c, same rationale as
+		// attestations above.
+		s.handleGenerateLocation(evt)
 	}
 }
 
@@ -497,6 +502,12 @@ func (s *Sim) handleGenerateMessage(evt *C.sim_event_t) {
 
 func (s *Sim) handleGenerateAttestation(evt *C.sim_event_t) {
 	handleGenerateAttestation(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
+}
+
+// handleGenerateLocation (issue #172): a scripted GPS position broadcast
+// through the real firmware location serialization path in bridge.c.
+func (s *Sim) handleGenerateLocation(evt *C.sim_event_t) {
+	handleGenerateLocation(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
 // handleProvisionAnchor (trust-anchor campaign P2 red-team): a scripted runtime

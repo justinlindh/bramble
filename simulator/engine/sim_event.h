@@ -37,6 +37,13 @@ typedef enum {
      * test anchor; the drop-stale-pins behavior of identity_store_set_anchor is
      * what the event exercises. */
     EVT_PROVISION_ANCHOR,
+    /* Location sharing (issue #172): a scripted GPS position broadcast
+     * ("send_location" scenario event). data.location.node_id is the
+     * originating node; the fix-degree coordinates from the scenario are
+     * carried as e7 integers (the firmware's own bramble_position_t
+     * representation) so no float precision is lost on the way to
+     * location_serialize_for_tier. */
+    EVT_GENERATE_LOCATION,
 } event_type_t;
 
 /* Packet event data */
@@ -62,6 +69,16 @@ typedef struct {
     float x;
     float y;
 } node_event_data_t;
+
+/* Location event data (EVT_GENERATE_LOCATION). Degrees are stored as
+ * degrees * 1e7 (the firmware's bramble_position_t convention): a float
+ * only holds ~7 significant digits, which would corrupt e7 coordinates. */
+typedef struct {
+    char node_id[16];
+    int32_t latitude_e7;
+    int32_t longitude_e7;
+    int16_t altitude_m;
+} location_event_data_t;
 
 /* Interference event data */
 typedef struct {
@@ -91,6 +108,7 @@ typedef struct {
     union {
         packet_event_data_t packet;
         node_event_data_t node;
+        location_event_data_t location;
         interference_event_data_t interference;
         tick_event_data_t tick;
         broadcast_delivery_event_data_t broadcast_delivery;
