@@ -368,19 +368,28 @@ jobs:
     # (never pushes; it exists to catch a broken build before merge, not to
     # publish) so future Dependabot docker bumps are self-verifying.
     #
-    # COVERAGE: three of the four shipped Dockerfiles (webapp, simulator,
-    # firmware-builder). emulator/Dockerfile is deliberately NOT a leg here
-    # yet: its ESP-IDF stage resolves managed components (libsodium, lvgl)
-    # from the Espressif component registry at build time, which needs live
-    # egress to components-file.espressif.com that the runner pool does not
-    # have, so the build cannot complete from clean. The gate CAUGHT this as
-    # a real latent bug (the emulator image had never been buildable from a
-    # clean checkout; the Emulator suite builds emulator/node on the host,
-    # never through the Dockerfile). Making that build hermetic (vendored or
-    # baked components, no live registry egress) and re-adding the leg is
-    # tracked in #231. emulator/Dockerfile's registry-URL fix already landed
-    # in this PR so `docker compose up --build` works for developers with
-    # normal egress; only the CI leg is deferred.
+    # COVERAGE: all four shipped Dockerfiles (webapp, simulator, emulator,
+    # firmware-builder). The gate caught a real latent bug in the emulator
+    # image on its first run: emulator/Dockerfile's ESP-IDF stage resolves
+    # managed components (libsodium, lvgl) from the Espressif component
+    # registry at build time, and the manager bundled with the v5.4.1 install
+    # defaulted to the dead api.components.espressif.com subdomain, so the
+    # image had never been buildable from a clean checkout (the Emulator suite
+    # builds emulator/node directly on the host, never through the Dockerfile,
+    # and a gitignored dependencies.lock masked it locally). Two fixes: the
+    # registry-URL pin in emulator/Dockerfile (which alone repairs
+    # `docker compose up --build` for developers), and `--network=host` on the
+    # emulator leg's build below, because the component FILE host
+    # (components-file.espressif.com) is reachable from the runner HOST but not
+    # from the build's default bridge network. That live fetch is consistent
+    # with how the rest of CI already works: the required Emulator suite builds
+    # emulator/node by fetching the same components live, and the other three
+    # docker legs run live npm ci / go mod download / apt at build time.
+    #
+    # SECURITY: `--network=host` on our own trusted CI runner building our own
+    # Dockerfiles is the same trust model as the docker.sock mount the publish
+    # workflow already uses; the build has no untrusted input, so sharing the
+    # host network namespace to reach a first-party registry is acceptable.
     #
     # THE AREA GATE IS ON THE STEPS, NOT THE JOB, AND MUST STAY THERE: see
     # Board build smoke's comment above for why a job-level `if:` on a matrix
@@ -411,7 +420,7 @@ jobs:
       # smoke: a webapp-only bump breaking the emulator image (or vice versa)
       # must not hide behind a cancelled sibling.
       fail-fast: false
-      # Dockerfiles on a small self-hosted pool that also runs the board
+      # Four Dockerfiles on a small self-hosted pool that also runs the board
       # matrix, gosim, and the emulator suite; two at a time keeps the rest of
       # the wave moving.
       max-parallel: 2
@@ -423,6 +432,13 @@ jobs:
           - image: simulator
             dockerfile: simulator/Dockerfile
             context: .
+          - image: emulator
+            dockerfile: emulator/Dockerfile
+            context: .
+            # Only this leg needs host networking: its ESP-IDF stage fetches
+            # managed components from components-file.espressif.com, reachable
+            # from the runner host but not the build's default bridge network.
+            netmode: host
           - image: firmware-builder
             dockerfile: docker/firmware-builder/Dockerfile
             context: docker/firmware-builder
@@ -433,14 +449,17 @@ jobs:
         # repeating the expression. Each image gates on the union of areas its
         # Dockerfile's COPY instructions actually read (see docs/ci.md):
         # webapp on webapp; simulator on simulator/firmware (it COPYs main/ +
-        # components/ for its cgo build); firmware-builder on firmware (which
-        # the detector maps docker/firmware-builder/ into). workflows is OR'd
-        # into every leg per the always-report safety rule.
+        # components/ for its cgo build); emulator on emulator/simulator/firmware
+        # (it additionally builds the linux firmware node and gosim);
+        # firmware-builder on firmware (which the detector maps
+        # docker/firmware-builder/ into). workflows is OR'd into every leg per
+        # the always-report safety rule.
         id: gate
         env:
           IMAGE: ${{ matrix.image }}
           WEBAPP: ${{ needs.detect.outputs.webapp }}
           SIMULATOR: ${{ needs.detect.outputs.simulator }}
+          EMULATOR: ${{ needs.detect.outputs.emulator }}
           FIRMWARE: ${{ needs.detect.outputs.firmware }}
           WORKFLOWS: ${{ needs.detect.outputs.workflows }}
         run: |
@@ -449,6 +468,7 @@ jobs:
           case "$IMAGE" in
             webapp)  [ "$WEBAPP" = true ] && build=true ;;
             simulator) { [ "$SIMULATOR" = true ] || [ "$FIRMWARE" = true ]; } && build=true ;;
+            emulator) { [ "$EMULATOR" = true ] || [ "$SIMULATOR" = true ] || [ "$FIRMWARE" = true ]; } && build=true ;;
             firmware-builder) [ "$FIRMWARE" = true ] && build=true ;;
           esac
           [ "$WORKFLOWS" = true ] && build=true
@@ -483,6 +503,10 @@ jobs:
         env:
           DOCKERFILE_PATH: ${{ matrix.dockerfile }}
           BUILD_CONTEXT: ${{ matrix.context }}
+          # host on the emulator leg only (see the matrix entry and the job
+          # header's SECURITY note); empty for the others, which build fine on
+          # the default bridge network.
+          NETMODE: ${{ matrix.netmode }}
           # Force BuildKit on regardless of the host daemon's default, so the
           # Dockerfiles' `# syntax=` directives and `--mount=type=cache` RUN
           # steps are honoured. No push, no load: a successful build IS the
@@ -490,4 +514,6 @@ jobs:
           DOCKER_BUILDKIT: "1"
         run: |
           set -euo pipefail
-          docker build -f "$DOCKERFILE_PATH" "$BUILD_CONTEXT"
+          netflag=()
+          [ "${NETMODE:-}" = host ] && netflag=(--network=host)
+          docker build "${netflag[@]}" -f "$DOCKERFILE_PATH" "$BUILD_CONTEXT"
