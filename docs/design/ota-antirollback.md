@@ -188,7 +188,7 @@ secure-version burn onto a device silently.
    Dev builds, the emulator, and the QEMU/linux targets are untouched: on the
    linux target `ota_rollback.c` is not even compiled, and the pure policy
    sees `secure_enforced = false`
-   (`test_secure_not_enforced_ignores_clear_flag`).
+   (`test_secure_floor_ignored_when_enforcement_not_compiled_in`).
 2. **Loud build surface.** `scripts/flash.sh` runs
    `scripts/antirollback-guard.sh` after every build; an anti-rollback build
    prints an unmissable banner naming the epoch and the irreversibility, even

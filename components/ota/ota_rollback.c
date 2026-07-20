@@ -47,7 +47,8 @@ static int write_floor(const char* version) {
 
 void ota_rollback_note_boot(void) {
 #if CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
-    /* CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK selects APP_ROLLBACK_ENABLE: a freshly
+    /* CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK depends on (does not select)
+     * APP_ROLLBACK_ENABLE, so the overlay sets both explicitly. A freshly
      * OTA'd image boots in pending-verify state and reverts on the next reboot
      * unless the app confirms it is operable. Reaching this call (after NVS
      * init, from the main bring-up path) is the current definition of a
