@@ -125,6 +125,14 @@ static bool s_cad_done;
 static bool s_cad_busy;
 static bool s_cad_async; /* an async radio_cad() is awaiting its cadres */
 
+/* CAD-timeout fail-open/closed policy (issue #118), mirroring radio_esp.c so
+ * the emulator exercises the same decision. The counter is only touched on the
+ * transmitting task, so it needs no lock; the reinit flag is set there and
+ * read/cleared by radio_check_and_clear_reinit() on the mesh task, so it is
+ * atomic. */
+static cad_timeout_policy_t s_cad_timeout_policy;
+static atomic_bool s_needs_reinit;
+
 /* ------------------------------------------------------------------ */
 /*  base64 (RFC 4648, standard alphabet, padded)                       */
 /* ------------------------------------------------------------------ */
@@ -619,10 +627,26 @@ bool radio_cad_check(void) {
     pthread_mutex_unlock(&s_mu);
 #endif
 
-    /* Timeout fails safe to "clear" so a silent broker never starves TX,
-     * matching radio_esp.c's CAD-timeout behavior. */
     radio_start_rx();
-    return done ? busy : false;
+
+    if (!done) {
+        /* Fail-open/closed policy (issue #118), identical to radio_esp.c: the
+         * first BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD-1 consecutive timeouts
+         * fail open (transmit anyway) so a briefly silent broker never starves
+         * TX; the threshold-th fails closed (report busy) and flags a reinit. */
+        cad_timeout_action_t action = cad_timeout_policy_on_timeout(&s_cad_timeout_policy);
+        if (action == CAD_TIMEOUT_FAIL_CLOSED) {
+            ESP_LOGE(TAG, "CAD timed out %u consecutive times, failing closed, requesting reinit",
+                     (unsigned)BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD);
+            atomic_store(&s_needs_reinit, true);
+            return true;
+        }
+        return false;
+    }
+
+    /* A completed CAD means the broker answered; reset the timeout streak. */
+    cad_timeout_policy_on_success(&s_cad_timeout_policy);
+    return busy;
 }
 
 void radio_set_tx_power(int8_t power) { s_config.tx_power = power; }
@@ -637,6 +661,12 @@ void radio_set_cad_done_callback(radio_cad_done_callback_t cb) { s_cad_done_cb =
 
 void radio_sleep(void) { atomic_store(&s_state, RADIO_STATE_SLEEP); }
 
-bool radio_check_and_clear_reinit(void) { return false; }
+bool radio_check_and_clear_reinit(void) {
+    /* Honor the CAD-timeout fail-closed path (issue #118): if a run of CAD
+     * timeouts flagged the radio as wedged, report it once so the mesh loop
+     * runs radio_reconfigure, and clear the flag. Normal emulator runs never
+     * set it, since the broker answers every CAD. */
+    return atomic_exchange(&s_needs_reinit, false);
+}
 
 #endif /* host build (IDF linux target or plain-gcc test harness) */

@@ -31,6 +31,23 @@ static void reset_nodes_mode(ui_state_t* state) {
     state->nodes_cursor = 0;
 }
 
+/* Full-refresh policy bookkeeping (see UI_FULL_REFRESH_EVERY_N_SCREENS in
+ * ui.h): called after anything that may have changed current_screen, with
+ * the screen in effect before that change. A no-op if the screen did not
+ * actually change (settings row navigation, message scrolling, etc, all set
+ * screen_dirty without changing current_screen and must not consume the
+ * cadence). */
+static void note_screen_change(ui_state_t* state, ui_screen_t before) {
+    if (state->current_screen == before)
+        return;
+    state->screens_since_full_refresh++;
+    if (state->current_screen == SCREEN_SETTINGS ||
+        state->screens_since_full_refresh >= UI_FULL_REFRESH_EVERY_N_SCREENS) {
+        state->full_refresh_pending = true;
+        state->screens_since_full_refresh = 0;
+    }
+}
+
 void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
     ui_screen_t before = state->current_screen;
     state->last_activity = now_ms;
@@ -105,6 +122,7 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
             state->prev_screen = state->current_screen;
             state->current_screen = SCREEN_MAIN;
             state->screen_dirty = true;
+            note_screen_change(state, SCREEN_SETTINGS);
             return;
         default:
             break;
@@ -293,6 +311,8 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
     if (before == SCREEN_NODES && state->current_screen != SCREEN_NODES) {
         reset_nodes_mode(state);
     }
+
+    note_screen_change(state, before);
 }
 
 void ui_set_gps_available(ui_state_t* state, bool available) { state->gps_available = available; }
@@ -307,7 +327,14 @@ bool ui_needs_redraw(const ui_state_t* state) { return state->screen_dirty; }
 
 void ui_mark_drawn(ui_state_t* state) { state->screen_dirty = false; }
 
+bool ui_take_full_refresh_pending(ui_state_t* state) {
+    bool pending = state->full_refresh_pending;
+    state->full_refresh_pending = false;
+    return pending;
+}
+
 void ui_on_message_received(ui_state_t* state, uint32_t now_ms) {
+    ui_screen_t before = state->current_screen;
     if (state->current_screen == SCREEN_MESSAGES && state->msg_scroll == 0) {
         /* Reader is already looking at the newest page: nothing pending, but
          * extend the auto-restore window if one is running and repaint. */
@@ -345,9 +372,11 @@ void ui_on_message_received(ui_state_t* state, uint32_t now_ms) {
         }
         state->screen_dirty = true;
     }
+    note_screen_change(state, before);
 }
 
 void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
+    ui_screen_t before = state->current_screen;
     if (state->message_auto_switch_time != 0 && state->current_screen == SCREEN_MESSAGES &&
         state->msg_scroll == 0 &&
         (now_ms - state->message_auto_switch_time) >= UI_MESSAGE_AUTO_RESTORE_TIMEOUT_MS) {
@@ -358,6 +387,7 @@ void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
         if (state->current_screen != SCREEN_NODES) {
             reset_nodes_mode(state);
         }
+        note_screen_change(state, before);
         return;
     }
 
@@ -380,6 +410,7 @@ void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
         state->message_auto_switch_time = 0;
         reset_nodes_mode(state);
     }
+    note_screen_change(state, before);
 }
 
 conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool low_sram_board) {

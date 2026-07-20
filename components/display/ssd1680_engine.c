@@ -27,6 +27,7 @@ static uint8_t s_ram[SSD1680_RAM_SIZE];
 
 static bool s_dirty;         /* any real pixel change since last refresh */
 static uint32_t s_refreshes; /* emitted refreshes; 0 = first still pending */
+static bool s_force_full;    /* caller-requested full refresh pending */
 
 /* Snapshot of the fb at the last FULL refresh: the ghost baseline. Ghosting
  * accumulates from every partial since the last full clear, so the
@@ -91,8 +92,11 @@ void ssd1680_engine_init(void) {
     memset(s_fb, 0, sizeof(s_fb));
     s_dirty = false;
     s_refreshes = 0; /* forces the first flush to emit a FULL refresh */
+    s_force_full = false;
     memset(s_shown, 0, sizeof(s_shown));
 }
+
+void ssd1680_engine_request_full_refresh(void) { s_force_full = true; }
 
 void ssd1680_engine_pixel(int x, int y, bool on) {
     if (x < 0 || x >= SSD1680_WIDTH || y < 0 || y >= SSD1680_HEIGHT)
@@ -158,14 +162,15 @@ static size_t emit(size_t i, uint8_t cmd, const uint8_t* data, size_t len) {
 
 ssd1680_refresh_t ssd1680_engine_flush(const ssd1680_op_t** ops, size_t* n_ops, uint32_t* busy_ms) {
     bool first = (s_refreshes == 0);
-    if (!first && !s_dirty) {
+    bool forced = s_force_full;
+    if (!first && !s_dirty && !forced) {
         *ops = NULL;
         *n_ops = 0;
         *busy_ms = 0;
         return SSD1680_REFRESH_NONE;
     }
 
-    bool full = (s_refreshes % SSD1680_FULL_EVERY_N_FLUSHES) == 0;
+    bool full = forced || (s_refreshes % SSD1680_FULL_EVERY_N_FLUSHES) == 0;
 
     /* Change-fraction promotion: when a large share of the framebuffer
      * diverges from the last FULL image (a message scroll or screen/menu
@@ -218,6 +223,7 @@ ssd1680_refresh_t ssd1680_engine_flush(const ssd1680_op_t** ops, size_t* n_ops, 
 
     s_refreshes++;
     s_dirty = false;
+    s_force_full = false;
     if (full)
         memcpy(s_shown, s_fb, SSD1680_FB_SIZE); /* new ghost baseline */
     return full ? SSD1680_REFRESH_FULL : SSD1680_REFRESH_PARTIAL;

@@ -4904,9 +4904,11 @@ static void mesh_task(void* param) {
         /* Reset task watchdog; if this stops being called, WDT resets device */
         esp_task_wdt_reset();
 
-        /* Check if radio was hard-reset and needs reconfiguration */
+        /* Check if the radio was flagged for reinit and reconfigure if so. The
+         * flag is raised either by a stuck-BUSY hard reset or by a soft request
+         * after repeated CAD timeouts (issue #118), so the message covers both. */
         if (radio_check_and_clear_reinit()) {
-            ESP_LOGW(TAG, "Radio recovered from stuck BUSY, resuming RX");
+            ESP_LOGW(TAG, "Radio reinit (stuck BUSY or repeated CAD timeout), reconfiguring");
         }
 
         /* Process received packets */

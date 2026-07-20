@@ -22,6 +22,19 @@ ARG IDF_VERSION=v5.4.1
 RUN git clone --branch ${IDF_VERSION} --depth 1 --recurse-submodules --shallow-submodules \
         https://github.com/espressif/esp-idf.git /opt/esp-idf
 ENV IDF_PATH=/opt/esp-idf
+# Pin the ESP-IDF component registry to the canonical host. The
+# idf-component-manager bundled with the v5.4.1 install defaults to the old
+# `https://api.components.espressif.com/` subdomain, which no longer has a
+# DNS record (NXDOMAIN), so a clean build that has to resolve the managed
+# components (libsodium, lvgl) fails with "Cannot establish a connection to
+# the component registry". A populated emulator/node/dependencies.lock hides
+# this (it records the canonical URL and pins resolved components), but that
+# file is gitignored, so a from-clean build like CI's has none and hits the
+# dead default. The current manager (2.4.x, what the host build uses) already
+# defaults to `https://components.espressif.com/`; setting it explicitly makes
+# the build correct regardless of the installed manager version's default and
+# matches the URL dependencies.lock records.
+ENV IDF_COMPONENT_REGISTRY_URL=https://components.espressif.com/
 # Requests the linux target only. ESP-IDF's installer still pulls the
 # xtensa/riscv32 cross toolchains as part of its "core" tool set even so
 # (no smaller install profile is exposed for this preview target on v5.4.1);
@@ -40,7 +53,7 @@ RUN bash -lc '. /opt/esp-idf/export.sh \
     && idf.py build'
 
 # Stage 2: gosim (Go server embedding Bramble C code via cgo)
-FROM golang:1.25-bookworm AS go-build
+FROM golang:1.26-bookworm AS go-build
 RUN apt-get update && apt-get install -y gcc libc6-dev libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY simulator/gosim/go.mod simulator/gosim/go.sum simulator/gosim/

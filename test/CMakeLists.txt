@@ -406,6 +406,24 @@ target_include_directories(test_radio_airtime PRIVATE
 )
 target_link_libraries(test_radio_airtime m)
 
+# Radio bandwidth -> register-code mapping (regression guard for #149)
+add_executable(test_radio_bw_mapping
+    test_radio_bw_mapping.c
+    unity/unity.c
+)
+target_include_directories(test_radio_bw_mapping PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+
+# CAD-timeout fail-open/closed policy (issue #118)
+add_executable(test_cad_timeout_policy
+    test_cad_timeout_policy.c
+    unity/unity.c
+)
+target_include_directories(test_cad_timeout_policy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+
 # Crypto tests
 add_executable(test_crypto
     test_crypto.c
@@ -1929,13 +1947,13 @@ target_include_directories(test_radio_esp_state PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
 )
 target_link_libraries(test_radio_esp_state m)
-# radio_esp.c has never had a host compile before, so it trips two pre-existing
-# warnings that the host build promotes to errors. Both are out of scope here
-# and neither is introduced by this target:
-#   -Woverflow:    bw_hz_to_code() returns 500 from a uint8_t (truncates to 244,
-#                  tracked separately, it changes on-air behaviour to fix).
-#   -Wtype-limits: a uint8_t length is compared against sizeof(buf) == 256.
-target_compile_options(test_radio_esp_state PRIVATE -Wno-overflow -Wno-type-limits)
+# radio_esp.c's host compile trips -Wtype-limits, which the host build promotes
+# to an error: a uint8_t length is compared against sizeof(buf) == 256. That is
+# out of scope here and not introduced by this target. The -Woverflow
+# suppression this target used to carry is gone: it covered bw_hz_to_code()
+# returning 500 from a uint8_t, which is deleted now that the mapping takes
+# uint32_t Hz (issue #149).
+target_compile_options(test_radio_esp_state PRIVATE -Wno-type-limits)
 
 # radio_virt tests (Task 4): the virtual radio over a socketpair fake broker.
 # Whitebox include of emu_link.c + radio_airtime.c + radio_profiles.c +

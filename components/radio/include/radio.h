@@ -91,4 +91,48 @@ uint32_t bramble_symbol_time_us(uint8_t sf, uint32_t bw_hz);
  */
 uint32_t bramble_cad_timeout_ms(uint8_t sf, uint32_t bw_hz, uint8_t cad_symbol_num_reg);
 
+/**
+ * Consecutive CAD timeouts before radio_cad_check() stops failing open and
+ * fails closed (issue #118). Now that #117 sizes the CAD budget correctly, a
+ * timeout means the radio did not answer within roughly twice the CAD
+ * duration, which points at a stuck SX1262, a wedged DIO1 path or severe SPI
+ * starvation. A single timeout is still weak evidence (a one-off missed IRQ
+ * under contention), so the first two fail open and transmit anyway; the third
+ * fails closed and flags the radio for reinit. Set to 3 to match the driver's
+ * existing BUSY_STUCK_THRESHOLD, so BUSY and CAD share one three-strikes trip
+ * point, and to bound the blind-transmit (no-LBT) exposure to two frames. */
+#define BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD 3u
+
+/** Verdict from the CAD-timeout fail-open/closed policy. */
+typedef enum {
+    CAD_TIMEOUT_FAIL_OPEN,   /* transmit anyway; the radio is probably fine */
+    CAD_TIMEOUT_FAIL_CLOSED, /* report busy AND request a radio reinit */
+} cad_timeout_action_t;
+
+/** Consecutive-timeout run state for one radio driver. Zero-initialized. */
+typedef struct {
+    uint8_t consecutive_timeouts;
+} cad_timeout_policy_t;
+
+/**
+ * Advance the policy on a CAD timeout. Returns CAD_TIMEOUT_FAIL_OPEN for the
+ * first BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD-1 consecutive timeouts, then
+ * CAD_TIMEOUT_FAIL_CLOSED on the threshold-th, resetting the run so recovery
+ * starts fresh after the reinit it asks for.
+ */
+static inline cad_timeout_action_t cad_timeout_policy_on_timeout(cad_timeout_policy_t* p) {
+    if (p->consecutive_timeouts < 255u)
+        p->consecutive_timeouts++;
+    if (p->consecutive_timeouts >= BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD) {
+        p->consecutive_timeouts = 0;
+        return CAD_TIMEOUT_FAIL_CLOSED;
+    }
+    return CAD_TIMEOUT_FAIL_OPEN;
+}
+
+/** Reset the run: any CAD that actually completes clears the timeout streak. */
+static inline void cad_timeout_policy_on_success(cad_timeout_policy_t* p) {
+    p->consecutive_timeouts = 0;
+}
+
 #endif

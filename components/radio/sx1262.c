@@ -37,6 +37,13 @@ static volatile bool s_needs_reinit = false;
 bool sx1262_needs_reinit(void) { return s_needs_reinit; }
 void sx1262_clear_reinit(void) { s_needs_reinit = false; }
 
+/* Raise the reinit flag without a hard reset. Used by the CAD-timeout policy
+ * (issue #118): after enough consecutive CAD timeouts the radio is treated as
+ * wedged, and the next radio_check_and_clear_reinit() reconfigures it. If the
+ * chip is genuinely stuck, that reconfigure's own BUSY-timeout path escalates
+ * to a hard reset via BUSY_STUCK_THRESHOLD, so this stays a soft request. */
+void sx1262_request_reinit(void) { s_needs_reinit = true; }
+
 /* ------------------------------------------------------------------ */
 /*  Helper: NSS control                                                */
 /* ------------------------------------------------------------------ */
@@ -343,28 +350,18 @@ int sx1262_set_tx_params(int8_t power_dbm, uint8_t ramp_time) {
     return sx1262_write_command(SX1262_CMD_SET_TX_PARAMS, data, 2);
 }
 
-int sx1262_set_modulation_params(uint8_t sf, uint8_t bw, uint8_t cr, uint8_t ldro) {
-    /* BW encoding: 125kHz=0x04, 250kHz=0x05, 500kHz=0x06 */
-    uint8_t bw_param;
-    switch (bw) {
-    case 125:
-        bw_param = 0x04;
-        break;
-    case 250:
-        bw_param = 0x05;
-        break;
-    case 500:
-        bw_param = 0x06;
-        break;
-    default:
-        bw_param = 0x04;
-        break; /* default 125kHz */
-    }
+int sx1262_set_modulation_params(uint8_t sf, uint32_t bw_hz, uint8_t cr, uint8_t ldro) {
+    /* Map bw_hz to the register code in one place (125kHz=0x04, 250kHz=0x05,
+     * 500kHz=0x06). Taking Hz here rather than a kHz number through a uint8_t
+     * avoids the 500 -> 244 truncation that silently ran the radio at 125 kHz
+     * (issue #149). */
+    uint8_t bw_param = sx1262_bw_reg_from_hz(bw_hz);
 
     /* Auto-calculate LDRO if caller passed 0xFF */
     if (ldro == 0xFF) {
-        /* Symbol time = 2^SF / BW.  Enable LDRO if > 16 ms */
-        double sym_time_ms = (double)(1u << sf) / ((double)bw * 1000.0) * 1000.0;
+        /* Symbol time = 2^SF / BW.  Enable LDRO if > 16 ms. Uses the real
+         * bandwidth in Hz, not the truncated register input. */
+        double sym_time_ms = (double)(1u << sf) / (double)bw_hz * 1000.0;
         ldro = (sym_time_ms > 16.0) ? 1 : 0;
     }
 
