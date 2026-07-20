@@ -24,9 +24,12 @@
 #ifndef MESH_INTERNAL_H
 #define MESH_INTERNAL_H
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "esp_log.h"
 
 #include "mesh_task.h"
 #include "util.h"

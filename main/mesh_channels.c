@@ -6,20 +6,11 @@
  */
 #include "mesh_internal.h"
 
-#include <assert.h>
-#include <inttypes.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-#include "esp_log.h"
-#include "esp_random.h"
-#include "esp_timer.h"
 #include "nvs.h"
-#include "nvs_flash.h"
 #include "nvs_keys.h"
-#include "cJSON.h"
-#include "rpc_dispatcher.h"
 
 static const char* TAG = "mesh";
 
