@@ -16,7 +16,7 @@ globs:
   - "**/*.md"
 ignores:
   - "build/**"
-  - "managed_components/**"
-  - "node_modules/**"
+  - "**/managed_components/**"
+  - "**/node_modules/**"
   - ".git/**"
   - "docs/archive/**"

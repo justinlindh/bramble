@@ -176,12 +176,13 @@ That is a missing tool, not a failing check. The tools these targets need:
 You do not need all of them. CI runs the full set; locally, install the ones
 covering what you changed, or push and let CI tell you.
 
-### `scripts/lint/run-markdownlint.sh` fails with "not found on PATH"
+### `scripts/lint/run-markdownlint.sh` fails with "neither markdownlint-cli2 nor npx found"
 
-It needs `markdownlint-cli2` installed; there is no skip mode; a missing tool
-is a hard failure, not advisory signal (docs/quality-policy.md). Install the
-pinned version CI uses: `npm install -g markdownlint-cli2@0.23.1` (or run it
-ad hoc via `npx --yes markdownlint-cli2@0.23.1`).
+It needs `markdownlint-cli2` on PATH or `npx` (to fetch the pinned version on
+demand); there is no skip mode, a missing tool is a hard failure, not
+advisory signal (docs/quality-policy.md). Install Node (which provides
+`npx`), or install the pinned version globally yourself:
+`npm install -g markdownlint-cli2@0.23.1`.
 
 ### The host tests fail to build
 

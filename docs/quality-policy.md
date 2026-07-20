@@ -22,7 +22,7 @@ the full job topology and the always-report contract.
   - Strict clang-format, full scope (`bash scripts/lint/run-clang-format-check.sh --strict`), pinned to the version in `.clang-format-version` (currently 14.0.6); the `Static checks` job asserts the runner's `clang-format --version` matches before running the check, and the wrapper script prints a warning if your local version differs, because unpinned clang-format versions disagree on macro and designated-initializer layout and produce unreproducible findings (issue #161)
   - cppcheck (`--error-exitcode=2`, blocking)
   - RPC contract check (`bash scripts/check-rpc-contract.sh`: `api/openapi.yaml` vs the firmware registry in `main/rpc_methods.c`)
-  - Markdownlint (`bash scripts/lint/run-markdownlint.sh`, issue #160): `markdownlint-cli2` against the root `.markdownlint-cli2.yaml` config, over every tracked markdown file. A pinned `npm install -g markdownlint-cli2@0.23.1` step precedes it, since the runner image does not (yet) bake the tool in; baking it into the image is issue #222's scope, not this gate's
+  - Markdownlint (`bash scripts/lint/run-markdownlint.sh`, issue #160): `markdownlint-cli2` against the root `.markdownlint-cli2.yaml` config, over every tracked markdown file. The runner image does not (yet) bake the tool in (that is issue #222's scope, not this gate's), so the script falls back to a pinned `npx --yes markdownlint-cli2@0.23.1` when it is not already on PATH; a global `npm install -g` was tried first and rejected because the runner's npm prefix is not writable by the job user
   - Actionlint over the four gating workflow files
 - `Host tests` (`bash test/run_all_tests.sh`, `quality.yml`)
 - `Parser fuzzing` (`bash test/fuzz/run_fuzz.sh`, `quality.yml`): a 30-second-per-target libFuzzer campaign, under ASan and UBSan, over the wire-frame parsers in `components/packet/packet.c` and the fragment reassembler. Both harnesses start from committed seed corpora (`test/fuzz/corpus/`) built from the host suites' own test vectors. Requires `clang` with libFuzzer on the runner image; the job asserts the toolchain is present and fails hard when it is not, because a skip here would be an advisory check in disguise.
@@ -166,8 +166,8 @@ actionlint -color -oneline -config-file .actionlint.yaml .github/workflows/firmw
 
 bash scripts/lint/check-no-internal-refs.sh
 bash scripts/lint/check-no-em-dash.sh
-bash scripts/lint/run-markdownlint.sh         # needs markdownlint-cli2 on PATH,
-                                               # e.g. npm install -g markdownlint-cli2@0.23.1
+bash scripts/lint/run-markdownlint.sh         # uses markdownlint-cli2 on PATH if present,
+                                               # else falls back to a pinned npx invocation
 
 # Local-only helpers (not wired into CI)
 bash scripts/lint/run-clang-format-check.sh
