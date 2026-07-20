@@ -14,7 +14,7 @@ else()
         SRCS "ota.c" "ota_url.c" "ota_version.c" "ota_origin.c" "ota_rollback.c"
              "ota_rollback_policy.c" "ota_progress.c"
         INCLUDE_DIRS "include"
-        REQUIRES esp_https_ota esp_http_client app_update nvs_flash nvs_keys
+        REQUIRES esp_https_ota esp_http_client app_update nvs_flash nvs_keys efuse
         PRIV_REQUIRES mbedtls
     )
 endif()

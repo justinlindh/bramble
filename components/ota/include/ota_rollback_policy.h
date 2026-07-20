@@ -55,3 +55,28 @@ static inline bool ota_rollback_decision_accepts(ota_rollback_decision_t d) {
  * Returns true when the floor should be rewritten to the running version.
  */
 bool ota_rollback_should_raise_floor(const char* running_version, const char* floor_version);
+
+/**
+ * Hardware (eFuse) anti-rollback floor check, kept pure for host testing.
+ *
+ * The soft floor above lives in NVS and an authenticated allow_downgrade can
+ * lower it. The hardware floor is different: in a build compiled with
+ * CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK the bootloader refuses to boot an app
+ * whose secure_version is below the burned eFuse value, and that value
+ * survives a flash rewrite or an NVS wipe.
+ *
+ * Returns true when an incoming image must be REJECTED because of the hardware
+ * floor, i.e. enforcement is compiled in and the candidate does not clear it.
+ * This rejection is absolute: unlike the soft floor it is never overridable by
+ * allow_downgrade, because letting a sub-floor image install would only brick
+ * the device on the next boot. Evaluate it BEFORE the soft-floor decision so
+ * the two floors can never disagree dangerously.
+ *
+ * @param secure_enforced               True only in a build compiled with
+ *                                      CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK.
+ * @param candidate_clears_secure_floor Result of
+ *                                      esp_efuse_check_secure_version(image
+ *                                      secure_version); ignored when
+ *                                      secure_enforced is false.
+ */
+bool ota_rollback_secure_floor_blocks(bool secure_enforced, bool candidate_clears_secure_floor);

@@ -56,7 +56,12 @@ class Result:
     details: str
 
 
-def run_cmd(cmd: list[str], timeout: int = 180, check: bool = False) -> subprocess.CompletedProcess[str]:
+def run_cmd(
+    cmd: list[str],
+    timeout: int = 180,
+    check: bool = False,
+    input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
         cwd=str(REPO_ROOT),
@@ -65,6 +70,7 @@ def run_cmd(cmd: list[str], timeout: int = 180, check: bool = False) -> subproce
         stderr=subprocess.STDOUT,
         timeout=timeout,
         check=check,
+        input=input_text,
     )
 
 
@@ -142,7 +148,7 @@ def detect_usb_device(port: str, cfg: dict[str, Any], esptool: str) -> UsbDevice
         if mapped:
             board = norm_board(mapped)
     elif psram_mb is None:
-        # No PSRAM detected, check fallback rules:
+        # No PSRAM detected: check fallback rules:
         # "no_psram" key in usb_detection, or "default" key
         fallback = mapping.get("no_psram") or mapping.get("default")
         if fallback:
@@ -157,9 +163,40 @@ def build_board(board: str) -> tuple[bool, str]:
     return cp.returncode == 0, cp.stdout
 
 
-def flash_usb(port: str, board: str) -> tuple[bool, str]:
+def board_antirollback(board: str) -> tuple[bool, int]:
+    """Inspect the board's generated sdkconfig for eFuse anti-rollback.
+
+    Returns (enabled, secure_version_epoch). The sdkconfig.<board> file is
+    produced at the repo root by the build (see scripts/flash.sh); a missing
+    file reads as not-enabled because the guard in flash.sh independently
+    fails closed at flash time.
+    """
+    cfg_path = REPO_ROOT / f"sdkconfig.{board}"
+    if not cfg_path.exists():
+        return False, 0
+    enabled = False
+    epoch = 0
+    for line in cfg_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.strip() == "CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK=y":
+            enabled = True
+        elif line.startswith("CONFIG_BOOTLOADER_APP_SECURE_VERSION="):
+            try:
+                epoch = int(line.split("=", 1)[1])
+            except ValueError:
+                pass
+    return enabled, epoch
+
+
+def flash_usb(port: str, board: str, antirollback_phrase: str | None = None) -> tuple[bool, str]:
     cmd = ["bash", str(FLASH_SH), "local", board, "flash", port]
-    cp = run_cmd(cmd, timeout=900)
+    input_text = None
+    if antirollback_phrase is not None:
+        # The operator already typed the epoch confirmation once, upfront in
+        # main(); pass the flag and replay the phrase to flash.sh's guard so
+        # parallel flashes do not each block on an invisible prompt.
+        cmd.append("--enable-antirollback")
+        input_text = antirollback_phrase + "\n"
+    cp = run_cmd(cmd, timeout=900, input_text=input_text)
     if cp.returncode != 0:
         return False, cp.stdout
     # For ESP32-S3 USB JTAG (ACM) devices, give a moment for USB
@@ -207,13 +244,13 @@ def verify_usb_boot(port: str, timeout_s: int = 30) -> tuple[bool, str]:
                     continue
                 collected.append(line)
                 if BOOT_MARKER in line:
-                    return True, f"boot OK, saw '{BOOT_MARKER}' after {len(collected)} lines"
+                    return True, f"boot OK: saw '{BOOT_MARKER}' after {len(collected)} lines"
                 for panic in PANIC_MARKERS:
                     if panic in line:
                         return False, f"panic detected: {line}"
                 for op in OPERATIONAL_MARKERS:
                     if op in line:
-                        return True, f"boot OK, device operational (saw '{op}' output)"
+                        return True, f"boot OK: device operational (saw '{op}' output)"
     except Exception as e:
         return False, f"serial error on {port}: {e}"
 
@@ -306,6 +343,16 @@ def main() -> int:
     p.add_argument("--usb-only", action="store_true")
     p.add_argument("--ota-only", action="store_true")
     p.add_argument("--max-workers", type=int, default=4)
+    p.add_argument(
+        "--enable-antirollback",
+        action="store_true",
+        help=(
+            "Required to flash builds with CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK. "
+            "Prompts for a typed epoch confirmation; booting such a build "
+            "irreversibly burns the eFuse secure-version floor. "
+            "See docs/design/ota-antirollback.md."
+        ),
+    )
     args = p.parse_args()
 
     cfg = load_config((REPO_ROOT / args.config).resolve() if not os.path.isabs(args.config) else Path(args.config))
@@ -358,6 +405,8 @@ def main() -> int:
     print(f"Boards to build: {', '.join(sorted(boards_to_build)) if boards_to_build else '(none)'}")
 
     if args.dry_run:
+        if not args.enable_antirollback:
+            print("NOTE: builds with CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK would be refused at the guard (missing --enable-antirollback).")
         for b in sorted(boards_to_build):
             print("BUILD:", fmt_cmd(["bash", str(FLASH_SH), "local", b, "build"]))
         for d in usb_devices:
@@ -383,13 +432,62 @@ def main() -> int:
                 build_logs[b] = log
                 print(f"[{b}] {'OK' if ok else 'FAIL'}")
 
-    # 2) USB flash in parallel
+    # 1b) Anti-rollback consent gate (issue #79). A build with
+    # CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK burns the eFuse secure-version floor
+    # on first boot, irreversibly. The default flow refuses to carry that onto
+    # any device silently: it requires --enable-antirollback plus one typed,
+    # epoch-specific confirmation before the parallel phases start.
     results: list[Result] = []
+    ar_boards: dict[str, int] = {}
+    for b in sorted(boards_to_build):
+        if build_ok.get(b):
+            enabled, epoch = board_antirollback(b)
+            if enabled:
+                ar_boards[b] = epoch
+
+    ar_phrase_by_board: dict[str, str] = {}
+    if ar_boards:
+        print("\n=== ANTI-ROLLBACK BUILDS DETECTED (eFuse secure version) ===")
+        for b, epoch in sorted(ar_boards.items()):
+            print(f"  - {b}: secure_version epoch {epoch}")
+        print("Booting these images on an enforcing bootloader IRREVERSIBLY burns")
+        print("the eFuse floor up to the epoch shown. There is no undo; the device")
+        print("will refuse to boot any lower-epoch image forever, even over USB.")
+        print("See docs/design/ota-antirollback.md.")
+        if not args.enable_antirollback:
+            print("REFUSING all targets for these boards (missing --enable-antirollback).")
+            refusal = "anti-rollback build refused: re-run with --enable-antirollback"
+            for d in usb_devices:
+                if d.board in ar_boards:
+                    results.append(Result(name=d.port, kind="usb", board=d.board, success=False, phase="guard", details=refusal))
+            kept_nodes = []
+            for n in net_nodes:
+                n_board = norm_board(n.get("board", ""))
+                if n_board in ar_boards:
+                    results.append(Result(name=n.get("name") or n.get("host"), kind="ota", board=n_board, success=False, phase="guard", details=refusal))
+                else:
+                    kept_nodes.append(n)
+            net_nodes = kept_nodes
+            usb_devices = [d for d in usb_devices if d.board not in ar_boards]
+        else:
+            for epoch in sorted(set(ar_boards.values())):
+                expected = f"BURN EPOCH {epoch}"
+                try:
+                    typed = input(f"Type exactly '{expected}' to confirm epoch {epoch} (anything else aborts): ")
+                except EOFError:
+                    typed = ""
+                if typed != expected:
+                    print("Confirmation mismatch; aborting the entire run (nothing flashed).")
+                    return 2
+            for b, epoch in ar_boards.items():
+                ar_phrase_by_board[b] = f"BURN EPOCH {epoch}"
+
+    # 2) USB flash in parallel
     usb_candidates = [d for d in usb_devices if d.board and build_ok.get(d.board)]
     if usb_candidates:
         print("\n=== Flashing USB devices (parallel) ===")
         with ThreadPoolExecutor(max_workers=min(args.max_workers, len(usb_candidates))) as ex:
-            fut_map = {ex.submit(flash_usb, d.port, d.board): d for d in usb_candidates}
+            fut_map = {ex.submit(flash_usb, d.port, d.board, ar_phrase_by_board.get(d.board)): d for d in usb_candidates}
             for fut in as_completed(fut_map):
                 d = fut_map[fut]
                 ok, log = fut.result()

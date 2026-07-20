@@ -43,6 +43,7 @@ esp_err_t esp_https_ota_begin(const esp_https_ota_config_t* ota_config,
 esp_err_t esp_https_ota_get_img_desc(esp_https_ota_handle_t handle, esp_app_desc_t* out) {
     (void)handle;
     out->version = g_img_desc_version;
+    out->secure_version = 0;
     return g_img_desc_result;
 }
 esp_err_t esp_https_ota_perform(esp_https_ota_handle_t handle) {
@@ -81,12 +82,15 @@ int esp_https_ota_get_image_len_read(esp_https_ota_handle_t handle) {
 
 static int g_gate_result;
 static char g_gate_version[64];
+static uint32_t g_gate_secure_version;
 static bool g_gate_allow_downgrade;
 static int g_gate_calls;
 
-int ota_rollback_gate(const char* new_version, bool allow_downgrade) {
+int ota_rollback_gate(const char* new_version, uint32_t candidate_secure_version,
+                      bool allow_downgrade) {
     g_gate_calls++;
     snprintf(g_gate_version, sizeof(g_gate_version), "%s", new_version ? new_version : "");
+    g_gate_secure_version = candidate_secure_version;
     g_gate_allow_downgrade = allow_downgrade;
     return g_gate_result;
 }
@@ -178,6 +182,7 @@ void setUp(void) {
     g_abort_calls = 0;
     g_gate_result = 0;
     g_gate_version[0] = '\0';
+    g_gate_secure_version = 0;
     g_gate_allow_downgrade = false;
     g_gate_calls = 0;
     memset(&g_last_https_http_cfg, 0, sizeof(g_last_https_http_cfg));
@@ -401,6 +406,31 @@ void test_should_raise_floor_only_for_a_strictly_higher_running_version(void) {
     TEST_ASSERT_FALSE(ota_rollback_should_raise_floor("dev-build", NULL));
 }
 
+/* ── Hardware (eFuse) anti-rollback floor (ota_rollback_secure_floor_blocks) ──
+ *
+ * This pure helper is the reconciliation point between the two floors: it says
+ * whether the hardware floor alone forces a rejection. The device gate calls
+ * it BEFORE the soft-floor decision and, unlike the soft floor, its rejection
+ * is never overridable by allow_downgrade, because a sub-floor image would be
+ * refused by the bootloader and brick the device. */
+
+void test_secure_floor_ignored_when_enforcement_not_compiled_in(void) {
+    /* Not enforced: the clear flag is irrelevant, nothing is blocked, so the
+     * decision is exactly the historical soft-floor-only behavior. */
+    TEST_ASSERT_FALSE(ota_rollback_secure_floor_blocks(false, false));
+    TEST_ASSERT_FALSE(ota_rollback_secure_floor_blocks(false, true));
+}
+
+void test_secure_floor_blocks_only_a_sub_floor_image_when_enforced(void) {
+    /* Enforced and the image clears the eFuse floor: allowed through to the
+     * soft-floor check. */
+    TEST_ASSERT_FALSE(ota_rollback_secure_floor_blocks(true, true));
+    /* Enforced and the image is below the eFuse floor: blocked, absolutely.
+     * There is no allow_downgrade parameter here by design: the caller cannot
+     * override this, matching the bootloader that would refuse to boot it. */
+    TEST_ASSERT_TRUE(ota_rollback_secure_floor_blocks(true, false));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_https_url_routes_to_https_ota_with_hardening_flags);
@@ -423,5 +453,7 @@ int main(void) {
     RUN_TEST(test_policy_allow_downgrade_lowers_the_floor_only_when_below_it);
     RUN_TEST(test_policy_accept_predicate_matches_the_decisions);
     RUN_TEST(test_should_raise_floor_only_for_a_strictly_higher_running_version);
+    RUN_TEST(test_secure_floor_ignored_when_enforcement_not_compiled_in);
+    RUN_TEST(test_secure_floor_blocks_only_a_sub_floor_image_when_enforced);
     return UNITY_END();
 }
