@@ -68,10 +68,14 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Post inline comments as they are made rather than buffering them
-          # through a classifier that drops most of them. We want one comment
-          # per finding, anchored to the line it is about.
-          classify_inline_comments: "false"
+          # Inline review comments are driven by the tool + prompt below, not
+          # by a top-level input: claude-code-action@v1 has no inline-comment
+          # toggle (an earlier classify_inline_comments entry was not a valid
+          # @v1 input and actionlint rejected it). The mechanism is the
+          # mcp__github_inline_comment__create_inline_comment tool in the
+          # allowlist, which the system prompt tells Claude to call with
+          # confirmed: true so each finding posts immediately, anchored to its
+          # line, rather than buffering through a classifier that drops most.
           # The allowlist is read-and-verify plus this repo's own gate scripts.
           #
           # Deliberately absent, and each for a reason worth keeping:
