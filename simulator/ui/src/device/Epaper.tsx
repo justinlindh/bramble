@@ -9,8 +9,10 @@
 import { useEffect, useRef } from 'react';
 import { applyFrame, initialEpaperState, type CanvasFrame, type EpaperState } from './epaperModel';
 import { unpackFramebuffer, FB_WIDTH, FB_HEIGHT } from './framebuffer';
+import { captureEnabled, recordContentPaint } from './paintLog';
 
 export interface EpaperProps {
+  node: string; // owning node id, for the test-only paint history (paintLog.ts)
   fb: string | null;
   kind: 'partial' | 'full';
   busyMs: number;
@@ -25,7 +27,7 @@ const FLASH_FILL: Record<'black' | 'white', string> = {
   white: '#dddcd2',
 };
 
-export default function Epaper({ fb, kind, busyMs, seq, displayWidth, displayHeight }: EpaperProps) {
+export default function Epaper({ node, fb, kind, busyMs, seq, displayWidth, displayHeight }: EpaperProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ghostCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const stateRef = useRef<EpaperState>(initialEpaperState());
@@ -53,6 +55,12 @@ export default function Epaper({ fb, kind, busyMs, seq, displayWidth, displayHei
     const img = ctx.createImageData(FB_WIDTH, FB_HEIGHT);
     img.data.set(rgba);
     ctx.putImageData(img, 0, 0);
+
+    // Record this applied content frame to the per-node paint history so a
+    // test can assert a TRANSIENT frame (e.g. the boot splash) was painted at
+    // some point, without racing its overpaint on the live canvas. No-op
+    // unless the E2E harness set the capture flag (paintLog.ts).
+    if (captureEnabled()) recordContentPaint(node, rgba, seq);
 
     // Ghost residue: overlay the previous image faintly on top of the new one.
     const prev = prevContentRef.current;
