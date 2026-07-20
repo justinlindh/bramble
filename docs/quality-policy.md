@@ -24,6 +24,7 @@ the full job topology and the always-report contract.
   - RPC contract check (`bash scripts/check-rpc-contract.sh`: `api/openapi.yaml` vs the firmware registry in `main/rpc_methods.c`)
   - Actionlint over the four gating workflow files
 - `Host tests` (`bash test/run_all_tests.sh`, `quality.yml`)
+- `Parser fuzzing` (`bash test/fuzz/run_fuzz.sh`, `quality.yml`): a 30-second-per-target libFuzzer campaign, under ASan and UBSan, over the wire-frame parsers in `components/packet/packet.c` and the fragment reassembler. Both harnesses start from committed seed corpora (`test/fuzz/corpus/`) built from the host suites' own test vectors. Requires `clang` with libFuzzer on the runner image; the job asserts the toolchain is present and fails hard when it is not, because a skip here would be an advisory check in disguise.
 - `Release config` (`node scripts/release/semantic-release-squash-expander.test.cjs`, `quality.yml`): the release-rule scope-gating regression, run against the real `.releaserc.<component>.cjs` files, so a config change that would silently stop every component release fails the PR
 - `gosim integration` (builds and tests the simulator, `quality.yml`)
 - `Board build smoke (heltec-v3)`, `(tdeck-plus)`, `(heltec-v4)`, `(bramble-pager)` (`quality.yml`): one context per board, each running `bash scripts/flash.sh local <board> build`. `fail-fast: false`, so every board reports its own result. The `firmware or workflows` area gate is on the job's steps rather than on the job, because a false job-level `if:` prevents GitHub from expanding the matrix at all and collapses the four contexts into one check run named with the raw literal `Board build smoke (${{ matrix.board }})`. Step-level gating keeps all four contexts reporting on every PR, so they are safe to require
@@ -123,6 +124,9 @@ positives, infra instability, etc.).
 # Required checks (strict / blocking behavior)
 bash scripts/lint/run-clang-format-check.sh --strict
 bash scripts/lint/run-shellcheck.sh --strict
+bash test/fuzz/run_fuzz.sh                    # same 30s/target budget as CI
+FUZZ_SECONDS=600 bash test/fuzz/run_fuzz.sh   # longer local campaign
+bash test/fuzz/run_fuzz.sh --regen-corpus     # after a wire-format change
 actionlint -color -oneline -config-file .actionlint.yaml .github/workflows/firmware-quality.yml
 
 bash scripts/lint/check-no-internal-refs.sh

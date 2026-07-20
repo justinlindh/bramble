@@ -380,6 +380,56 @@ func (h *radioHarness) packetsForwarded(node *C.sim_node_t) uint64 {
 	return uint64(node.packets_forwarded)
 }
 
+// routeSourceDiscovered / routeSourceBreadcrumb mirror the C route_source_t
+// enum for readable assertions.
+const (
+	routeSourceDiscovered = int(C.ROUTE_SRC_DISCOVERED)
+	routeSourceBreadcrumb = int(C.ROUTE_SRC_BREADCRUMB)
+)
+
+// routeEntry reads node's routing-table entry for destAddr directly from the C
+// struct: its next_hop, trust source (routeSourceDiscovered/Breadcrumb) and
+// whether it exists at all.
+func (h *radioHarness) routeEntry(node *C.sim_node_t, destAddr uint32) (nextHop uint32, source int, found bool) {
+	for i := 0; i < int(node.routes.count); i++ {
+		e := node.routes.entries[i]
+		if uint32(e.dest_addr) == destAddr {
+			return uint32(e.next_hop), int(e.source), true
+		}
+	}
+	return 0, 0, false
+}
+
+// installDiscoveredRoute seeds a legitimate control-plane (ROUTE_SRC_DISCOVERED)
+// route on node, standing in for one learned via a signed RREP or beacon.
+func (h *radioHarness) installDiscoveredRoute(node *C.sim_node_t, dest, nextHop uint32,
+	hopCount, metric uint8, nowMs uint32) {
+	C.route_install(&node.routes, C.uint32_t(dest), C.uint32_t(nextHop), C.uint8_t(hopCount),
+		C.uint8_t(metric), C.ROUTE_ACTIVE, C.ROUTE_SRC_DISCOVERED, C.uint32_t(nowMs))
+}
+
+// provisionAll marks every node index provisioned (and re-inits per-node ext
+// state), the same thing bridge_init does for a full scenario run. A harness
+// test run in isolation has no scenario test ahead of it to call bridge_init,
+// so without this the mandatory-provisioning gate in bridge_handle_receive_packet
+// drops every frame and the node never dispatches it.
+func (h *radioHarness) provisionAll() {
+	C.bridge_node_ext_init_all()
+}
+
+// setRREQSrcRouteTrust drives bridge.c's issue #74 attack-repro toggle: it
+// makes _handle_rreq install the route it learns back toward an RREQ source
+// with the given trust class (routeSourceDiscovered = pre-fix vulnerable,
+// routeSourceBreadcrumb = the fix). Callers must reset it to off via
+// clearRREQSrcRouteTrust so no test leaks the setting to another.
+func (h *radioHarness) setRREQSrcRouteTrust(source int) {
+	C.bridge_set_rreq_src_route_trust(C.int(source))
+}
+
+func (h *radioHarness) clearRREQSrcRouteTrust() {
+	C.bridge_set_rreq_src_route_trust(C.int(-1))
+}
+
 // rreqFwdDenied reads a node's forwarded-RREQ rate-limiter denial counter.
 func (h *radioHarness) rreqFwdDenied(node *C.sim_node_t) uint32 {
 	return uint32(node.rreq_fwd_denied)

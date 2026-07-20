@@ -8,6 +8,7 @@
 #include "radio.h"
 #include "radio_internal.h"
 #include "sx1262.h"
+#include "tx_gate.h"
 #include "board_config.h"
 
 #include <string.h>
@@ -45,6 +46,9 @@ static _Atomic(TaskHandle_t) s_tx_waiter;
 static volatile bool s_cad_result;
 static SemaphoreHandle_t s_cad_sem;
 
+/* Consecutive CAD-timeout run state for the fail-open/closed policy (#118). */
+static cad_timeout_policy_t s_cad_timeout_policy;
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -52,16 +56,6 @@ static SemaphoreHandle_t s_cad_sem;
 /* STDBY_RC (mode 0): the SX1262 auto-enables TCXO via DIO3 when entering
  * TX or RX, so we don't need to stay in STDBY_XOSC between commands. */
 static inline int radio_standby(void) { return sx1262_set_standby(0); }
-
-/* Convert bw_hz (e.g. 125000) to bw code for sx1262_set_modulation_params */
-static uint8_t bw_hz_to_code(uint32_t bw_hz) {
-    if (bw_hz <= 125000)
-        return 125;
-    else if (bw_hz <= 250000)
-        return 250;
-    else
-        return 500;
-}
 
 static int set_sync_word(uint8_t sw) {
     /* LoRa sync word register 0x0740-0x0741.
@@ -96,8 +90,7 @@ static int configure_radio(const radio_config_t* cfg) {
     if (rc != 0)
         return rc;
 
-    rc = sx1262_set_modulation_params(cfg->sf, bw_hz_to_code(cfg->bw_hz), cfg->coding_rate,
-                                      0xFF /* auto LDRO */);
+    rc = sx1262_set_modulation_params(cfg->sf, cfg->bw_hz, cfg->coding_rate, 0xFF /* auto LDRO */);
     if (rc != 0)
         return rc;
 
@@ -236,6 +229,15 @@ int radio_reconfigure(const radio_config_t* config) {
     ESP_LOGI(TAG, "Reconfiguring radio: %.1f MHz SF%u BW%" PRIu32 " TX %ddBm",
              config->frequency_mhz, config->sf, config->bw_hz, config->tx_power);
 
+    /* Hold the transmit serialization lock across the whole reconfigure. This
+     * is reachable from the UI settings task and the RPC task, and its command
+     * sequence (standby, delay, configure_radio's ~8 commands, radio_start_rx)
+     * would otherwise splice into an in-flight radio_transmit_raw between its
+     * write_buffer, set_packet_params, clear_irq and set_tx, since transmits
+     * are serialized on this same lock but reconfigure took no lock at all
+     * (issue #82). */
+    tx_gate_radio_lock();
+
     /* Put radio in standby before reconfiguring (0 = RC oscillator). A failure
      * here is not fatal: reconfiguring is exactly the recovery a freshly reset
      * chip needs, so log and carry on into configure_radio. */
@@ -250,11 +252,13 @@ int radio_reconfigure(const radio_config_t* config) {
     int rc = configure_radio(config);
     if (rc != 0) {
         ESP_LOGE(TAG, "configure_radio failed during reconfigure");
+        tx_gate_radio_unlock();
         return rc;
     }
 
     /* Resume RX */
     radio_start_rx();
+    tx_gate_radio_unlock();
     ESP_LOGI(TAG, "Radio reconfigured successfully");
     return 0;
 }
@@ -510,11 +514,29 @@ bool radio_cad_check(void) {
     radio_start_rx();
 
     if (!got_result) {
-        ESP_LOGW(TAG, "CAD check timed out after %u ms (sf=%u bw=%u)", (unsigned)timeout_ms,
-                 (unsigned)s_config.sf, (unsigned)s_config.bw_hz);
+        cad_timeout_action_t action = cad_timeout_policy_on_timeout(&s_cad_timeout_policy);
+        if (action == CAD_TIMEOUT_FAIL_CLOSED) {
+            /* The radio has missed the CAD budget BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD
+             * times running: treat it as wedged. Report busy so tx_gate backs
+             * off instead of transmitting blind without LBT, and flag a reinit
+             * for the next radio_check_and_clear_reinit() to act on. */
+            ESP_LOGE(TAG,
+                     "CAD check timed out after %u ms (sf=%u bw=%u): %u consecutive, failing "
+                     "closed and requesting radio reinit",
+                     (unsigned)timeout_ms, (unsigned)s_config.sf, (unsigned)s_config.bw_hz,
+                     (unsigned)BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD);
+            sx1262_request_reinit();
+            return true;
+        }
+        /* Fail open: transmit anyway, as before. A one-off timeout is more
+         * likely a transient missed IRQ than a dead radio. */
+        ESP_LOGW(TAG, "CAD check timed out after %u ms (sf=%u bw=%u), failing open",
+                 (unsigned)timeout_ms, (unsigned)s_config.sf, (unsigned)s_config.bw_hz);
         return false;
     }
 
+    /* A completed CAD (busy or clear) means the radio answered; reset the run. */
+    cad_timeout_policy_on_success(&s_cad_timeout_policy);
     return s_cad_result;
 }
 

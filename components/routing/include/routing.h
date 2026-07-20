@@ -91,8 +91,8 @@ typedef enum {
  * carries only immediate-link quality and, critically, an UNAUTHENTICATED
  * next-hop hint (prev_hop is relay-mutable, MAC-excluded). Without a trust
  * class a nearby breadcrumb with a maxed-out (255,1) metric could lock out
- * and never yield to a real DISCOVERED route (RREQ/RREP/beacon), which is
- * HMAC-gated end to end. route_install arbitrates on this first:
+ * and never yield to a real DISCOVERED route (RREP/beacon), which is
+ * HMAC-authenticated end to end. route_install arbitrates on this first:
  *   - a DISCOVERED install ALWAYS wins over an existing BREADCRUMB entry
  *     (installs/reclaims regardless of metric or hop count);
  *   - a BREADCRUMB install NEVER displaces an existing DISCOVERED entry;
@@ -106,8 +106,10 @@ typedef enum {
  * while a DISCOVERED install may still evict any entry.
  */
 typedef enum {
-    ROUTE_SRC_DISCOVERED = 0, /* RREQ/RREP/beacon: control-plane, HMAC-gated */
-    ROUTE_SRC_BREADCRUMB,     /* DATA reverse-route learning (wire v4) */
+    ROUTE_SRC_DISCOVERED = 0, /* RREP/beacon: control-plane, HMAC-authenticated */
+    ROUTE_SRC_BREADCRUMB,     /* unauthenticated hint: DATA reverse-route
+                               * learning (wire v4) or an RREQ source route
+                               * (RREQs carry no HMAC; see issue #74) */
 } route_source_t;
 
 typedef struct {

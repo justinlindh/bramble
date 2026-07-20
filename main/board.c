@@ -111,16 +111,23 @@ int board_init(void) {
             return -1;
         }
         ESP_LOGI(TAG, "Shared SPI bus initialized");
-
-        /* Create SPI mutex for radio/display coordination */
-        g_spi_mutex = xSemaphoreCreateMutex();
-        if (!g_spi_mutex) {
-            ESP_LOGE(TAG, "Failed to create SPI mutex");
-            return -1;
-        }
-        ESP_LOGI(TAG, "Shared SPI mutex created");
     }
     /* Non-shared SPI boards: radio driver inits its own bus (existing behavior) */
+
+    /* Serialize multi-command SPI sequences on every board, not only shared-SPI
+     * ones. spi_device_acquire_bus keeps a single transfer atomic, but a radio
+     * command sequence (BUSY wait, CS low, transfer, CS high) or a full
+     * radio_reconfigure spans several commands, and on a non-shared board this
+     * mutex was left NULL, making spi_mutex_take() a no-op so two radio callers
+     * could still interleave. On shared-SPI boards it additionally coordinates
+     * radio traffic with the display. Either way it must exist before either
+     * subsystem starts, and both start after board_init returns (issue #82). */
+    g_spi_mutex = xSemaphoreCreateMutex();
+    if (!g_spi_mutex) {
+        ESP_LOGE(TAG, "Failed to create SPI mutex");
+        return -1;
+    }
+    ESP_LOGI(TAG, "SPI serialization mutex created");
 
     s_initialized = true;
 #endif

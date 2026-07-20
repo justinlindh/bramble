@@ -212,6 +212,10 @@ void display_draw_text_large(int x, int y, const char* text) {
     }
 }
 
+/* SSD1306 OLED has no e-paper-style residue: every flush already redraws
+ * the whole visible frame from RAM, so there is nothing to clear. */
+void display_request_full_refresh(void) {}
+
 void display_flush(void) {
     if (!initialized || !dev_handle)
         return;
