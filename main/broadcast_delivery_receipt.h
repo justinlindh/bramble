@@ -52,7 +52,7 @@ uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
 
 /*
  * seq (ws 1.3b): the 48-bit control-plane origin sequence, drawn by the
- * CALLER via control_seq_next (mesh_task.c) and written into the struct
+ * CALLER via control_seq_next (mesh_beacon.c) and written into the struct
  * before receipt_sign. This function lives in a host-testable file (no
  * FreeRTOS/ESP-IDF dependency) and cannot reach control_seq_next itself,
  * same reason rrep_build_destination in components/routing/discovery.c

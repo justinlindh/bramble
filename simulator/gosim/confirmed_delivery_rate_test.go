@@ -72,13 +72,16 @@ func TestConfirmedDeliveryRateMatchesReceiptsHome(t *testing.T) {
 // actual differentiator (confirmed delivery) at scale.
 //
 // 50-node dense grid at SF7/250kHz (45-unit spacing, connects at this SF's
-// derived range; see the SF-range coupling fix, commit 30603bdc), 3
+// derived range; see the SF-range coupling fix, commit 30603bdc), 5
 // msgs/min traffic: a real, reproducible run where several messages reach
 // their destination but not every one of those receipts makes it back
 // through the loaded reverse path. (Re-tuned from 2 msgs/min when the
 // Phase 4 identity-derived addresses reshuffled the deterministic
-// collision pattern and the 2 msgs/min run happened to confirm every
-// delivered message.)
+// collision pattern, and again from 3 msgs/min for issue #144: with the
+// ACK retransmit ladder actually firing and destinations re-ACKing
+// duplicate DATA, 3 msgs/min recovered every lost receipt and the gap
+// closed at that load; 5 msgs/min keeps the reverse path lossy enough to
+// exercise it.)
 func TestConfirmedDeliveryRateHonestUnderLoad(t *testing.T) {
 	scenarioJSON := generateGridScenarioJSON(t, gridScenarioParams{
 		Name:       "sf7-45u-50-confirmed-test",
@@ -87,7 +90,7 @@ func TestConfirmedDeliveryRateHonestUnderLoad(t *testing.T) {
 		SF:         7,
 		BWHz:       250000,
 		DurationS:  600,
-		MsgsPerMin: 3,
+		MsgsPerMin: 5,
 	})
 
 	finalMetrics := runAndGetFinalMetrics(t, "sf7-45u-50-confirmed-test", scenarioJSON)

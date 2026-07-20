@@ -1,6 +1,6 @@
 {
   "name": "anomaly-black-hole",
-  "description": "Black hole: Node C relays between A-B and D-E in a line. After routes establish, C is killed and immediately re-joined (clearing its route table). Rapid DATA sent through C \u2014 it receives but can't forward (no routes). Should trigger black_hole on C.",
+  "description": "Black hole: node C relays the A-B-C-D-E line. After a confirmed baseline in both directions, C is killed and immediately rejoined WITHOUT coordinates (the rejoin must restore its original position), clearing its route table while its neighbors keep stale routes through it. Rapid DATA sent through the rebooted C is received but unforwardable, which must trigger the black_hole anomaly on C; the senders' pending acks are then fast-failed by C's no-route RERR chain.",
   "mode": "deterministic",
   "duration_ms": 120000,
   "nodes": [
@@ -43,80 +43,56 @@
       "dest": "E"
     },
     {
-      "at_ms": 13000,
+      "at_ms": 35000,
       "type": "send_message",
       "src": "E",
       "dest": "A"
     },
     {
-      "at_ms": 20000,
+      "at_ms": 60000,
       "type": "kill_node",
       "node": "C"
     },
     {
-      "at_ms": 20500,
+      "at_ms": 60500,
       "type": "node_join",
       "node": "C"
     },
     {
-      "at_ms": 21000,
+      "at_ms": 62000,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 22000,
+      "at_ms": 63000,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 23000,
+      "at_ms": 64000,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 24000,
+      "at_ms": 65000,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 24500,
+      "at_ms": 66000,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 25000,
+      "at_ms": 67000,
       "type": "send_message",
-      "src": "E",
-      "dest": "A"
-    },
-    {
-      "at_ms": 25500,
-      "type": "send_message",
-      "src": "E",
-      "dest": "A"
-    },
-    {
-      "at_ms": 26000,
-      "type": "send_message",
-      "src": "E",
-      "dest": "A"
-    },
-    {
-      "at_ms": 26500,
-      "type": "send_message",
-      "src": "E",
-      "dest": "A"
-    },
-    {
-      "at_ms": 27000,
-      "type": "send_message",
-      "src": "E",
-      "dest": "A"
+      "src": "A",
+      "dest": "E"
     }
   ]
 }

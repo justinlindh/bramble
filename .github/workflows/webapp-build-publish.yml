@@ -13,7 +13,14 @@ defaults:
 
 jobs:
   build-test-publish:
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Pinned to the persistent self-hosted host (never RUNNER_LABEL, never
+    # ubuntu-latest): this is a job-level container: job, so the burst pool is
+    # out (it does not mount node externals into job containers, failing every
+    # step at Checkout), and a GitHub-hosted runner cannot reach the private
+    # LAN registry or bind the host docker socket this job pushes through. The
+    # bramble-host runner is the container-capable host that carries the docker
+    # socket (group 959) and registry reachability this publish path needs.
+    runs-on: bramble-host
     container:
       image: ghcr.io/catthehacker/ubuntu:full-22.04
       options: --user 0:0 --group-add 959

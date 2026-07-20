@@ -3,16 +3,21 @@
 # diff-to-area mapping lives in a single place instead of being copy-pasted into
 # every workflow. It never gates anything itself: it only emits boolean area
 # outputs the caller's real jobs skip on via job-level `if:` (see docs/ci.md for
-# the always-report contract). A workflow-file change forces every area true so a
-# changed job definition is always exercised (the safety rule).
+# the always-report contract). A change to a JOB-DEFINING gating workflow
+# (quality.yml, firmware-quality.yml, webapp-quality.yml, or this file) sets
+# ci_core, which forces every heavy job so a changed job definition is always
+# exercised (the safety rule). Editing any OTHER workflow does not force them.
 name: Detect changed areas (reusable)
 
 on:
   workflow_call:
     outputs:
       firmware:
-        description: main/ components/ test/ api/ scripts/ docker/firmware-builder/ .releaserc.* and firmware build/lint config touched
+        description: compiled firmware sources (main/ components/) or root build config (CMakeLists.txt, sdkconfig.*, partitions*.csv) touched
         value: ${{ jobs.detect.outputs.firmware }}
+      host_test:
+        description: test/ (host test harness) touched
+        value: ${{ jobs.detect.outputs.host_test }}
       simulator:
         description: simulator/ touched
         value: ${{ jobs.detect.outputs.simulator }}
@@ -25,9 +30,24 @@ on:
       web_flasher:
         description: web-flasher/ touched
         value: ${{ jobs.detect.outputs.web_flasher }}
-      workflows:
-        description: any .github/workflows file or .actionlint.yaml touched (forces everything)
-        value: ${{ jobs.detect.outputs.workflows }}
+      idf_build_scripts:
+        description: the ESP-IDF sourcing / flash wrapper scripts (and .esp-idf-version pin) the emulator and board-build jobs invoke touched
+        value: ${{ jobs.detect.outputs.idf_build_scripts }}
+      release_config:
+        description: .releaserc.* or scripts/release/ (the release-rule inputs) touched
+        value: ${{ jobs.detect.outputs.release_config }}
+      docker_firmware_builder:
+        description: docker/firmware-builder/ (the firmware-builder image build context) touched
+        value: ${{ jobs.detect.outputs.docker_firmware_builder }}
+      coverage_tooling:
+        description: the coverage ratchet scripts or ci/coverage-baseline.json touched (re-runs the host / gosim / webapp coverage gates)
+        value: ${{ jobs.detect.outputs.coverage_tooling }}
+      size_tooling:
+        description: the firmware-size ratchet scripts or ci/size-baseline.json touched (re-runs the board-build size gate)
+        value: ${{ jobs.detect.outputs.size_tooling }}
+      ci_core:
+        description: a JOB-DEFINING gating workflow (quality.yml, firmware-quality.yml, webapp-quality.yml, _detect-changes.yml) touched (forces every heavy job so a changed job definition is exercised)
+        value: ${{ jobs.detect.outputs.ci_core }}
       docs:
         description: docs/ or README.md touched
         value: ${{ jobs.detect.outputs.docs }}
@@ -46,11 +66,17 @@ jobs:
     timeout-minutes: 5
     outputs:
       firmware: ${{ steps.detect.outputs.firmware }}
+      host_test: ${{ steps.detect.outputs.host_test }}
       simulator: ${{ steps.detect.outputs.simulator }}
       emulator: ${{ steps.detect.outputs.emulator }}
       webapp: ${{ steps.detect.outputs.webapp }}
       web_flasher: ${{ steps.detect.outputs.web_flasher }}
-      workflows: ${{ steps.detect.outputs.workflows }}
+      idf_build_scripts: ${{ steps.detect.outputs.idf_build_scripts }}
+      release_config: ${{ steps.detect.outputs.release_config }}
+      docker_firmware_builder: ${{ steps.detect.outputs.docker_firmware_builder }}
+      coverage_tooling: ${{ steps.detect.outputs.coverage_tooling }}
+      size_tooling: ${{ steps.detect.outputs.size_tooling }}
+      ci_core: ${{ steps.detect.outputs.ci_core }}
       docs: ${{ steps.detect.outputs.docs }}
     steps:
       - uses: actions/checkout@v7
@@ -121,40 +147,92 @@ jobs:
             fi
           }
 
-          # firmware is a superset of every firmware-area consumer's real inputs:
-          # host tests read test/ + components/ + main/; the board build adds
-          # CMakeLists.txt, sdkconfig.defaults*, partitions*.csv; the static
-          # bundle's ruff scans scripts/, cppcheck scans main/ components/, the
-          # rpc-contract check reads api/ + main/, and the strict clang-format
-          # and shell lint wrappers read the root dotfile configs.
-          # .markdownlint-cli2.yaml is included because the Static checks
-          # bundle's markdownlint step reads it (issue #160); it also runs
-          # unconditionally on every trigger regardless of this area, same as
-          # every other Static checks step, so this is belt-and-suspenders.
-          # docker/firmware-builder/ is folded in here (not its own output)
-          # because the Docker build gate's firmware-builder image is the
-          # same class of firmware-CI-tooling change as .releaserc.*, and the
-          # image FROMs espressif/idf so it also needs to rebuild whenever the
-          # firmware area's own inputs move. simulator/ has its own output
-          # because the strict clang-format scope scans simulator C sources
-          # too.
-          firmware=$(area_changed '^(main|components|test|api|scripts)/|^docker/firmware-builder/|^CMakeLists\.txt$|^sdkconfig\.|^partitions[^/]*\.csv$|^\.clang-format$|^\.clang-format-version$|^\.clang-tidy$|^\.shellcheckrc$|^\.markdownlint-cli2\.yaml$|^\.releaserc\.')
+          # firmware is the compiled-firmware source set shared by every firmware
+          # BUILD job (host tests, gosim, emulator, board build): the C sources
+          # under main/ + components/ and the root build config (CMakeLists.txt,
+          # sdkconfig.*, partitions*.csv) those builds read. It deliberately does
+          # NOT carry scripts/, api/, .releaserc.*, the lint dotfiles
+          # (.clang-format, .clang-format-version, .clang-tidy, .shellcheckrc,
+          # .markdownlint-cli2.yaml), or docker/firmware-builder/: those are
+          # consumed only by the always-run Static checks bundle (ruff scans
+          # scripts/, the rpc-contract check reads api/ + main/, the strict
+          # clang-format / shellcheck / markdownlint wrappers read the root
+          # dotfiles), by the single-purpose Release config job, or by the
+          # firmware-builder Docker leg (its own area below). None of the heavy
+          # firmware BUILD jobs read them, so keeping them in firmware ran those
+          # suites on scripts-only, api-only, dotfile-only, release-config-only,
+          # or firmware-builder-Dockerfile-only PRs for no reason.
+          firmware=$(area_changed '^(main|components)/|^CMakeLists\.txt$|^sdkconfig\.|^partitions[^/]*\.csv$')
+          # host_test is test/ on its own: the Host tests and Parser fuzzing jobs
+          # build it (test/fuzz/ lives here), so a test-harness-only change must
+          # not drag in gosim or the emulator suite.
+          host_test=$(area_changed '^test/')
+          # simulator/ has its own output because the strict clang-format scope
+          # (inside Static checks) scans simulator C sources too, and gosim + the
+          # emulator suite both build simulator/.
           simulator=$(area_changed '^simulator/')
           emulator=$(area_changed '^emulator/')
           webapp=$(area_changed '^webapp/')
           web_flasher=$(area_changed '^web-flasher/')
-          workflows=$(area_changed '^\.github/workflows/|^\.actionlint\.yaml$')
+          # idf_build_scripts are the exact wrapper scripts the emulator and
+          # board-build jobs invoke (source ci-source-idf.sh, run ci-ensure-idf.sh,
+          # flash.sh / flash-all, ensure-ota-signing-key.sh) plus the
+          # .esp-idf-version pin ci-source-idf.sh reads to pick the toolchain.
+          # Editing them must re-run those two build jobs even when no firmware
+          # source changed; host tests and gosim use no IDF, so they stay out.
+          idf_build_scripts=$(area_changed '^scripts/(ci-source-idf|ci-ensure-idf|flash|flash-all|ensure-ota-signing-key)|^\.esp-idf-version$')
+          # release_config is what the Release config job loads: the per-component
+          # .releaserc.*.cjs files and the release scripts (the squash-expander).
+          release_config=$(area_changed '^\.releaserc\.|^scripts/release/')
+          # docker_firmware_builder is the firmware-builder image's build context.
+          # Its Docker leg builds with context docker/firmware-builder/ (a
+          # toolchain image FROM espressif/idf), so it reads only that dir and
+          # NOT main/ or components/. Giving it its own area keeps a
+          # firmware-builder Dockerfile edit off the host/gosim/emulator/board
+          # suites (which never touch it) while still rebuilding the image.
+          docker_firmware_builder=$(area_changed '^docker/firmware-builder/')
+          # coverage_tooling / size_tooling are the CI ratchet scripts + baselines.
+          # Under the old broad firmware area (^scripts/) these rode along on every
+          # firmware change; now that firmware is narrowed, they get their own
+          # areas so a ratchet-script-only or baseline-only change still re-runs
+          # the jobs that execute the ratchet (which it self-verifies) instead of
+          # falsely skipping. The local-only update-*-baseline.sh helpers are
+          # excluded: no CI job invokes them (Static checks shellcheck covers
+          # them). The coverage ratchet runs inside host tests, gosim, and the
+          # webapp job; the size ratchet runs inside the board build.
+          coverage_tooling=$(area_changed '^scripts/ci/(check_coverage\.py|host_coverage\.py|run-host-coverage\.sh)$|^ci/coverage-baseline\.json$')
+          size_tooling=$(area_changed '^scripts/ci/(check-firmware-size\.sh|check_size\.py|extract_firmware_sizes\.py)$|^ci/size-baseline\.json$')
+          # ci_core is the force-everything trigger, but scoped to ONLY the
+          # workflows that DEFINE the heavy build/test jobs: quality.yml,
+          # firmware-quality.yml, webapp-quality.yml, and the reusable
+          # _detect-changes.yml they all call. Editing one of these can change a
+          # job definition or the gating logic itself, so every heavy job must
+          # re-run to exercise it. Editing ANY OTHER workflow (the claude.yml
+          # review bot, commit-msg-lint, pr-template, release/publish workflows,
+          # the burst watchdog, dependabot config, .actionlint.yaml) touches
+          # nothing the product suites build, so it must NOT force them: that
+          # workflow runs its own jobs via its own triggers, and here only the
+          # always-on Static checks bundle reports. This is what stops a
+          # review-bot-config or markdown edit from running the full emulator /
+          # board / docker / host / gosim suite.
+          ci_core=$(area_changed '^\.github/workflows/(quality|firmware-quality|webapp-quality|_detect-changes)\.yml$')
           docs=$(area_changed '^docs/|^README\.md$')
 
           {
             echo "firmware=${firmware}"
+            echo "host_test=${host_test}"
             echo "simulator=${simulator}"
             echo "emulator=${emulator}"
             echo "webapp=${webapp}"
             echo "web_flasher=${web_flasher}"
-            echo "workflows=${workflows}"
+            echo "idf_build_scripts=${idf_build_scripts}"
+            echo "release_config=${release_config}"
+            echo "docker_firmware_builder=${docker_firmware_builder}"
+            echo "coverage_tooling=${coverage_tooling}"
+            echo "size_tooling=${size_tooling}"
+            echo "ci_core=${ci_core}"
             echo "docs=${docs}"
           } >> "$GITHUB_OUTPUT"
 
           echo "Resolved diff range: ${diff_range:-<unresolved>}"
-          echo "firmware=${firmware} simulator=${simulator} emulator=${emulator} webapp=${webapp} web_flasher=${web_flasher} workflows=${workflows} docs=${docs}"
+          echo "firmware=${firmware} host_test=${host_test} simulator=${simulator} emulator=${emulator} webapp=${webapp} web_flasher=${web_flasher} idf_build_scripts=${idf_build_scripts} release_config=${release_config} docker_firmware_builder=${docker_firmware_builder} coverage_tooling=${coverage_tooling} size_tooling=${size_tooling} ci_core=${ci_core} docs=${docs}"

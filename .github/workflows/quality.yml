@@ -26,7 +26,14 @@ jobs:
   host-tests:
     name: Host tests
     needs: detect
-    if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
+    # coverage_tooling: the Host coverage ratchet step below runs the coverage
+    # scripts and reads ci/coverage-baseline.json, so a ratchet-only change must
+    # re-run this job to self-verify.
+    if: |
+      needs.detect.outputs.firmware == 'true' ||
+      needs.detect.outputs.host_test == 'true' ||
+      needs.detect.outputs.coverage_tooling == 'true' ||
+      needs.detect.outputs.ci_core == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
@@ -104,13 +111,13 @@ jobs:
         board: [heltec-v3, tdeck-plus, heltec-v4, bramble-pager]
     steps:
       - uses: actions/checkout@v7
-        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
+        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.idf_build_scripts == 'true' || needs.detect.outputs.size_tooling == 'true' || needs.detect.outputs.ci_core == 'true'
       - name: Ensure ESP-IDF toolchain
-        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
+        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.idf_build_scripts == 'true' || needs.detect.outputs.size_tooling == 'true' || needs.detect.outputs.ci_core == 'true'
         run: bash scripts/ci-ensure-idf.sh
       - name: Configure ccache
         id: ccache
-        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
+        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.idf_build_scripts == 'true' || needs.detect.outputs.size_tooling == 'true' || needs.detect.outputs.ci_core == 'true'
         # Sets IDF_CCACHE_ENABLE (the env switch idf.py reads to put ccache in
         # front of the compiler) and pins CCACHE_DIR outside the workspace and
         # outside the overridden HOME the build step uses. Emits the ESP-IDF
@@ -119,7 +126,10 @@ jobs:
         run: bash scripts/ci-ccache-env.sh
       - name: Restore ccache
         if: |
-          (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true') &&
+          (needs.detect.outputs.firmware == 'true' ||
+           needs.detect.outputs.idf_build_scripts == 'true' ||
+           needs.detect.outputs.size_tooling == 'true' ||
+           needs.detect.outputs.ci_core == 'true') &&
           steps.ccache.outputs.available == 'true'
         uses: actions/cache@v6
         with:
@@ -129,7 +139,7 @@ jobs:
             ccache-${{ matrix.board }}-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('sdkconfig.defaults*', 'CMakeLists.txt', 'partitions*.csv') }}-
             ccache-${{ matrix.board }}-idf${{ steps.ccache.outputs.idf_version }}-
       - name: Build ${{ matrix.board }} via wrapper
-        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
+        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.idf_build_scripts == 'true' || needs.detect.outputs.size_tooling == 'true' || needs.detect.outputs.ci_core == 'true'
         env:
           HOME: /tmp/cihome
           ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
@@ -148,7 +158,7 @@ jobs:
         # tolerance, so a silent tens-of-KiB flash bloat or a shrinking RAM margin
         # (this project shipped a stack overflow only hardware caught) surfaces
         # before merge. Same area gate as the build so it never runs without one.
-        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
+        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.idf_build_scripts == 'true' || needs.detect.outputs.size_tooling == 'true' || needs.detect.outputs.ci_core == 'true'
         env:
           HOME: /tmp/cihome
           ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
@@ -160,7 +170,10 @@ jobs:
       - name: ccache statistics
         if: |
           always() &&
-          (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true') &&
+          (needs.detect.outputs.firmware == 'true' ||
+           needs.detect.outputs.idf_build_scripts == 'true' ||
+           needs.detect.outputs.size_tooling == 'true' ||
+           needs.detect.outputs.ci_core == 'true') &&
           steps.ccache.outputs.available == 'true'
         run: ccache --show-stats
 
@@ -173,7 +186,12 @@ jobs:
     # than a coin flip: the run starts from valid frames of every wire type
     # instead of rediscovering the formats from scratch.
     needs: detect
-    if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
+    # The fuzz harness lives under test/fuzz/ (host_test) and compiles the parser
+    # from components/ (firmware); either moving is a reason to re-fuzz.
+    if: |
+      needs.detect.outputs.firmware == 'true' ||
+      needs.detect.outputs.host_test == 'true' ||
+      needs.detect.outputs.ci_core == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
@@ -206,11 +224,12 @@ jobs:
     # The per-component semantic-release configs (.releaserc.<component>.cjs)
     # and the squash-expander they wrap decide whether any binary ever
     # publishes. A silent scope-gating regression here stops every release, so
-    # this cheap check runs whenever a release config, the release scripts, or
-    # a workflow file changes (the firmware area already covers scripts/ and
-    # .releaserc.*; workflows forces it for the safety rule).
+    # this cheap check runs whenever a release config or the release scripts
+    # change (release_config = .releaserc.* + scripts/release/); ci_core forces
+    # it for the safety rule. It no longer piggybacks on the broad firmware area,
+    # so an ordinary firmware code change stops spinning up this pod.
     needs: detect
-    if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
+    if: needs.detect.outputs.release_config == 'true' || needs.detect.outputs.ci_core == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
@@ -237,10 +256,13 @@ jobs:
   gosim-integration:
     name: gosim integration
     needs: detect
+    # coverage_tooling: the gosim coverage ratchet step runs check_coverage.py
+    # against ci/coverage-baseline.json, so a ratchet-only change re-runs it.
     if: |
       needs.detect.outputs.firmware == 'true' ||
       needs.detect.outputs.simulator == 'true' ||
-      needs.detect.outputs.workflows == 'true'
+      needs.detect.outputs.coverage_tooling == 'true' ||
+      needs.detect.outputs.ci_core == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
@@ -289,7 +311,8 @@ jobs:
       needs.detect.outputs.firmware == 'true' ||
       needs.detect.outputs.simulator == 'true' ||
       needs.detect.outputs.emulator == 'true' ||
-      needs.detect.outputs.workflows == 'true'
+      needs.detect.outputs.idf_build_scripts == 'true' ||
+      needs.detect.outputs.ci_core == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 25
     steps:
@@ -487,9 +510,11 @@ jobs:
         # webapp on webapp; simulator on simulator/firmware (it COPYs main/ +
         # components/ for its cgo build); emulator on emulator/simulator/firmware
         # (it additionally builds the linux firmware node and gosim);
-        # firmware-builder on firmware (which the detector maps
-        # docker/firmware-builder/ into). workflows is OR'd into every leg per
-        # the always-report safety rule.
+        # firmware-builder on docker_firmware_builder ONLY (its build context is
+        # docker/firmware-builder/, a toolchain image that does not COPY main/ or
+        # components/, so a firmware source change must NOT rebuild it). ci_core
+        # (a job-defining workflow edit) is OR'd into every leg per the
+        # always-report safety rule.
         id: gate
         env:
           IMAGE: ${{ matrix.image }}
@@ -497,7 +522,8 @@ jobs:
           SIMULATOR: ${{ needs.detect.outputs.simulator }}
           EMULATOR: ${{ needs.detect.outputs.emulator }}
           FIRMWARE: ${{ needs.detect.outputs.firmware }}
-          WORKFLOWS: ${{ needs.detect.outputs.workflows }}
+          DOCKER_FW_BUILDER: ${{ needs.detect.outputs.docker_firmware_builder }}
+          CI_CORE: ${{ needs.detect.outputs.ci_core }}
         run: |
           set -euo pipefail
           build=false
@@ -505,9 +531,9 @@ jobs:
             webapp)  [ "$WEBAPP" = true ] && build=true ;;
             simulator) { [ "$SIMULATOR" = true ] || [ "$FIRMWARE" = true ]; } && build=true ;;
             emulator) { [ "$EMULATOR" = true ] || [ "$SIMULATOR" = true ] || [ "$FIRMWARE" = true ]; } && build=true ;;
-            firmware-builder) [ "$FIRMWARE" = true ] && build=true ;;
+            firmware-builder) [ "$DOCKER_FW_BUILDER" = true ] && build=true ;;
           esac
-          [ "$WORKFLOWS" = true ] && build=true
+          [ "$CI_CORE" = true ] && build=true
           echo "build=${build}" >> "$GITHUB_OUTPUT"
           echo "leg=${IMAGE} build=${build}"
       - uses: actions/checkout@v7
