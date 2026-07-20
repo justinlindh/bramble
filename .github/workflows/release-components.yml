@@ -21,9 +21,12 @@ on:
       webapp_installers_tag:
         description: >-
           Existing webapp-vX.Y.Z tag to rebuild desktop installers for.
-          Skips semantic-release entirely and re-attaches the installers to
-          that tag's release (idempotent replace). Combine with dry_run to
-          build the installers without uploading anything.
+          Skips semantic-release entirely and attaches the installers to that
+          tag's release, then publishes it. This only works while that
+          release is still an unpublished DRAFT: once a release is published
+          it is immutable and rejects new assets (HTTP 422), so this cannot
+          recover a release that already completed a run. Combine with dry_run
+          to build the installers without uploading anything.
         required: false
         default: ""
         type: string
@@ -104,7 +107,11 @@ jobs:
             npx semantic-release --extends ./.releaserc.firmware.cjs
           fi
           after="$(git tag -l 'firmware-v*' | LC_ALL=C sort)"
-          new="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tail -1)"
+          # LC_ALL=C on comm too: comm's own sorted-order check uses the ambient
+          # locale's collation, and the self-hosted burst runner's locale is not
+          # guaranteed to match byte order. Pin both so the whole comparison is
+          # locale-independent.
+          new="$(LC_ALL=C comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tail -1)"
           if [ -n "$new" ]; then
             echo "published=true" >> "$GITHUB_OUTPUT"
             echo "tag=$new" >> "$GITHUB_OUTPUT"
@@ -129,7 +136,9 @@ jobs:
             npx semantic-release --extends ./.releaserc.webapp.cjs
           fi
           after="$(git tag -l 'webapp-v*' | LC_ALL=C sort)"
-          new="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tail -1)"
+          # LC_ALL=C on comm too (see the firmware step): comm's sorted-order
+          # check uses the ambient locale, which the burst runner does not pin.
+          new="$(LC_ALL=C comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tail -1)"
           if [ -n "$new" ]; then
             echo "published=true" >> "$GITHUB_OUTPUT"
             echo "tag=$new" >> "$GITHUB_OUTPUT"

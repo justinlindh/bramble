@@ -40,7 +40,13 @@ auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+js
 find_release() {
   local page=1 batch match count
   while :; do
-    batch="$(curl -fsSL "${auth[@]}" "$api/repos/$REPO/releases?per_page=100&page=$page")"
+    # Explicit exit check: this runs inside an `if` condition, where set -e is
+    # ignored, so a curl failure (rate limit, transient 5xx) would otherwise
+    # leave $batch empty, crash the python parsers on empty stdin, and spin the
+    # loop until the step's timeout with no diagnostic. Returning 1 instead
+    # counts the failure as a missed attempt and surfaces it through the caller's
+    # 6-attempt retry, then the final "no release found" error.
+    batch="$(curl -fsSL "${auth[@]}" "$api/repos/$REPO/releases?per_page=100&page=$page")" || return 1
     match="$(printf '%s' "$batch" | python3 -c '
 import json, sys
 tag = sys.argv[1]
@@ -69,6 +75,19 @@ read -r release_id is_draft < <(printf '%s' "$release_json" \
   | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["id"], str(r.get("draft", False)).lower())')
 echo "Release for $TAG: id=$release_id draft=$is_draft"
 
+# Fail fast on an already-published release. This script's whole reason to exist
+# is to attach assets while the release is still a mutable draft and then publish
+# it; a published release is immutable and the upload API rejects new assets with
+# a bare HTTP 422. Surfacing that here as a clear message beats letting the 422
+# fall out of the upload loop below. In the normal pipeline the release is always
+# a fresh draft; this only trips a webapp_installers_tag rebuild dispatch aimed at
+# a tag whose release already published, which is unrecoverable by re-attach.
+if [[ "$is_draft" != "true" ]]; then
+  echo "attach-release-assets: release $TAG is already published and immutable;" \
+       "assets cannot be added to it. Cut a new version instead." >&2
+  exit 1
+fi
+
 # Existing assets, emitted "id name" per line, so an upload replaces rather than
 # collides. A fresh draft has none; a re-attach on a still-draft release reuses
 # this to replace by name. per_page=100 is plenty for this repo's handful of
@@ -94,12 +113,8 @@ for f in "$@"; do
 done
 
 # Publish the draft now that its assets are attached. Publishing locks the
-# release immutable, which is why this is the last step. A release that is
-# already published (a re-run) is skipped: it cannot take asset changes anyway.
-if [[ "$is_draft" == "true" ]]; then
-  curl -fsSL "${auth[@]}" -X PATCH "$api/repos/$REPO/releases/$release_id" \
-    -d '{"draft":false}' > /dev/null
-  echo "Published release $TAG"
-else
-  echo "Release $TAG already published; skipping publish"
-fi
+# release immutable, which is why this is the last step. The already-published
+# case exited above, so the release is always a draft here.
+curl -fsSL "${auth[@]}" -X PATCH "$api/repos/$REPO/releases/$release_id" \
+  -d '{"draft":false}' > /dev/null
+echo "Published release $TAG"
