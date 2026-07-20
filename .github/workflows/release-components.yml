@@ -276,7 +276,14 @@ jobs:
         run: |
           set -euo pipefail
           cd webapp
-          npx electron-builder --linux --win --config electron-builder.yml \
+          # --publish never: electron-builder.yml declares a github publish
+          # provider (so the latest*.yml update feed gets emitted), and GitHub
+          # Actions sets CI=true, which otherwise flips electron-builder into
+          # implicit "onTagOrDraft" publishing and makes it attempt a real
+          # upload that fails here (no GH_TOKEN in this job). This job only
+          # builds; the webapp-installers-publish job attaches every asset,
+          # feed files included.
+          npx electron-builder --linux --win --publish never --config electron-builder.yml \
             -c.extraMetadata.version="$VER"
           ls -lh release/ | grep -v -e '^total' -e 'unpacked'
 
@@ -357,7 +364,11 @@ jobs:
         run: |
           set -euo pipefail
           cd webapp
-          npx electron-builder --mac --arm64 --x64 --config electron-builder.yml \
+          # --publish never: see the Linux/Windows job. The github publish
+          # provider plus CI=true would otherwise make electron-builder attempt
+          # a real upload that fails here (no GH_TOKEN). This job only builds;
+          # the mac dmgs are attached by the webapp-installers-publish job.
+          npx electron-builder --mac --arm64 --x64 --publish never --config electron-builder.yml \
             -c.extraMetadata.version="$VER"
           ls -lh release/ | grep -v -e '^total' -e 'unpacked'
 
