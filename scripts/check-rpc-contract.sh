@@ -58,6 +58,35 @@ if [ -n "$phantom" ]; then
     printf '%s\n' "$phantom" | sed 's/^/  /' >&2
 fi
 
+# Webapp call-site check: every bramble.* method the webapp invokes through
+# client.rpc(...) must be a method the firmware registers. The name-symmetry
+# checks above only compare the firmware registry against the spec, so they
+# cannot see a webapp that calls a method existing in neither (a phantom like
+# bramble.disconnect, issue #101). This closes that gap.
+WEBAPP_SRC="webapp/src"
+if [ -d "$WEBAPP_SRC" ]; then
+    if ! command -v perl >/dev/null 2>&1; then
+        echo "::warning::perl not found; skipping webapp RPC call-site check" >&2
+    else
+        # Capture the first string-literal argument of every .rpc(...) call,
+        # tolerating a generic type argument and a newline before the literal.
+        # Matches .rpc(, never .sendRPC( (used with a deliberately fake method
+        # in transport tests), so those stay out of the comparison.
+        webapp_calls=$(find "$WEBAPP_SRC" \( -name '*.ts' -o -name '*.tsx' \) -print0 \
+            | xargs -0 perl -0777 -ne \
+                'while(/\.rpc\s*(?:<[^>]*>)?\s*\(\s*(["\x27])(bramble\.[A-Za-z0-9_.]+)\1/g){print "$2\n"}' \
+            | sort -u)
+        if [ -n "$webapp_calls" ]; then
+            webapp_phantom=$(comm -23 <(printf '%s\n' "$webapp_calls") <(printf '%s\n' "$fw_methods"))
+            if [ -n "$webapp_phantom" ]; then
+                fail=1
+                echo "::error::methods the webapp calls via client.rpc() but $FIRMWARE_SRC does not register:" >&2
+                printf '%s\n' "$webapp_phantom" | sed 's/^/  /' >&2
+            fi
+        fi
+    fi
+fi
+
 count=$(printf '%s\n' "$fw_methods" | wc -l)
 if [ "$fail" -ne 0 ]; then
     echo "RPC contract check FAILED: spec and firmware registry have drifted." >&2
