@@ -34,8 +34,13 @@ jobs:
     # coverage_tooling: the Webapp coverage ratchet step reads
     # ci/coverage-baseline.json via check_coverage.py, so a ratchet-only change
     # must re-run this job to self-verify.
+    # api: webapp/test/rpcContractCoverage.test.ts pins the committed
+    # src/types/rpcContract.generated.ts against api/openapi.yaml, so an
+    # api-only spec edit must run the unit tests here or the exact drift that
+    # test exists to catch would merge with this job skipped.
     if: |
       needs.detect.outputs.webapp == 'true' ||
+      needs.detect.outputs.api == 'true' ||
       needs.detect.outputs.coverage_tooling == 'true' ||
       needs.detect.outputs.ci_core == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}

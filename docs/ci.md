@@ -124,7 +124,8 @@ changed. When in doubt, run the real checks rather than silently skip them.
 | `emulator` | `emulator/` |
 | `webapp` | `webapp/` |
 | `web_flasher` | `web-flasher/` |
-| `idf_build_scripts` | `scripts/ci-source-idf*`, `scripts/ci-ensure-idf*`, `scripts/flash*`, `scripts/flash-all*`, `scripts/ensure-ota-signing-key*`, `.esp-idf-version` |
+| `api` | `api/` |
+| `idf_build_scripts` | `scripts/ci-source-idf*`, `scripts/ci-ensure-idf*`, `scripts/ci-ccache-env*`, `scripts/flash*`, `scripts/flash-all*`, `scripts/ensure-ota-signing-key*`, `.esp-idf-version` |
 | `release_config` | `.releaserc.*`, `scripts/release/` |
 | `docker_firmware_builder` | `docker/firmware-builder/` |
 | `coverage_tooling` | `scripts/ci/check_coverage.py`, `scripts/ci/host_coverage.py`, `scripts/ci/run-host-coverage.sh`, `ci/coverage-baseline.json` |
@@ -144,14 +145,20 @@ read the root dotfiles), by the single-purpose `Release config` job, or by the
 firmware-builder Docker leg, none of which the host tests, gosim, or emulator
 suite ever read. Folding them into `firmware` used to spin up those heavy
 firmware suites on scripts-only, api-only, dotfile-only, and release-config-only
-PRs for no reason. `host_test` is `test/` on its own so a host-harness-only
-change runs `Host tests` and `Parser fuzzing` without dragging in gosim or the
-emulator suite. `simulator` is a separate output because the strict clang-format
-scope scans simulator C sources too, so a simulator-only change must still run
-clang-format (inside the bundle) and gosim. `idf_build_scripts` is a small
-deliberate superset: the exact ESP-IDF sourcing / flash wrapper scripts the
-emulator and board-build jobs invoke, plus the `.esp-idf-version` pin, keyed as
-one bucket (a `flash.sh`-only change re-running the emulator is a harmless
+PRs for no reason. `api` exists because the spec has a consumer OUTSIDE the
+always-run bundle: `webapp/test/rpcContractCoverage.test.ts` pins the committed
+`src/types/rpcContract.generated.ts` against `api/openapi.yaml`, so an api-only
+spec edit gates the `Webapp checks` job (the rpc-contract check in `Static
+checks` covers only the firmware side). `host_test` is `test/` on its own so a
+host-harness-only change runs `Host tests` and `Parser fuzzing` without
+dragging in gosim or the emulator suite. `simulator` is a separate output
+because the strict clang-format scope scans simulator C sources too, so a
+simulator-only change must still run clang-format (inside the bundle) and
+gosim. `idf_build_scripts` is a small deliberate superset: the exact ESP-IDF
+sourcing / flash / ccache wrapper scripts the emulator and board-build jobs
+invoke (`ci-ccache-env.sh` included: both jobs run it to configure the compiler
+cache, so editing it must re-run them), plus the `.esp-idf-version` pin, keyed
+as one bucket (a `flash.sh`-only change re-running the emulator is a harmless
 over-match, and over-matching here is always safe). `release_config` is exactly
 what the `Release config` job loads. `docker_firmware_builder` is the
 firmware-builder image's build context (`docker/firmware-builder/`): that leg
@@ -256,7 +263,7 @@ signal) naming the mismatch and pointing at this file.
 | `gosim integration` | `firmware`, `simulator`, `coverage_tooling`, or `ci_core` | yes |
 | `Board build smoke (heltec-v3)` (+ `tdeck-plus`, `heltec-v4`, `bramble-pager`), step-gated | `firmware`, `idf_build_scripts`, `size_tooling`, or `ci_core` | yes |
 | `Emulator suite` | `firmware`, `simulator`, `emulator`, `idf_build_scripts`, or `ci_core` | yes |
-| `Docker build (webapp)`, step-gated | `webapp` or `ci_core` | yes |
+| `Docker build (webapp)`, step-gated | `webapp`, `web_flasher`, or `ci_core` | yes |
 | `Docker build (simulator)`, step-gated | `simulator`, `firmware`, or `ci_core` | yes |
 | `Docker build (emulator)`, step-gated | `emulator`, `simulator`, `firmware`, or `ci_core` | yes |
 | `Docker build (firmware-builder)`, step-gated | `docker_firmware_builder` or `ci_core` | yes |
@@ -404,8 +411,12 @@ trust model as the docker.sock mount the publish workflow already uses.
 The area gate is on the job's STEPS, not the job, for the same
 matrix-collapse reason as `Board build smoke` above. Each leg's gate is the
 union of areas that Dockerfile's `COPY` instructions actually read: `webapp`
-gates on `webapp`; `simulator` (which also `COPY`s `main/`, `components/`,
-and `test/stubs/` for its cgo build) gates on `simulator` or `firmware`;
+gates on `webapp` or `web_flasher` (the leg stages the top-level `web-flasher/`
+tree into `webapp/public/web-flasher/` before building, exactly as the publish
+workflow does, so the image it verifies contains web-flasher and a
+web-flasher-only change must rebuild it); `simulator` (which also `COPY`s
+`main/`, `components/`, and `test/stubs/` for its cgo build) gates on
+`simulator` or `firmware`;
 `emulator` (which additionally builds the linux firmware node and gosim)
 gates on `emulator`, `simulator`, or `firmware`; `firmware-builder` gates on
 `docker_firmware_builder` alone, because its build context is
@@ -419,7 +430,7 @@ small-pool reason as the board matrix.
 | Job (context name) | Runs when | Required? |
 | --- | --- | --- |
 | `Detect changed areas` (via reusable `detect`) | always | no |
-| `Webapp checks` | `webapp` or `ci_core` | yes |
+| `Webapp checks` | `webapp`, `api`, `coverage_tooling`, or `ci_core` | yes |
 | `web-flasher tests` | `web_flasher` or `ci_core` | yes |
 
 `Webapp checks` is one job with a single `npm ci`, then lint, typecheck, electron
