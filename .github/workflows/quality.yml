@@ -245,14 +245,15 @@ jobs:
           go build ./...
           # -count=1 defeats go's test cache, which can serve stale results
           # across cgo-compiled C edits (observed on this runner setup).
-          go test -count=1 ./...
+          # -covermode=set -coverprofile captures coverage in this same run so
+          # the ratchet step below needs no second (timing-sensitive) go test.
+          go test -covermode=set -coverprofile=cover.out -count=1 ./...
       - name: gosim coverage ratchet
-        # Re-run with statement coverage and ratchet the total against
+        # Ratchet the coverage captured by the test run above against
         # ci/coverage-baseline.json. Go coverage is toolchain-stable, so this
         # number matches locally and on the pods.
         run: |
           cd simulator/gosim
-          go test -covermode=set -coverprofile=cover.out -count=1 ./...
           PCT="$(go tool cover -func=cover.out | awk '/^total:/ {gsub(/%/,"",$NF); print $NF}')"
           echo "gosim total statement coverage: ${PCT}%"
           python3 "$GITHUB_WORKSPACE/scripts/ci/check_coverage.py" gosim "$PCT"

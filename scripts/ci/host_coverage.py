@@ -27,7 +27,7 @@ import subprocess
 import sys
 
 INCLUDE_PREFIXES = ("components/", "main/")
-EXCLUDE_SUBSTRINGS = ("/test/", "/unity/", "/stubs/", "components/packet/cJSON")
+EXCLUDE_SUBSTRINGS = ("/test/", "/unity/", "/stubs/")
 
 
 def find_gcda(build_dir):
