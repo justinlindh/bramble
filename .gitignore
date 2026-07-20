@@ -2,6 +2,14 @@
 build/
 build-*/
 test/build/
+test/build-coverage/
+
+# Coverage artifacts (host gcov, gosim profile, webapp v8)
+*.gcda
+*.gcno
+*.gcov
+webapp/coverage/
+simulator/gosim/cover.out
 
 # Release factory images (built in CI, attached to firmware releases)
 /dist/

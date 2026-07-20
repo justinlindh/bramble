@@ -45,6 +45,17 @@ export default defineConfig({
     // keep answering calls made by a later, unrelated test.
     restoreMocks: true,
     exclude: ['**/node_modules/**', '**/test/integration/**', '**/web-flasher/**'],
+    // Coverage is only collected with `vitest run --coverage` (the CI ratchet
+    // gate); it does not affect a plain `vitest run`. Scope it to product
+    // source under src/, and emit json-summary so scripts/ci/check_coverage.py
+    // can read the line percentage from coverage/coverage-summary.json.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'json-summary'],
+      reportsDirectory: './coverage',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.d.ts', 'src/**/*.test.{ts,tsx}', 'src/main.tsx'],
+    },
   },
   build: {
     outDir: 'dist',

@@ -344,7 +344,7 @@ Encrypted payload structure (inside ciphertext):
 
 Note: For channel messages, `src_addr` at offset 12 in the wire header is set to `0x00000000`. The `channel_id` is NOT present in the plaintext header: it is inside the encrypted payload. Receivers attempt trial decryption with each of their channel keys (max 16 attempts, ~1ms total on ESP32-S3 with hardware AES acceleration). This prevents non-members from identifying which channel a message belongs to. The actual source address is also encrypted inside the ciphertext alongside the payload.
 
-> **Firmware reality (wire v4).** The two layouts above are wire v1 design and no longer describe the wire. There is one DATA/LOCATION envelope layout regardless of unicast vs. channel: `header(12) + src_addr(4) + prev_hop(4) + auth_hmac(8) + nonce(BRAMBLE_NONCE_SIZE) + ciphertext(N) + tag(BRAMBLE_TAG_SIZE)`. Neither a cleartext `next_hop` nor a cleartext `app_type`/`payload_len` pair exists on DATA today: forwarding is broadcast-retransmit keyed on the header's `dest_addr` and a routing-table lookup, not a `next_hop` field carried on DATA itself, and `app_type`/`payload_len` moved inside the encrypted payload along with everything else application-layer. See §4.27 for the full wire v4 change inventory, including the new relay-mutated `prev_hop` field and its `auth_hmac`. Wire v5 (§4.29) adds one more wrinkle for DM chat and directed LOCATION shares specifically: a 3-byte cleartext ratchet header sits between `nonce` and `ciphertext` for those session-keyed frames, so `ciphertext(N)` above is `ratchet_header(3) + ciphertext(N)` in that case.
+> **Firmware reality (wire v4).** The two layouts above are wire v1 design and no longer describe the wire. There is one DATA/LOCATION envelope layout regardless of unicast vs. channel: `header(12) + src_addr(4) + prev_hop(4) + auth_hmac(8) + nonce(BRAMBLE_NONCE_SIZE) + ciphertext(N) + tag(BRAMBLE_TAG_SIZE)`. Neither a cleartext `next_hop` nor a cleartext `app_type`/`payload_len` pair exists on DATA today: forwarding is broadcast-retransmit keyed on the header's `dest_addr` and a routing-table lookup, not a `next_hop` field carried on DATA itself, and `app_type`/`payload_len` moved inside the encrypted payload along with everything else application-layer. See §4.27 for the full wire v4 change inventory, including the new relay-mutated `prev_hop` field and its `auth_hmac`.
 
 ### 4.5 ACK Packet
 
@@ -895,42 +895,6 @@ grown 144 -> 158 when the Phase 3 relay gate added `auth_hmac + seq`. At the
 cycle on LONG_RANGE (SF10/125 kHz) and roughly 0.0202% on MEDIUM (SF7/250
 kHz), negligible against the 10% regulatory budget and debited from the same
 broadcast tier as all flooded traffic.
-
-### 4.29 Wire Version 5 (Firmware Reality)
-
-`BRAMBLE_VERSION` is `5` (was `4`; `components/packet/include/packet.h`). Same flag-day RX gate as every prior bump (`bramble_header_is_supported_version`, exact `==` match, checked before any type-specific parsing): a v4 DM or LOCATION session frame is rejected outright rather than accepted as legacy-compatible, and the two peers re-handshake to establish a v5-shaped session. Only session-keyed DATA and LOCATION frames (`FLAG_ENCRYPT` set, `FLAG_CHANNEL` clear, i.e. a DM chat message or a directed location share) change layout; everything else, including channel-keyed DATA/LOCATION, RREQ, RREP, RERR, ACK, delivery receipt, PROBE, beacon, and IDENTITY_ATTESTATION, is unchanged and now simply carries `version = 5`.
-
-This is the DM forward-secrecy flag day: session payloads move from one static per-pair session key to a symmetric double ratchet with a fresh key per message (`components/dm_session`; `docs/SECURITY-MODEL.md`). The wire-visible consequence is a new 3-byte cleartext header ahead of the ciphertext.
-
-1. **Ratchet header added ahead of the ciphertext, session-keyed DATA/LOCATION only.** `DM_RATCHET_HEADER_SIZE` (`components/packet/include/packet.h`) is 3. Field layout, verified against the serializer (`dm_session_ratchet_encrypt`, `components/dm_session/dm_session.c`):
-
-   ```
-   Offset  Size  Field       Description
-   ------  ----  -----       -----------
-   0       1     epoch       low byte of the session's current ke_epoch
-   1-2     2     msg_index   big-endian message index on this ratchet chain
-   ```
-
-   Encoded exactly as `hdr[0] = ratchet.send.epoch; hdr[1] = (uint8_t)(index >> 8); hdr[2] = (uint8_t)(index & 0xFF)`. The receiver (`dm_session_ratchet_decrypt`) reads it back the same way, before attempting any decrypt: `epoch = framed_ct[0]`, `index = (framed_ct[1] << 8) | framed_ct[2]`.
-
-2. **Where it sits on the wire.** The DATA/LOCATION envelope prefix is unchanged since wire v4 (§4.27): `header(12) + src_addr(4) + prev_hop(4) + auth_hmac(8)` = `BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE` (28 bytes), followed by `nonce(BRAMBLE_NONCE_SIZE=12)`. For a session-keyed frame only, the 3-byte ratchet header now sits immediately after the nonce and immediately before the AEAD ciphertext, which is followed by `tag(BRAMBLE_TAG_SIZE=16)`:
-
-   ```
-   ... | auth_hmac(8) | nonce(12) | epoch(1) | msg_index(2, BE) | ciphertext(N) | tag(16)
-                                   \_____________ 3-byte ratchet header ____________/
-   ```
-
-   The header and ciphertext are written and read as one contiguous blob of `DM_RATCHET_HEADER_SIZE + N` bytes (`framed_len` in `dm_session_ratchet_encrypt`/`_decrypt`), so the on-wire frame is exactly 3 bytes longer than the plaintext it carries (`send_dm_packet` and the directed-location branch of `mesh_send_location_packet`, both in `main/mesh_task.c`, size their buffers for this).
-
-3. **Authenticated, not encrypted.** The 3 header bytes are cleartext on the wire but are fed into the AEAD associated data: AAD = `bramble_build_aead_aad`'s output (`header(12, hop_limit masked) + src_addr(4)`, unchanged since §4.25 item 4) followed by the same 3 ratchet-header bytes, built identically on both the encrypt and decrypt side before the AES-256-GCM call. Flipping `epoch` or `msg_index` in flight fails the GCM tag rather than silently redirecting the receiver to the wrong key.
-
-4. **Nonce unchanged; only the message key rotates per message.** The 12-byte AEAD nonce is still the sender's node-global, NVS-persisted monotonic counter (§4.25 item 4), exactly as for every other AEAD frame on the mesh; the ratchet does not touch it. What changes per message is the AES-256-GCM key: `dm_ratchet_step` derives a fresh message key `mk` for `(chain, msg_index)`, used for exactly one message and then wiped, so no `(key, nonce)` pair repeats even though the nonce sequence's shape is unchanged.
-
-5. **Receiver key selection is deterministic, never trial decryption.** Because `epoch || msg_index` is read from the cleartext header up front, the receiver derives exactly the one message key the index names, walking its own chain cursor forward and caching any skipped keys in a bounded per-direction skip cache, then performs a single AES-256-GCM decrypt. There is no loop over candidate keys.
-
-6. **Bounded skip window, a loss-tolerance bound, not a second replay defense.** An index behind the receive cursor decrypts only if it is still present in the skip cache; an already-consumed or evicted straggler is refused (`DM_DECRYPT_TOO_FAR`) without deriving any key. An index more than `DM_MAX_SKIP` (16) ahead of the cursor is refused the same way, also without deriving. `DM_MAX_SKIP` trades loss tolerance against forward-derivation work and skip-cache RAM; the authoritative replay check remains the per-sender nonce-counter window (`components/replay_window`), consulted before this ratchet layer ever runs, and `dm_session_ratchet_decrypt` never itself returns a replay disposition.
-
-7. **Interaction with the version gate.** The ratchet header changes what bytes sit between `nonce` and `tag`, so a v4 peer's DM/LOCATION session frames are wire-incompatible with a v5 peer's: `bramble_header_is_supported_version`'s exact-match gate drops them before any type-specific parsing, and the two nodes fall back to a fresh INIT/RESP handshake (§5.2) to establish a v5-shaped session rather than attempting a mixed-version decode. This is also why the header cannot be treated as optional metadata layered on top of an unrelated version: it is what "v5" means for a DM.
 
 ## 5. Node Identity & Key Management
 

@@ -18,12 +18,12 @@
  * private seed never leaves this client and is never sent over any RPC.
  */
 import * as ed from '@noble/ed25519';
-import { sha256, sha512 } from '@noble/hashes/sha2.js';
-import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
+import { sha256, sha512 } from '@noble/hashes/sha2';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 
-// @noble/ed25519 v3 needs a synchronous sha512 hook for sync sign/getPublicKey.
+// @noble/ed25519 v2 needs a synchronous sha512 hook for sync sign/getPublicKey.
 // Wire it once at module load so signing is deterministic and offline.
-ed.hashes.sha512 = sha512;
+ed.etc.sha512Sync = (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
 
 const ENDORSE_CONTEXT = new TextEncoder().encode('bramble-endorse-v1'); // 18 bytes
 const HEX64 = /^[0-9a-fA-F]{64}$/;

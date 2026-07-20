@@ -2,8 +2,20 @@ cmake_minimum_required(VERSION 3.16)
 project(bramble_tests C)
 
 set(CMAKE_C_STANDARD 11)
-add_compile_options(-Wall -Wextra -Werror -fsanitize=address -fno-omit-frame-pointer)
-add_link_options(-fsanitize=address)
+
+# Coverage build (BRAMBLE_COVERAGE=ON) swaps AddressSanitizer for gcov
+# instrumentation: the coverage run only needs each binary to execute so gcov
+# emits .gcda data, and running without ASan avoids the leak-detector's ptrace
+# dependency on the CI pods. The normal build keeps ASan; the two build types
+# never mix in one tree (CI uses a separate build-coverage/ directory).
+option(BRAMBLE_COVERAGE "Instrument the host tests with gcov instead of ASan" OFF)
+if(BRAMBLE_COVERAGE)
+    add_compile_options(-Wall -Wextra -Werror --coverage -O0 -fno-omit-frame-pointer)
+    add_link_options(--coverage)
+else()
+    add_compile_options(-Wall -Wextra -Werror -fsanitize=address -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address)
+endif()
 
 # Locate OpenSSL portably (was hardcoded to a linuxbrew path; DES-19).
 # OPENSSL_ROOT is derived from the discovered include dir so the existing

@@ -1,0 +1,9 @@
+{
+  "_comment": "Committed line-coverage floors (percent) per host-testable suite. CI fails a suite when its measured line coverage drops more than tolerance_pct below the floor here. This file NEVER auto-drifts: a developer updates it deliberately with scripts/ci/update-coverage-baseline.sh (raising a floor after adding tests, or lowering one with a written justification in the PR) and commits the change. See docs/quality-policy.md.",
+  "tolerance_pct": 0.5,
+  "suites": {
+    "host-c": 76.0,
+    "gosim": 61.0,
+    "webapp": 66.0
+  }
+}

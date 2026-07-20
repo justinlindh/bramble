@@ -2697,22 +2697,6 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
          * timesync because without trusted time the bound is unevaluable,
          * and an unevaluable bound must not reject live traffic (tier-1
          * acceptance is not the fail-closed layer, tier-2 is). */
-        /* Ordering note (#163): replay_check_and_add above has already
-         * advanced high_water/window/dirty for this counter by the time
-         * the freshness check below can still drop the packet. That is
-         * intentional, not a bug. This code only runs post-decrypt (see
-         * the comment above channel_source_is_replay_trustworthy), so
-         * rx_counter already passed AEAD authentication: it is a counter
-         * value the sender actually issued, not one an attacker forged.
-         * A stale-but-above-high-water replay (for example one delivered
-         * before a reboot but after the last NVS flush) therefore
-         * self-heals the post-reboot flush-lag gap using the attacker's
-         * own replay attempt. The message is still dropped below and
-         * never delivered, and the window can never be pushed past the
-         * sender's real highest-ever counter, because the attacker
-         * cannot mint new ones. Do not reorder the freshness check ahead
-         * of replay_check_and_add: that would reopen the flush-lag window
-         * this comment describes. */
         if (rp == REPLAY_ACCEPT && info.app_type == APP_TYPE_CHAT &&
             timesync_is_confident(&s_timesync, now_ms())) {
             uint32_t now_s = (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000);
@@ -6379,14 +6363,7 @@ static void mesh_replay_store_save_one(nvs_handle_t h, const char* key, replay_t
     replay_table_mark_clean(t);
 }
 
-/* Flush both windows if either is dirty, rather than gating each blob's
- * write independently on its own dirty flag. Writing only the dirty table
- * was considered and rejected: it would need a second rate-limit
- * timestamp so the two blobs' flush cadence cannot skew apart, for a
- * savings the endurance budget does not need. The endurance arithmetic in
- * PR #150 already assumes two full blobs per flush round and still lands
- * at roughly 27 years of NOR headroom, so always writing both blobs is
- * not a hidden cost, just simpler. force=true bypasses the rate limit
+/* Flush both windows if either is dirty. force=true bypasses the rate limit
  * (used before a deliberate reboot, e.g. OTA). */
 static void mesh_replay_store_save(bool force) {
     if (!replay_table_is_dirty(&s_replay) && !replay_table_is_dirty(&s_control_replay))
@@ -7212,23 +7189,14 @@ static void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t 
     uint8_t probe_round = (len >= HEADER_SIZE + 5) ? data[HEADER_SIZE + 4] : 1;
 
     char src_buf[12], me_buf[12];
-    /* Debug, not info: this fires once per received PROBE, before the ingress
-     * rate limit below has any say. PROBE is unauthenticated and remotely
-     * inducible, so an attacker in radio range could otherwise buy one UART
-     * line per injected frame and starve the serial RPC channel a maintainer
-     * would reach for while diagnosing the flood. Same reasoning as commit
-     * 843db077, which demoted the raw NMEA log for exactly this failure mode
-     * (issue #174). */
-    ESP_LOGD(TAG, "PROBE RX pid=%08" PRIX32 " round=%u src=%s me=%s hop=%u rssi=%d snr=%d",
+    ESP_LOGI(TAG, "PROBE RX pid=%08" PRIX32 " round=%u src=%s me=%s hop=%u rssi=%d snr=%d",
              header.packet_id, (unsigned)probe_round, addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)), (unsigned)header.hop_limit,
              (int)rssi, (int)snr);
 
     /* Ignore our own probe if it loops back through relays. */
     if (src_addr == s_identity->address) {
-        /* Also pre-rate-limit and forgeable (src_addr is unauthenticated), so
-         * keep it at debug for the same reason as the line above. */
-        ESP_LOGD(TAG, "PROBE RX ignored self-originated pid=%08" PRIX32, header.packet_id);
+        ESP_LOGI(TAG, "PROBE RX ignored self-originated pid=%08" PRIX32, header.packet_id);
         return;
     }
 
