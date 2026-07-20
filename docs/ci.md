@@ -287,12 +287,10 @@ asserts that the matrix board list and the `BOARDS` list in
 release path without adding it to the gate fails the PR rather than quietly
 reopening the hole.
 
-`Docker build (webapp)`, `(simulator)`, `(emulator)`, `(firmware-builder)`
-(issue #195) is a four-way matrix, one leg per Dockerfile the repo ships
-(`webapp/Dockerfile`, `simulator/Dockerfile`, `emulator/Dockerfile`,
-`docker/firmware-builder/Dockerfile`). Before this job, no workflow built any
-of them: a base-image bump (the trigger case, #179's `node` 22-to-26 jump in
-`emulator/Dockerfile`) could merge with every required context green and
+`Docker build (webapp)`, `(simulator)`, `(firmware-builder)` (issue #195) is
+a matrix, one leg per covered Dockerfile. Before this job, no workflow built
+any of the shipped Dockerfiles: a base-image bump (the trigger case, #179's
+`node` 22-to-26 jump) could merge with every required context green and
 nothing having ever constructed the image, which is worse than no bump at
 all because it carries the appearance of a passing check. Each leg runs
 `docker build` against its own Dockerfile and build context, directly on the
@@ -307,17 +305,30 @@ cache needs the buildx docker-container driver plus the runner's cache
 service, both extra failure surface, so caching is a follow-up once the
 plain build is proven green on the pool.
 
+`emulator/Dockerfile` is the fourth shipped Dockerfile but is deliberately
+NOT a leg yet. Its ESP-IDF stage resolves managed components (libsodium,
+lvgl) from the Espressif component registry at build time, which needs live
+egress to `components-file.espressif.com` that the runner pool does not have,
+so the image cannot build from a clean checkout on CI. The gate caught this
+as a real latent bug: the emulator image had never been buildable from clean
+(the `Emulator suite` builds `emulator/node` directly on the host, never
+through the Dockerfile, and a gitignored `dependencies.lock` masks it
+locally). Making that build hermetic (vendored or baked components, no live
+registry egress) and re-adding the leg is tracked in issue #231; the PR that
+added this gate also fixed a separate latent bug where the manager targeted
+the dead `api.components.espressif.com` subdomain, so `docker compose up
+--build` works for developers with normal egress even though the CI leg is
+deferred.
+
 The area gate is on the job's STEPS, not the job, for the same
 matrix-collapse reason as `Board build smoke` above. Each leg's gate is the
 union of areas that Dockerfile's `COPY` instructions actually read: `webapp`
 gates on `webapp`; `simulator` (which also `COPY`s `main/`, `components/`,
 and `test/stubs/` for its cgo build) gates on `simulator` or `firmware`;
-`emulator` (which additionally builds the linux firmware node and gosim)
-gates on `emulator`, `simulator`, or `firmware`; `firmware-builder` gates on
-`firmware`, which now includes `docker/firmware-builder/` itself (see the
-detector's area table above). `workflows` is OR'd into every leg, per the
-usual safety rule. `max-parallel: 2` for the same small-pool reason as the
-board matrix.
+`firmware-builder` gates on `firmware`, which now includes
+`docker/firmware-builder/` itself (see the detector's area table above).
+`workflows` is OR'd into every leg, per the usual safety rule.
+`max-parallel: 2` for the same small-pool reason as the board matrix.
 
 ### `webapp-quality.yml`
 

@@ -325,12 +325,25 @@ jobs:
 
   docker-build:
     name: Docker build (${{ matrix.image }})
-    # Issue #195: no workflow built any of the four shipped Dockerfiles, so a
-    # base-image bump (e.g. #179's node 22-to-26 jump in emulator/Dockerfile)
-    # could merge with every required context green and nothing having ever
-    # constructed the image. This job builds each Dockerfile (never pushes;
-    # it exists to catch a broken build before merge, not to publish) so
-    # future Dependabot docker bumps are self-verifying.
+    # Issue #195: no workflow built the shipped Dockerfiles, so a base-image
+    # bump could merge with every required context green and nothing having
+    # ever constructed the image. This job builds each covered Dockerfile
+    # (never pushes; it exists to catch a broken build before merge, not to
+    # publish) so future Dependabot docker bumps are self-verifying.
+    #
+    # COVERAGE: three of the four shipped Dockerfiles (webapp, simulator,
+    # firmware-builder). emulator/Dockerfile is deliberately NOT a leg here
+    # yet: its ESP-IDF stage resolves managed components (libsodium, lvgl)
+    # from the Espressif component registry at build time, which needs live
+    # egress to components-file.espressif.com that the runner pool does not
+    # have, so the build cannot complete from clean. The gate CAUGHT this as
+    # a real latent bug (the emulator image had never been buildable from a
+    # clean checkout; the Emulator suite builds emulator/node on the host,
+    # never through the Dockerfile). Making that build hermetic (vendored or
+    # baked components, no live registry egress) and re-adding the leg is
+    # tracked in #231. emulator/Dockerfile's registry-URL fix already landed
+    # in this PR so `docker compose up --build` works for developers with
+    # normal egress; only the CI leg is deferred.
     #
     # THE AREA GATE IS ON THE STEPS, NOT THE JOB, AND MUST STAY THERE: see
     # Board build smoke's comment above for why a job-level `if:` on a matrix
@@ -361,7 +374,7 @@ jobs:
       # smoke: a webapp-only bump breaking the emulator image (or vice versa)
       # must not hide behind a cancelled sibling.
       fail-fast: false
-      # Four Dockerfiles on a small self-hosted pool that also runs the board
+      # Dockerfiles on a small self-hosted pool that also runs the board
       # matrix, gosim, and the emulator suite; two at a time keeps the rest of
       # the wave moving.
       max-parallel: 2
@@ -373,9 +386,6 @@ jobs:
           - image: simulator
             dockerfile: simulator/Dockerfile
             context: .
-          - image: emulator
-            dockerfile: emulator/Dockerfile
-            context: .
           - image: firmware-builder
             dockerfile: docker/firmware-builder/Dockerfile
             context: docker/firmware-builder
@@ -383,18 +393,17 @@ jobs:
       - name: Decide whether this leg builds
         # Compute the per-leg area gate ONCE here (always runs, no `if:`), so
         # the remaining steps carry a single `if:` on this output instead of
-        # repeating the four-way expression. Each image gates on the union of
-        # areas its Dockerfile's COPY instructions actually read (see docs/ci.md):
-        # webapp on webapp; simulator on simulator/firmware; emulator on
-        # emulator/simulator/firmware; firmware-builder on firmware (which the
-        # detector now maps docker/firmware-builder/ into). workflows is OR'd
+        # repeating the expression. Each image gates on the union of areas its
+        # Dockerfile's COPY instructions actually read (see docs/ci.md):
+        # webapp on webapp; simulator on simulator/firmware (it COPYs main/ +
+        # components/ for its cgo build); firmware-builder on firmware (which
+        # the detector maps docker/firmware-builder/ into). workflows is OR'd
         # into every leg per the always-report safety rule.
         id: gate
         env:
           IMAGE: ${{ matrix.image }}
           WEBAPP: ${{ needs.detect.outputs.webapp }}
           SIMULATOR: ${{ needs.detect.outputs.simulator }}
-          EMULATOR: ${{ needs.detect.outputs.emulator }}
           FIRMWARE: ${{ needs.detect.outputs.firmware }}
           WORKFLOWS: ${{ needs.detect.outputs.workflows }}
         run: |
@@ -403,7 +412,6 @@ jobs:
           case "$IMAGE" in
             webapp)  [ "$WEBAPP" = true ] && build=true ;;
             simulator) { [ "$SIMULATOR" = true ] || [ "$FIRMWARE" = true ]; } && build=true ;;
-            emulator) { [ "$EMULATOR" = true ] || [ "$SIMULATOR" = true ] || [ "$FIRMWARE" = true ]; } && build=true ;;
             firmware-builder) [ "$FIRMWARE" = true ] && build=true ;;
           esac
           [ "$WORKFLOWS" = true ] && build=true
