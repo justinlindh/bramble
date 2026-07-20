@@ -1,8 +1,9 @@
 // Typed view over the generated RPC contract (rpcContract.generated.ts, which
-// is produced from api/openapi.yaml). The firmware side of that contract is
-// gated by scripts/check-rpc-contract.sh, and rpcContract.drift.test.ts pins
-// the generated file to the spec, so a method or response shape here can only
-// change by changing api/openapi.yaml.
+// is produced from api/openapi.yaml by `npm run gen:rpc-types`). The firmware
+// side of that contract is gated by scripts/check-rpc-contract.sh, and
+// test/rpcContractCoverage.test.ts pins the generated file's method set,
+// per-method response wiring, and schema set to the spec, so the RPC surface
+// here can only change by changing api/openapi.yaml and regenerating.
 //
 // Usage: `client.rpc('bramble.getConfig')` resolves its result type from the
 // method name. Call sites that intentionally send params outside the contract
