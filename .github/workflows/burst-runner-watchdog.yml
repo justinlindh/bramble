@@ -1,0 +1,102 @@
+name: burst-runner-watchdog
+
+# Crash-safety net for label-routed CI.
+#
+# Bramble jobs pick their runner with `runs-on: ${{ vars.RUNNER_LABEL ||
+# 'ubuntu-latest' }}`. An optional burst runner host can flip the RUNNER_LABEL
+# repo variable to its own self-hosted label to serve jobs temporarily. If that
+# host dies while the variable still points at its label, newly triggered jobs
+# would queue forever against a label with no online runner.
+#
+# This workflow detects that condition and flips RUNNER_LABEL back to the
+# default pool label. It MUST run on GitHub-hosted ubuntu-latest and MUST NOT
+# use vars.RUNNER_LABEL or any self-hosted label: it is the recovery path, so
+# it cannot depend on the very runners it exists to recover from.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report only; do not flip the variable'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: burst-runner-watchdog
+  cancel-in-progress: false
+
+env:
+  # The burst host's ephemeral runners register with this label and this name
+  # prefix. The default pool answers to the pool label. Kept generic on
+  # purpose: no hostnames, no addresses, no machine names.
+  BURST_LABEL: bramble-burst
+  POOL_LABEL: bramble-runner
+  RUNNER_PREFIX: burst-
+
+jobs:
+  watchdog:
+    name: Recover routing if the burst host is down
+    # Recovery path: always GitHub-hosted, never vars.RUNNER_LABEL.
+    runs-on: ubuntu-latest
+    # A hung run must never block the next scheduled recovery: concurrency below
+    # is cancel-in-progress false, so without a short timeout a stalled gh api
+    # call could hold the group for the default 360 minutes and defeat the
+    # watchdog. Recovery work here takes seconds.
+    timeout-minutes: 5
+    # Only act when routing currently points at the burst label. When it is the
+    # default pool label there is nothing to recover and this skips green,
+    # needing no elevated token. NOTE: this literal must stay in sync with
+    # env.BURST_LABEL below; the env context is not available in a job-level
+    # if, so the value is duplicated here on purpose. If you change
+    # env.BURST_LABEL, change this literal too or the watchdog silently stops
+    # triggering.
+    if: ${{ vars.RUNNER_LABEL == 'bramble-burst' }}
+    steps:
+      - name: Check for an online burst runner and recover if none
+        env:
+          # Listing self-hosted runners and writing a repo variable both need
+          # more than the Actions GITHUB_TOKEN grants (it cannot write repo
+          # variables). Provide a fine-grained PAT or GitHub App token via this
+          # secret, scoped to this repo with:
+          #   - Administration: read   (list self-hosted runners)
+          #   - Variables:      write  (update RUNNER_LABEL)
+          # If the secret is unset the workflow reports and exits without
+          # flipping, so a scheduled run never hard-fails on a repo that has
+          # not configured burst routing.
+          GH_TOKEN: ${{ secrets.BURST_ROUTING_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::BURST_ROUTING_TOKEN is not set; cannot list runners or flip routing."
+            echo "RUNNER_LABEL is ${BURST_LABEL} but the watchdog has no token to act. Reporting only."
+            exit 0
+          fi
+
+          online="$(gh api "repos/${REPO}/actions/runners" --paginate \
+            --jq "[.runners[] | select(.name | startswith(\"${RUNNER_PREFIX}\")) | select(.status == \"online\")] | length" \
+            | awk '{ sum += $1 } END { print sum + 0 }')"
+          echo "Online ${RUNNER_PREFIX}* runners: ${online}"
+
+          if [ "${online}" -ge 1 ]; then
+            echo "Burst host is healthy; leaving RUNNER_LABEL=${BURST_LABEL}."
+            exit 0
+          fi
+
+          echo "::warning::No ${RUNNER_PREFIX}* runner online while RUNNER_LABEL=${BURST_LABEL}; routing would strand jobs."
+
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            echo "dry_run=true: would flip RUNNER_LABEL back to ${POOL_LABEL}, but taking no action."
+            exit 0
+          fi
+
+          echo "Flipping RUNNER_LABEL back to ${POOL_LABEL}."
+          gh variable set RUNNER_LABEL --repo "${REPO}" --body "${POOL_LABEL}"
+          echo "Done. Newly triggered runs will target ${POOL_LABEL}."

@@ -11,7 +11,7 @@ on:
   workflow_call:
     outputs:
       firmware:
-        description: main/ components/ test/ api/ scripts/ .releaserc.* and firmware build/lint config touched
+        description: main/ components/ test/ api/ scripts/ docker/firmware-builder/ .releaserc.* and firmware build/lint config touched
         value: ${{ jobs.detect.outputs.firmware }}
       simulator:
         description: simulator/ touched
@@ -129,9 +129,14 @@ jobs:
           # and shell lint wrappers read the root dotfile configs. The
           # .markdownlint-cli2.yaml pattern is retained deliberately: no CI job
           # reads it today (see issue #160), but over-triggering is safe.
-          # simulator/ has its own output because the strict clang-format scope
-          # scans simulator C sources too.
-          firmware=$(area_changed '^(main|components|test|api|scripts)/|^CMakeLists\.txt$|^sdkconfig\.|^partitions[^/]*\.csv$|^\.clang-format$|^\.clang-format-version$|^\.clang-tidy$|^\.shellcheckrc$|^\.markdownlint-cli2\.yaml$|^\.releaserc\.')
+          # docker/firmware-builder/ is folded in here (not its own output)
+          # because the Docker build gate's firmware-builder image is the
+          # same class of firmware-CI-tooling change as .releaserc.*, and the
+          # image FROMs espressif/idf so it also needs to rebuild whenever the
+          # firmware area's own inputs move. simulator/ has its own output
+          # because the strict clang-format scope scans simulator C sources
+          # too.
+          firmware=$(area_changed '^(main|components|test|api|scripts)/|^docker/firmware-builder/|^CMakeLists\.txt$|^sdkconfig\.|^partitions[^/]*\.csv$|^\.clang-format$|^\.clang-format-version$|^\.clang-tidy$|^\.shellcheckrc$|^\.markdownlint-cli2\.yaml$|^\.releaserc\.')
           simulator=$(area_changed '^simulator/')
           emulator=$(area_changed '^emulator/')
           webapp=$(area_changed '^webapp/')
