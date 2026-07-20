@@ -11,7 +11,7 @@ from the dropdown -- are correct, through the real DOM.
 
 ## Running it
 
-```
+```bash
 cd emulator
 make e2e
 ```
@@ -22,7 +22,7 @@ runs the suite, and tears the stack down. Exit 0 on pass.
 
 To run directly (stack already built):
 
-```
+```bash
 bash emulator/e2e/run_e2e.sh
 ```
 
@@ -114,6 +114,7 @@ brief.
 
 **device cards, boot screen, buttons, reset persistence, and message
 delivery** -- one `emu-channel-delivery` load carries all of:
+
 - **(a)** exactly 3 device cards for the 3 firmware nodes (split-identity
   regression sentinel), cross-checked against the wire's distinct
   `node_joined` ids.

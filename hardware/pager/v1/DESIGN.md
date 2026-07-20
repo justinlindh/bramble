@@ -37,7 +37,7 @@ directory, sources-of-truth ranking, COMPONENTS.md / NET_TOPOLOGY.md as derived 
 Heltec-V3-matching pins marked `*`.
 
 | Function | GPIO | Notes |
-|---|---|---|
+| --- | --- | --- |
 | SPI SCK | 9* | shared bus: radio + e-paper, mode 0, 8MHz |
 | SPI MOSI | 10* | |
 | SPI MISO | 11* | |
@@ -113,6 +113,7 @@ Panel pinout: 1 NC, 2 GDR, 3 RESE, 4 NC, 5 VSH2, 6 TSCL (open), 7 TSDA (open),
 19 VPP open, 20 VSH1, 21 VGH, 22 VSL, 23 VGL, 24 VCOM.
 
 Boost/charge-pump (panel datasheet p.29 ref circuit, WeAct-proven basic substitutions):
+
 - L1 47uH FNR4030S470MT (C167888, ext) from 3V3 (C4 4.7uF C1779) to switch node
 - Q1 AO3400A (C20917, basic) drain=switch node, gate=GDR with R1 1M (C22935) pulldown,
   source to R2 **2.2 ohm** 0805 1% (C2933402, ext; this panel is NOT 0.47 ohm) to GND;
@@ -141,7 +142,7 @@ Boost/charge-pump (panel datasheet p.29 ref circuit, WeAct-proven basic substitu
   thermal vias (~1W worst case; keep away from radio/TCXO). CHRG/STDBY drive red C2286 /
   green C965805 LEDs via 1k (C21190) from VBUS.
 - Protection (cell-agnostic, kept even with protected cells): DW01A (C351410, 100R+100nF)
-  + FS8205A (C2830320) low-side: cell- to S1, S2 to board GND, OD to G1, OC to G2.
+  - FS8205A (C2830320) low-side: cell- to S1, S2 to board GND, OD to G1, OC to G2.
 - Load share (Adafruit/AN1149 style): BAT+ to AO3401A (C15127) drain, source to VSYS,
   gate to VBUS with 100k (C25803) pulldown; SS34 (C8678) VBUS to VSYS.
   USB present: FET off, cell isolated, load runs from VBUS (VSYS~4.6V), termination clean.
@@ -225,7 +226,7 @@ Decoupling per Espressif hardware design guide. Console: USB-Serial-JTAG
 ## Firmware deltas (tracked as separate PRs, not this repo dir)
 
 1. **Blocking for bring-up**: `radio_dio2_rf_switch` flag in `bramble_board_config_t`
-   + one-time 0x9D at init in `components/radio/sx1262.c`. Bench A/B on Heltec V3.
+   - one-time 0x9D at init in `components/radio/sx1262.c`. Bench A/B on Heltec V3.
 2. Board profile `main/boards/bramble_pager.h` + Kconfig + `board.c` branches +
    `sdkconfig.defaults.bramble_pager` (USB-Serial-JTAG console).
 3. SSD1680 e-paper driver + `BOARD_CAP_DISPLAY_EPAPER` + display-pins struct variant
@@ -278,6 +279,7 @@ battery bay (34x62x6mm cell), vibra motor pocket, snap or screw lid.
 Belt clip optional but morally required.
 
 USB-C port integration (user requirement: port lives cleanly in the body):
+
 - The onboard receptacle IS the body port: flush-mounted through a precise case
   opening, phone-style. No panel-mount pigtail (rejected: cost, volume, 6-conductor
   CC-passing link needed for C-to-C charging + native USB, and a worse look).

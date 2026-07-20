@@ -22,6 +22,7 @@ the full job topology and the always-report contract.
   - Strict clang-format, full scope (`bash scripts/lint/run-clang-format-check.sh --strict`), pinned to the version in `.clang-format-version` (currently 14.0.6); the `Static checks` job asserts the runner's `clang-format --version` matches before running the check, and the wrapper script prints a warning if your local version differs, because unpinned clang-format versions disagree on macro and designated-initializer layout and produce unreproducible findings (issue #161)
   - cppcheck (`--error-exitcode=2`, blocking)
   - RPC contract check (`bash scripts/check-rpc-contract.sh`: `api/openapi.yaml` vs the firmware registry in `main/rpc_methods.c`)
+  - Markdownlint (`bash scripts/lint/run-markdownlint.sh`, issue #160): `markdownlint-cli2` against the root `.markdownlint-cli2.yaml` config, over every tracked markdown file. The runner image does not (yet) bake the tool in (that is issue #222's scope, not this gate's), so the script falls back to a pinned `npx --yes markdownlint-cli2@0.23.1` when it is not already on PATH; a global `npm install -g` was tried first and rejected because the runner's npm prefix is not writable by the job user
   - Actionlint over the four gating workflow files
 - `Host tests` (`bash test/run_all_tests.sh`, `quality.yml`)
 - `Parser fuzzing` (`bash test/fuzz/run_fuzz.sh`, `quality.yml`): a 30-second-per-target libFuzzer campaign, under ASan and UBSan, over the wire-frame parsers in `components/packet/packet.c` and the fragment reassembler. Both harnesses start from committed seed corpora (`test/fuzz/corpus/`) built from the host suites' own test vectors. Requires `clang` with libFuzzer on the runner image; the job asserts the toolchain is present and fails hard when it is not, because a skip here would be an advisory check in disguise.
@@ -35,16 +36,25 @@ the full job topology and the always-report contract.
 - `Webapp checks` (one pod: lint, typecheck, electron typecheck, unit tests, build, e2e smoke, `webapp-quality.yml`)
 - `web-flasher tests` (`node --test web-flasher/`, `webapp-quality.yml`)
 
-There is no clang-tidy or markdownlint gate. The `run-clang-tidy-advisory.sh`
-and `run-markdownlint.sh` wrappers used to sit in `scripts/lint/` unreferenced
-by any workflow, Makefile target, or script, and both defaulted to reporting
-findings and then exiting 0, which is exactly the advisory tier this policy
-forbids. They were deleted rather than promoted: a real clang-tidy gate needs
-an xtensa-capable toolchain and a firmware build in the static pod, and a real
-markdownlint gate needs a repo-wide markdown formatting sweep first, tracked
-as issue #160. The `.clang-tidy` and `.markdownlint-cli2.yaml` dotfiles stay
-because editors and language servers read them directly; run `markdownlint-cli2`
-or `clang-tidy` by hand if you want the local signal.
+There is no clang-tidy gate. The `run-clang-tidy-advisory.sh` wrapper used to
+sit in `scripts/lint/` unreferenced by any workflow, Makefile target, or
+script, and defaulted to reporting findings and then exiting 0, which is
+exactly the advisory tier this policy forbids. It was deleted rather than
+promoted: a real clang-tidy gate needs an xtensa-capable toolchain and a
+firmware build in the static pod. The `.clang-tidy` dotfile stays because
+editors and language servers read it directly; run `clang-tidy` by hand if
+you want the local signal.
+
+Markdownlint used to be in the same boat (`run-markdownlint.sh` deleted for
+the same advisory-exit-0 reason, tracked as issue #160), but it is now a real
+gate: the tree was reformatted to satisfy `.markdownlint-cli2.yaml` and
+`scripts/lint/run-markdownlint.sh` runs as a required step in `Static checks`
+(see above). `.markdownlint-cli2.yaml`'s `MD024` (`siblings_only: true`),
+`MD036`, and `MD060` overrides exist because those three rules would otherwise
+flag legitimate, repeated repo patterns (per-section subject headings,
+bold field labels used as flat in-section sub-labels in spec docs, and
+hand-maintained table pipe spacing) rather than real defects; see the config
+file's own comments for the specific rationale per rule.
 
 ## Coverage ratchet (line coverage, no-regression)
 
@@ -156,6 +166,8 @@ actionlint -color -oneline -config-file .actionlint.yaml .github/workflows/firmw
 
 bash scripts/lint/check-no-internal-refs.sh
 bash scripts/lint/check-no-em-dash.sh
+bash scripts/lint/run-markdownlint.sh         # uses markdownlint-cli2 on PATH if present,
+                                               # else falls back to a pinned npx invocation
 
 # Local-only helpers (not wired into CI)
 bash scripts/lint/run-clang-format-check.sh

@@ -3,6 +3,7 @@
 Status: implemented design target
 
 ## Purpose
+
 Network Reach answers: "Which peers are reliably reachable from this node right now?"
 
 v2 uses a **bounded 3-round sweep** per user probe, then reports an aggregated final result to reduce single-shot RF noise without unbounded airtime.
@@ -25,6 +26,7 @@ v2 uses a **bounded 3-round sweep** per user probe, then reports an aggregated f
 ## Aggregation rules
 
 Per responder (key: `responder_addr`):
+
 - upsert (never append duplicates)
 - keep latest latency
 - keep best quality sample (max RSSI / max SNR)
@@ -33,6 +35,7 @@ Per responder (key: `responder_addr`):
 ## Confidence model
 
 UI confidence is derived from `seen_rounds / rounds_total`:
+
 - `3/3`: high confidence (stable)
 - `2/3`: medium confidence
 - `1/3`: low confidence (likely edge/noisy link)
@@ -49,6 +52,7 @@ UI confidence is derived from `seen_rounds / rounds_total`:
 ## Airtime bounds
 
 Per user probe:
+
 - Origin probe TX: 3 total (one per round)
 - Responder ACK retries remain bounded (current behavior: 3 ACK sends per received probe)
 - Collection window fixed (5 s)

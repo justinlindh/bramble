@@ -20,11 +20,11 @@ The June numbers were produced by a sim with parallel implementations and missin
 Grid topology, 120-unit spacing (each node hears ~4 neighbors), 20 scripted messages over 600 s, 3 seeds per node count.
 
 | Nodes | Message delivery (mean, spread) | Offered load (erlangs) | Control share of ToA | RREQ ToA (s/600s) | Beacon ToA (s/600s) |
-|---|---|---|---|---|---|
-| 10  | **95%** (95-95) | 0.18 | 82% | 16 | 65 |
-| 50  | **12%** (5-15)  | 1.7  | 99.5-99.8% | 679-691 | 321 |
-| 100 | **10%** (10-10) | 2.4  | 99.5-99.7% | 721-778 | 644 |
-| 200 | **0%** (0-0)    | 3.5  | 100%       | 817-821 | 1287 |
+| --- | --- | --- | --- | --- | --- |
+| 10 | **95%** (95-95) | 0.18 | 82% | 16 | 65 |
+| 50 | **12%** (5-15) | 1.7 | 99.5-99.8% | 679-691 | 321 |
+| 100 | **10%** (10-10) | 2.4 | 99.5-99.7% | 721-778 | 644 |
+| 200 | **0%** (0-0) | 3.5 | 100% | 817-821 | 1287 |
 
 Seeds verified to drive the RNG (distinct event timelines); at n=10 all three seeds converge to identical aggregates (small, dense, well-connected topology), so n=10 effectively contributes one observation, not three. Runs cost 0.13-0.24 s wall-clock each; parameter sweeps are cheap.
 
@@ -44,7 +44,7 @@ Seeds verified to drive the RNG (distinct event timelines); at n=10 all three se
 
 ## Reproduction
 
-```
+```bash
 cd simulator/gosim && go build -o bramble-gosim .
 python3 ../scenarios/generate.py --legacy N --seed S --out /tmp/nN-sS.json   # N in {10,50,100,200}, S in {1,2,3}
 ./bramble-gosim --headless --scenario /tmp/nN-sS.json   # read final_metrics.message_delivery_rate
@@ -57,7 +57,7 @@ The Phase 1 delivery-core plan the internal design plan found that the numbers a
 **10-node `message_delivery_rate` (all 3 seeds converge identically, as above):**
 
 | Stage | Rate | What changed |
-|---|---|---|
+| --- | --- | --- |
 | This baseline (masked) | 95% | gosim's beacon-derived routes hid the bug |
 | De-masked (Task 1: beacon route-install removed) | **40%** | The TRUE parity number once gosim can no longer cheat: the confirmation-return bug, now visible, tanks sender-observed delivery even though destinations were still receiving the message |
 | Wire v4 reverse-route learning (Task 4/4-fix) | **50%** | DATA-driven breadcrumbs (`docs/SECURITY-MODEL.md`, §4.27 of the protocol spec) give a returning ACK a route home at every relay; +10 points over the de-masked baseline, the direction and magnitude the plan required before calling the fix real |

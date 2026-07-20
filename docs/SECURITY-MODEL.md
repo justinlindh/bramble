@@ -341,7 +341,7 @@ holds the network key, which is real authentication against outsiders, but
 not against another key holder forging a fresh beacon (section 5). Freshness (below)
 closes replay of a captured, genuinely valid beacon within a boot (the
 window is RAM-only, so replay reopens against a rebooted receiver: issue
-#72), and does not close forgery by another key holder at all. Do not
+\#72), and does not close forgery by another key holder at all. Do not
 treat a provisioned beacon HMAC as more than that.
 
 ### RREQ origination rate limiting
@@ -655,6 +655,7 @@ identity-gated (assessed, left open).** A mailbox node stores a DATA frame
 on behalf of an offline destination when it has no route. Custody
 acceptance is not gated on the source being pinned, and that is a
 deliberate, bounded choice, not an oversight:
+
 - **Opt-in.** Mailbox mode is off by default (`s_mailbox_enabled`, NVS,
   default false); a node stores nothing for anyone unless its operator
   turned it on.
