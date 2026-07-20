@@ -68,15 +68,37 @@ trap cleanup EXIT INT TERM
 # needs its own node_modules entry pointing at the real one.
 ln -sfn "$UI_DIR/node_modules" "$E2E_DIR/node_modules"
 
-info "installing/verifying chromium (playwright)..."
+info "verifying chromium (playwright)..."
 if [ -n "${CI:-}" ]; then
-    # CI runners ship the chromium browser binary but not its system libraries
-    # (libnspr4/libnss3/...), so a plain `install` leaves chrome-headless-shell
-    # unable to load libnspr4.so and every test fails at browserType.launch.
-    # --with-deps also apt-installs those libs; it needs root, which the CI
-    # container has. Skipped locally, where developers already have the libs and
-    # do not want an apt-get side effect.
-    ( cd "$UI_DIR" && npx playwright install --with-deps chromium )
+    # CI runners bake the chromium + headless-shell binaries (and their system
+    # libraries) into the runner image at PLAYWRIGHT_BROWSERS_PATH
+    # (private runner-image definition, image >= 1.2.0), so this REQUIRED
+    # suite no longer downloads ~290MB from the playwright CDN or runs apt as
+    # root on every run. ASSERT instead of installing: the browser revision is
+    # keyed to the playwright version simulator/ui's lockfile resolves, and a
+    # silent job-time re-download would hide that the image has drifted from
+    # the lockfile. On drift this fails loud; the fix is bumping
+    # PLAYWRIGHT_BROWSERS_FOR in the runner image Dockerfile to the new
+    # playwright version and rebuilding the image.
+    ( cd "$UI_DIR" && node -e '
+const fs = require("fs");
+const { chromium } = require("playwright-core");
+const p = chromium.executablePath();
+try { fs.accessSync(p); } catch {
+  console.error("FAIL: baked chromium missing at " + p);
+  console.error("The runner image does not bake the browser revision this playwright version resolves.");
+  console.error("Bump PLAYWRIGHT_BROWSERS_FOR in the private runner-image definition and rebuild the image.");
+  process.exit(2);
+}
+const rev = (p.match(/chromium-(\d+)/) || [])[1];
+const shell = process.env.PLAYWRIGHT_BROWSERS_PATH + "/chromium_headless_shell-" + rev;
+if (!fs.existsSync(shell)) {
+  console.error("FAIL: baked chromium headless shell missing at " + shell);
+  console.error("Rebuild the runner image so both chromium and its headless shell are baked for this revision.");
+  process.exit(2);
+}
+console.log("baked chromium OK: " + p);
+' )
 else
     ( cd "$UI_DIR" && npx playwright install chromium )
 fi

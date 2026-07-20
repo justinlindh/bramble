@@ -24,11 +24,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install commitlint
+      - name: Assert baked commitlint matches the pinned major
+        # @commitlint/cli and @commitlint/config-conventional are baked into
+        # the runner image (bramble#222, image 1.2.0), replacing an npm
+        # registry install that ran on every PR. The extends resolution from
+        # the global install against commitlint.config.cjs is verified as part
+        # of the image build contract; this assert fails loud if the image
+        # drifts from the major this repo's configs are written for.
         run: |
-          npm install --no-save \
-            @commitlint/cli@19 \
-            @commitlint/config-conventional@19
+          command -v commitlint >/dev/null || { echo "::error::commitlint missing from runner image (bramble#222 bake contract)"; exit 1; }
+          got="$(commitlint --version)"
+          case "$got" in
+            *@19.*) echo "commitlint ${got} matches pinned major 19" ;;
+            *) echo "::error::commitlint version ${got} does not match pinned major 19. Bump COMMITLINT_MAJOR in the private runner-image definition or this pin so they agree."; exit 1 ;;
+          esac
 
       - name: Pick the commitlint config
         # Dependabot's grouped-update titles are structurally longer than a
@@ -59,7 +68,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CONFIG: ${{ steps.config.outputs.file }}
-        run: npx commitlint --config "${CONFIG}" --from "origin/${BASE_REF}" --to "${HEAD_SHA}" --verbose
+        run: commitlint --config "${CONFIG}" --from "origin/${BASE_REF}" --to "${HEAD_SHA}" --verbose
 
       - name: Lint PR title
         # GitHub squash-merges use the PR title as the commit subject, which is
@@ -68,4 +77,4 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           CONFIG: ${{ steps.config.outputs.file }}
-        run: printf '%s\n' "$PR_TITLE" | npx commitlint --config "${CONFIG}" --verbose
+        run: printf '%s\n' "$PR_TITLE" | commitlint --config "${CONFIG}" --verbose

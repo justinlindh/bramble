@@ -36,8 +36,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Assert required tools are pre-baked on the runner
+        # ruff and markdownlint-cli2 joined this list with the bramble#222 bake
+        # wave (runner image 1.2.0): both were previously fetched at run time
+        # (ruff from PyPI via uvx, markdownlint via the wrapper's npx
+        # fallback), which made this always-run required gate depend on
+        # external registries on every PR. Their exact pinned versions are
+        # asserted by their own steps below.
         run: |
-          for tool in shellcheck clang-format cppcheck actionlint uv; do
+          for tool in shellcheck clang-format cppcheck actionlint ruff markdownlint-cli2; do
             command -v "$tool" >/dev/null || { echo "::error::$tool missing from runner image"; exit 1; }
           done
       - name: Assert clang-format matches the pinned version
@@ -59,10 +65,11 @@ jobs:
       - name: No em dash
         run: bash scripts/lint/check-no-em-dash.sh
       - name: Markdownlint
-        # Pinned rather than baked into the runner image (issue #222's
-        # separate scope): the script falls back to a pinned `npx` invocation
-        # (version 0.23.1) when markdownlint-cli2 is not already on PATH, so
-        # this step needs no separate install step of its own.
+        # markdownlint-cli2 is baked into the runner image (bramble#222). The
+        # wrapper uses the PATH binary after asserting it matches the pinned
+        # version (fail-loud on image drift), and keeps its pinned `npx`
+        # fallback for environments without the bake, so this step still needs
+        # no install step of its own.
         run: bash scripts/lint/run-markdownlint.sh
       - name: Board matrix covers every shipped board
         # Guards the gating hole this check was added for: if a board is added
@@ -75,7 +82,19 @@ jobs:
       - name: Required shellcheck (strict wrapper)
         run: bash scripts/lint/run-shellcheck.sh --strict
       - name: Ruff (required baseline profile)
-        run: uvx --from 'ruff==0.12.10' ruff check scripts --select E9,F63,F7,F82
+        # Baked into the runner image (bramble#222); the uvx invocation this
+        # replaced downloaded ruff from PyPI inside an always-run required
+        # gate on every PR (and the 16-runner startup herd DNS incident broke
+        # exactly that path once). The version assert fails loud on image
+        # drift instead of silently linting with a different ruff.
+        run: |
+          want="0.12.10"
+          got="$(ruff --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          if [[ "$got" != "$want" ]]; then
+            echo "::error::ruff version mismatch: runner image has ${got:-unknown}, pinned version is ${want}. Bump RUFF_VERSION in the private runner-image definition or this pin so they agree."
+            exit 1
+          fi
+          ruff check scripts --select E9,F63,F7,F82
       - name: Required clang-format (full strict scope)
         run: bash scripts/lint/run-clang-format-check.sh --strict
       - name: cppcheck
