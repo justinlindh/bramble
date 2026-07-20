@@ -43,9 +43,18 @@ jobs:
     name: Recover routing if the burst host is down
     # Recovery path: always GitHub-hosted, never vars.RUNNER_LABEL.
     runs-on: ubuntu-latest
+    # A hung run must never block the next scheduled recovery: concurrency below
+    # is cancel-in-progress false, so without a short timeout a stalled gh api
+    # call could hold the group for the default 360 minutes and defeat the
+    # watchdog. Recovery work here takes seconds.
+    timeout-minutes: 5
     # Only act when routing currently points at the burst label. When it is the
     # default pool label there is nothing to recover and this skips green,
-    # needing no elevated token.
+    # needing no elevated token. NOTE: this literal must stay in sync with
+    # env.BURST_LABEL below; the env context is not available in a job-level
+    # if, so the value is duplicated here on purpose. If you change
+    # env.BURST_LABEL, change this literal too or the watchdog silently stops
+    # triggering.
     if: ${{ vars.RUNNER_LABEL == 'bramble-burst' }}
     steps:
       - name: Check for an online burst runner and recover if none
