@@ -25,18 +25,25 @@ static const char* TAG = "mesh";
 
 /* Forward declarations for intra-module static helpers. */
 static bool dm_rehandshake_rate_ok(uint32_t peer, uint32_t now);
-static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_t payload_len, dm_session_t* sess);
-static uint32_t send_ke_envelope(uint32_t dest_addr, int channel_idx, const bramble_key_exchange_t* ke);
+static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_t payload_len,
+                               dm_session_t* sess);
+static uint32_t send_ke_envelope(uint32_t dest_addr, int channel_idx,
+                                 const bramble_key_exchange_t* ke);
 static int dm_session_has_peer_id(const dm_session_t* s);
-static void pending_eph_store(uint32_t peer_addr, const uint8_t eph_priv[32], const uint8_t eph_pub[32]);
+static void pending_eph_store(uint32_t peer_addr, const uint8_t eph_priv[32],
+                              const uint8_t eph_pub[32]);
 static dm_pending_eph_t* pending_eph_lookup(uint32_t peer_addr);
 static void pending_eph_clear(uint32_t peer_addr);
-static int hs_dedup_check_and_record(uint32_t src_addr, const uint8_t eph_pub[32], uint16_t ke_epoch, uint32_t now);
-static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t* data, size_t len, int channel_idx, uint32_t uid);
+static int hs_dedup_check_and_record(uint32_t src_addr, const uint8_t eph_pub[32],
+                                     uint16_t ke_epoch, uint32_t now);
+static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t* data, size_t len,
+                                      int channel_idx, uint32_t uid);
 static void flush_session_queue(uint32_t dest_addr);
 static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx, uint16_t rekey_epoch);
-static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_key_exchange_t* init, const uint8_t* pinned_x25519_or_null);
-static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* resp, const uint8_t* pinned_x25519_or_null);
+static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_key_exchange_t* init,
+                            const uint8_t* pinned_x25519_or_null);
+static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* resp,
+                            const uint8_t* pinned_x25519_or_null);
 
 /* Self-heal for a desynced DM session. handle_data calls this when it cannot
  * decrypt a directed DM from a peer: the peer's session has diverged from ours
@@ -527,7 +534,7 @@ static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx, uint16_t 
  * triggers an INIT, or fails visibly if the handshaking cap is reached.
  */
 uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t* data, size_t len,
-                             uint32_t uid) {
+                      uint32_t uid) {
     if (len > FRAG_MAX_PLAINTEXT) {
         /* Fragmentation under a session key is out of this task's scope
          * (DM chat payloads are short); fail visibly rather than silently
@@ -883,8 +890,7 @@ void handshake_worker_task(void* arg) {
  * AAD binding), not yet trusted to equal the inner struct's own claimed
  * src_addr until checked below.
  */
-void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t* data,
-                               size_t data_len) {
+void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t* data, size_t data_len) {
     bramble_key_exchange_t msg;
     if (bramble_key_exchange_deserialize(&msg, data, data_len) != ESP_OK) {
         ESP_LOGW(TAG, "Malformed KE envelope from %08" PRIX32, src_addr);

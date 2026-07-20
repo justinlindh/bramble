@@ -203,8 +203,8 @@ void process_rreq_forward_queue(uint32_t t) {
  * Task 2). One queue + one suppression engine serves both; only the lane the
  * final mesh_tx debits differs.
  */
-void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms,
-                                 uint32_t flood_key, tx_kind_t tx_kind) {
+void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms, uint32_t flood_key,
+                          tx_kind_t tx_kind) {
     if (channel_flood_relay_admit(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY, buf, len,
                                   now_ms() + jitter_ms, flood_key, (uint8_t)tx_kind,
                                   &s_flood_relay_drops)) {

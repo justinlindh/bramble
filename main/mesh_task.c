@@ -130,7 +130,7 @@ dedup_buffer_t s_flood_dedup;
  * re-triggers send_ack WITHOUT re-entering handle_data's decrypt/deliver
  * path, so local delivery stays exactly-once. */
 static dedup_buffer_t s_delivered_dedup;
-replay_table_t s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
+replay_table_t s_replay;         /* SEC-M1: per-sender authenticated nonce-counter replay window */
 replay_table_t s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon)
                                            replay window, keyed on the authenticated signer address,
                                            separate from the data-plane s_replay above */
@@ -1907,7 +1907,7 @@ static void mesh_task(void* param) {
  * Send a DATA packet. Returns packet_id on success, 0 on failure.
  */
 uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, size_t payload_len,
-                                 const bramble_channel_t* ch, uint8_t app_type) {
+                          const bramble_channel_t* ch, uint8_t app_type) {
     uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD + CHANNEL_MSG_SENT_AT_SIZE];
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
@@ -3012,4 +3012,3 @@ void mesh_traffic_debug_load_config(void) {
         nvs_close(nvs);
     }
 }
-

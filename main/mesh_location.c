@@ -38,10 +38,17 @@ typedef struct __attribute__((packed)) {
 /* Forward declarations for intra-module static helpers. */
 static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t* policy);
 static bool location_policy_has_targets(void);
-static void mesh_emit_location_event(const char* event, uint32_t peer_addr, uint8_t tier, uint32_t timestamp_ms, int16_t rssi, int8_t snr, uint32_t count);
-static void mesh_send_location_updates(uint32_t t, const location_policy_t* policy, const bramble_position_t* source_pos);
-static void mesh_persist_peer_location(uint32_t peer_addr, const bramble_position_t* pos, uint8_t tier, uint32_t now_ms);
-static int location_rx_decode_channel(const uint8_t* nonce, const uint8_t* ciphertext, size_t ct_len, const uint8_t* tag, const uint8_t* aad, size_t aad_len, uint8_t* tier_out, bramble_position_t* pos_out, int* channel_index_out);
+static void mesh_emit_location_event(const char* event, uint32_t peer_addr, uint8_t tier,
+                                     uint32_t timestamp_ms, int16_t rssi, int8_t snr,
+                                     uint32_t count);
+static void mesh_send_location_updates(uint32_t t, const location_policy_t* policy,
+                                       const bramble_position_t* source_pos);
+static void mesh_persist_peer_location(uint32_t peer_addr, const bramble_position_t* pos,
+                                       uint8_t tier, uint32_t now_ms);
+static int location_rx_decode_channel(const uint8_t* nonce, const uint8_t* ciphertext,
+                                      size_t ct_len, const uint8_t* tag, const uint8_t* aad,
+                                      size_t aad_len, uint8_t* tier_out,
+                                      bramble_position_t* pos_out, int* channel_index_out);
 static bool mesh_resolve_self_position(bramble_position_t* out);
 
 static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t* policy) {

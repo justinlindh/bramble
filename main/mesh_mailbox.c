@@ -27,8 +27,8 @@ static const char* TAG = "mesh";
 
 /* ── Mailbox helpers ─────────────────────────────────────────────────── */
 
-bool mesh_mailbox_store(uint32_t src_addr, uint32_t dest_addr, const uint8_t* raw,
-                               uint8_t raw_len, uint32_t packet_id) {
+bool mesh_mailbox_store(uint32_t src_addr, uint32_t dest_addr, const uint8_t* raw, uint8_t raw_len,
+                        uint32_t packet_id) {
     if (!s_mailbox_enabled)
         return false;
 

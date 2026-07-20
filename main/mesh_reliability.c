@@ -31,7 +31,8 @@ enum {
 /* Forward declarations for intra-module static helpers. */
 static void delivery_event_ring_append_locked(const delivery_event_record_t* event);
 static void record_ack_delivery_event(const bramble_ack_t* ack);
-static void record_broadcast_delivery_event(uint32_t recipient_addr, uint32_t broadcast_id, uint8_t hop_count, const uint32_t* relay_path);
+static void record_broadcast_delivery_event(uint32_t recipient_addr, uint32_t broadcast_id,
+                                            uint8_t hop_count, const uint32_t* relay_path);
 static bool recent_broadcast_contains(uint32_t packet_id);
 static void mesh_schedule_next_receipt_timer(void);
 static void forward_ack(bramble_ack_t* ack, int16_t rssi);
@@ -110,7 +111,7 @@ static bool recent_broadcast_contains(uint32_t packet_id) {
 }
 
 void maybe_emit_implicit_broadcast_delivery(const bramble_header_t* header,
-                                                   const rx_packet_t* pkt) {
+                                            const rx_packet_t* pkt) {
     if (!header || !pkt)
         return;
     if (header->type != PKT_TYPE_DATA)
@@ -164,8 +165,7 @@ static void mesh_schedule_next_receipt_timer(void) {
     }
 }
 
-void queue_broadcast_delivery_receipt(uint32_t original_src_addr,
-                                             uint32_t original_packet_id) {
+void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id) {
     /* Mandatory-provisioning (Task 2): inert when unprovisioned (the receipt is
      * receipt_sign'd with the network key inside the builder). */
     if (!network_key_is_provisioned()) {
