@@ -58,6 +58,14 @@ module.exports = {
         },
       },
     }],
-    ['@semantic-release/github', { successComment: false, failComment: false, failTitle: false }]
+    // draftRelease: create the GitHub release as a draft, not published. The
+    // release job builds the per-board factory images after semantic-release
+    // runs and attaches them to this draft, then flips it to published. GitHub
+    // releases are immutable once published: assets cannot be added afterward
+    // (the REST API rejects the upload with HTTP 422), so the release must stay
+    // a mutable draft until its factory images are attached. semantic-release
+    // core still creates and pushes the firmware-v* git tag regardless of the
+    // draft flag, so the tag-diff publish detection in the workflow is unaffected.
+    ['@semantic-release/github', { successComment: false, failComment: false, failTitle: false, draftRelease: true }]
   ]
 };
