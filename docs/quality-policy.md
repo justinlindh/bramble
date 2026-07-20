@@ -75,23 +75,27 @@ local box, commit the CI value.
 
 Each board leg of the `board-build-smoke` matrix (`quality.yml`) ratchets the
 firmware it just built against a committed ceiling in `ci/size-baseline.json`.
-`scripts/ci/check-firmware-size.sh <board>` measures two numbers: the flash image
-(`build-<board>/bramble.bin`, the size that must fit the OTA app partition) and
-static DRAM (`data + bss` from `idf.py size --format json`, the RAM the app
-reserves before the heap). It fails when either grows more than `tolerance_bytes`
-above the ceiling, naming exactly what grew and by how much. This runs at PR time
-because the board build itself now gates PRs: this project shipped a main-task
-stack overflow that only hardware caught, and RAM headroom is the documented
-T1000-E port blocker, so a silent tens-of-KiB flash bloat or a shrinking RAM
-margin must surface before merge, not when a device bootloops.
+`scripts/ci/check-firmware-size.sh <board>` measures two numbers from
+`idf.py size --format json`: the app flash footprint (`flash_code + flash_rodata
++ flash_other`) and static DRAM (`data + bss`, the RAM the app reserves before
+the heap). It uses the UNPADDED flash figure, not the `bramble.bin` image size,
+because the image is padded up to 64 KiB ESP32-S3 MMU pages, so its size jumps a
+whole page when a segment crosses a boundary and can differ by 64 KiB between
+ESP-IDF patch versions; the unpadded figure moves precisely with the code and
+data a change adds, and partition fit is already enforced by the ESP-IDF build.
+It fails when either metric grows more than `tolerance_bytes` above the ceiling,
+naming exactly what grew and by how much. This runs at PR time because the board
+build itself now gates PRs: this project shipped a main-task stack overflow that
+only hardware caught, and RAM headroom is the documented T1000-E port blocker, so
+a silent flash bloat or a shrinking RAM margin must surface before merge, not when
+a device bootloops.
 
 Like the coverage baseline, `ci/size-baseline.json` NEVER auto-drifts: a
 developer raises a ceiling deliberately with `scripts/ci/update-size-baseline.sh`
-when a change legitimately grows the image, with the reason in the PR. Sizes are
-toolchain-sensitive, so the canonical ceiling is what the runner's pinned ESP-IDF
-measures; a baseline seeded on a different IDF is reconciled to the first CI run's
-numbers, and `tolerance_bytes` (8 KiB) absorbs a patch-level toolchain delta while
-still catching the regressions this gate exists to stop.
+when a change legitimately grows the binary, with the reason in the PR. Sizes are
+toolchain-sensitive, so `tolerance_bytes` (8 KiB) absorbs the sub-KiB unpadded
+delta between ESP-IDF patch versions while still catching the tens-of-KiB
+regressions this gate exists to stop.
 
 ## The collect-then-fail pattern (step-level `continue-on-error`)
 

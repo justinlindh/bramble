@@ -1,24 +1,24 @@
 {
-  "_comment": "Committed flash-image and static-DRAM ceilings (bytes) per board. CI fails a board when its bramble.bin or static DRAM (data + bss) grows more than tolerance_bytes above the ceiling. This file NEVER auto-drifts: a developer updates it deliberately with scripts/ci/update-size-baseline.sh (raising a ceiling when a change legitimately grows the image, with the reason in the PR) and commits it. See docs/quality-policy.md. Seeded from ESP-IDF v5.4 local builds; the runner uses the pinned v5.4.1, so the canonical ceiling is what CI measures: if a first CI run reports different sizes, commit the CI values. tolerance_bytes (8 KiB) absorbs a patch-level toolchain delta while still catching the tens-of-KiB regressions this gate exists to stop.",
+  "_comment": "Committed app-flash and static-DRAM ceilings (bytes) per board. flash_bytes is the UNPADDED app flash footprint (flash_code + flash_rodata + flash_other from idf.py size), not the bramble.bin image: the image is padded up to 64 KiB ESP32-S3 MMU pages, so its size jumps a whole page at a boundary and can differ by 64 KiB between ESP-IDF patch versions, which is not a precise regression signal (partition fit is already enforced by the ESP-IDF build). CI fails a board when app flash or static DRAM (data + bss) grows more than tolerance_bytes above the ceiling. This file NEVER auto-drifts: a developer updates it deliberately with scripts/ci/update-size-baseline.sh (raising a ceiling when a change legitimately grows the binary, with the reason in the PR). static_ram_bytes are the runner's measured values; flash_bytes are seeded from ESP-IDF v5.4 local builds and the runner uses the pinned v5.4.1, so tolerance_bytes (8 KiB) absorbs the sub-KiB unpadded toolchain delta while still catching the tens-of-KiB regressions this gate exists to stop.",
   "boards": {
     "heltec-v3": {
-      "flash_bytes": 1511424,
-      "static_ram_bytes": 113560,
+      "flash_bytes": 1372734,
+      "static_ram_bytes": 113828,
       "tolerance_bytes": 8192
     },
     "tdeck-plus": {
-      "flash_bytes": 2035712,
-      "static_ram_bytes": 128516,
+      "flash_bytes": 1839666,
+      "static_ram_bytes": 128744,
       "tolerance_bytes": 8192
     },
     "heltec-v4": {
-      "flash_bytes": 1708032,
-      "static_ram_bytes": 126888,
+      "flash_bytes": 1538830,
+      "static_ram_bytes": 127380,
       "tolerance_bytes": 8192
     },
     "bramble-pager": {
-      "flash_bytes": 1511424,
-      "static_ram_bytes": 124384,
+      "flash_bytes": 1354774,
+      "static_ram_bytes": 124620,
       "tolerance_bytes": 8192
     }
   }

@@ -27,7 +27,7 @@ BASELINE_PATH = os.path.join(REPO_ROOT, "ci", "size-baseline.json")
 # real hardware, and RAM headroom is the documented T1000-E port blocker, so
 # static DRAM is tracked as tightly as flash.
 METRICS = (
-    ("flash_bytes", "flash image (bramble.bin)"),
+    ("flash_bytes", "app flash (code + rodata)"),
     ("static_ram_bytes", "static DRAM (data + bss)"),
 )
 
