@@ -48,8 +48,46 @@ export function toGrid(rgba: number[]): BitGrid {
   return grid;
 }
 
+// readCanvasGrid classifies ink/paper INSIDE the browser and ships one byte
+// per pixel back over CDP, instead of routing through readCanvasRGBA's full
+// 4-bytes-per-pixel array (toGrid only ever reads the red channel, so 3 of
+// every 4 numbers readCanvasRGBA returns were always discarded here). This
+// function is polled every 200ms by specs waiting for a render to land
+// (e.g. functionality.spec.ts's boot-text wait, issue #170) while real
+// firmware processes are competing for the same CPU, so the per-poll
+// marshaling cost is part of what that wait pays for on a contended runner;
+// a quarter of the payload measurably cheapens every poll. Contract with
+// toGrid/readCanvasRGBA is unchanged (both still exist for callers that need
+// the full RGBA, e.g. classifyFill's alpha check), only this hot path's wire
+// format differs.
 export async function readCanvasGrid(page: Page, nodeId: string): Promise<BitGrid> {
-  return toGrid(await readCanvasRGBA(page, nodeId));
+  const inked = await page.$eval(
+    canvasSelector(nodeId),
+    (canvas: HTMLCanvasElement, threshold: number) => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('canvasRead: no 2d context');
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = img.data;
+      const out = new Uint8Array(canvas.width * canvas.height);
+      for (let i = 0, p = 0; p < out.length; i += 4, p++) {
+        out[p] = data[i] < threshold ? 1 : 0;
+      }
+      // Uint8Array crosses the Playwright/CDP boundary as a plain array
+      // either way; returning it directly (rather than Array.from) avoids
+      // one more full-size copy on the browser side before serialization.
+      return out;
+    },
+    INK_THRESHOLD,
+  );
+  const grid: BitGrid = [];
+  for (let y = 0; y < FB_HEIGHT; y++) {
+    const row: boolean[] = new Array(FB_WIDTH);
+    for (let x = 0; x < FB_WIDTH; x++) {
+      row[x] = inked[y * FB_WIDTH + x] === 1;
+    }
+    grid.push(row);
+  }
+  return grid;
 }
 
 export type FillClass = 'black' | 'white' | 'mixed' | 'unpainted';

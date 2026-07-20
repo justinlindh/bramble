@@ -80,9 +80,21 @@ test('device cards, boot screen, buttons, reset persistence, and message deliver
         return findText(grid, 'BRAMBLE', 2).found || undefined;
       },
       // Canvas readback is CDP round-trips into a chromium that shares the CI
-      // pod's CPU; 8s expired on a contended pod after the wire hit had
-      // already proven the render. Event-driven, so fast boxes exit early.
-      { timeoutMs: 20_000, intervalMs: 200, label: 'boot text visible on canvas' },
+      // pod's CPU with three real firmware processes; this is real, inherent
+      // cost (not a fixed sleep or a backoff), so it scales with runner
+      // contention. Issue #170 measured this wait completing in 16.1-16.5s
+      // against the prior 20s budget (7 local runs, 18% margin, and it had
+      // already produced one red check unrelated to the change under review).
+      // canvasRead.ts's readCanvasGrid now classifies ink/paper inside the
+      // browser and ships one byte per pixel instead of four, cutting the
+      // CDP payload every poll pays for by 4x, but the remaining cost is
+      // still real CPU contention that a budget must cover, not chase away.
+      // 45s gives roughly 2.7x the worst observed baseline (63% margin)
+      // without following the "20s becomes 60s becomes a test nobody
+      // trusts" pattern the issue warned against. Event-driven, so a fast
+      // box still exits in a couple of seconds; this is a ceiling, not a
+      // target.
+      { timeoutMs: 45_000, intervalMs: 200, label: 'boot text visible on canvas' },
     );
     expect(canvasFound).toBe(true);
   });
