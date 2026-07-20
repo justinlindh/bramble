@@ -118,42 +118,101 @@ changed. When in doubt, run the real checks rather than silently skip them.
 
 | Output | Marks changed when the diff touches |
 | --- | --- |
-| `firmware` | `main/`, `components/`, `test/`, `api/`, `scripts/`, `docker/firmware-builder/`, `CMakeLists.txt`, `sdkconfig.*`, `partitions*.csv`, `.clang-format`, `.clang-format-version`, `.clang-tidy`, `.shellcheckrc`, `.markdownlint-cli2.yaml` |
+| `firmware` | `main/`, `components/`, `CMakeLists.txt`, `sdkconfig.*`, `partitions*.csv` |
+| `host_test` | `test/` |
 | `simulator` | `simulator/` |
 | `emulator` | `emulator/` |
 | `webapp` | `webapp/` |
 | `web_flasher` | `web-flasher/` |
-| `workflows` | any file under `.github/workflows/`, or `.actionlint.yaml` |
+| `idf_build_scripts` | `scripts/ci-source-idf*`, `scripts/ci-ensure-idf*`, `scripts/flash*`, `scripts/flash-all*`, `scripts/ensure-ota-signing-key*`, `.esp-idf-version` |
+| `release_config` | `.releaserc.*`, `scripts/release/` |
+| `docker_firmware_builder` | `docker/firmware-builder/` |
+| `coverage_tooling` | `scripts/ci/check_coverage.py`, `scripts/ci/host_coverage.py`, `scripts/ci/run-host-coverage.sh`, `ci/coverage-baseline.json` |
+| `size_tooling` | `scripts/ci/check-firmware-size.sh`, `scripts/ci/check_size.py`, `scripts/ci/extract_firmware_sizes.py`, `ci/size-baseline.json` |
+| `ci_core` | a job-defining gating workflow: `quality.yml`, `firmware-quality.yml`, `webapp-quality.yml`, or `_detect-changes.yml` (forces every heavy job) |
 | `docs` | `docs/`, `README.md` |
 
-`firmware` is deliberately a superset of every firmware-area consumer's real
-inputs (host tests, board build, ruff, cppcheck, rpc-contract, and the strict
-clang-format/shellcheck wrappers). `simulator` is a separate output
-because the strict clang-format scope scans simulator C sources too, so a
-simulator-only change must still run clang-format (inside the bundle) and gosim.
+`firmware` is the compiled-firmware source set shared by every firmware BUILD
+job (host tests, gosim, emulator, board build): the C under `main/` +
+`components/` plus the root build config those builds read. It deliberately does
+NOT carry `scripts/`, `api/`, `.releaserc.*`, `docker/firmware-builder/`, or the
+lint dotfiles (`.clang-format`, `.clang-format-version`, `.clang-tidy`,
+`.shellcheckrc`, `.markdownlint-cli2.yaml`): those are consumed only by the
+always-run `Static checks` bundle (ruff scans `scripts/`, the rpc-contract check
+reads `api/` + `main/`, the strict clang-format/shellcheck/markdownlint wrappers
+read the root dotfiles), by the single-purpose `Release config` job, or by the
+firmware-builder Docker leg, none of which the host tests, gosim, or emulator
+suite ever read. Folding them into `firmware` used to spin up those heavy
+firmware suites on scripts-only, api-only, dotfile-only, and release-config-only
+PRs for no reason. `host_test` is `test/` on its own so a host-harness-only
+change runs `Host tests` and `Parser fuzzing` without dragging in gosim or the
+emulator suite. `simulator` is a separate output because the strict clang-format
+scope scans simulator C sources too, so a simulator-only change must still run
+clang-format (inside the bundle) and gosim. `idf_build_scripts` is a small
+deliberate superset: the exact ESP-IDF sourcing / flash wrapper scripts the
+emulator and board-build jobs invoke, plus the `.esp-idf-version` pin, keyed as
+one bucket (a `flash.sh`-only change re-running the emulator is a harmless
+over-match, and over-matching here is always safe). `release_config` is exactly
+what the `Release config` job loads. `docker_firmware_builder` is the
+firmware-builder image's build context (`docker/firmware-builder/`): that leg
+builds a toolchain image FROM `espressif/idf` and does not `COPY` `main/` or
+`components/`, so it gets its own area instead of riding on `firmware`.
+`coverage_tooling` and `size_tooling` are the CI ratchet scripts and their
+baselines under `scripts/ci/` and `ci/`: when the broad `firmware` area still
+carried `scripts/`, editing a ratchet rode along on every firmware change; with
+`firmware` narrowed, these areas re-run exactly the jobs whose steps execute the
+ratchet (host tests, gosim, and the webapp job for coverage; the board build for
+size) so a ratchet-script-only or baseline-only change still self-verifies.
 
-### The safety rule: workflow edits force everything
+### The safety rule: job-defining workflow edits force everything
 
-`workflows` is OR'd into every job's `if:`. So editing any file under
-`.github/workflows/` (or `.actionlint.yaml`) runs every job in all three
-workflows. Editing a job's steps is itself a change that must be exercised; if a
-workflow edit only ran jobs whose code area also happened to change, a broken
-job definition could land unverified. This over-triggers on rare
-workflow-edit PRs on purpose, in exchange for a rule that is impossible to
-under-match.
+`ci_core` is OR'd into every heavy job's `if:`. It matches ONLY the workflows
+that DEFINE the build/test jobs: `quality.yml`, `firmware-quality.yml`,
+`webapp-quality.yml`, and the reusable `_detect-changes.yml` they all call.
+Editing one of those can change a job's steps or the gating logic itself, and
+that change must be exercised: if a job-defining edit only ran jobs whose code
+area also happened to change, a broken job definition could land unverified. So
+editing any of those four runs every heavy job across all three workflows. This
+over-triggers on rare core-workflow edits on purpose, in exchange for a rule
+that is impossible to under-match.
+
+Editing any OTHER workflow file does NOT force the product suites, because it
+cannot affect what they build. The `claude.yml` review bot, `commit-msg-lint.yml`,
+`pr-template.yml`, the publish/release workflows (`firmware-build.yml`,
+`release-components.yml`, `webapp-build-publish.yml`, ...), the burst-runner
+watchdog, and the Dependabot config each run their own jobs via their own
+triggers; a PR that touches only them runs just the always-on `Static checks`
+bundle here (plus that workflow's own jobs), while every heavy context still
+reports a green skip so branch protection is never stranded. `.actionlint.yaml`
+is likewise not in `ci_core`: it only feeds the actionlint step inside `Static
+checks`, which always runs. This is what stops a review-bot-config or markdown
+edit from spinning up the full emulator / board / docker / host / gosim suite.
 
 ### The area superset rule
 
 Every job's area set must be a superset of what its commands actually read. When
 a script widens its scan scope, widen the matching area regex or job condition
 with it, or PRs touching only the new scope will falsely skip the check. Audit
-by reading the scripts, not the job names: `run-clang-format-check.sh --strict`
-scans `main/ components/ test/ simulator/`, `run-shellcheck.sh --strict` scans
-`scripts/lint/*.sh`, cppcheck scans `main components`, the host test suite builds
-`test/` against `components/` and `main/`, and the board build additionally reads
-root `CMakeLists.txt`, `sdkconfig.defaults*`, and `partitions*.csv`. The firmware
-area also covers `.releaserc.*` (root release configs) so the `Release config`
-job's scope-gating regression runs on any release-config edit.
+by reading the scripts, not the job names. Because the `Static checks` bundle has
+no `if:` and always runs, the widest-scanning strict wrappers
+(`run-clang-format-check.sh --strict` over `main/ components/ test/ simulator/`,
+`run-shellcheck.sh --strict` over `scripts/lint/*.sh`, cppcheck over `main
+components`, ruff over `scripts/`, and the rpc-contract check over `api/` +
+`main/`) never need an area at all: they gate on every PR regardless. The
+per-area outputs exist only for the HEAVY jobs, so each area is sized to exactly
+what its job builds: the host test suite builds `test/` (`host_test`) against
+`components/` + `main/` (`firmware`) and ratchets host coverage
+(`coverage_tooling`); `Parser fuzzing` builds `test/fuzz/` (`host_test`) against
+`components/` (`firmware`); gosim builds `simulator/` against `components/` +
+`main/` and ratchets gosim coverage (`coverage_tooling`); the emulator suite
+builds `emulator/` + `simulator/` + `components/` + `main/` and sources the IDF
+wrapper scripts (`idf_build_scripts`); the four-board build (which gates PRs)
+additionally reads root `CMakeLists.txt`, `sdkconfig.defaults*`,
+`partitions*.csv` (`firmware`), its flash wrappers (`idf_build_scripts`), and the
+size ratchet (`size_tooling`); the `Release config` job loads `.releaserc.*` +
+`scripts/release/` (`release_config`); and the firmware-builder Docker leg builds
+`docker/firmware-builder/` (`docker_firmware_builder`). If one of these jobs
+gains a new input, widen its area, not the shared `firmware` catch-all.
 
 ## Job topology
 
@@ -191,15 +250,16 @@ signal) naming the mismatch and pointing at this file.
 | Job (context name) | Runs when | Required? |
 | --- | --- | --- |
 | `Detect changed areas` (via reusable `detect`) | always | no |
-| `Host tests` | `firmware` or `workflows` | yes |
-| `Parser fuzzing` | `firmware` or `workflows` | yes |
-| `Release config` | `firmware` or `workflows` | yes |
-| `gosim integration` | `firmware`, `simulator`, or `workflows` | yes |
-| `Board build smoke (heltec-v3)` | `firmware` or `workflows` | yes |
-| `Board build smoke (tdeck-plus)` | `firmware` or `workflows` | yes |
-| `Board build smoke (heltec-v4)` | `firmware` or `workflows` | yes |
-| `Board build smoke (bramble-pager)` | `firmware` or `workflows` | yes |
-| `Emulator suite` | `firmware`, `simulator`, `emulator`, or `workflows` | yes |
+| `Host tests` | `firmware`, `host_test`, `coverage_tooling`, or `ci_core` | yes |
+| `Parser fuzzing` | `firmware`, `host_test`, or `ci_core` | yes |
+| `Release config` | `release_config` or `ci_core` | yes |
+| `gosim integration` | `firmware`, `simulator`, `coverage_tooling`, or `ci_core` | yes |
+| `Board build smoke (heltec-v3)` (+ `tdeck-plus`, `heltec-v4`, `bramble-pager`), step-gated | `firmware`, `idf_build_scripts`, `size_tooling`, or `ci_core` | yes |
+| `Emulator suite` | `firmware`, `simulator`, `emulator`, `idf_build_scripts`, or `ci_core` | yes |
+| `Docker build (webapp)`, step-gated | `webapp` or `ci_core` | yes |
+| `Docker build (simulator)`, step-gated | `simulator`, `firmware`, or `ci_core` | yes |
+| `Docker build (emulator)`, step-gated | `emulator`, `simulator`, `firmware`, or `ci_core` | yes |
+| `Docker build (firmware-builder)`, step-gated | `docker_firmware_builder` or `ci_core` | yes |
 
 `Parser fuzzing` runs `test/fuzz/run_fuzz.sh`, a bounded libFuzzer campaign
 (30 seconds per target, two targets) under ASan and UBSan against the wire-frame
@@ -292,9 +352,10 @@ unevaluated literal `Board build smoke (${{ matrix.board }})` and the four
 per-board contexts simply did not exist on that commit. Requiring them would
 then have hung every docs-only, webapp-only, and dependency PR forever.
 Gating each step keeps the matrix unconditional, so all four contexts report
-on every PR: they build when `firmware` or `workflows` changed, and otherwise
-succeed immediately having run nothing. Verified by opening a docs-only PR
-against this change and observing all four expanded contexts report success.
+on every PR: they build when `firmware`, `idf_build_scripts`, `size_tooling`, or
+`ci_core` changed, and otherwise succeed immediately having run nothing. Verified
+by opening a docs-only PR against this change and observing all four expanded
+contexts report success.
 
 `scripts/lint/check-board-matrix.sh` (a step in the `Static checks` bundle)
 asserts that the matrix board list and the `BOARDS` list in
@@ -347,18 +408,19 @@ gates on `webapp`; `simulator` (which also `COPY`s `main/`, `components/`,
 and `test/stubs/` for its cgo build) gates on `simulator` or `firmware`;
 `emulator` (which additionally builds the linux firmware node and gosim)
 gates on `emulator`, `simulator`, or `firmware`; `firmware-builder` gates on
-`firmware`, which now includes `docker/firmware-builder/` itself (see the
-detector's area table above). `workflows` is OR'd into every leg, per the
-usual safety rule. `max-parallel: 2` for the same small-pool reason as the
-board matrix.
+`docker_firmware_builder` alone, because its build context is
+`docker/firmware-builder/` (a toolchain image that does not `COPY` `main/` or
+`components/`), so a firmware source change must not rebuild it. `ci_core` is
+OR'd into every leg, per the usual safety rule. `max-parallel: 2` for the same
+small-pool reason as the board matrix.
 
 ### `webapp-quality.yml`
 
 | Job (context name) | Runs when | Required? |
 | --- | --- | --- |
 | `Detect changed areas` (via reusable `detect`) | always | no |
-| `Webapp checks` | `webapp` or `workflows` | yes |
-| `web-flasher tests` | `web_flasher` or `workflows` | yes |
+| `Webapp checks` | `webapp` or `ci_core` | yes |
+| `web-flasher tests` | `web_flasher` or `ci_core` | yes |
 
 `Webapp checks` is one job with a single `npm ci`, then lint, typecheck, electron
 typecheck, unit tests, build, and the e2e smoke run as sequential steps. The smoke
@@ -366,22 +428,25 @@ run reuses the build produced earlier in the same job, so there is no second
 `npm ci` and no second build. `web-flasher tests` stays separate because it runs
 `node --test web-flasher/` with no webapp install.
 
-## What a docs-only PR looks like now
+## What a docs-only (or review-bot-config) PR looks like now
 
-A PR that touches only `docs/**` (and nothing under `main/`, `components/`,
-`test/`, `api/`, `scripts/`, `simulator/`, `emulator/`, `webapp/`,
-`web-flasher/`, or `.github/workflows/`) still triggers all three workflows. The
-three `detect` jobs run (fast: a diff, no build), the `Static checks` bundle runs
-(one pod), and every other job reports `skipped`. Every context branch protection
-could require gets a report either way, so the PR is never stuck waiting on a
-check that was never going to run.
+A PR that touches only `docs/**` still triggers all three workflows. The three
+`detect` jobs run (fast: a diff, no build), the `Static checks` bundle runs (one
+pod), and every other job reports `skipped`. The same holds for a PR that edits
+only a NON-core workflow plus a doc, e.g. `CLAUDE.md` + `.github/workflows/claude.yml`
+(the review bot): because `claude.yml` is not in `ci_core`, none of the heavy
+firmware / emulator / board / docker / host / gosim / webapp suites activate, and
+`claude.yml` runs its own jobs via its own triggers. Every context branch
+protection could require gets a report either way (green skip where inactive), so
+the PR is never stuck waiting on a check that was never going to run.
 
 ## Adding a new job
 
 1. Add `needs: detect`.
 2. Add an `if:` referencing the relevant `needs.detect.outputs.*` area(s), OR'd
-   with `workflows` at minimum. (The `Static checks` bundle is the sole
-   deliberate exception: no `if:`, so it always runs and reports.)
+   with `ci_core` at minimum (so editing a job-defining workflow re-exercises the
+   job). (The `Static checks` bundle is the sole deliberate exception: no `if:`,
+   so it always runs and reports.)
 3. If the job needs an area the detector does not yet compute, add a new output
    and pattern to `_detect-changes.yml` and document it in the table above.
 4. Do not add a workflow-level `paths:` filter. It reintroduces the exact

@@ -31,7 +31,13 @@ jobs:
   webapp:
     name: Webapp checks
     needs: detect
-    if: needs.detect.outputs.webapp == 'true' || needs.detect.outputs.workflows == 'true'
+    # coverage_tooling: the Webapp coverage ratchet step reads
+    # ci/coverage-baseline.json via check_coverage.py, so a ratchet-only change
+    # must re-run this job to self-verify.
+    if: |
+      needs.detect.outputs.webapp == 'true' ||
+      needs.detect.outputs.coverage_tooling == 'true' ||
+      needs.detect.outputs.ci_core == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
@@ -108,7 +114,7 @@ jobs:
   web-flasher-tests:
     name: web-flasher tests
     needs: detect
-    if: needs.detect.outputs.web_flasher == 'true' || needs.detect.outputs.workflows == 'true'
+    if: needs.detect.outputs.web_flasher == 'true' || needs.detect.outputs.ci_core == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
