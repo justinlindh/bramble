@@ -81,6 +81,33 @@ PR). The host-c number is gcc-version sensitive, so the canonical baseline is th
 value the runner measures; when a first CI run reports a different number than a
 local box, commit the CI value.
 
+## Firmware size ratchet (flash and static RAM, no-regression)
+
+Each board leg of the `board-build-smoke` matrix (`quality.yml`) ratchets the
+firmware it just built against a committed ceiling in `ci/size-baseline.json`.
+`scripts/ci/check-firmware-size.sh <board>` measures two numbers from
+`idf.py size --format json`: the app flash footprint (`flash_code` plus
+`flash_rodata` plus `flash_other`) and static DRAM (initialized `.data` plus
+`.bss`, the RAM the app reserves before the heap). It uses the UNPADDED flash
+figure, not the `bramble.bin` image size, because the image is padded up to
+64 KiB ESP32-S3 MMU pages, so its size jumps a whole page when a segment crosses
+a boundary and can differ by 64 KiB between ESP-IDF patch versions; the unpadded
+figure moves precisely with the code and data a change adds, and partition fit is
+already enforced by the ESP-IDF build.
+It fails when either metric grows more than `tolerance_bytes` above the ceiling,
+naming exactly what grew and by how much. This runs at PR time because the board
+build itself now gates PRs: this project shipped a main-task stack overflow that
+only hardware caught, and RAM headroom is the documented T1000-E port blocker, so
+a silent flash bloat or a shrinking RAM margin must surface before merge, not when
+a device bootloops.
+
+Like the coverage baseline, `ci/size-baseline.json` NEVER auto-drifts: a
+developer raises a ceiling deliberately with `scripts/ci/update-size-baseline.sh`
+when a change legitimately grows the binary, with the reason in the PR. Sizes are
+toolchain-sensitive, so `tolerance_bytes` (8 KiB) absorbs the sub-KiB unpadded
+delta between ESP-IDF patch versions while still catching the tens-of-KiB
+regressions this gate exists to stop.
+
 ## The collect-then-fail pattern (step-level `continue-on-error`)
 
 Job-level or de-facto advisory checks are forbidden, but step-level
