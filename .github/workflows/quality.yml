@@ -338,16 +338,23 @@ jobs:
     # own real "Docker build (<image>)" context; out of scope, it does no
     # work and reports success.
     #
-    # Runs inside the same container + docker.sock combination as the
-    # existing docker build in webapp-build-publish.yml (the one other place
-    # this repo builds a container image), since that is the one proven
-    # working docker-on-this-runner pattern; a bare `runs-on:` job on this
-    # pool has no docker CLI of its own.
+    # Runs `docker build` directly on the runner host, exactly like every
+    # other job in this workflow runs its own toolchain (idf.py, go, npm)
+    # directly, rather than inside a `container:`. An earlier revision copied
+    # webapp-build-publish.yml's `container: ghcr.io/catthehacker/...` +
+    # docker.sock pattern, but that pattern needs the runner to inject its
+    # node externals into the job container for JS actions like checkout, and
+    # the off-cluster burst pool does not provide that mount, so every leg
+    # died at checkout with `/__e/node24/bin/node: no such file or directory`.
+    # Building on the host needs only docker with BuildKit (the default), and
+    # the four Dockerfiles' `# syntax=` directives and `--mount=type=cache`
+    # RUN steps are honoured by the host daemon's BuildKit just as they are
+    # locally. No layer cache backend is wired yet: type=gha requires the
+    # buildx docker-container driver plus the runner's cache service, both
+    # extra failure surface on a pool this job has not yet been proven on;
+    # caching is a follow-up once the plain build is green here.
     needs: detect
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container:
-      image: ghcr.io/catthehacker/ubuntu:full-22.04
-      options: --user 0:0 --group-add 959
     timeout-minutes: 30
     strategy:
       # Every image reports its own result, same reasoning as Board build
@@ -373,43 +380,69 @@ jobs:
             dockerfile: docker/firmware-builder/Dockerfile
             context: docker/firmware-builder
     steps:
-      - uses: actions/checkout@v7
-        if: |
-          (matrix.image == 'webapp' && (needs.detect.outputs.webapp == 'true' || needs.detect.outputs.workflows == 'true')) ||
-          (matrix.image == 'simulator' && (needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
-          (matrix.image == 'emulator' && (needs.detect.outputs.emulator == 'true' || needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
-          (matrix.image == 'firmware-builder' && (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'))
-      - name: Verify docker daemon access
-        if: |
-          (matrix.image == 'webapp' && (needs.detect.outputs.webapp == 'true' || needs.detect.outputs.workflows == 'true')) ||
-          (matrix.image == 'simulator' && (needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
-          (matrix.image == 'emulator' && (needs.detect.outputs.emulator == 'true' || needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
-          (matrix.image == 'firmware-builder' && (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'))
+      - name: Decide whether this leg builds
+        # Compute the per-leg area gate ONCE here (always runs, no `if:`), so
+        # the remaining steps carry a single `if:` on this output instead of
+        # repeating the four-way expression. Each image gates on the union of
+        # areas its Dockerfile's COPY instructions actually read (see docs/ci.md):
+        # webapp on webapp; simulator on simulator/firmware; emulator on
+        # emulator/simulator/firmware; firmware-builder on firmware (which the
+        # detector now maps docker/firmware-builder/ into). workflows is OR'd
+        # into every leg per the always-report safety rule.
+        id: gate
+        env:
+          IMAGE: ${{ matrix.image }}
+          WEBAPP: ${{ needs.detect.outputs.webapp }}
+          SIMULATOR: ${{ needs.detect.outputs.simulator }}
+          EMULATOR: ${{ needs.detect.outputs.emulator }}
+          FIRMWARE: ${{ needs.detect.outputs.firmware }}
+          WORKFLOWS: ${{ needs.detect.outputs.workflows }}
         run: |
           set -euo pipefail
+          build=false
+          case "$IMAGE" in
+            webapp)  [ "$WEBAPP" = true ] && build=true ;;
+            simulator) { [ "$SIMULATOR" = true ] || [ "$FIRMWARE" = true ]; } && build=true ;;
+            emulator) { [ "$EMULATOR" = true ] || [ "$SIMULATOR" = true ] || [ "$FIRMWARE" = true ]; } && build=true ;;
+            firmware-builder) [ "$FIRMWARE" = true ] && build=true ;;
+          esac
+          [ "$WORKFLOWS" = true ] && build=true
+          echo "build=${build}" >> "$GITHUB_OUTPUT"
+          echo "leg=${IMAGE} build=${build}"
+      - uses: actions/checkout@v7
+        if: steps.gate.outputs.build == 'true'
+      - name: Verify docker is available on the runner
+        if: steps.gate.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          command -v docker >/dev/null || { echo "::error::docker CLI missing from the runner host"; exit 1; }
           docker version
+      - name: Stage web-flasher into the webapp build context
+        # webapp/Dockerfile's `COPY . .` expects webapp/public/web-flasher/ to
+        # be populated, but that path is gitignored (.gitignore) and only ever
+        # filled by copying the top-level web-flasher/ tree in first, exactly
+        # as webapp-build-publish.yml's "Build and test webapp" step does
+        # before it builds the shipped image. Without this, the webapp leg
+        # would still build (Vite does not require the dir to exist) but would
+        # silently produce an image missing web-flasher, so it would not be
+        # verifying the same image that actually ships. Only the webapp leg
+        # needs it.
+        if: matrix.image == 'webapp' && steps.gate.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          rm -rf webapp/public/web-flasher
+          mkdir -p webapp/public/web-flasher
+          cp -a web-flasher/. webapp/public/web-flasher/
       - name: Build ${{ matrix.image }} image (verify only, no push)
-        if: |
-          (matrix.image == 'webapp' && (needs.detect.outputs.webapp == 'true' || needs.detect.outputs.workflows == 'true')) ||
-          (matrix.image == 'simulator' && (needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
-          (matrix.image == 'emulator' && (needs.detect.outputs.emulator == 'true' || needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
-          (matrix.image == 'firmware-builder' && (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'))
+        if: steps.gate.outputs.build == 'true'
         env:
           DOCKERFILE_PATH: ${{ matrix.dockerfile }}
           BUILD_CONTEXT: ${{ matrix.context }}
+          # Force BuildKit on regardless of the host daemon's default, so the
+          # Dockerfiles' `# syntax=` directives and `--mount=type=cache` RUN
+          # steps are honoured. No push, no load: a successful build IS the
+          # assertion; the resulting image layers stay in the host build cache.
+          DOCKER_BUILDKIT: "1"
         run: |
           set -euo pipefail
-          builder="bramble-docker-gate-${{ matrix.image }}"
-          docker buildx rm "$builder" >/dev/null 2>&1 || true
-          docker buildx create --name "$builder" --driver docker-container --use
-          docker buildx inspect --bootstrap
-          # GitHub Actions cache backend (type=gha): no registry credentials
-          # needed, and it keys per image via scope so the four builds' caches
-          # never collide. Neither --push nor --load: this job exists to
-          # prove the Dockerfile builds, not to publish or run the image.
-          docker buildx build \
-            --builder "$builder" \
-            --cache-from "type=gha,scope=docker-build-${{ matrix.image }}" \
-            --cache-to "type=gha,scope=docker-build-${{ matrix.image }},mode=max" \
-            -f "$DOCKERFILE_PATH" \
-            "$BUILD_CONTEXT"
+          docker build -f "$DOCKERFILE_PATH" "$BUILD_CONTEXT"

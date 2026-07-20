@@ -295,14 +295,17 @@ of them: a base-image bump (the trigger case, #179's `node` 22-to-26 jump in
 `emulator/Dockerfile`) could merge with every required context green and
 nothing having ever constructed the image, which is worse than no bump at
 all because it carries the appearance of a passing check. Each leg runs
-`docker buildx build` against its own Dockerfile and build context, with
-`--cache-from`/`--cache-to type=gha` scoped per image so the four builds'
-caches never collide; nothing is pushed or loaded, since the job exists to
-catch a broken Dockerfile before merge; a successful build is the entire
-assertion. It runs inside the same container-plus-`docker.sock` combination
-`webapp-build-publish.yml` already uses to build the webapp image, the one
-proven working docker-on-this-runner pattern in the repo, since a bare
-`runs-on:` job on this pool has no docker CLI of its own.
+`docker build` against its own Dockerfile and build context, directly on the
+runner host, exactly as every other job in this workflow runs its own
+toolchain (`idf.py`, `go`, `npm`) directly rather than inside a `container:`.
+Nothing is pushed or loaded, since the job exists to catch a broken
+Dockerfile before merge; a successful build is the entire assertion.
+`DOCKER_BUILDKIT=1` is forced on so the Dockerfiles' `# syntax=` directives
+and `--mount=type=cache` RUN steps are honoured by the host daemon's
+BuildKit. No layer-cache backend is wired yet: a registry or `type=gha`
+cache needs the buildx docker-container driver plus the runner's cache
+service, both extra failure surface, so caching is a follow-up once the
+plain build is proven green on the pool.
 
 The area gate is on the job's STEPS, not the job, for the same
 matrix-collapse reason as `Board build smoke` above. Each leg's gate is the
