@@ -145,14 +145,14 @@ export function mergeFirmwareMessages(
   return accepted;
 }
 
-export async function loadMessages(sinceId?: number): Promise<void> {
+export async function loadMessages(): Promise<void> {
   if (!session.client) return;
-  const params: Record<string, unknown> = { limit: 100 };
-  if (sinceId !== undefined) params.since_id = sinceId;
+  // bramble.getMessages takes no params (EmptyParams in the contract): the
+  // firmware serializes its whole ring buffer regardless, so send nothing.
   const result = await session.client.rpc<{ messages: FirmwareMessageWire[] }>(
     'bramble.getMessages',
-    params,
-    10000, // longer timeout: serializing 20 messages can be slow on ESP32
+    undefined,
+    10000, // longer timeout: serializing the ring buffer can be slow on ESP32
   );
   const store = useStore.getState();
   const newFromFirmware = mergeFirmwareMessages(result.messages ?? [], {

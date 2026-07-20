@@ -371,11 +371,6 @@ export async function connect(
 }
 
 export async function disconnect(): Promise<void> {
-  try {
-    await session.client?.rpc('bramble.disconnect');
-  } catch {
-    // Ignore: node may not have this method, or already disconnected
-  }
   session.client?.clearSubscriptions();
   await session.client?.disconnect();
   session.client = null;
