@@ -2,6 +2,19 @@ appId: org.bramblemesh.app
 productName: Bramble
 copyright: Copyright © 2026 Bramble Mesh
 
+# Update feed. electron-updater reads the update metadata (latest.yml on
+# Windows, latest-linux.yml on Linux) from a GitHub release. Declaring the
+# provider here is also what makes electron-builder emit those yml files next
+# to the installers at package time; the release workflow attaches them to the
+# webapp-vX.Y.Z release so self-updating builds (Windows NSIS, Linux AppImage)
+# can find them. deb/pacman and the unsigned macOS dmg do not self-update: the
+# app detects that and points the user at the releases page instead.
+publish:
+  provider: github
+  owner: justinlindh
+  repo: bramble
+  releaseType: release
+
 directories:
   buildResources: build
   output: release

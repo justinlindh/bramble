@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, net, session, shell } from 'electron
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
 import { startDiscovery, stopDiscovery } from './discovery';
+import { scheduleUpdateCheck } from './updater';
 import { DEVICE_PICKER_CHANNELS, DISCOVERY_CHANNELS, OTA_CHANNELS, type OtaIndexFetchResult, type PickerDevice } from '../src/types/desktop';
 
 let mainWindow: BrowserWindow | null = null;
@@ -181,6 +182,11 @@ app.whenReady().then(() => {
   // DevTools stays reachable below for debugging.
   Menu.setApplicationMenu(null);
   createWindow();
+
+  // Check GitHub Releases for a newer desktop build. Notify-and-ask by design:
+  // never downloads or installs without the user agreeing first, and stays
+  // silent when already up to date or when running unpackaged/in dev.
+  scheduleUpdateCheck(mainWindow);
 
   ipcMain.on(DISCOVERY_CHANNELS.start, (event) => {
     startDiscovery((nodes) => {
