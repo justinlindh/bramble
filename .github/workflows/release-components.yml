@@ -221,7 +221,15 @@ jobs:
       !cancelled() &&
       (needs.release.outputs.webapp_published == 'true' ||
        (needs.release.result == 'skipped' && inputs.webapp_installers_tag != ''))
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # GitHub-hosted on purpose (never RUNNER_LABEL): this is a job-level
+    # container: job, and the self-hosted burst pool cannot run container jobs.
+    # Burst runners do not mount the runner's node externals into the job
+    # container, so every step dies at Checkout with 'exec /__e/node24/bin/node:
+    # no such file or directory'. The electron-builder:wine image is
+    # self-contained (node + wine for NSIS, no ESP-IDF/go tooling), so a hosted
+    # runner needs nothing from the self-hosted pool; releases are infrequent,
+    # so hosted minutes are fine.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
