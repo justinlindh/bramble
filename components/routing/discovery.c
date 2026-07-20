@@ -2,6 +2,22 @@
 #include "network_key.h"
 #include <string.h>
 
+/* Saturating 8-bit hop-count arithmetic. hop_count is a single wire byte and,
+ * on an unauthenticated RREQ, is fully attacker-controlled. A plain ++ or +
+ * wraps 255 -> 0, which lets a forged hop_count of 255 be laundered into a
+ * zero-hop advertisement: the most attractive route possible (issue #74).
+ * Saturating at 255 pins a forged count at the maximum instead of rolling
+ * over. A legitimate mesh never approaches 255 hops, so this only ever
+ * changes the pathological / forged case. */
+static inline uint8_t hop_inc_sat(uint8_t hop_count) {
+    return (hop_count >= 255u) ? 255u : (uint8_t)(hop_count + 1u);
+}
+
+static inline uint8_t hop_add_sat(uint8_t a, uint8_t b) {
+    uint16_t sum = (uint16_t)a + (uint16_t)b;
+    return (sum > 255u) ? 255u : (uint8_t)sum;
+}
+
 void discovery_init(pending_discovery_table_t* table) { memset(table, 0, sizeof(*table)); }
 
 int discovery_start(pending_discovery_table_t* table, uint32_t dest_addr, uint32_t query_id,
@@ -96,7 +112,7 @@ bramble_rreq_t rreq_build_originator(uint32_t my_addr, uint32_t dest_addr, uint3
 bramble_rreq_t rreq_forward(const bramble_rreq_t* incoming, uint32_t my_addr, int8_t rx_rssi,
                             int8_t rx_snr) {
     bramble_rreq_t r = *incoming;
-    r.hop_count++;
+    r.hop_count = hop_inc_sat(r.hop_count);
     r.metric = metric_apply_link_penalty(r.metric, rx_rssi, rx_snr);
     r.header.hop_limit--;
     r.prev_hop = my_addr;
@@ -172,7 +188,7 @@ bramble_rrep_t rrep_build_destination(const bramble_rreq_t* rreq, uint32_t my_ad
      * receiver installs next_hop = whoever actually delivered the RREP,
      * fixing the multi-hop bug (see the harness design doc). */
     r.next_hop = my_addr;
-    r.hop_count = rreq->hop_count + 1;
+    r.hop_count = hop_inc_sat(rreq->hop_count);
     r.route_metric = rreq->metric;
     rrep_sign(&r);
     return r;
@@ -204,8 +220,8 @@ bramble_rrep_t rrep_build_intermediate(const bramble_rreq_t* rreq,
     r.src_addr = route_to_dest->dest_addr; /* answering ON BEHALF OF this destination */
     r.next_hop = my_addr;                  /* this relay is the first hop back, from itself */
 
-    uint8_t hops_to_me = (uint8_t)(rreq->hop_count + 1);
-    r.hop_count = (uint8_t)(hops_to_me + route_to_dest->hop_count);
+    uint8_t hops_to_me = hop_inc_sat(rreq->hop_count);
+    r.hop_count = hop_add_sat(hops_to_me, route_to_dest->hop_count);
 
     uint8_t metric_to_me = metric_apply_link_penalty(rreq->metric, rx_rssi, rx_snr);
     uint16_t dest_penalty = (uint16_t)(255 - route_to_dest->metric);
