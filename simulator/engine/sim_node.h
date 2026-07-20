@@ -93,6 +93,11 @@ typedef struct {
     uint32_t addr;
     float x;
     float y;
+    /* Original scenario position, captured at creation (issue #144): a
+     * coordinate-less node_join restores the node here instead of leaving
+     * it wherever the kill (or a bug) put it. */
+    float home_x;
+    float home_y;
     bool active;
 
     /* Per-node identity Phase 4: the node's PERSISTENT Ed25519 identity

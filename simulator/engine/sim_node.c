@@ -29,6 +29,8 @@ int node_array_add(node_array_t* array, const char* id, uint32_t addr, float x, 
     node->addr = addr;
     node->x = x;
     node->y = y;
+    node->home_x = x;
+    node->home_y = y;
     node->active = true;
 
     /* Per-node identity Phase 4: create the node's persistent Ed25519
@@ -277,8 +279,14 @@ void node_tick(sim_node_t* node, uint64_t now_us, const radio_config_t* radio,
         }
     }
 
-    /* 5. Pending ACK tick: retransmit or expire */
-    pending_ack_tick(&node->pending_acks, now_ms);
+    /* 5. Pending ACK retransmit/expire is driven exclusively by
+     * bridge_handle_retransmit (called right after node_tick in sim.go),
+     * which both sends the retransmit and advances attempt/next_retry_ms,
+     * mirroring firmware's mesh_task ACK retry tick. Calling pending_ack_tick
+     * here as well double-drove the state machine: it advanced attempt and
+     * pushed next_retry_ms into the future before bridge_handle_retransmit
+     * could act, so the sender was permanently starved and no retransmit was
+     * ever sent (messages_retried stuck at 0). */
 
     /* 6. Dedup purge */
     dedup_purge(&node->dedup, now_ms);

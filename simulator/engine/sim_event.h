@@ -68,6 +68,10 @@ typedef struct {
     uint32_t addr;
     float x;
     float y;
+    /* node_join only (issue #144): true when the scenario event supplied
+     * explicit x/y. A coordinate-less rejoin restores the node's original
+     * scenario position instead of teleporting it to (0,0). */
+    bool has_coords;
 } node_event_data_t;
 
 /* Location event data (EVT_GENERATE_LOCATION). Degrees are stored as

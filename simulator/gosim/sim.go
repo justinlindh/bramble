@@ -541,21 +541,52 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	nodeID := C.GoString(&nd.node_id[0])
 	ts := getEventTimestamp(evt)
 
-	idx := nodeArrayAdd(&s.nodes, nodeID, uint32(nd.addr), float32(nd.x), float32(nd.y))
-	if idx < 0 {
-		log.Printf("failed to add node %s", nodeID)
-		return
+	// Issue #144 Bug 2: a rejoin must REUSE the existing entry, like
+	// firmware keeps its NVS identity across a reboot. Appending a
+	// duplicate left two entries with the same id and address, with every
+	// find-by-id lookup resolving to the deactivated corpse while the live
+	// node sat stranded at (0,0). nodeActivate below models the reboot:
+	// volatile protocol state (routes, neighbors, pending acks) is
+	// cleared, the persistent identity survives.
+	idx := -1
+	for i := 0; i < int(s.nodes.count); i++ {
+		if C.GoString(&s.nodes.nodes[i].id[0]) == nodeID {
+			idx = i
+			break
+		}
 	}
-	node := C.node_array_get(&s.nodes, C.int(idx))
+	var node *C.sim_node_t
+	if idx >= 0 {
+		node = C.node_array_get(&s.nodes, C.int(idx))
+		// Issue #144 Bug 1 follow-through: explicit event coordinates win;
+		// a coordinate-less rejoin restores the node's original scenario
+		// position rather than teleporting it to (0,0).
+		if bool(nd.has_coords) {
+			node.x = nd.x
+			node.y = nd.y
+		} else {
+			node.x = node.home_x
+			node.y = node.home_y
+		}
+	} else {
+		idx = nodeArrayAdd(&s.nodes, nodeID, uint32(nd.addr), float32(nd.x), float32(nd.y))
+		if idx < 0 {
+			log.Printf("failed to add node %s", nodeID)
+			return
+		}
+		node = C.node_array_get(&s.nodes, C.int(idx))
+	}
 	nodeActivate(node)
 	s.applyDutyCycleCap(node)
 	anomalyInit(&s.anomaly[idx])
 
 	// Phase 6: Initialize extended node state (mailbox, location, etc.)
 	// node.addr, not nd.addr: node_array_add derives the address from the
-	// node's Ed25519 identity key (Phase 4 rebind).
+	// node's Ed25519 identity key (Phase 4 rebind). node.x/node.y, not
+	// nd.x/nd.y: the resolved position (event coords, or the restored
+	// original on a coordinate-less rejoin).
 	C.bridge_handle_node_join_ext(C.int(idx), node.addr,
-		nd.x, nd.y, C.uint64_t(ts))
+		node.x, node.y, C.uint64_t(ts))
 
 	// Schedule first tick
 	cid := C.CString(nodeID)
@@ -566,7 +597,7 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	s.emitJSON(map[string]interface{}{
 		"type": "node_joined", "timestamp_us": ts,
 		"node": nodeID, "addr": fmt.Sprintf("0x%08X", uint32(node.addr)),
-		"x": nd.x, "y": nd.y,
+		"x": node.x, "y": node.y,
 	})
 }
 
@@ -584,7 +615,7 @@ func (s *Sim) handleNodeLeave(evt *C.sim_event_t) {
 		"type": "node_left", "timestamp_us": ts, "node": nodeID,
 	})
 
-	anomalyCheckPartition(&s.nodes, float32(s.radio._range))
+	anomalyCheckPartition(&s.nodes, float32(s.radio._range), ts)
 }
 
 func (s *Sim) handleNodeMove(evt *C.sim_event_t) {
@@ -984,7 +1015,7 @@ func (s *Sim) cmdRemoveNode(cmd Command) {
 		"type": "node_left", "timestamp_us": s.simTime, "node": cmd.NodeID,
 	})
 
-	anomalyCheckPartition(&s.nodes, float32(s.radio._range))
+	anomalyCheckPartition(&s.nodes, float32(s.radio._range), s.simTime)
 }
 
 // cmdButton forwards a face-button edge from a device card (PagerDevice.tsx)
