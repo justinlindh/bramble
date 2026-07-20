@@ -1,4 +1,4 @@
-import { useStore } from './index';
+import { useStore, conversationIdForMessage } from './index';
 import { createTransport, BrambleClient } from '../transport';
 import { messageDb } from './messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from './deliveryEventStore';
@@ -898,12 +898,6 @@ function hydrateCorrelationMaps(messages: Message[]): void {
   }
 }
 
-function conversationKeyForMessage(message: Message): string {
-  if (message.channelIndex !== undefined && message.channelIndex >= 0) return `ch:${message.channelIndex}`;
-  if (message.to === 0xFFFFFFFF) return 'broadcast';
-  return `dm:${message.direction === 'outgoing' ? message.to : message.from}`;
-}
-
 function applyDeliveryEventToMessage(message: Message, event: DeliveryEventRecord): Message {
   if (event.eventType === 'ack') {
     const payload = (event.payload ?? {}) as { status?: 'delivered' | 'failed' | 'sent' | 'sending'; relayPath?: RelayHop[] };
@@ -1047,7 +1041,7 @@ function applyBroadcastDelivery(event: BroadcastDeliveryNotification): void {
   deliveryEventStore.upsertDeliveryEvent({
     eventId: `broadcast:${event.broadcastId}:${recipient.addr}`,
     messageId: msgId,
-    conversationKey: message ? conversationKeyForMessage(message) : 'broadcast',
+    conversationKey: message ? conversationIdForMessage(message) : 'broadcast',
     ts: recipient.deliveredAtMs,
     nodeAddr: currentNodeAddrHex(),
     eventType: 'broadcast_delivery',
@@ -1214,7 +1208,7 @@ export function handleAck(params: unknown): void {
       eventId: `ack:${packetId}:${newStatus}`,
       messageId: msgId,
       packetId,
-      conversationKey: message ? conversationKeyForMessage(message) : `dm:${msgId}`,
+      conversationKey: message ? conversationIdForMessage(message) : `dm:${msgId}`,
       ts: nowTs,
       nodeAddr: currentNodeAddrHex(),
       eventType: 'ack',
@@ -1283,7 +1277,7 @@ function maybeNotifyIncoming(msg: Message): void {
   const selfAddr = store.config?.identity?.address;
   if (selfAddr !== undefined && msg.from === selfAddr) return;
 
-  const conversationId = conversationKeyForMessage(msg);
+  const conversationId = conversationIdForMessage(msg);
   const appVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
   if (appVisible && store.activeConversationId === conversationId) return;
 
