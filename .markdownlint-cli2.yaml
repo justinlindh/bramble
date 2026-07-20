@@ -12,8 +12,15 @@ config:
   MD060: false # table pipe alignment/spacing is a cosmetic source-only nit with
     # no rendered difference; enforcing it forces constant re-padding of every
     # hand-maintained table on every edit
-globs:
-  - "**/*.md"
+# No `globs:` here on purpose. markdownlint-cli2 UNIONS config globs with any
+# command-line file arguments, so a repo-wide "**/*.md" glob here would drag
+# every untracked markdown on disk (gitignored build output, editor scratch,
+# agent worktrees) into runs that name explicit files, and a tree that is clean
+# in CI would fail locally. scripts/lint/run-markdownlint.sh owns file
+# selection: it passes exactly the git-tracked markdown files. The ignores
+# below still apply to command-line arguments (docs/archive/ is tracked but
+# frozen, and the others guard vendored/derived trees for editor integrations
+# that lint single files against this config).
 ignores:
   - "build/**"
   - "**/managed_components/**"

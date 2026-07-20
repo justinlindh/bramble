@@ -507,7 +507,8 @@ jobs:
         # the remaining steps carry a single `if:` on this output instead of
         # repeating the expression. Each image gates on the union of areas its
         # Dockerfile's COPY instructions actually read (see docs/ci.md):
-        # webapp on webapp; simulator on simulator/firmware (it COPYs main/ +
+        # webapp on webapp + web_flasher (the staging step feeds web-flasher/
+        # into its build context); simulator on simulator/firmware (it COPYs main/ +
         # components/ for its cgo build); emulator on emulator/simulator/firmware
         # (it additionally builds the linux firmware node and gosim);
         # firmware-builder on docker_firmware_builder ONLY (its build context is
@@ -519,6 +520,7 @@ jobs:
         env:
           IMAGE: ${{ matrix.image }}
           WEBAPP: ${{ needs.detect.outputs.webapp }}
+          WEB_FLASHER: ${{ needs.detect.outputs.web_flasher }}
           SIMULATOR: ${{ needs.detect.outputs.simulator }}
           EMULATOR: ${{ needs.detect.outputs.emulator }}
           FIRMWARE: ${{ needs.detect.outputs.firmware }}
@@ -528,7 +530,11 @@ jobs:
           set -euo pipefail
           build=false
           case "$IMAGE" in
-            webapp)  [ "$WEBAPP" = true ] && build=true ;;
+            # web_flasher too: the staging step below copies web-flasher/ into
+            # webapp/public/web-flasher before the build, exactly as the publish
+            # workflow does, so the shipped webapp image CONTAINS web-flasher
+            # and a web-flasher-only change must rebuild-verify this leg.
+            webapp)  { [ "$WEBAPP" = true ] || [ "$WEB_FLASHER" = true ]; } && build=true ;;
             simulator) { [ "$SIMULATOR" = true ] || [ "$FIRMWARE" = true ]; } && build=true ;;
             emulator) { [ "$EMULATOR" = true ] || [ "$SIMULATOR" = true ] || [ "$FIRMWARE" = true ]; } && build=true ;;
             firmware-builder) [ "$DOCKER_FW_BUILDER" = true ] && build=true ;;

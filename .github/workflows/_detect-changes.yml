@@ -30,8 +30,11 @@ on:
       web_flasher:
         description: web-flasher/ touched
         value: ${{ jobs.detect.outputs.web_flasher }}
+      api:
+        description: api/ (the RPC contract spec the webapp contract tests pin against) touched
+        value: ${{ jobs.detect.outputs.api }}
       idf_build_scripts:
-        description: the ESP-IDF sourcing / flash wrapper scripts (and .esp-idf-version pin) the emulator and board-build jobs invoke touched
+        description: the ESP-IDF sourcing / flash / ccache wrapper scripts (and .esp-idf-version pin) the emulator and board-build jobs invoke touched
         value: ${{ jobs.detect.outputs.idf_build_scripts }}
       release_config:
         description: .releaserc.* or scripts/release/ (the release-rule inputs) touched
@@ -71,6 +74,7 @@ jobs:
       emulator: ${{ steps.detect.outputs.emulator }}
       webapp: ${{ steps.detect.outputs.webapp }}
       web_flasher: ${{ steps.detect.outputs.web_flasher }}
+      api: ${{ steps.detect.outputs.api }}
       idf_build_scripts: ${{ steps.detect.outputs.idf_build_scripts }}
       release_config: ${{ steps.detect.outputs.release_config }}
       docker_firmware_builder: ${{ steps.detect.outputs.docker_firmware_builder }}
@@ -174,13 +178,21 @@ jobs:
           emulator=$(area_changed '^emulator/')
           webapp=$(area_changed '^webapp/')
           web_flasher=$(area_changed '^web-flasher/')
+          # api is the RPC contract spec. The always-run Static checks bundle
+          # covers its firmware side (check-rpc-contract.sh), but the webapp
+          # side is a unit test: webapp/test/rpcContractCoverage.test.ts pins
+          # src/types/rpcContract.generated.ts against api/openapi.yaml, so an
+          # api-only spec edit must run the Webapp checks job or the drift it
+          # exists to catch merges unexercised.
+          api=$(area_changed '^api/')
           # idf_build_scripts are the exact wrapper scripts the emulator and
           # board-build jobs invoke (source ci-source-idf.sh, run ci-ensure-idf.sh,
-          # flash.sh / flash-all, ensure-ota-signing-key.sh) plus the
+          # flash.sh / flash-all, ensure-ota-signing-key.sh, and ci-ccache-env.sh,
+          # which both jobs run to configure the compiler cache) plus the
           # .esp-idf-version pin ci-source-idf.sh reads to pick the toolchain.
           # Editing them must re-run those two build jobs even when no firmware
           # source changed; host tests and gosim use no IDF, so they stay out.
-          idf_build_scripts=$(area_changed '^scripts/(ci-source-idf|ci-ensure-idf|flash|flash-all|ensure-ota-signing-key)|^\.esp-idf-version$')
+          idf_build_scripts=$(area_changed '^scripts/(ci-source-idf|ci-ensure-idf|ci-ccache-env|flash|flash-all|ensure-ota-signing-key)|^\.esp-idf-version$')
           # release_config is what the Release config job loads: the per-component
           # .releaserc.*.cjs files and the release scripts (the squash-expander).
           release_config=$(area_changed '^\.releaserc\.|^scripts/release/')
@@ -225,6 +237,7 @@ jobs:
             echo "emulator=${emulator}"
             echo "webapp=${webapp}"
             echo "web_flasher=${web_flasher}"
+            echo "api=${api}"
             echo "idf_build_scripts=${idf_build_scripts}"
             echo "release_config=${release_config}"
             echo "docker_firmware_builder=${docker_firmware_builder}"
@@ -235,4 +248,4 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           echo "Resolved diff range: ${diff_range:-<unresolved>}"
-          echo "firmware=${firmware} host_test=${host_test} simulator=${simulator} emulator=${emulator} webapp=${webapp} web_flasher=${web_flasher} idf_build_scripts=${idf_build_scripts} release_config=${release_config} docker_firmware_builder=${docker_firmware_builder} coverage_tooling=${coverage_tooling} size_tooling=${size_tooling} ci_core=${ci_core} docs=${docs}"
+          echo "firmware=${firmware} host_test=${host_test} simulator=${simulator} emulator=${emulator} webapp=${webapp} web_flasher=${web_flasher} api=${api} idf_build_scripts=${idf_build_scripts} release_config=${release_config} docker_firmware_builder=${docker_firmware_builder} coverage_tooling=${coverage_tooling} size_tooling=${size_tooling} ci_core=${ci_core} docs=${docs}"

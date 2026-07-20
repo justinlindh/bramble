@@ -33,6 +33,17 @@ else
   exit 1
 fi
 
-# No glob arguments: .markdownlint-cli2.yaml's globs/ignores are authoritative
-# (repo-wide **/*.md, excluding build output, vendored trees, and docs/archive).
-"${lint_cmd[@]}"
+# Lint exactly the TRACKED markdown files, which is what this gate has always
+# promised (see the header). Relying on the config's repo-wide `**/*.md` glob
+# instead meant every UNTRACKED markdown on disk was linted too, so a clean-CI
+# tree could fail locally on gitignored build output (webapp/dist/), agent
+# worktrees, or any scratch file, teaching people to distrust the documented
+# local command. Passing the tracked list as CLI globs disables the config's
+# `globs:` but keeps its `ignores:` (markdownlint-cli2 applies ignores to
+# command-line globs as well), so docs/archive/ stays excluded in both modes.
+mapfile -d '' -t tracked_md < <(git ls-files -z -- '*.md')
+if [ "${#tracked_md[@]}" -eq 0 ]; then
+  echo "run-markdownlint: no tracked markdown files found." >&2
+  exit 1
+fi
+"${lint_cmd[@]}" -- "${tracked_md[@]}"
