@@ -2,7 +2,7 @@
 
 The trust anchor is the fleet's membership-authority root. Every node
 already has an unforgeable per-node Ed25519 identity (address =
-SHA-256[key](0:4), self-signed attestations, TOFU pinning, address-key
+`SHA-256(key)[0:4]`, self-signed attestations, TOFU pinning, address-key
 binding: see `docs/SECURITY-MODEL.md` section 3, "Per-node cryptographic
 identity"). Identity answers "is this the same node I saw before"; it does
 NOT answer "is this node allowed in my fleet". On an un-anchored mesh
