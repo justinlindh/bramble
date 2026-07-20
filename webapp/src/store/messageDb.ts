@@ -1,45 +1,25 @@
 import type { Message, DeliveryStatus, RelayHop } from '../types/bramble';
+import { conversationIdForMessage } from './index';
 
 type DbMessage = Message & { conversationId: string };
 
-/**
- * Compute conversation ID matching the Zustand store convention:
- *   broadcast → 'broadcast'
- *   channel   → 'ch:{index}'
- *   DM        → 'dm:{peerAddr}' (the other party's address)
- *
- * For DMs we need the local node address to determine which side is "us".
- * If not provided, falls back to the outgoing/incoming direction heuristic.
- */
-function computeConversationId(msg: Message, selfAddr?: number): string {
-  // Order matters and must match conversationTargetForMessage in store/index.ts:
-  // a channel index only wins when it is non-negative. A negative index is the
-  // firmware's "not a channel message" sentinel, so it falls through to
-  // broadcast/DM rather than being treated as a broadcast in its own right.
-  if (msg.channelIndex !== undefined && msg.channelIndex >= 0) return `ch:${msg.channelIndex}`;
-  if (msg.to === 0xFFFFFFFF) return 'broadcast';
-  // DM: key by the peer's address (not ours)
-  if (selfAddr !== undefined) {
-    const peerAddr = msg.from === selfAddr ? msg.to : msg.from;
-    return `dm:${peerAddr}`;
-  }
-  // Fallback: use direction if available, otherwise use the "to" address
-  const peerAddr = msg.direction === 'outgoing' ? msg.to : msg.from;
-  return `dm:${peerAddr}`;
-}
+// The persisted conversationId is derived through the store's single
+// classifier (conversationIdForMessage in store/index.ts) so the index this
+// file maintains cannot drift from the buckets the UI shows. This is the same
+// invariant store/index.ts pins for its in-memory callers: the bucket kind is
+// decided in exactly one place. Keying off the store's direction-based rule
+// (rather than a local self-address comparison) also avoids mis-bucketing an
+// outgoing message whose `from` carries the 0-means-self sentinel.
 
 class MessageDb {
   private db: IDBDatabase | null = null;
   private readonly DB_VERSION = 2;
   private readonly STORE_NAME = 'messages';
   private nodeAddr: string = '';
-  private selfAddrNum: number | undefined;
 
   /** Open (or reopen) the DB for a specific node address */
   async open(nodeAddr?: string): Promise<void> {
     const addr = nodeAddr || 'default';
-    // Parse numeric address for conversation ID computation
-    this.selfAddrNum = addr !== 'default' ? parseInt(addr, 16) : undefined;
     // If switching nodes, close old DB
     if (this.db && this.nodeAddr !== addr) {
       this.db.close();
@@ -63,8 +43,9 @@ class MessageDb {
         }
         if (oldVersion >= 1 && oldVersion < 2) {
           // v1 → v2: conversation IDs changed from dm:{min}-{max} to dm:{peerAddr}.
-          // We can't rewrite keys during upgrade (no selfAddr yet), so we'll
-          // re-index on first read. The index itself doesn't need schema changes.
+          // The record fields needed to recompute the id are already on each row,
+          // so we re-key on first read rather than during upgrade. The index
+          // itself doesn't need schema changes.
         }
       };
       req.onsuccess = () => {
@@ -82,7 +63,9 @@ class MessageDb {
    * to the current format (dm:{peerAddr}).
    */
   private async migrateV1ConversationIds(): Promise<void> {
-    if (!this.db || this.selfAddrNum === undefined) return;
+    // Only real-node DBs carry legacy DM ids worth re-keying; skip the
+    // 'default' namespace opened before an identity is known.
+    if (!this.db || this.nodeAddr === 'default') return;
     const migratedKey = `bramble:msgdb-migrated-v2:${this.nodeAddr}`;
     try {
       if (localStorage.getItem(migratedKey)) return;
@@ -98,7 +81,7 @@ class MessageDb {
         const record = cursor.value as DbMessage;
         // Detect old format: dm:{hex}-{hex}
         if (record.conversationId && /^dm:[0-9a-f]+-[0-9a-f]+$/i.test(record.conversationId)) {
-          const newId = computeConversationId(record, this.selfAddrNum);
+          const newId = conversationIdForMessage(record);
           if (newId !== record.conversationId) {
             cursor.update({ ...record, conversationId: newId });
           }
@@ -115,7 +98,7 @@ class MessageDb {
 
   async saveMessage(msg: Message): Promise<void> {
     if (!this.db) return;
-    const record: DbMessage = { ...msg, conversationId: computeConversationId(msg, this.selfAddrNum) };
+    const record: DbMessage = { ...msg, conversationId: conversationIdForMessage(msg) };
     return new Promise((resolve, reject) => {
       const tx = this.db!.transaction(this.STORE_NAME, 'readwrite');
       tx.objectStore(this.STORE_NAME).put(record);
@@ -130,7 +113,7 @@ class MessageDb {
       const tx = this.db!.transaction(this.STORE_NAME, 'readwrite');
       const store = tx.objectStore(this.STORE_NAME);
       for (const msg of msgs) {
-        store.put({ ...msg, conversationId: computeConversationId(msg, this.selfAddrNum) });
+        store.put({ ...msg, conversationId: conversationIdForMessage(msg) });
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
