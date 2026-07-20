@@ -1925,6 +1925,7 @@ target_include_directories(test_radio_esp_state PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
 )
 target_link_libraries(test_radio_esp_state m)

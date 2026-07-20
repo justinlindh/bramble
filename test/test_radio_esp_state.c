@@ -283,6 +283,27 @@ int sx1262_set_dio2_as_rf_switch(bool enable) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Fake tx_gate serialization hooks (issue #82)                       */
+/* ------------------------------------------------------------------ */
+
+/* radio_reconfigure now brackets its whole command sequence in the transmit
+ * serialization lock so it cannot splice into an in-flight radio_transmit_raw.
+ * No real gate runs here, so the fakes just track the balance: the tests assert
+ * the lock is taken and released on every path, including the failure return. */
+static int s_gate_lock_depth;
+static int s_gate_lock_max_depth;
+static int s_gate_lock_calls;
+
+void tx_gate_radio_lock(void) {
+    s_gate_lock_depth++;
+    s_gate_lock_calls++;
+    if (s_gate_lock_depth > s_gate_lock_max_depth)
+        s_gate_lock_max_depth = s_gate_lock_depth;
+}
+
+void tx_gate_radio_unlock(void) { s_gate_lock_depth--; }
+
+/* ------------------------------------------------------------------ */
 /*  Driver under test                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -313,6 +334,9 @@ void setUp(void) {
     atomic_store(&s_tx_waiter, (TaskHandle_t)NULL);
     s_tx_done_cb_calls = 0;
     s_tx_done_cb = NULL;
+    s_gate_lock_depth = 0;
+    s_gate_lock_max_depth = 0;
+    s_gate_lock_calls = 0;
 }
 
 void tearDown(void) {}
@@ -508,6 +532,29 @@ static void test_sleep_does_not_claim_sleep_when_the_command_fails(void) {
     TEST_ASSERT_NOT_EQUAL_INT(RADIO_STATE_SLEEP, radio_get_state());
 }
 
+/* ---------- reconfigure serialization (issue #82) ---------- */
+
+static void test_reconfigure_holds_the_gate_lock_across_the_sequence(void) {
+    radio_config_t cfg = test_config();
+    TEST_ASSERT_EQUAL_INT(0, radio_reconfigure(&cfg));
+    /* It actually acquired the transmit lock, held it once (not nested), and
+     * released it: without this a reconfigure spliced into an in-flight
+     * transmit. */
+    TEST_ASSERT_TRUE(s_gate_lock_calls > 0);
+    TEST_ASSERT_EQUAL_INT(1, s_gate_lock_max_depth);
+    TEST_ASSERT_EQUAL_INT(0, s_gate_lock_depth);
+}
+
+static void test_reconfigure_releases_the_gate_lock_on_failure(void) {
+    /* The configure_radio failure path returns early; it must still release the
+     * lock or the next transmit would block forever. */
+    arm_failure("write_register", -1);
+    radio_config_t cfg = test_config();
+    TEST_ASSERT_NOT_EQUAL_INT(0, radio_reconfigure(&cfg));
+    TEST_ASSERT_TRUE(s_gate_lock_calls > 0);
+    TEST_ASSERT_EQUAL_INT(0, s_gate_lock_depth);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -532,6 +579,9 @@ int main(void) {
 
     RUN_TEST(test_reconfigure_fails_when_the_sync_word_write_fails);
     RUN_TEST(test_sleep_does_not_claim_sleep_when_the_command_fails);
+
+    RUN_TEST(test_reconfigure_holds_the_gate_lock_across_the_sequence);
+    RUN_TEST(test_reconfigure_releases_the_gate_lock_on_failure);
 
     return UNITY_END();
 }

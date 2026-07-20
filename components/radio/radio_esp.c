@@ -8,6 +8,7 @@
 #include "radio.h"
 #include "radio_internal.h"
 #include "sx1262.h"
+#include "tx_gate.h"
 #include "board_config.h"
 
 #include <string.h>
@@ -236,6 +237,15 @@ int radio_reconfigure(const radio_config_t* config) {
     ESP_LOGI(TAG, "Reconfiguring radio: %.1f MHz SF%u BW%" PRIu32 " TX %ddBm",
              config->frequency_mhz, config->sf, config->bw_hz, config->tx_power);
 
+    /* Hold the transmit serialization lock across the whole reconfigure. This
+     * is reachable from the UI settings task and the RPC task, and its command
+     * sequence (standby, delay, configure_radio's ~8 commands, radio_start_rx)
+     * would otherwise splice into an in-flight radio_transmit_raw between its
+     * write_buffer, set_packet_params, clear_irq and set_tx, since transmits
+     * are serialized on this same lock but reconfigure took no lock at all
+     * (issue #82). */
+    tx_gate_radio_lock();
+
     /* Put radio in standby before reconfiguring (0 = RC oscillator). A failure
      * here is not fatal: reconfiguring is exactly the recovery a freshly reset
      * chip needs, so log and carry on into configure_radio. */
@@ -250,11 +260,13 @@ int radio_reconfigure(const radio_config_t* config) {
     int rc = configure_radio(config);
     if (rc != 0) {
         ESP_LOGE(TAG, "configure_radio failed during reconfigure");
+        tx_gate_radio_unlock();
         return rc;
     }
 
     /* Resume RX */
     radio_start_rx();
+    tx_gate_radio_unlock();
     ESP_LOGI(TAG, "Radio reconfigured successfully");
     return 0;
 }
