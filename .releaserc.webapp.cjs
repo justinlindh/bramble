@@ -55,6 +55,15 @@ module.exports = {
         },
       },
     }],
-    ['@semantic-release/github', { successComment: false, failComment: false, failTitle: false }]
+    // draftRelease: create the GitHub release as a draft, not published. The
+    // desktop-installer jobs build the AppImage/deb/pacman/exe/dmg after
+    // semantic-release runs and attach them to this draft, then flip it to
+    // published. GitHub releases are immutable once published: assets cannot be
+    // added afterward (the REST API rejects the upload with HTTP 422), so the
+    // release must stay a mutable draft until its installers are attached.
+    // semantic-release core still creates and pushes the webapp-v* git tag
+    // regardless of the draft flag, so the tag-diff publish detection and the
+    // installer jobs' tag checkout are unaffected.
+    ['@semantic-release/github', { successComment: false, failComment: false, failTitle: false, draftRelease: true }]
   ]
 };

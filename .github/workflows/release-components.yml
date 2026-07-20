@@ -90,13 +90,20 @@ jobs:
           # publish by the firmware-v* tag it creates and pushes in this
           # checkout. Diff the tag set across the run; a new tag means a real
           # release. A dry run creates no tag, so this reports published=false.
-          before="$(git tag -l 'firmware-v*' | sort -V)"
+          # comm needs both inputs in the same LEXICAL (LC_ALL=C) order. Never
+          # feed it "sort -V": once a component reaches double digits, version
+          # order (firmware-v1.5.10 before v1.5.9) diverges from byte order, comm
+          # prints "input is not in sorted order" and exits 1, which under
+          # set -e -o pipefail fails this step AFTER semantic-release already
+          # published, leaving a bare release. Set membership is all we need, so
+          # lexical order is correct here.
+          before="$(git tag -l 'firmware-v*' | LC_ALL=C sort)"
           if [ "$DRY" = "true" ]; then
             npx semantic-release --extends ./.releaserc.firmware.cjs --dry-run
           else
             npx semantic-release --extends ./.releaserc.firmware.cjs
           fi
-          after="$(git tag -l 'firmware-v*' | sort -V)"
+          after="$(git tag -l 'firmware-v*' | LC_ALL=C sort)"
           new="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tail -1)"
           if [ -n "$new" ]; then
             echo "published=true" >> "$GITHUB_OUTPUT"
@@ -111,15 +118,17 @@ jobs:
       - name: Release webapp
         id: webapp
         run: |
-          # Same tag-diff publish detection as the firmware step above; the
+          # Same tag-diff publish detection as the firmware step above, with the
+          # same LC_ALL=C requirement: version sort would break comm at the
+          # double-digit rollover and fail the step after publishing. The
           # desktop-installer jobs below consume these outputs.
-          before="$(git tag -l 'webapp-v*' | sort -V)"
+          before="$(git tag -l 'webapp-v*' | LC_ALL=C sort)"
           if [ "$DRY" = "true" ]; then
             npx semantic-release --extends ./.releaserc.webapp.cjs --dry-run
           else
             npx semantic-release --extends ./.releaserc.webapp.cjs
           fi
-          after="$(git tag -l 'webapp-v*' | sort -V)"
+          after="$(git tag -l 'webapp-v*' | LC_ALL=C sort)"
           new="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tail -1)"
           if [ -n "$new" ]; then
             echo "published=true" >> "$GITHUB_OUTPUT"
@@ -163,10 +172,13 @@ jobs:
         run: |
           bash scripts/release/build-factory-images.sh "$FW_VERSION"
 
-      # semantic-release created the release for this tag above; the script
-      # attaches the assets idempotently via the REST API (curl, no gh CLI
+      # semantic-release created this release as a DRAFT (draftRelease: true in
+      # .releaserc.firmware.cjs) precisely so these assets can be attached: a
+      # published release is immutable and rejects asset uploads with HTTP 422.
+      # The script uploads to the draft, then flips it to published (immutable)
+      # with the assets already in place. Uses the REST API via curl (no gh CLI
       # dependency on the runner).
-      - name: Attach factory images to firmware release
+      - name: Attach factory images to firmware release and publish
         # See the build step: run whenever firmware published, even if an
         # earlier component's release step failed.
         if: ${{ !cancelled() && steps.firmware.outputs.published == 'true' }}
@@ -425,10 +437,16 @@ jobs:
           pattern: webapp-installers-*
           merge-multiple: true
 
-      # semantic-release created the release for this tag; the script attaches
-      # the assets idempotently (replace-by-name), which also makes manual
-      # re-attach runs safe.
-      - name: Attach installers to webapp release
+      # semantic-release created this release as a DRAFT (draftRelease: true in
+      # .releaserc.webapp.cjs) so these installers can be attached: a published
+      # release is immutable and rejects asset uploads with HTTP 422. The script
+      # uploads to the draft (replace-by-name, so a re-attach on a still-draft
+      # release is safe), then flips it to published with the installers in
+      # place. A webapp_installers_tag dispatch only works while that tag's
+      # release is still a draft; an already-published release is immutable and
+      # cannot take new assets, so recovering a bare published release means
+      # cutting a new version, not re-attaching to the old tag.
+      - name: Attach installers to webapp release and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
