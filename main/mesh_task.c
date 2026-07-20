@@ -83,8 +83,8 @@ static void traffic_event_notify(const traffic_event_t* evt, void* ctx);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
+/* BEACON_JITTER_MS lives in beacon_policy_calc.h next to beacon_next_interval_ms. */
 #define BEACON_INTERVAL_MS 60000      /* 60 seconds between beacons (A/B test) */
-#define BEACON_JITTER_MS 5000         /* ±5s random jitter */
 #define NEIGHBOR_PURGE_INTERVAL 60000 /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH 16
 #define MESH_EVENT_QUEUE_DEPTH 8
@@ -1506,12 +1506,13 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
         send_beacon();
         *last_beacon_ms = t;
 
-        /* Add jitter for next interval */
+        /* Add jitter for next interval. The span-clamped helper is what keeps
+         * a short base (the emulator's EMU_BEACON_INTERVAL_MS override) from
+         * summing negative and wrapping the uint32, which permanently stopped
+         * beaconing after a handful of beacons. */
         uint8_t j[2];
         crypto_random(j, 2);
-        int32_t jitter =
-            ((int32_t)(j[0] | (j[1] << 8)) % (BEACON_JITTER_MS * 2)) - BEACON_JITTER_MS;
-        *beacon_interval = base_interval + jitter;
+        *beacon_interval = beacon_next_interval_ms(base_interval, (uint16_t)(j[0] | (j[1] << 8)));
     }
 
     /* Periodic identity attestation (Phase 2): low cadence, budget-gated.

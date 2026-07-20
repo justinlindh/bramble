@@ -31,4 +31,18 @@ beacon_interval_decide(int enabled, int mode_is_adaptive, uint32_t base_interval
                        uint32_t min_interval_ms, uint32_t max_interval_ms, uint8_t dense_threshold,
                        uint8_t churn_threshold, uint8_t neighbor_count, uint8_t churn_events);
 
+/* Beacon phase jitter: +-5s on the production 60s base, so neighboring nodes
+ * cannot phase-lock and collide every interval. */
+#define BEACON_JITTER_MS 5000
+
+/* Next beacon interval = base + jitter, with the jitter span clamped to
+ * base/2 so the sum can never go negative and wrap the uint32. The clamp is
+ * what makes short bases safe: the emulator overrides the base to a few
+ * seconds (EMU_BEACON_INTERVAL_MS), and base 3000 + jitter drawn from the
+ * full +-5000 went negative one draw in five, wrapping to ~49 days and
+ * silently ending that node's beaconing for good. rand16 is the caller's
+ * entropy (firmware: crypto_random; sim: pcg32), kept as a parameter so the
+ * function stays pure and host-testable. Pure. */
+uint32_t beacon_next_interval_ms(uint32_t base_interval_ms, uint16_t rand16);
+
 #endif /* BEACON_POLICY_CALC_H */

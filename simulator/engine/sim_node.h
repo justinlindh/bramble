@@ -28,10 +28,10 @@ typedef struct radio_config radio_config_t;
  * size the randomized first-beacon phase at boot (node_activate), so staggered
  * nodes do not all key up on the same tick; the actual beacon cadence is
  * decided every tick by beacon_interval_decide() (main/beacon_policy_calc.c),
- * driven by the scenario's sim_beacon_policy_t (see below). Jitter matches
- * firmware's BEACON_JITTER_MS (main/mesh_task.c). */
+ * driven by the scenario's sim_beacon_policy_t (see below). Per-beacon jitter
+ * comes from the firmware's own beacon_next_interval_ms (span-clamped
+ * BEACON_JITTER_MS, main/beacon_policy_calc.h). */
 #define NODE_BEACON_INTERVAL_BASE_US 60000000ULL /* 60 s firmware base, boot-phase only */
-#define NODE_BEACON_JITTER_US 5000000ULL         /* +-5 s firmware BEACON_JITTER_MS */
 #define NODE_NEIGHBOR_PURGE_US 60000000ULL       /* 60 s */
 #define NODE_ROUTE_MAINT_US 60000000ULL          /* 60 s */
 #define NODE_DISCOVERY_CHECK_US 5000000ULL       /*  5 s */
