@@ -33,7 +33,7 @@ let autoSelectExpected: { id?: string; name?: string } | null = null;
 //
 // 'clipboard-sanitized-write' covers navigator.clipboard.writeText, used to
 // copy addresses, network keys, and anchor backups.
-const ALLOWED_PERMISSIONS = new Set([
+export const ALLOWED_PERMISSIONS = new Set([
   'serial',
   'bluetooth',
   'media',
