@@ -33,6 +33,29 @@ target), `test/` (host test suites), `scripts/`, `docs/`, `api/openapi.yaml`
   to PR bodies; verify after `gh pr create` and strip it with `gh pr edit`.
 - Never push to `main`. Branch (`fix/**`, `feat/**`, `chore/**`, `ci/**`,
   `docs/**`) and open a PR; required checks gate the merge.
+- Trunk-based, and nothing incomplete lands on trunk. Incomplete means the
+  change leaves known work behind: a follow-up, a tracked-separately, a
+  deferred leg, a naive fix with a noted caveat, a TODO for the real fix.
+  When you find a defect or a needed change while working, fix it fully and
+  properly now, in the same change, not later. Filing a GitHub issue to
+  defer work you could do now is not allowed, and issues are strongly
+  discouraged in general; do not create them to park scope. If a fix
+  broadens the PR's scope, broaden the PR: widen the branch, or stack under
+  an integration branch that only merges to trunk once complete. A latent
+  bug a change surfaces (for example a Dockerfile that was never buildable
+  from a clean checkout) gets fixed in that change, not deferred. A reviewer
+  finding that is real is addressed before merge, never merged with a
+  follow-up pointer. This is non-negotiable: deferral in any form is not
+  allowed, ever. The one narrow exception is genuinely unrunnable
+  verification, for example firmware you cannot flash without a hardware
+  bench, which is an honest constraint, not deferred code work.
+- Never force-push. Not `git push --force`, not `--force-with-lease`, not by
+  any other route. History on a pushed branch is append-only. To bring a
+  branch up to date with main, merge `github/main` into it (a merge commit
+  is fine, the squash-merge flattens it at the end); never rebase-and-force
+  a pushed branch. Rebasing is only acceptable on a branch you have not
+  pushed yet. A force-push has already silently dropped a merged PR's
+  content on this repo, which is exactly what this rule prevents.
 - This repo is public. Before every push run
   `bash scripts/lint/check-no-internal-refs.sh` and fix anything it flags.
   Never commit internal hostnames, real device addresses, private LAN
@@ -45,10 +68,27 @@ target), `test/` (host test suites), `scripts/`, `docs/`, `api/openapi.yaml`
 - Every CI check gates. There is no advisory tier. A step may use
   continue-on-error only to let later steps collect more failures, and the
   job must then end with a terminal step that fails on any failed step.
+- CI does no redundant or unnecessary work. Never run the same expensive
+  step twice: fold coverage or other instrumentation into the existing test
+  run rather than re-running a suite to produce a second artifact or number.
+  Never run a job or suite a change cannot affect: respect and tighten the
+  change-detection areas so, for example, a docs-only or webapp-only PR does
+  not build firmware. Prefer the cheapest correct mechanism. Running a
+  timing-sensitive suite twice also doubles the flake surface, which is its
+  own reason to avoid it. Any CI change is reviewed specifically for
+  duplicated or unnecessary work.
 - PR bodies follow `.github/PULL_REQUEST_TEMPLATE.md` (What and why /
   Changes / Validation with real command output / Release impact), written
   as unwrapped prose: one paragraph per line, because the GitHub renderer
   treats every newline as a line break.
+- PR bodies are written for a human reviewer, not as a log. Keep them
+  concise and describe the CURRENT state of the change, not the history of
+  how it got there. No running monologue, no per-iteration narration, no
+  rebase or CI-flake or incident commentary, no restating the diff line by
+  line. Keep each template section to the minimum a reviewer needs: What and
+  why in a sentence or two, Changes as the load-bearing points, Validation
+  as the commands run and their results. Before merge, edit the body to its
+  final state; if the PR evolved, rewrite the body, do not append to it.
 
 ## Build and test
 

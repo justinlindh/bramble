@@ -11,6 +11,7 @@ Bramble is a privacy-first LoRa mesh networking protocol targeting ESP32-S3 + SX
 The codebase is organized as ESP-IDF components. Each component is self-contained with a clean public API exposed through its `include/` header. Components depend on each other only through these interfaces: there are no circular dependencies.
 
 See also:
+
 - [`docs/COMPARISON.md`](COMPARISON.md): Comparison with Meshtastic and MeshCore
 - [`docs/bramble-anomaly-detection.md`](bramble-anomaly-detection.md): Anomaly detection subsystem
 - [`simulator/README.md`](../simulator/README.md): Network simulator
@@ -69,7 +70,7 @@ The three RPC transports are not equivalent in trust: WebSocket and BLE require 
 ## Component Map
 
 | Component | Path | Purpose |
-|-----------|------|---------|
+| ----------- | ------ | --------- |
 | `crypto` | `components/crypto/` | AES-256-GCM, X25519, HKDF |
 | `packet` | `components/packet/` | Packet framing, serialization, type definitions |
 | `routing` | `components/routing/` | AODV route discovery, forwarding, beacon, route maintenance, route metrics |
@@ -198,11 +199,13 @@ The OpenAPI document (`api/openapi.yaml`) is kept in sync with that registry,
 enforced in CI by `scripts/check-rpc-contract.sh`.
 
 Access control (see [auth.md](auth.md) and [SECURITY-MODEL.md](SECURITY-MODEL.md)):
+
 - Auth is required by default on WebSocket and BLE; serial is the unauthenticated pairing bootstrap.
 - Unauthenticated connections may call only `bramble.ping` and `bramble.getVersion` (`components/rpc/rpc_auth.c`) and receive no server-push notifications.
 - Tokenless browser connections are subject to a WebSocket `Origin` allowlist (`main/ws_origin.c`, enforced in `main/ws_server.c`).
 
 Notable wire-format details clients must honor:
+
 - `bramble.getAirtime` returns flat fields (`critical_remaining_ms`, etc.)
 - `bramble.sendMessage` returns `packetId` as a hex string
 - `bramble.setRadio` expects snake_case keys (`frequency_mhz`, `bw_hz`, `tx_power_dbm`, `coding_rate`)
@@ -216,7 +219,7 @@ Notable wire-format details clients must honor:
 
 All Bramble packets begin with a 12-byte header:
 
-```
+```text
 Offset  Size  Field
 0       1     version   (always 0x01)
 1       1     type      (PKT_TYPE_*)
@@ -231,7 +234,7 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 ### Flag Bits (header byte 2)
 
 | Bits | Mask | Name | Meaning |
-|------|------|------|---------|
+| ------ | ------ | ------ | --------- |
 | 7 | `0x80` | `FLAG_RESERVED_HIGH` | Reserved, not used |
 | 6 | `0x40` | `FLAG_EMERGENCY` | Reserved for future use: origin-set, immutable, AAD-bound. No emergency feature ships today |
 | 5 | `0x20` | `FLAG_ACK_REQ` | Sender requests an end-to-end ACK |
@@ -245,7 +248,7 @@ There is no `FLAG_TIER`. Bits 7 and 6 were freed in wire v2 when the reliability
 ### Packet Types
 
 | Value | Name | Description | Size |
-|-------|------|-------------|------|
+| ------- | ------ | ------------- | ------ |
 | `0x01` | `PKT_TYPE_ACK` | End-to-end acknowledgement | 37–69 bytes |
 | `0x02` | `PKT_TYPE_RREQ` | Route Request (AODV route discovery) | 30 bytes |
 | `0x03` | `PKT_TYPE_RREP` | Route Reply | 40 bytes |
@@ -433,7 +436,7 @@ Owns all direct-message cryptography: the pairwise handshake, the session table,
 Three delivery tiers:
 
 | Tier | Retries | Timeout | Notes |
-|------|---------|---------|-------|
+| ------ | --------- | --------- | ------- |
 | Broadcast | 0 | none | Fire-and-forget |
 | Normal | 3 | 2s base, exponential backoff with ±25% jitter | End-to-end ACK required |
 | Critical | 8 | 3s base, exponential backoff with ±25% jitter | Delivery receipt + full relay path |
@@ -473,7 +476,7 @@ The regulatory policy table. It is worth being precise about what this component
 Each `bramble_freq_plan_t` carries a name, the citable regulatory basis, the band start and end, a default frequency, a maximum TX power, a maximum duty cycle percentage, a hard-enforce flag, and default modulation parameters.
 
 | Region | Regulatory basis | Band | Default | Max TX power | Duty cycle | Enforced |
-|--------|------------------|------|---------|--------------|------------|----------|
+| -------- | ------------------ | ------ | --------- | -------------- | ------------ | ---------- |
 | `US915` | FCC Part 15.247 | 902.0–928.0 MHz | 915.0 MHz | 30 dBm | 100% (no limit) | no |
 | `EU868` | ETSI EN 300.220 | 863.0–870.0 MHz | 868.1 MHz | 14 dBm | 1% | yes |
 | `AU915` | ACMA | 915.0–928.0 MHz | 921.0 MHz | 30 dBm | 100% (no limit) | no |
@@ -511,6 +514,7 @@ Generates and persists the node's identity on first boot (stored in NVS): an Ed2
 **Files:** `timesync.c`
 
 Stratum-based mesh time synchronization inspired by NTP:
+
 - Sync rides the beacon: each beacon carries `network_time` and a stratum/confidence field, consumed by `timesync_handle_sync` on beacon receipt (`main/mesh_task.c`). The dedicated TIME_SYNC packet type was removed unshipped; the beacon is the only sync transport.
 - GPS-equipped nodes are stratum 0; other nodes adopt the best (lowest stratum) time source they hear and become stratum+1.
 - Convergence to ±1–2s across the mesh.
@@ -565,7 +569,7 @@ The seam that lets the real firmware run as a virtual node. `emu_link` is a JSON
 **Consumers.** The virtual peripheral drivers are its only users, and they are what make the emulated node behave like hardware:
 
 | Driver | Messages |
-|--------|----------|
+| -------- | ---------- |
 | `radio_virt.c` | sends `tx`, `cad`; handles `rx`, `txdone`, `cadres` |
 | `indicator_virt.c` | sends `ind` (LED, buzzer, vibration) |
 | `battery_virt.c` | handles `batt` |
@@ -576,6 +580,7 @@ The connection itself is owned by the node bootstrap in `main/main.c`, which con
 **A threading contract worth knowing before touching it.** `emu_link`'s reader is a raw pthread, not a FreeRTOS task, so inbound handlers run outside the FreeRTOS scheduler's assumptions. `radio_virt.c` documents the resulting rules at length; read them before adding a handler that signals a FreeRTOS primitive.
 
 **Design notes:**
+
 - Event emission never blocks the radio critical path (drop events before blocking).
 - Default mode: disabled (no overhead when not in use).
 - Sampling: configurable 0-100% sampling rate for high-traffic environments.
@@ -610,12 +615,14 @@ Allows nodes to store messages destined for currently-offline peers and deliver 
 **Buffer:** 32 entries, each up to 200-byte payload.
 
 **Admission control:**
+
 - Per-destination cap: 8 entries
 - Per-source cap: 8 entries
 - FIFO eviction when buffer full (oldest entry displaced)
 - TTL: 24 hours (`MAILBOX_TTL_MS`)
 
 **Protocol integration:**
+
 - `BEACON_FLAG_MAILBOX` (`0x01`) in the beacon flags field advertises willingness to store
 - `PKT_TYPE_STORE_REQUEST` (`0x0B`): sender asks a mailbox node to store a message
 - `PKT_TYPE_STORE_ACK` (`0x0C`): mailbox confirms storage
@@ -623,6 +630,7 @@ Allows nodes to store messages destined for currently-offline peers and deliver 
 - `PKT_TYPE_MAILBOX_QUERY` (`0x0E`): destination queries a mailbox node for pending messages
 
 **API:**
+
 ```c
 void mailbox_init(mailbox_t *mb);
 int  mailbox_store(mailbox_t *mb, src, dest, payload, len, packet_id, now_ms);
@@ -639,7 +647,7 @@ Encrypted per-contact location sharing with three privacy tiers. Location update
 **Privacy tiers:**
 
 | Tier | Constant | Payload | Serialized size |
-|------|----------|---------|-----------------|
+| ------ | ---------- | --------- | ----------------- |
 | Full | `LOCATION_TIER_FULL` (0) | lat, lon, alt, accuracy, speed, heading, timestamp | 17 bytes |
 | Coarse | `LOCATION_TIER_COARSE` (1) | ~1 km grid square (lat/lon quantized to 0.01°) + low-res timestamp | 5 bytes |
 | Presence | `LOCATION_TIER_PRESENCE` (2) | Online/offline status byte only | 1 byte |
@@ -647,21 +655,25 @@ Encrypted per-contact location sharing with three privacy tiers. Location update
 **Tier hiding:** the sizes above are what the serializers return, not what goes on the wire. The tier is carried inside the encrypted plaintext (at `LOCATION_INNER_TIER_OFFSET`), and every tier is padded up to one canonical inner size, `L_LOC_INNER` = 18 bytes (a 1-byte tier prefix plus a payload padded to `LOCATION_FULL_SIZE`). The session path pads once more, to `L_LOC_INNER + CHANNEL_MSG_OVERHEAD`. The point is that an observer cannot infer the tier from ciphertext length, and therefore cannot infer how much a sender trusts a given recipient.
 
 **Position format (full, 17 bytes):**
-```
+
+```text
 lat_e7(4) + lon_e7(4) + alt_m(2) + accuracy_m(1) + speed_kmh(1) + heading_deg2(1) + timestamp(4)
 ```
 
 **Sharing rules:**
+
 - Per-contact sharing config: each contact has an assigned tier and an `auto_approve_requests` flag.
 - Update triggers: time-based (default 5-minute interval) or distance-based (default 100 m threshold).
 - `location_should_send(mgr, peer_addr, now_ms)` combines both triggers.
 
 **Position cache:**
+
 - Up to 16 cached peer positions (`LOCATION_MAX_CONTACTS`)
 - TTL: 1 hour (`LOCATION_CACHE_TTL_MS`)
 - `location_cache_purge(mgr, now_ms)` evicts stale entries
 
 **API:**
+
 ```c
 void location_init(location_manager_t *mgr);
 int  location_add_contact(mgr, peer_addr, tier);

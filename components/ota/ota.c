@@ -67,7 +67,7 @@ static int ota_https_start(const char* url, bool allow_downgrade) {
         esp_https_ota_abort(handle);
         return -1;
     }
-    if (ota_rollback_gate(new_desc.version, allow_downgrade) != 0) {
+    if (ota_rollback_gate(new_desc.version, new_desc.secure_version, allow_downgrade) != 0) {
         set_last_error("OTA rejected: version %s is below the anti-rollback floor",
                        new_desc.version);
         esp_https_ota_abort(handle);
@@ -217,7 +217,7 @@ static int ota_http_start(const char* url, bool allow_downgrade) {
         esp_ota_abort(ota_handle);
         return -1;
     }
-    if (ota_rollback_gate(new_desc.version, allow_downgrade) != 0) {
+    if (ota_rollback_gate(new_desc.version, new_desc.secure_version, allow_downgrade) != 0) {
         set_last_error("OTA rejected: version %s is below the anti-rollback floor",
                        new_desc.version);
         esp_ota_abort(ota_handle);

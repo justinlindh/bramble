@@ -36,7 +36,7 @@ Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 h
 ## Architecture Comparison
 
 | Feature | Meshtastic | MeshCore | Bramble |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Routing approach** | Managed flooding (nodes rebroadcast up to hop limit). Next-hop routing for DMs shipped in 2.6. Zero-Cost Hops (2.7.11): hops between favorited router-class nodes do not decrement the hop limit, so router backbones count as one hop. | Flooding for discovery and group channels; DMs are **source-routed**: the sender embeds the learned repeater path (1 byte per hop) in the packet, with flood fallback on retry. Client nodes never repeat; only repeaters and room servers forward. | Dual-substrate. Reactive AODV (default): RREQ/RREP discovery, cached routes, reverse-route breadcrumbs from DATA, intermediate-node RREP, route-forwarded ACKs. Opt-in flooding transport (`s_flood_transport`, default off): hop-limited, deduplicated, airtime-budget-gated floods with a flooded ACK. Channel/group messages relay multi-hop via the flood relay. |
 | **Encryption: channels** | AES256-CTR with PSK. No integrity check (no AEAD: issue #4030 still open as of 2026-07). Known-plaintext forgery possible for any PSK holder. | **AES-128**-ECB with a 16-byte PSK plus an HMAC-SHA256 truncated to **2 bytes**. Hashtag channels derive the key as SHA-256("#name") truncated to 16 bytes, so the key is guessable from the channel name. | AES-256-GCM (AEAD) with PSK. Channel ID encrypted inside ciphertext. |
 | **Encryption: DMs** | Since v2.5: per-node X25519 keys + AES-CCM. v2.7 added **Key Verification**: a six-digit out-of-band code both sides confirm to verify DM keys. Note CVE-2025-52464 (June 2025, CVSS 9.5): cloned/low-entropy keypairs from vendor golden images and weak RNG seeding allowed DM decryption; patched in 2.6.11/2.6.12, hardware RNG in 2.7.23. | Ed25519 identity converted to X25519 for ECDH, then AES-128-ECB encrypt-then-MAC with a 2-byte truncated MAC and zero padding. Signed adverts prevent advert spoofing. ECB mode and the 2-byte MAC are real weaknesses. | Per-peer end-to-end AES-256-GCM sessions, keyed by a role-symmetric quad-DH X25519 exchange with a 7-digit SAS (`components/dm_session`). Not readable by other channel members. Sessions ratchet: a per-direction HKDF chain gives per-message forward secrecy, and a DH ratchet folds fresh entropy in once per key-exchange epoch. The SAS-comparison UX ships in the web client, the T-Deck graphical build, and the pager (see [SECURITY-MODEL.md](SECURITY-MODEL.md)). |
@@ -47,7 +47,7 @@ Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 h
 | **Time sync** | GPS-based or NTP via WiFi/MQTT. No mesh-internal time sync protocol. | Repeaters support GPS clock sync (v1.14.1+); clocks can be set from the companion app/CLI. No mesh-internal sync protocol. | Stratum-based mesh time sync via beacon fields (corroboration-gated). GPS optional. |
 | **Hardware targets** | ESP32, nRF52, RP2040/RP2350, STM32WL, Linux. Dozens of boards, steady new-board cadence. | 50+ devices (ESP32/S3/C3, nRF52, RP2040); 80+ firmware binaries per release; OTA updates on nRF. | ESP32-S3 only (Heltec V3, T-Deck Plus, Heltec V4). Narrow focus by design. |
 | **Protocol overhead** | Protobuf-encoded. Header ~16 bytes + protobuf payload. | 1-byte header + 4-byte transport codes + 1-byte path length + 0-64-byte path; payload up to 184 bytes, max packet 255. No protocol-level CRC (relies on LoRa PHY). | 12-byte base header, compact binary (no protobuf/JSON). Authenticated DATA adds a 28-byte envelope prefix (src_addr, relay-mutable prev_hop, 8-byte auth HMAC) plus a 12-byte nonce and 16-byte GCM tag. |
-| **Node identity** | Node ID is MAC-derived (not cryptographic; spoofable on channels), but since 2.5 every node also has a per-node X25519 keypair for DM encryption/signing, with six-digit Key Verification since 2.7. | Ed25519 public key per node; signed adverts. On-air source/destination IDs are 1-byte public-key-prefix hashes (roughly 1-in-256 collision), so the on-air ID is key-derived but trivially collidable. | Ed25519 identity key per node; address = SHA-256(key)[0:4]. Self-signed, relay-gated identity attestations; receivers TOFU-pin verified bindings and reject any attestation whose address does not derive from its own key, so claiming another node's address is cryptographically infeasible. Pinned identities gate the timesync quorum and DM key continuity. |
+| **Node identity** | Node ID is MAC-derived (not cryptographic; spoofable on channels), but since 2.5 every node also has a per-node X25519 keypair for DM encryption/signing, with six-digit Key Verification since 2.7. | Ed25519 public key per node; signed adverts. On-air source/destination IDs are 1-byte public-key-prefix hashes (roughly 1-in-256 collision), so the on-air ID is key-derived but trivially collidable. | Ed25519 identity key per node; address = `SHA-256(key)[0:4]`. Self-signed, relay-gated identity attestations; receivers TOFU-pin verified bindings and reject any attestation whose address does not derive from its own key, so claiming another node's address is cryptographically infeasible. Pinned identities gate the timesync quorum and DM key continuity. |
 | **Membership / Sybil control** | None. Any device on the channel PSK is a member. | Per-node keys and a per-peer contact list / ACL: trust is decided locally by each node's operator adding contacts; repeater admin is password-based per-repeater ACL. No fleet membership authority; no Sybil-scarcity story. | Optional per-fleet **trust anchor**: an operator-held Ed25519 anchor endorses node identities with a signed cert (`docs/trust-anchor.md`). An anchored mesh pins ONLY peers carrying an anchor-signed cert, so un-admitted Sybils cannot join, corroborate the timesync quorum, or pass DM key-continuity. The anchor private seed is operator-held and offline (never on a node, never over RPC). Honest bound: this stops outsiders and un-admitted Sybils, NOT a compromised admitted insider; anchor custody is the trust root; certs are permanent in v1 (no active revocation short of re-anchor). |
 | **Max hops** | 7 max (default 3); Zero-Cost Hops make favorited-router hops free, stretching effective reach well past 7. | Protocol supports 64 (1-byte path hashes). Current firmware defaults: `flood.max.unscoped` 64 (effectively uncapped), `flood.max.advert` 8. | Reactive: expanding-ring discovery 4 then 8, max route depth 8. Flood transport: configurable 1..32, default 8. |
 
@@ -95,7 +95,7 @@ Bramble uses **on-demand (reactive) routing** for DMs. Routes are discovered onl
 ### Meshtastic
 
 | Aspect | Details |
-|---|---|
+| --- | --- |
 | **Channel encryption** | AES256-CTR with PSK. **No integrity check** (CTR without MAC). Anyone who knows the PSK can forge messages impersonating any node. Issue #4030 (AEAD) still open as of 2026-07. |
 | **DM encryption (v2.5+)** | Per-node X25519 keys + AES-CCM. Real E2E encryption with sender authentication. v2.7 added six-digit Key Verification UX. |
 | **Key incident (2025)** | CVE-2025-52464 (CVSS 9.5): vendor firmware cloning and weak RNG seeding produced duplicated/low-entropy keypairs, allowing DM decryption and remote-admin hijack. Fixed in 2.6.11/2.6.12 (deferred keygen, compromised-key wipe); hardware RNG in 2.7.23. |
@@ -107,10 +107,10 @@ Bramble uses **on-demand (reactive) routing** for DMs. Routes are discovered onl
 ### MeshCore
 
 | Aspect | Details |
-|---|---|
+| --- | --- |
 | **Identity** | Ed25519 key pair per node. Adverts (name/position/public key) are signed, preventing advert spoofing. |
 | **DM encryption** | Ed25519 keys converted to X25519 for ECDH, then **AES-128-ECB** encrypt-then-MAC with an HMAC-SHA256 truncated to **2 bytes**, zero padding. ECB mode (identical plaintext blocks produce identical ciphertext blocks) and the 2-byte MAC (1-in-65536 forgery) are genuine cryptographic weaknesses. |
-| **Channel/room encryption** | AES-128-ECB with 16-byte PSK + 2-byte truncated MAC. Hashtag channels derive keys from the channel name (SHA-256("#name")[0:16]), so they are effectively public. Room servers are BBS-style store-and-forward spaces with history push. |
+| **Channel/room encryption** | AES-128-ECB with 16-byte PSK + 2-byte truncated MAC. Hashtag channels derive keys from the channel name (`SHA-256("#name")[0:16]`), so they are effectively public. Room servers are BBS-style store-and-forward spaces with history push. |
 | **Forward secrecy** | None: deterministic per-contact shared secret, no ratcheting or ephemeral keys. |
 | **Metadata leakage** | On-air source/destination are 1-byte public-key-prefix hashes (about 1-in-256 collision), plus the embedded source-route path in DMs. Observable by relays and passive listeners; short hashes give plausible deniability but also enable misdelivery/collision. |
 | **Key management** | Users broadcast signed "adverts" carrying name, position, and public key; contacts are added manually per node. No automatic rotation. |
@@ -120,7 +120,7 @@ Bramble uses **on-demand (reactive) routing** for DMs. Routes are discovered onl
 ### Bramble
 
 | Aspect | Details |
-|---|---|
+| --- | --- |
 | **Channel encryption** | AES-256-GCM (AEAD: provides both confidentiality and integrity). Channel ID is inside the ciphertext, so non-members cannot determine which channel a message belongs to. Keys derive deterministically from the channel passphrase, so a passphrase holder can compute every epoch key. |
 | **DM encryption** | Per-peer end-to-end AES-256-GCM sessions, keyed by a role-symmetric quad-DH X25519 exchange (four X25519 DHs mixed via HKDF-SHA256) with a 7-digit SAS for out-of-band verification (`components/dm_session`). The handshake travels inside DATA envelopes (`app_type = APP_TYPE_KE`); the standalone `KEY_EXCHANGE` packet type was retired from the wire. Other channel members cannot read a DM. |
 | **Forward secrecy** | DMs: yes, per message. Each direction has its own HKDF chain seeded from the handshake secret; every message derives a fresh message key and then advances the chain, so a key recovered from one message decrypts neither earlier nor later messages (`components/dm_session/dm_session.c`, `dm_ratchet_step`). A 3-byte epoch-plus-index ratchet header is bound into the AEAD as associated data, and a bounded skip window absorbs reordering before degrading to a re-handshake. Post-compromise recovery is coarser: the DH ratchet (`dm_ratchet_dh`) folds fresh entropy into the root key once per key-exchange epoch, not per message, so recovery from a state compromise is bounded by the epoch cadence. Channels: no. Epoch keys derive from the previous epoch's key and everything derives from the passphrase, so a passphrase holder can compute every epoch. Verified by host tests (`test/test_dm_ratchet.c`), not by a third-party audit. |
@@ -255,7 +255,7 @@ Reactive DM traffic scales as O(path_length) after route discovery: one transmis
 ## Resource Usage
 
 | Resource | Meshtastic | MeshCore | Bramble |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **RAM** | ~100-200 KB (varies by platform and features enabled; unofficial figures, not published) | Lightweight: "no dynamic allocation except during setup." Exact figures not published. | ~127 KB total (20 KB protocol, 5 KB app, 18 KB RTOS, 84 KB system). 60% headroom on ESP32-S3 (320 KB available). |
 | **Flash** | ~1.5-2 MB (ESP32 with all features; unofficial) | Compact: prebuilt binaries for 50+ boards. Size not published. | ~1.75 MB projected (256 KB firmware, 512 KB ESP-IDF, OTA partitions). |
 | **Battery life** | Good with sleep modes. nRF52 boards excel (~days to weeks). ESP32 boards: ~1-3 days typical with screen. | Low power focus; clients never repeat, saving energy. v1.15/1.16 shipped measured ESP repeater and nRF companion power reductions; companion auto-shutdown off external power. | Designed for ESP32 deep sleep (~10µA). Airtime budgeting inherently conserves battery. No real-world battery data. |
@@ -266,7 +266,7 @@ Reactive DM traffic scales as O(path_length) after route discovery: one transmis
 ## Ecosystem & Maturity
 
 | Aspect | Meshtastic | MeshCore | Bramble |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Community size** | Very large (~51k Discord, active subreddit, many YouTube creators) | Large and growing fast (claimed 30,000+ users in 80+ countries, 3.2k GitHub stars, Wikipedia page, regional mesh orgs) | Solo developer project |
 | **Companion apps** | Android, iOS, Web, Python CLI, extensive third-party tools | Android, iOS, Web, Windows/Mac/Linux desktop (closed-source freemium), meshcore.js, Python `meshcore-cli`, Home Assistant integration | Web companion app, Electron desktop app, Go SDK, CLI tool |
 | **Hardware support** | Dozens of boards across six architectures | 50+ boards, 80+ binaries per release, nRF OTA updates | 3 boards (Heltec V3, T-Deck Plus, Heltec V4) |
@@ -319,13 +319,13 @@ Reactive DM traffic scales as O(path_length) after route discovery: one transmis
 
 ## Key sources (verified 2026-07-08)
 
-- Meshtastic releases: https://github.com/meshtastic/firmware/releases (2.7.26 Beta, 2026-06-24)
-- Meshtastic mesh algorithm and encryption docs: https://meshtastic.org/docs/overview/mesh-algo/ , https://meshtastic.org/docs/overview/encryption/
-- Zero-Cost Hops: https://meshtastic.org/blog/zero-cost-hops-favorite-routers/
-- CVE-2025-52464: https://github.com/meshtastic/firmware/security/advisories/GHSA-gq7v-jr8c-mfr7
-- Channel AEAD issue (open): https://github.com/meshtastic/firmware/issues/4030
-- MeshCore repo and releases: https://github.com/meshcore-dev/MeshCore (v1.16.0, 2026-06-06)
-- MeshCore official docs: https://docs.meshcore.io/
-- MeshCore v1.16.0 / v1.15.0 notes: https://blog.meshcore.io/2026/06/06/release-1-16-0 , https://blog.meshcore.io/2026/04/19/release-1-15-0
-- MeshCore governance split: https://blog.meshcore.io/2026/04/23/the-split
-- MeshCore crypto analysis: https://jacksbrain.com/2026/01/a-hitchhiker-s-guide-to-meshcore-cryptography/
+- Meshtastic releases: <https://github.com/meshtastic/firmware/releases> (2.7.26 Beta, 2026-06-24)
+- Meshtastic mesh algorithm and encryption docs: <https://meshtastic.org/docs/overview/mesh-algo/> , <https://meshtastic.org/docs/overview/encryption/>
+- Zero-Cost Hops: <https://meshtastic.org/blog/zero-cost-hops-favorite-routers/>
+- CVE-2025-52464: <https://github.com/meshtastic/firmware/security/advisories/GHSA-gq7v-jr8c-mfr7>
+- Channel AEAD issue (open): <https://github.com/meshtastic/firmware/issues/4030>
+- MeshCore repo and releases: <https://github.com/meshcore-dev/MeshCore> (v1.16.0, 2026-06-06)
+- MeshCore official docs: <https://docs.meshcore.io/>
+- MeshCore v1.16.0 / v1.15.0 notes: <https://blog.meshcore.io/2026/06/06/release-1-16-0> , <https://blog.meshcore.io/2026/04/19/release-1-15-0>
+- MeshCore governance split: <https://blog.meshcore.io/2026/04/23/the-split>
+- MeshCore crypto analysis: <https://jacksbrain.com/2026/01/a-hitchhiker-s-guide-to-meshcore-cryptography/>

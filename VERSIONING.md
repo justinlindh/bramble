@@ -2,7 +2,7 @@
 
 ## Repository Structure
 
-```
+```text
 bramble (this repo)          bramble-go              bramble-cli
 ├── main/                    ├── transport/           ├── cmd/
 ├── components/              ├── client/              └── main.go
@@ -21,7 +21,7 @@ bramble (this repo)          bramble-go              bramble-cli
 ```
 
 | Repo | Contains |
-|------|----------|
+| ------ | ---------- |
 | **bramble** | ESP32 firmware, OpenAPI spec (`api/openapi.yaml`), simulator, webapp |
 | **bramble-go** | Go SDK: transport layer (BLE/serial), JSON-RPC client |
 | **bramble-cli** | CLI tool built on bramble-go |
@@ -41,7 +41,7 @@ Wire versions (the mesh packet format, currently at wire version 4, `BRAMBLE_VER
 ### Semver Rules
 
 | Bump | When | Example |
-|------|------|---------|
+| ------ | ------ | --------- |
 | **Patch** (0.1.x) | Bug fixes in method behavior, no schema changes | Fix edge case in `bramble.getVersion` response |
 | **Minor** (0.x.0) | New methods added, existing methods unchanged | Add `bramble.setConfig` |
 | **Major** (x.0.0) | Breaking changes to existing method params/responses | Rename a required field |
@@ -55,7 +55,7 @@ Independent semver for the firmware binary. Tracks hardware support, performance
 Independent semver. Each release documents its supported protocol version range (min/max).
 
 | Bump | When |
-|------|------|
+| ------ | ------ |
 | **Patch** | Bug fixes, no API changes |
 | **Minor** | Support for new protocol methods |
 | **Major** | Breaking changes to Go client API |

@@ -110,56 +110,96 @@ beforeEach(() => {
   });
 });
 
+// Generous per-waitFor ceiling for a suite that drives real async ceremonies
+// (connect + multiple RPC round trips) instead of pre-resolved mocks: under
+// CI load a bit of slack here is cheaper than a spurious failure, and every
+// wait below is on a real condition, never a fixed delay.
+const WAIT_OPTS = { timeout: 5000 };
+
 describe('AnchorSection RPC custody guard', () => {
-  it('never sends the anchor seed over RPC through the full enroll ceremony', async () => {
-    const { useStore } = await import('../../store/index');
-    const { connect } = await import('../../store/actions');
-    const { AnchorSection } = await import('./AnchorSection');
+  it(
+    'never sends the anchor seed over RPC through the full enroll ceremony',
+    async () => {
+      const { useStore } = await import('../../store/index');
+      const { connect } = await import('../../store/actions');
+      const { AnchorSection } = await import('./AnchorSection');
 
-    useStore.setState({
-      connectionState: 'disconnected',
-      config: null,
-      status: null,
-      anchorStatus: null,
-    } as never);
+      useStore.setState({
+        connectionState: 'disconnected',
+        config: null,
+        status: null,
+        anchorStatus: null,
+      } as never);
 
-    await connect('serial');
-    render(<AnchorSection />);
+      await connect('serial');
+      render(<AnchorSection />);
 
-    // 1. Generate + confirm a fresh anchor (seed lands in localStorage only).
-    fireEvent.click(screen.getByRole('button', { name: 'Generate anchor' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'I have saved this backup' }));
-    const seed = localStorage.getItem(SEED_KEY)!;
-    expect(seed).toMatch(/^[0-9a-f]{64}$/);
+      // 1. Generate + confirm a fresh anchor (seed lands in localStorage only).
+      fireEvent.click(screen.getByRole('button', { name: 'Generate anchor' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'I have saved this backup' }, WAIT_OPTS));
+      const seed = localStorage.getItem(SEED_KEY)!;
+      expect(seed).toMatch(/^[0-9a-f]{64}$/);
 
-    // 2. Provision the anchor PUBLIC key to the node.
-    fireEvent.click(screen.getByRole('button', { name: 'Provision anchor to this node' }));
-    await waitFor(() =>
-      expect(rpcMock).toHaveBeenCalledWith('bramble.setAnchor', expect.any(Object), undefined),
-    );
-    // The node now reports the matching fingerprint; wait for the enroll button
-    // to become enabled (mismatch guard cleared).
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Enroll this node' })).toBeEnabled());
+      // 2. Provision the anchor PUBLIC key to the node.
+      fireEvent.click(screen.getByRole('button', { name: 'Provision anchor to this node' }));
+      await waitFor(
+        () => expect(rpcMock).toHaveBeenCalledWith('bramble.setAnchor', expect.any(Object), undefined),
+        WAIT_OPTS,
+      );
+      // onProvision keeps running past that rpc call (setProvisionSuccess, then
+      // refreshStatus's own rpc round trip, then setProvisioning(false) in its
+      // finally). Wait for all of it to settle, not just the first rpc call,
+      // so every trailing setState lands inside this waitFor's act() window
+      // instead of firing after the test moves on (the source of the
+      // "not wrapped in act(...)" warnings and the flake under load).
+      await waitFor(
+        () => expect(screen.getByText('Anchor provisioned to this node.')).toBeInTheDocument(),
+        WAIT_OPTS,
+      );
+      await waitFor(
+        () => expect(screen.getByRole('button', { name: 'Provision anchor to this node' })).toBeEnabled(),
+        WAIT_OPTS,
+      );
+      // The node now reports the matching fingerprint; wait for the enroll button
+      // to become enabled (mismatch guard cleared).
+      await waitFor(
+        () => expect(screen.getByRole('button', { name: 'Enroll this node' })).toBeEnabled(),
+        WAIT_OPTS,
+      );
 
-    // 3. Enroll: sign locally, send only the cert.
-    fireEvent.click(screen.getByRole('button', { name: 'Enroll this node' }));
-    await waitFor(() =>
-      expect(rpcMock).toHaveBeenCalledWith('bramble.setEndorsement', expect.any(Object), undefined),
-    );
+      // 3. Enroll: sign locally, send only the cert.
+      fireEvent.click(screen.getByRole('button', { name: 'Enroll this node' }));
+      await waitFor(
+        () => expect(rpcMock).toHaveBeenCalledWith('bramble.setEndorsement', expect.any(Object), undefined),
+        WAIT_OPTS,
+      );
+      // Same reasoning as the provision step: let onEnrollLocal's trailing
+      // refreshStatus + setEnrolling(false) settle before the plain
+      // synchronous assertions below run.
+      await waitFor(
+        () => expect(screen.getByText('This node is enrolled (permanent endorsement applied).')).toBeInTheDocument(),
+        WAIT_OPTS,
+      );
+      await waitFor(
+        () => expect(screen.getByRole('button', { name: 'Enroll this node' })).toBeEnabled(),
+        WAIT_OPTS,
+      );
 
-    // The seed must appear in NO argument of ANY rpc call.
-    const allRpcArgs = JSON.stringify(rpcMock.mock.calls);
-    expect(allRpcArgs).not.toContain(seed);
+      // The seed must appear in NO argument of ANY rpc call.
+      const allRpcArgs = JSON.stringify(rpcMock.mock.calls);
+      expect(allRpcArgs).not.toContain(seed);
 
-    // Sanity: the ceremony really ran over RPC (public key + cert were sent).
-    const { anchorPubFromSeed } = await import('../../utils/anchor');
-    expect(rpcMock).toHaveBeenCalledWith(
-      'bramble.setAnchor',
-      { anchor_pubkey: anchorPubFromSeed(seed) },
-      undefined,
-    );
-    const endorseCall = rpcMock.mock.calls.find((c) => c[0] === 'bramble.setEndorsement');
-    expect(endorseCall?.[1]).toMatchObject({ not_after: 'ffffffffffffffff' });
-    expect((endorseCall?.[1] as Record<string, string>).endorsement_sig).toMatch(/^[0-9a-f]{128}$/);
-  });
+      // Sanity: the ceremony really ran over RPC (public key + cert were sent).
+      const { anchorPubFromSeed } = await import('../../utils/anchor');
+      expect(rpcMock).toHaveBeenCalledWith(
+        'bramble.setAnchor',
+        { anchor_pubkey: anchorPubFromSeed(seed) },
+        undefined,
+      );
+      const endorseCall = rpcMock.mock.calls.find((c) => c[0] === 'bramble.setEndorsement');
+      expect(endorseCall?.[1]).toMatchObject({ not_after: 'ffffffffffffffff' });
+      expect((endorseCall?.[1] as Record<string, string>).endorsement_sig).toMatch(/^[0-9a-f]{128}$/);
+    },
+    15000,
+  );
 });

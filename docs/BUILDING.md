@@ -188,7 +188,7 @@ npm test
 ## Supported hardware
 
 | Board | MCU | Radio | Status |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Heltec WiFi LoRa 32 V3 | ESP32-S3 | SX1262 | ✅ Running target |
 | Heltec WiFi LoRa 32 V4 | ESP32-S3 | SX1262 (+ optional L76K GNSS) | ✅ Running target (GNSS pin mapping validation ongoing) |
 | LilyGo T-Deck Plus | ESP32-S3 | SX1262 | ✅ Running target with LVGL v9 GUI |

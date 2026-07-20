@@ -7,7 +7,7 @@ physical access is the trust anchor.
 ## Quick Summary
 
 | Transport | Default | How it authenticates |
-|-----------|---------|----------------------|
+| ----------- | --------- | ---------------------- |
 | WebSocket | Token required | `Authorization: Bearer <token>` header or `?token=` query parameter |
 | BLE | Token required | First write on a new connection is the token |
 | Serial (USB) | No auth, by design | Physical access is the pairing bootstrap |
@@ -70,6 +70,7 @@ The `auth` commands work over serial (USB).
 ```
 
 To read the current token (serial or authenticated clients only):
+
 ```json
 {"jsonrpc":"2.0","id":1,"method":"bramble.getAuthToken","params":{}}
 ```
@@ -124,7 +125,7 @@ The browser's WebSocket API cannot set HTTP headers, so for web pages the
 query parameter is the supported authentication mechanism, not a
 deprecated one:
 
-```
+```text
 ws://192.0.2.100/ws?token=<token>
 ```
 

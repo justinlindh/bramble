@@ -22,6 +22,7 @@ once: as the sacrificial serial-attached RF gateway for the real-mesh bridge.
 Nothing about the Heltec is mimicked.
 
 Non-goals for phase 1:
+
 - No Xtensa emulation (that is phase 2, QEMU device models, separate spec).
 - No rewrite of the existing discrete-event simulator (`simulator/engine`); we
   extend gosim, we do not replace it.
@@ -38,7 +39,7 @@ with the real one (single source of truth: the real header, virtual profile
 derives from it).
 
 | Subsystem | Real hardware | Pins | Virtual backend |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Radio | SX1262 (NiceRF, DIO2 RF switch) | CS 8, RST 12, BUSY 13, DIO1 14 | `radio_virt.c` implements `radio.h`, frames to the ether |
 | Display | GDEY0213B74 e-paper, SSD1680, 250x122, 4-wire SPI | CS 4, D/C 5, RES# 6, BUSY 7 (active HIGH) | real SSD1680 engine (pure) + host transport, framebuffer to frontend |
 | Buttons | SELECT/BOOT, UP, DOWN + RESET | 0, 21, 47 | `button_virt.c`, events from frontend |
@@ -49,7 +50,7 @@ derives from it).
 
 ## 3. Architecture
 
-```
+```text
  +--------------------+     emu-link (JSON lines over unix socket/TCP)
  |  virtual pager #1  |----------------------------+
  |  (real firmware,   |                            |
@@ -81,6 +82,7 @@ files in the tree are already `#ifdef ESP_PLATFORM`-gated and `crypto_host.c`
 `main/` assumes about the device environment.
 
 Known IDF-linux caveats we accept and design around:
+
 - Cooperative preemption: busy-loops never yield. Any spin-wait found during the
   spike gets a `vTaskDelay` and that is a legitimate firmware fix, not a hack.
 - `driver` component is mock-only on host: no SPI/GPIO/UART. Correct by
@@ -260,6 +262,7 @@ messages that render on each other's e-paper, observed pixel-exact through a
 real browser. Buttons reach the firmware; RESET restarts with identity intact.
 
 Deviations from the plan as written, and why:
+
 - Provisioning + scripted send use a boot-time `EMU_NETWORK_KEY` env seed and
   scenario-scripted autosend, not the emu-link control-message path section 8
   originally implied. The env path was sufficient for the headless/CI scenarios

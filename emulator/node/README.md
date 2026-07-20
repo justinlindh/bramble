@@ -8,7 +8,7 @@ are no-op stubs (`null_drivers/`).
 
 ## Build and run
 
-```
+```bash
 source $IDF_PATH/export.sh          # ESP-IDF 5.4.1
 cd emulator/node
 idf.py --preview set-target linux
@@ -23,7 +23,7 @@ path is entered (INERT, no TX: node unprovisioned), and the process idles
 
 AddressSanitizer build (separate build dir):
 
-```
+```bash
 idf.py -B build-asan build -DCMAKE_C_FLAGS=-fsanitize=address \
     -DCMAKE_CXX_FLAGS=-fsanitize=address -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
 ./spike_check.sh build-asan/bramble-node.elf

@@ -84,7 +84,7 @@ Use this after RPC surface or transport-impacting changes.
 ## Decision guide
 
 | Changed area | Minimum recommended verification |
-|---|---|
+| --- | --- |
 | `components/**`, `main/**` | `bash test/run_all_tests.sh` |
 | `webapp/**` | `cd webapp && npm test` |
 | Routing/reliability/airtime | Host tests + targeted simulator scenario |

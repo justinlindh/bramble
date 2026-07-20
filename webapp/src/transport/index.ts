@@ -4,6 +4,7 @@ import { WebSocketTransport } from './WebSocketTransport';
 import { MockTransport } from './MockTransport';
 import { isEmbeddedShell } from '../utils/platform';
 import type { Transport, TransportType } from '../types/bramble';
+import type { RpcMethod, RpcParams, RpcResult } from '../types/rpc';
 
 export { SerialTransport } from './SerialTransport';
 export { BLETransport } from './BLETransport';
@@ -57,8 +58,15 @@ export class BrambleClient {
     return this.transport.disconnect();
   }
 
-  async rpc<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
-    return this.transport.sendRPC<T>(method, params, timeoutMs);
+  // Contract-typed overload: when the method string is one api/openapi.yaml
+  // defines (via types/rpcContract.generated.ts), params and result resolve
+  // from the contract. The generic overload remains for call sites that
+  // intentionally send params outside the contract, such as snake_case
+  // fallbacks for older firmware.
+  async rpc<M extends RpcMethod>(method: M, params?: RpcParams<M>, timeoutMs?: number): Promise<RpcResult<M>>;
+  async rpc<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T>;
+  async rpc(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<unknown> {
+    return this.transport.sendRPC(method, params, timeoutMs);
   }
 
   subscribe(method: string, cb: (params: unknown) => void): () => void {
