@@ -68,6 +68,15 @@ target), `test/` (host test suites), `scripts/`, `docs/`, `api/openapi.yaml`
 - Every CI check gates. There is no advisory tier. A step may use
   continue-on-error only to let later steps collect more failures, and the
   job must then end with a terminal step that fails on any failed step.
+- CI does no redundant or unnecessary work. Never run the same expensive
+  step twice: fold coverage or other instrumentation into the existing test
+  run rather than re-running a suite to produce a second artifact or number.
+  Never run a job or suite a change cannot affect: respect and tighten the
+  change-detection areas so, for example, a docs-only or webapp-only PR does
+  not build firmware. Prefer the cheapest correct mechanism. Running a
+  timing-sensitive suite twice also doubles the flake surface, which is its
+  own reason to avoid it. Any CI change is reviewed specifically for
+  duplicated or unnecessary work.
 - PR bodies follow `.github/PULL_REQUEST_TEMPLATE.md` (What and why /
   Changes / Validation with real command output / Release impact), written
   as unwrapped prose: one paragraph per line, because the GitHub renderer
