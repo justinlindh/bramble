@@ -83,8 +83,8 @@ static void traffic_event_notify(const traffic_event_t* evt, void* ctx);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
-#define BEACON_INTERVAL_MS 60000      /* 60 seconds between beacons (A/B test) */
 /* BEACON_JITTER_MS lives in beacon_policy_calc.h next to beacon_next_interval_ms. */
+#define BEACON_INTERVAL_MS 60000      /* 60 seconds between beacons (A/B test) */
 #define NEIGHBOR_PURGE_INTERVAL 60000 /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH 16
 #define MESH_EVENT_QUEUE_DEPTH 8
