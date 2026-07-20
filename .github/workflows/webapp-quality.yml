@@ -50,8 +50,18 @@ jobs:
         run: npm run typecheck --prefix webapp
       - name: Electron typecheck
         run: npm run typecheck:electron --prefix webapp
-      - name: Unit tests
-        run: npm run test:unit --prefix webapp
+      - name: Unit tests (with coverage)
+        # --coverage collects v8 line coverage in the same run (no second vitest
+        # pass) and writes webapp/coverage/coverage-summary.json. Pass/fail is
+        # unchanged from a plain `vitest run`.
+        run: npm run test:unit --prefix webapp -- --coverage
+      - name: Webapp coverage ratchet
+        # Ratchet the total line coverage against ci/coverage-baseline.json. v8
+        # coverage is deterministic across machines, so the pods match local.
+        run: |
+          PCT="$(python3 -c "import json;print(json.load(open('webapp/coverage/coverage-summary.json'))['total']['lines']['pct'])")"
+          echo "webapp total line coverage: ${PCT}%"
+          python3 scripts/ci/check_coverage.py webapp "$PCT"
       - name: Install and smoke-test the mock node server (webapp/mock)
         # webapp/mock is a standalone package with its own package.json and
         # package-lock.json, never installed above: the root npm ci only

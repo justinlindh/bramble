@@ -49,6 +49,14 @@ jobs:
           sudo -nE env "PATH=$PATH" setpriv --reuid="$(id -u)" --regid="$(id -g)" \
             --init-groups --inh-caps +sys_ptrace --ambient-caps +sys_ptrace \
             bash test/run_all_tests.sh
+      - name: Host coverage ratchet
+        # A second, gcov-instrumented build (ASan off) in test/build-coverage/.
+        # It aggregates line coverage over product code (components/, main/) with
+        # scripts/ci/host_coverage.py using only gcov + python3 (no gcovr, so no
+        # pip install can strand this required gate), then fails if coverage drops
+        # more than the tolerance below ci/coverage-baseline.json. The pristine
+        # ASan run above stays the pass/fail gate; this run only needs execution.
+        run: bash scripts/ci/run-host-coverage.sh
 
   board-build-smoke:
     name: Board build smoke (${{ matrix.board }})
@@ -238,6 +246,16 @@ jobs:
           # -count=1 defeats go's test cache, which can serve stale results
           # across cgo-compiled C edits (observed on this runner setup).
           go test -count=1 ./...
+      - name: gosim coverage ratchet
+        # Re-run with statement coverage and ratchet the total against
+        # ci/coverage-baseline.json. Go coverage is toolchain-stable, so this
+        # number matches locally and on the pods.
+        run: |
+          cd simulator/gosim
+          go test -covermode=set -coverprofile=cover.out -count=1 ./...
+          PCT="$(go tool cover -func=cover.out | awk '/^total:/ {gsub(/%/,"",$NF); print $NF}')"
+          echo "gosim total statement coverage: ${PCT}%"
+          python3 "$GITHUB_WORKSPACE/scripts/ci/check_coverage.py" gosim "$PCT"
 
   emulator:
     name: Emulator suite

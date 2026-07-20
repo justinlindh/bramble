@@ -45,6 +45,31 @@ as issue #160. The `.clang-tidy` and `.markdownlint-cli2.yaml` dotfiles stay
 because editors and language servers read them directly; run `markdownlint-cli2`
 or `clang-tidy` by hand if you want the local signal.
 
+## Coverage ratchet (line coverage, no-regression)
+
+Three suites measure line coverage and gate on it as steps inside existing
+required jobs (no new required context):
+
+- `host-c`: a second gcov-instrumented build of the Unity host suite
+  (`BRAMBLE_COVERAGE=ON`, ASan off) built into `test/build-coverage/`, run inside
+  the `Host tests` job (`quality.yml`). `scripts/ci/host_coverage.py` aggregates
+  line coverage over product code (`components/`, `main/`) using only `gcov` and
+  the Python standard library, so no `gcovr`/pip install can strand the gate.
+- `gosim`: `go test -covermode=set` total statement coverage, in the
+  `gosim integration` job (`quality.yml`).
+- `webapp`: vitest v8 line coverage collected in the same `Unit tests` run
+  (`--coverage`), in the `Webapp checks` job (`webapp-quality.yml`).
+
+Each suite's measured percentage is checked by `scripts/ci/check_coverage.py`
+against a committed floor in `ci/coverage-baseline.json`. The gate fails when
+coverage drops more than `tolerance_pct` below the floor, which is what deleting
+a test does. The baseline NEVER auto-drifts: it is a checked-in file a developer
+updates deliberately with `scripts/ci/update-coverage-baseline.sh` (floors go up
+after adding tests; a floor only goes down with a written justification in the
+PR). The host-c number is gcc-version sensitive, so the canonical baseline is the
+value the runner measures; when a first CI run reports a different number than a
+local box, commit the CI value.
+
 ## The collect-then-fail pattern (step-level `continue-on-error`)
 
 Job-level or de-facto advisory checks are forbidden, but step-level
