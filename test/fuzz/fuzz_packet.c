@@ -66,7 +66,7 @@ static void fuzz_ack(const uint8_t* buf, size_t len) {
     bramble_ack_t p;
     if (bramble_ack_deserialize(&p, buf, len) != ESP_OK)
         return;
-    /* hop_count gates a relay_path[] walk in main/mesh_task.c's handle_ack,
+    /* hop_count gates a relay_path[] walk in main/mesh_reliability.c's handle_ack,
      * so it must always come back inside the array bound. */
     assert(p.hop_count <= ACK_MAX_HOPS);
     ROUNDTRIP(bramble_ack_serialize, &p, bramble_ack_wire_size(&p));

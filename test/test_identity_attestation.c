@@ -278,7 +278,7 @@ static void test_wrong_key_fails_verify(void) {
 
 /* Origination contract: an attestation built from a node's own
  * bramble_identity_t, using exactly the field mapping
- * send_identity_attestation (main/mesh_task.c) uses, verifies against the
+ * send_identity_attestation (main/mesh_beacon.c) uses, verifies against the
  * frame's embedded key after a wire round trip. mesh_task.c itself is
  * never host-compiled (see test/CMakeLists.txt), so this is the host-side
  * pin of the identity-to-frame mapping. */

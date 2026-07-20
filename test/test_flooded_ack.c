@@ -87,7 +87,7 @@ typedef struct {
 } ack_dispatch_result_t;
 
 /*
- * Mirrors main/mesh_task.c's handle_ack (flood path) exactly:
+ * Mirrors main/mesh_reliability.c's handle_ack (flood path) exactly:
  *   ack_verify -> (dest == self) consume via pending_ack_remove
  *              -> (dest != self, flood on) channel_flood_decide relay.
  * `buf`/`len` are the real serialized wire bytes; deserialization here goes

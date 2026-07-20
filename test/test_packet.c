@@ -125,7 +125,7 @@ void test_ack_auth_hmac_offset_independent_of_hop_count(void) {
 /* Fix 5 (red-team panel): a tampered/truncated hop_count claiming more
  * relay_path entries than the buffer actually supplies must not leave
  * relay_path[] beyond what was truly read holding uninitialized/garbage
- * caller memory. handle_ack (main/mesh_task.c) reads relay_path[0..
+ * caller memory. handle_ack (main/mesh_reliability.c) reads relay_path[0..
  * hop_count) straight into the onAck UI notification, so stale bytes
  * there is a real (bounded, own-UI) leak. This proves hop_count is
  * clamped DOWN to the number of entries the buffer truly carries, and
