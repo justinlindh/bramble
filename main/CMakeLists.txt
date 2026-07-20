@@ -1,5 +1,9 @@
 set(main_srcs
-    "main.c" "mesh_task.c" "broadcast_delivery_receipt.c" "delivery_event_ring.c"
+    "main.c" "mesh_task.c"
+    "mesh_beacon.c" "mesh_reliability.c" "mesh_probe.c" "mesh_dm.c"
+    "mesh_routing.c" "mesh_location.c" "mesh_mailbox.c" "mesh_persist.c"
+    "mesh_channels.c"
+    "broadcast_delivery_receipt.c" "delivery_event_ring.c"
     "rpc_methods.c" "ws_server.c" "ws_origin.c" "ws_auth_credential.c"
     "secure_nvs.c" "board.c" "util.c" "rreq_pseudonym.c" "beacon_policy_calc.c"
     "probe_results.c" "probe_reply.c" "rerr_ack_fastfail.c")
