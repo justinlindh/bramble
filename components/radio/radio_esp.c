@@ -54,16 +54,6 @@ static SemaphoreHandle_t s_cad_sem;
  * TX or RX, so we don't need to stay in STDBY_XOSC between commands. */
 static inline int radio_standby(void) { return sx1262_set_standby(0); }
 
-/* Convert bw_hz (e.g. 125000) to bw code for sx1262_set_modulation_params */
-static uint8_t bw_hz_to_code(uint32_t bw_hz) {
-    if (bw_hz <= 125000)
-        return 125;
-    else if (bw_hz <= 250000)
-        return 250;
-    else
-        return 500;
-}
-
 static int set_sync_word(uint8_t sw) {
     /* LoRa sync word register 0x0740-0x0741.
        Public (0x34):  0x3444.  Private (0x12): 0x1424 */
@@ -97,8 +87,7 @@ static int configure_radio(const radio_config_t* cfg) {
     if (rc != 0)
         return rc;
 
-    rc = sx1262_set_modulation_params(cfg->sf, bw_hz_to_code(cfg->bw_hz), cfg->coding_rate,
-                                      0xFF /* auto LDRO */);
+    rc = sx1262_set_modulation_params(cfg->sf, cfg->bw_hz, cfg->coding_rate, 0xFF /* auto LDRO */);
     if (rc != 0)
         return rc;
 

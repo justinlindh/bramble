@@ -187,9 +187,9 @@ int sx1262_set_tx_params(int8_t power_dbm, uint8_t ramp_time) {
     return fake_rc("set_tx_params");
 }
 
-int sx1262_set_modulation_params(uint8_t sf, uint8_t bw, uint8_t cr, uint8_t ldro) {
+int sx1262_set_modulation_params(uint8_t sf, uint32_t bw_hz, uint8_t cr, uint8_t ldro) {
     (void)sf;
-    (void)bw;
+    (void)bw_hz;
     (void)cr;
     (void)ldro;
     return fake_rc("set_modulation_params");
