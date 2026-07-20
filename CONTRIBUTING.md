@@ -58,7 +58,7 @@ The strict clang-format gate is pinned to an exact version, currently the one
 in [`.clang-format-version`](.clang-format-version) (`14.0.6`), because
 different clang-format releases disagree on macro and designated-initializer
 layout and there is no formatting that satisfies two versions at once (issue
-#161). Get the exact version with `uv`:
+\#161). Get the exact version with `uv`:
 
 ```bash
 uv tool install "clang-format==$(cat .clang-format-version)"

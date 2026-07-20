@@ -21,7 +21,7 @@ USB-C input, TP4056 charger, DW01A + FS8205A cell protection, AN1149-style load-
 and the 3.3V LDO. See `NET_TOPOLOGY.md` for the full power chain.
 
 | Ref | Part | Package | LCSC | Nets | Purpose | Pinout note |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | USBC1 | TYPE-C-31-M-12 USB-C receptacle | HRO TYPE-C-31-M-12 SMD | C165948 | VBUS (A4/A9/B4/B9), GND (A1/A12/B1/B12/SH), CC1 (A5), CC2 (B5), USB_DP_RAW (A6/B6), USB_DM_RAW (A7/B7) | Body port and PCB-to-case datum. 5V VBUS only, never PD. D+ pairs and D- pairs tied. Shield to GND. | USB2 receptacle; A6/B6 = DP, A7/B7 = DM interleaved (require layer-change ties, see NET_TOPOLOGY). |
 | U101 | USBLC6-2SC6 ESD array | SOT-23-6 | C2687116 | VBUS (5), GND (2), USB_DP_RAW (1), USB_DP (4), USB_DM_RAW (3), USB_DM (6) | TVS ESD protection on VBUS + both data lines. Placed within 5mm of USBC1. | ST datasheet; genuine ST is C7519, C2687116 is the fitted line. Raw on 1/3, MCU-side clamps on 4/6. |
 | R101 | 5.1k 1% | 0603 | C23186 | CC1, GND | CC1 pulldown (Rd). Sinks 5V-only source detection. | -- |
@@ -55,7 +55,7 @@ LoRa transceiver, GNSS receiver, and both u.FL RF feeds with the GNSS bias tee a
 gate. See `NET_TOPOLOGY.md` for the RF and gate topology.
 
 | Ref | Part | Package | LCSC | Nets | Purpose | Pinout note |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | U201 | NiceRF LoRa1262-915TCXO (SX1262 module) | 16-pin castellated 16x16mm, shielded | C5356643 | GND (1/8/10), SPI_MISO (2), SPI_MOSI (3), SPI_SCK (4), RADIO_NSS (5), RADIO_NRESET (6), ANT/RF_ANT (9), DIO3 NC (11), +3V3 VCC (13), RADIO_DIO1 (15), RADIO_BUSY (16); pins 7/12/14 NC | US915 LoRa transceiver. FCC ID 2AD6-1262. VCC 10uF+100nF at pin 13. Regulator DC-DC, `radio_osc = TCXO_DIO3`. | NiceRF LoRa126X datasheet Rev 2.1 Sec 7 p.7-8, CCW ring. DIO3 (11) left NC: module powers its TCXO from DIO3 internally (Chinese-edition p.8 note). RF switch is chip-internal on DIO2 (Sec 1 + Sec 9): firmware must send SetDio2AsRfSwitchCtrl or TX is dead. TCXO 2.8V default so SX1262 code 2.7V (Semtech Table 13-35). Netlist-confirmed: pin 11 unconnected. |
 | C201 | 10uF 25V X5R | 0805 | C15850 | +3V3, GND | U201 VCC bulk at pin 13. | -- |
 | C202 | 100nF 50V X7R | 0603 | C14663 | +3V3, GND | U201 VCC HF bypass at pin 13. | -- |
@@ -77,7 +77,7 @@ Display connector plus its boost / negative charge-pump. The connector netlist i
 mirrored: connector pin N = panel pin 25-N (fold-under mount). See `NET_TOPOLOGY.md`.
 
 | Ref | Part | Package | LCSC | Nets | Purpose | Pinout note |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | EPD1 | Hirose FH34SRJ-24S-0.5SH FPC connector (mates GDEY0213B74 panel tail) | 0.5mm 24-pin dual-contact SMD | C324726 | VCOM (1), VGL (2), VSL (3), VGH (4), VSH1 (5), VDD (7), GND (8/17), +3V3 VCI (9/10), SPI_MOSI (11), SPI_SCK (12), EPD_CS (13), EPD_DC (14), EPD_RST (15), EPD_BUSY (16), VSH2 (20), RESE (22), GDR (23); 6/18/19/21/24 open per panel | SSD1680 2.13" 250x122 panel interface. 0.3mm panel tail, 180-degree fold. | GDEY0213B74 panel pin table p.8. BUSY active-HIGH p.9 note 5-4; BS1=L for 4-wire SPI note 5-5; RESE 2.2R ref circuit p.29; connector-to-panel mirror (connector N = panel 25-N) with fold-under mount, mech p.7. Netlist-confirmed mirror: EPD1.1=VCOM=panel24, EPD1.13=CS=panel12, EPD1.22=RESE=panel3. |
 | L301 | 47uH (FNR4030S470MT) | FNR4030 4x4mm SMD | C167888 | +3V3, EPD_SW node | Boost inductor: 3V3 to switch node. | -- |
 | Q301 | AO3400A N-channel MOSFET | SOT-23 | C20917 | EPD_GDR (gate 1), R302 source node (source 2), EPD_SW node (drain 3) | Boost switch driven by panel GDR. Source through R302 (RESE) to GND. | AO3400A SOT-23: 1 G, 2 S, 3 D. |
@@ -103,13 +103,13 @@ ESP32-S3, reset network, four tact buttons, buzzer and vibra low-side drivers, s
 LED, and the I2C debug header.
 
 | Ref | Part | Package | LCSC | Nets | Purpose | Pinout note |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | U401 | ESP32-S3-WROOM-1-N8R2 | RF_Module WROOM-1 | C2913204 | +3V3, GND, EN (3), plus every signal net: SPI bus (17/18/19), RADIO_NSS/NRESET/BUSY/DIO1, EPD_CS/DC/RST/BUSY, USB_DM (13)/USB_DP (14), I2C_SDA/SCL, BUZ_GATE (8)/VIB_GATE (9), GNSS_TX/RX/EN, BTN_UP/DOWN, BOOT, LED_R, VBAT_SENSE (39) | 8MB flash, 2MB quad PSRAM. Native USB console (USB-Serial-JTAG). Antenna-end copper keepout all layers. | Espressif WROOM-1 module. N8 (C2913198) is a drop-in alternate; N8R8 dropped when GPIO35/36 went to GPS. |
 | C401 | 10uF 25V X5R | 0805 | C15850 | +3V3, GND | WROOM 3V3 bulk. | -- |
 | C402 | 100nF 50V X7R | 0603 | C14663 | +3V3, GND | WROOM 3V3 HF bypass. | -- |
 | C403 | 1uF 50V X7R | 0603 | C15849 | EN, GND | EN RC delay cap (with R401) for clean reset. | -- |
 | R401 | 10k | 0603 | C25804 | +3V3, EN | EN pullup. | -- |
-| SW401 | TS-1187A tact (RESET) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | EN (1/2), GND (3/4) | RESET: shorts EN to GND. Actuated through a case pinhole. | XKB drawing: TOP-push 2.0mm plunger, 0.25mm travel; contacts {1,2}|{3,4}. |
+| SW401 | TS-1187A tact (RESET) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | EN (1/2), GND (3/4) | RESET: shorts EN to GND. Actuated through a case pinhole. | XKB drawing: TOP-push 2.0mm plunger, 0.25mm travel; contacts {1,2} \| {3,4}. |
 | SW402 | TS-1187A tact (BOOT) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | BOOT (1/2), GND (3/4) | BOOT/SELECT on GPIO0 (strapping-canonical), to GND. Front-face plunger. | Same as SW401. |
 | SW403 | TS-1187A tact (DOWN) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | BTN_DOWN (1/2), GND (3/4) | DOWN button on GPIO21 (RTC-capable: deep-sleep wake), internal pullup. Front-face plunger. | Same as SW401. |
 | SW404 | TS-1187A tact (UP) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | BTN_UP (1/2), GND (3/4) | UP button on GPIO47 (no RTC alias: cannot deep-sleep-wake), internal pullup. Front-face plunger. | Same as SW401. |
@@ -134,7 +134,7 @@ LED, and the I2C debug header.
 ## Power rails
 
 | Rail | Voltage | Source | Consumers | Bulk |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | VBUS | 5V | USBC1 (USB only, never PD) | U101 (ESD), U102 (charger VCC), R104/R105 (LED feeds), R107 (load-share ref), Q101 gate, D101 anode | C101 |
 | BAT_PLUS | ~3.0-4.2V | BATT1 cell + | U102 (BAT), Q101 drain (load-share), R106 (DW01A VCC), R108 (sense divider top) | C102 |
 | VSYS | ~3.6-4.6V | Q101 (cell) OR D101 (VBUS) | U105 (LDO VIN) | C104 |

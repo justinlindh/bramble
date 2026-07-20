@@ -78,7 +78,7 @@ A desktop app (Linux, Windows, macOS) is also available, built from the same web
 ## Hardware Targets
 
 | Board | MCU | Display | Input | Radio | Audio | Status |
-|------|-----|---------|-------|-------|-------|--------|
+| ------ | ----- | --------- | ------- | ------- | ------- | -------- |
 | Heltec WiFi LoRa 32 V3 | ESP32-S3 | 0.96" SSD1306 OLED (128x64) | Buttons | SX1262 | N/A | Running target |
 | Heltec WiFi LoRa 32 V4 | ESP32-S3 | OLED + optional L76K GNSS | Buttons | SX1262 | N/A | Running target |
 | LilyGo T-Deck Plus | ESP32-S3 | ST7789 320x240 LCD with LVGL v9 UI | GT911 capacitive touch + I2C keyboard | SX1262 with TCXO (DIO3 1.8V, DC-DC) | I2S with NVS-persisted volume | Running target with full GUI |

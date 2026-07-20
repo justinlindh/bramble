@@ -77,7 +77,7 @@ Defined in `bramble_theme.h`:
 **Source:** `screens/scr_splash.c`  
 **Duration:** 2 seconds (then transitions to main layout)
 
-```
+```text
 ┌──────────────────────────────────────┐  (320×240)
 │                                      │
 │                                      │
@@ -98,12 +98,14 @@ Defined in `bramble_theme.h`:
 ```
 
 **Elements:**
+
 - Bramble logo image (`img_bramble_logo`, 100×100, from flash)
 - Title: "BRAMBLE", Montserrat 18, primary green
 - Subtitle: "LoRa Mesh", Montserrat 12, secondary gray
 - Version: "v{app_version}" from `esp_app_desc_t`, Montserrat 12, secondary gray, 50% opacity
 
 **Transition:** After 2s, LVGL timer fires `splash_timer_cb`:
+
 1. `lv_refr_now()`: flush pending layouts (critical: avoids indev timer corruption)
 2. `lv_obj_clean()`: destroy splash
 3. Initialize touch, trackball, keyboard ports
@@ -116,7 +118,7 @@ Defined in `bramble_theme.h`:
 **Source:** `screens/scr_layout.c`  
 **Applies to:** All tabs (Chat, Nodes, Map, Stats, Settings)
 
-```
+```text
 ┌──────────────────────────────────────┐  y=0
 │ 🔋 85%  📶 3   GPS  --:--  BRAMBLE  │  ← Status Bar (h=20)
 ├──────────────────────────────────────┤  y=20
@@ -145,6 +147,7 @@ Horizontal flex row, space-between alignment, 2px padding all sides, Montserrat 
 | Right    | Node Name      | `BRAMBLE` (static)                     | PRIMARY (green)  |
 
 Battery icon thresholds:
+
 - `>75%` → BATTERY_FULL, TEXT color
 - `>50%` → BATTERY_3, TEXT color
 - `>25%` → BATTERY_2, TEXT color
@@ -187,7 +190,7 @@ Inactive tabs: transparent background.
 **Source:** `screens/scr_chat_list.c`  
 **LVGL trigger:** `scr_chat_list_create()` called from `layout_set_tab(TAB_CHAT)`
 
-```
+```text
 [Content Area: 320×180]
 ┌──────────────────────────────────────┐  y=20 (within screen)
 │ Messages                  [+ New]   │  ← Header row (h=28)
@@ -222,7 +225,8 @@ Tapping [+ New] → opens Chat Message Detail View (channel 0).
 - Each message card: 304×48, SURFACE bg, BR_RADIUS
 
 **Message Card Layout (48px tall):**
-```
+
+```text
 ┌─────────────────────────────────────┐
 │ → You   [or]  ← 0A1B2C3D           │  y=0, Montserrat 12 (SENT or PRIMARY color)
 │ Preview text truncated to width...  │  y=16, Montserrat 14, TEXT color, max-width 290px, "..."
@@ -243,7 +247,7 @@ Tapping [+ New] → opens Chat Message Detail View (channel 0).
 
 This is a full-screen overlay over the content area. The **tab bar is hidden** and content area expands to fill its space.
 
-```
+```text
 [Expanded Content: 320×220 (240 - 20px status bar)]
 ┌──────────────────────────────────────┐  y=20
 │ [←]          Chat                   │  ← Header (h=28, SURFACE bg)
@@ -279,7 +283,8 @@ Tapping [←] → restores tab bar, restores content area size (320×180), rebui
 Each bubble is a `row` container (304px wide, transparent) containing a `bubble` object:
 
 **Incoming bubble (left-aligned):**
-```
+
+```text
 ┌─────────────────────────────┐   max-width: 220px
 │ {sender_hex_addr}            │   Montserrat 12, PRIMARY color
 │ {message text wrapping}      │   Montserrat 14, TEXT color
@@ -287,7 +292,8 @@ Each bubble is a `row` container (304px wide, transparent) containing a `bubble`
 ```
 
 **Outgoing bubble (right-aligned):**
-```
+
+```text
               ┌────────────────────────┐   max-width: 220px
               │ {message text wrapping} │   Montserrat 14, TEXT color
               └────────────────────────┘   SENT bg (#1A4B91), radius=8
@@ -312,7 +318,7 @@ Keyboard focus is placed on the textarea immediately on open; physical keyboard 
 **LVGL trigger:** `scr_nodes_create()` from `layout_set_tab(TAB_NODES)`  
 **Auto-refresh:** Every 5 seconds (rebuilds via `tab_refresh_timer_cb`)
 
-```
+```text
 [Content Area: 320×180]
 ┌──────────────────────────────────────┐
 │ Nodes (3 peers)                      │  ← Title, Montserrat 16, +8px pad left
@@ -341,9 +347,9 @@ Keyboard focus is placed on the textarea immediately on open; physical keyboard 
 - Each card: 304×48, SURFACE bg, BR_RADIUS
 - Trackball focus: PRIMARY bg at 30% opacity
 
-### Node Card Layout (48px tall):
+### Node Card Layout (48px tall)
 
-```
+```text
 ┌─────────────────────────────────────────┐
 │ {name or 8-char hex addr}    [bar] 🟢   │  y=0, name: Montserrat 14 TEXT
 │ {-XXdBm  SNR:X}                         │  y=20, Montserrat 12 TEXT_SEC
@@ -380,7 +386,7 @@ Displays node positions from the location manager (`mesh_get_location_state()`) 
 **LVGL trigger:** `scr_stats_create()` from `layout_set_tab(TAB_STATS)`  
 **Auto-refresh:** Every 5 seconds (rebuilds via `tab_refresh_timer_cb`)
 
-```
+```text
 [Content Area: 320×180, vertical flex column, 8px padding, 6px row gap]
 ┌──────────────────────────────────────┐
 │ Stats                                │  ← Title, Montserrat 16
@@ -410,6 +416,7 @@ Three cards: **TX pkts**, **RX pkts**, **peers** (from mesh state snapshot).
 ### Radio Status Row
 
 `"Radio: {OK|ERROR}  Last RSSI: {rssi}dBm"`, Montserrat 12:
+
 - `radio_ok=true` → TEXT_SEC gray
 - `radio_ok=false` → DANGER red
 
@@ -429,7 +436,7 @@ Three cards: **TX pkts**, **RX pkts**, **peers** (from mesh state snapshot).
 **LVGL trigger:** `scr_settings_create()` from `layout_set_tab(TAB_SETTINGS)`  
 **No auto-refresh** (static content + user-driven controls)
 
-```
+```text
 [Content Area: 320×180, vertical flex column, 8px padding, 4px row gap]
 ┌──────────────────────────────────────┐
 │ Settings                             │  ← Title, Montserrat 16
@@ -489,7 +496,8 @@ Trackball focus: PRIMARY bg at 30% opacity.
 ## User Flows
 
 ### Boot Flow
-```
+
+```text
 Power ON
   └──▶ ui_graphics_init()
          └──▶ scr_splash_create()   [Splash shown]
@@ -504,7 +512,8 @@ Power ON
 ```
 
 ### Tab Navigation
-```
+
+```text
 User taps tab button
   └──▶ tab_click_cb()
          └──▶ layout_set_tab(tab)
@@ -515,7 +524,8 @@ User taps tab button
 ```
 
 ### Sending a Message
-```
+
+```text
 Chat List → tap [+ New]  (or tap any message card)
   └──▶ scr_chat_messages_open(layout, 0)
          ├── Hide tab bar
@@ -536,7 +546,8 @@ User taps [←] Back
 ```
 
 ### Receiving a Message
-```
+
+```text
 mesh_task receives packet
   └──▶ msg_store_add()
   └──▶ ui_graphics_notify(UI_EVT_MSG_RECEIVED)
@@ -549,7 +560,8 @@ mesh_task receives packet
 ```
 
 ### Live Data Refresh (Nodes / Stats)
-```
+
+```text
 5s tab_refresh_timer_cb fires:
   └── If active_tab == TAB_STATS or TAB_NODES:
         └── layout_set_tab(active_tab)   [rebuild with fresh mesh state]

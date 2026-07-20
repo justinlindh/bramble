@@ -126,9 +126,11 @@ jobs:
           # CMakeLists.txt, sdkconfig.defaults*, partitions*.csv; the static
           # bundle's ruff scans scripts/, cppcheck scans main/ components/, the
           # rpc-contract check reads api/ + main/, and the strict clang-format
-          # and shell lint wrappers read the root dotfile configs. The
-          # .markdownlint-cli2.yaml pattern is retained deliberately: no CI job
-          # reads it today (see issue #160), but over-triggering is safe.
+          # and shell lint wrappers read the root dotfile configs.
+          # .markdownlint-cli2.yaml is included because the Static checks
+          # bundle's markdownlint step reads it (issue #160); it also runs
+          # unconditionally on every trigger regardless of this area, same as
+          # every other Static checks step, so this is belt-and-suspenders.
           # docker/firmware-builder/ is folded in here (not its own output)
           # because the Docker build gate's firmware-builder image is the
           # same class of firmware-CI-tooling change as .releaserc.*, and the

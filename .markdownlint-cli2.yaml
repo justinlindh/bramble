@@ -1,8 +1,17 @@
 config:
   default: true
   MD013: false # line length handled by editor/review for now
+  MD024: # allow repeated heading text across different, non-sibling sections
+    siblings_only: true # (per-board tables, per-project comparison subsections, changelog entries)
   MD033: false # allow inline HTML in ESP-IDF/docs tooling docs
+  MD036: false # bold field labels (e.g. **Params**, **Trigger conditions**) are a
+    # deliberate flat sub-label style in spec docs (docs/rpc/events.md,
+    # docs/bramble-protocol-spec.md), not sloppy headings; promoting them to real
+    # headings would add anchors/nav entries never meant to exist
   MD041: false # many docs intentionally omit top-level heading
+  MD060: false # table pipe alignment/spacing is a cosmetic source-only nit with
+    # no rendered difference; enforcing it forces constant re-padding of every
+    # hand-maintained table on every edit
 globs:
   - "**/*.md"
 ignores:

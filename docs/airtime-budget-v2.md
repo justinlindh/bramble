@@ -5,6 +5,7 @@
 v1 behavior used an hourly cliff refill model: once tokens were spent, budgets stayed empty until the next full-hour reset. In practice this caused abrupt receipt suppression during testing and unstable UX in small meshes.
 
 v2 changes:
+
 1. Continuous refill token bucket (proportional refill by elapsed time)
 2. Dedicated `receipt` airtime tier
 3. Adaptive profile by mesh size
@@ -12,12 +13,14 @@ v2 changes:
 ## Defaults
 
 Base budgets (ms/hour):
+
 - critical: 36000
 - normal: 18000
 - broadcast: 18000
 - receipt: 12000
 
 Tier semantics:
+
 - `critical`: routing control and ACKs (may borrow from normal, capped at 25% of normal's capacity per refill window, `AIRTIME_BORROW_CAP_PCT`)
 - `normal`: unicast data and routine traffic
 - `broadcast`: broadcast data traffic and beacons (a beacon-sized reserve is held back from broadcast data so the next beacon always has tokens)
@@ -29,7 +32,7 @@ When the regional frequency plan enforces a regulatory duty-cycle limit (EU868: 
 
 For each tier `i`:
 
-```
+```text
 add_i = floor((max_i * elapsed_ms + remainder_i) / REFILL_INTERVAL_MS)
 remainder_i = (max_i * elapsed_ms + remainder_i) % REFILL_INTERVAL_MS
 tokens_i = min(max_i, tokens_i + add_i)
@@ -64,15 +67,18 @@ Peer count is used to adjust effective max tokens:
 ### "Delivery receipt suppressed ... receipt airtime budget exhausted"
 
 This means receipt tier tokens are depleted. Typical causes:
+
 - too many back-to-back broadcast tests
 - too many retries/receipt waves in dense meshes
 
 Check via RPC (`bramble.getAirtime`) fields:
+
 - `receipt_remaining_ms`
 - `receipt_max_ms`
 - `next_refill_ms` (continuous model reports 0 because refill is immediate/ongoing)
 
 Mitigations:
+
 - increase spacing between test broadcasts
 - reduce test count
 - reboot nodes (resets tokens)

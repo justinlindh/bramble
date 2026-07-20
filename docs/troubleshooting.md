@@ -165,7 +165,7 @@ make: *** [Makefile:76: ci-quality-shellcheck] Error 1
 That is a missing tool, not a failing check. The tools these targets need:
 
 | Target | Needs | Where to get it |
-|---|---|---|
+| --- | --- | --- |
 | `ci-quality-shellcheck`, `ci-fw-shellcheck` | `shellcheck` | <https://www.shellcheck.net/> or your package manager |
 | `ci-quality-cppcheck` | `cppcheck` | <https://cppcheck.sourceforge.io/> or your package manager |
 | `ci-quality-actionlint`, `ci-fw-actionlint` | `actionlint` | <https://github.com/rhysd/actionlint> (`ci-fw-actionlint` falls back to `go run` if Go is installed) |
@@ -176,11 +176,12 @@ That is a missing tool, not a failing check. The tools these targets need:
 You do not need all of them. CI runs the full set; locally, install the ones
 covering what you changed, or push and let CI tell you.
 
-### `scripts/lint/run-markdownlint.sh` skips instead of running
+### `scripts/lint/run-markdownlint.sh` fails with "not found on PATH"
 
-It needs `markdownlint-cli2`, or `npx` so it can fetch it on demand. With
-neither present it skips in normal mode and fails in `--strict` mode. Install
-Node, or `npm i -g markdownlint-cli2`.
+It needs `markdownlint-cli2` installed; there is no skip mode; a missing tool
+is a hard failure, not advisory signal (docs/quality-policy.md). Install the
+pinned version CI uses: `npm install -g markdownlint-cli2@0.23.1` (or run it
+ad hoc via `npx --yes markdownlint-cli2@0.23.1`).
 
 ### The host tests fail to build
 
