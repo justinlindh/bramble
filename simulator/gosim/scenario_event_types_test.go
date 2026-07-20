@@ -65,15 +65,16 @@ var engineEventTypes = map[string]bool{
 	"interference":     true,
 	"join":             true,
 	"node_join":        true,
+	"send_location":    true,
 }
 
-// engineKnownUnimplementedEventTypes mirrors event_type_is_known_unimplemented
-// in sim_scenario.c: recognized intent with no engine implementation. These
-// load with a loud warning instead of failing, so they are legal in a scenario
-// file but must never grow silently.
-var engineKnownUnimplementedEventTypes = map[string]bool{
-	"send_location": true,
-}
+// engineKnownUnimplementedEventTypes is EMPTY and must stay that way: with
+// send_location implemented (issue #172), every recognized spelling is
+// executable and the engine hard-fails on anything else. The map survives
+// only so this test names the policy; do not add entries to silence a typo
+// or park an unbuilt feature, an unloadable scenario is strictly better
+// than an inert one.
+var engineKnownUnimplementedEventTypes = map[string]bool{}
 
 // TestScenarioEventTypesAreExecutable asserts that no checked-in scenario
 // declares an event type the engine would reject. Before #166 a typo here cost

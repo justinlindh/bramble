@@ -60,6 +60,7 @@ where Bramble is behind), see [docs/COMPARISON.md](COMPARISON.md).
 ### 2.1 Privacy First
 
 Every design decision passes through a privacy filter:
+
 - **DM content** is end-to-end encrypted with per-pair X25519-derived keys. Relay nodes see only opaque ciphertext.
 - **Route discovery** uses ephemeral query IDs. Intermediate nodes cannot correlate a route request to a specific source node. Only the destination can decrypt the source identity.
 - **No global topology map.** Nodes know their neighbors and cached routes, never the full network graph.
@@ -68,6 +69,7 @@ Every design decision passes through a privacy filter:
 ### 2.2 Reliability Through Intelligence
 
 Rather than relying on flooding alone, Bramble builds routing knowledge passively and uses it actively:
+
 - **Delivery receipts include relay paths**, so senders passively learn network topology.
 - **Neighbor quality metrics** (RSSI, SNR, success rate) inform route selection.
 - **Congestion signals propagate** so senders back off before the network saturates.
@@ -75,6 +77,7 @@ Rather than relying on flooding alone, Bramble builds routing knowledge passivel
 ### 2.3 ESP32-Constrained Design
 
 Every data structure has a hard size cap. Every algorithm has bounded memory and CPU:
+
 - Routing table: max 64 entries × 24 bytes = 1,536 bytes
 - Neighbor table: max 32 entries × 20 bytes = 640 bytes
 - TX queue: max 16 entries × 256 bytes = 4,096 bytes
@@ -85,6 +88,7 @@ Every data structure has a hard size cap. Every algorithm has bounded memory and
 ### 2.4 Conserve Airtime
 
 LoRa is slow. At SF10/125kHz, a 200-byte packet takes ~700ms to transmit. Every byte and every transmission must be justified:
+
 - Route-based forwarding: only nodes on the path transmit (not the entire mesh).
 - Compact binary packet format: no JSON, no protobuf, no padding.
 - Piggybacked ACKs where possible to reduce standalone ACK packets.
@@ -97,12 +101,14 @@ LoRa is slow. At SF10/125kHz, a 200-byte packet takes ~700ms to transmit. Every 
 ### 3.1 Target Hardware
 
 **Primary:** Heltec WiFi LoRa 32 V3
+
 - MCU: ESP32-S3, 240 MHz dual-core, 512KB SRAM (~320KB usable), 4–8MB flash
 - Radio: Semtech SX1262 (150 MHz – 960 MHz)
 - Display: 0.96" OLED (SSD1306, 128×64)
 - Battery: LiPo via onboard charger, deep sleep ~10µA
 
 **Secondary:** LILYGO T-Beam S3 Supreme
+
 - Same ESP32-S3 + SX1262
 - GPS module (optional, not required by protocol)
 - 18650 battery holder
@@ -116,7 +122,7 @@ Bramble defines two radio profiles. All nodes in a mesh must use the same profil
 #### Profile: LongRange (default)
 
 | Parameter | Value | Rationale |
-|---|---|---|
+| --- | --- | --- |
 | Frequency | 906.875 MHz | US ISM band (902–928 MHz), center of a common sub-band |
 | Spreading Factor | SF10 | Good range (~10km LOS) with acceptable data rate. SF12 is too slow for mesh. |
 | Bandwidth | 125 kHz | Standard, best sensitivity (-137 dBm at SF10) |
@@ -129,6 +135,7 @@ Bramble defines two radio profiles. All nodes in a mesh must use the same profil
 | Max Payload | 222 bytes | SX1262 limit with explicit header |
 
 **Resulting characteristics (SF10, 125kHz, CR 4/6):**
+
 - Bit rate: 3,125 bps (raw), ~2,083 bps (effective with CR)
 - 100-byte payload: ~480ms airtime
 - 200-byte payload: ~850ms airtime
@@ -138,7 +145,7 @@ Bramble defines two radio profiles. All nodes in a mesh must use the same profil
 #### Profile: MediumRange
 
 | Parameter | Value | Rationale |
-|---|---|---|
+| --- | --- | --- |
 | Frequency | 906.875 MHz | Same band |
 | Spreading Factor | SF8 | Shorter range (~5km LOS), 4× faster throughput |
 | Bandwidth | 250 kHz | Wider BW for speed |
@@ -147,6 +154,7 @@ Bramble defines two radio profiles. All nodes in a mesh must use the same profil
 | Preamble | 8 symbols | Adequate for shorter-range, higher-SNR links |
 
 **Resulting characteristics (SF8, 250kHz, CR 4/5):**
+
 - Bit rate: 12,500 bps (raw), ~10,000 bps (effective)
 - 100-byte payload: ~120ms airtime
 - 200-byte payload: ~210ms airtime
@@ -161,7 +169,7 @@ Before transmitting, nodes perform Listen-Before-Talk (LBT) using the SX1262's h
 3. If channel busy, back off with randomized exponential delay: `base_ms × 2^attempt + random(0, base_ms × 2^attempt)`, capped at 300ms per attempt.
 4. Retry CAD up to 3 attempts. If still busy after all attempts, transmit anyway to avoid starvation.
 
-```
+```text
 LBT_MAX_ATTEMPTS    = 3
 LBT_BACKOFF_BASE_MS = 50
 LBT_BACKOFF_MAX_MS  = 300
@@ -189,7 +197,7 @@ Bramble uses a three-layer approach to prevent receipt collisions:
 
 **Layer 1, slotted response timing:** Each recipient is assigned a deterministic time slot based on a hash of its address and the original packet ID:
 
-```
+```text
 SLOT_BUCKETS    = 32
 SLOT_SPACING_MS = 200
 SLOT_BASE_MS    = 200
@@ -204,7 +212,7 @@ This spreads receipt transmissions across a ~6.4-second window. With 32 buckets 
 
 **Layer 3, exponential retry backoff:** Each receipt is transmitted up to 3 times with increasing randomized delays between attempts:
 
-```
+```text
 RECEIPT_RETRY_COUNT = 3
 
 for attempt in 0..2:
@@ -234,7 +242,7 @@ The combination of wide slot spacing, hardware channel sensing, and aggressive r
 
 Every Bramble packet starts with this header:
 
-```
+```text
 Offset  Size  Field           Description
 ──────  ────  ─────           ───────────
 0       1     version         Protocol version (0x01)
@@ -251,7 +259,7 @@ Total: 12 bytes
 
 **Flags byte (bit fields):**
 
-```
+```text
 Bit 7   Bit 6   Bit 5   Bit 4   Bit 3    Bit 2    Bit 1   Bit 0
 ─────   ─────   ─────   ─────   ─────    ─────    ─────   ─────
 TIER1   TIER0   ACK_REQ RECEIPT CHANNEL  ENCRYP   FRAG1   FRAG0
@@ -268,7 +276,7 @@ TIER1   TIER0   ACK_REQ RECEIPT CHANNEL  ENCRYP   FRAG1   FRAG0
 
 ### 4.3 Packet Types
 
-```
+```text
 Value  Name               Description
 ─────  ────               ───────────
 0x01   ACK                Acknowledgment
@@ -302,7 +310,7 @@ Used for all application-layer messages (text, telemetry, position, etc.).
 
 **Direct Message DATA (encrypted end-to-end):**
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x01, ENCRYP=1, CHANNEL=0)
@@ -320,7 +328,7 @@ Max plaintext payload: 172 bytes
 
 **Channel Message DATA (channel PSK encrypted):**
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x01, ENCRYP=1, CHANNEL=1)
@@ -348,7 +356,7 @@ Note: For channel messages, `src_addr` at offset 12 in the wire header is set to
 
 ### 4.5 ACK Packet
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x02)
@@ -368,7 +376,7 @@ ACKs are routed back along the reverse path. They are small and high-priority. T
 
 Privacy-preserving route discovery. Intermediate nodes cannot determine who initiated the request; only the destination can decrypt the source identity.
 
-```
+```text
 Offset  Size  Field                Description
 ──────  ────  ─────                ───────────
 0       12    header               Common header (packet_type=0x03, dest_addr=target)
@@ -388,7 +396,7 @@ The `encrypted_source` field is the 4-byte source address encrypted under a ligh
 
 Unicast back along the reverse path built during ROUTE_REQUEST propagation.
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x04)
@@ -415,7 +423,7 @@ Total: 34 bytes
 
 Sent when a forwarding node detects a broken link (no ACK from next hop after max retries).
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x05)
@@ -432,7 +440,7 @@ Total: 24 bytes
 
 Periodic advertisement. Broadcast, unencrypted (beacons contain no sensitive content).
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x06, dest=0xFFFFFFFF, ENCRYP=0)
@@ -455,7 +463,7 @@ Total: 36 bytes (base)
 
 **Beacon flags byte (bit fields):**
 
-```
+```text
 Bit 7   Bit 6   Bit 5   Bit 4   Bit 3    Bit 2        Bit 1         Bit 0
 ─────   ─────   ─────   ─────   ─────    ─────        ─────         ─────
 RSVD    RSVD    RSVD    RSVD    RSVD     ACCEPT_DM    PROBE_ACK     MAILBOX
@@ -474,7 +482,7 @@ RSVD    RSVD    RSVD    RSVD    RSVD     ACCEPT_DM    PROBE_ACK     MAILBOX
 
 X25519 Diffie-Hellman key exchange for establishing DM encryption keys.
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x07)
@@ -495,7 +503,7 @@ Total: 101 bytes
 
 Returned to sender with relay path information. This is how senders passively build routing intelligence.
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x08)
@@ -528,7 +536,7 @@ For payloads exceeding the single-packet maximum (172 bytes for DM, 171 for chan
 
 Fragment header (appended after the standard DATA header, before payload):
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       1     frag_index       Fragment index (0–based)
@@ -548,7 +556,7 @@ Total: 4 bytes (reduces per-fragment payload by 4 bytes)
 
 Fragment reassembly buffer: max 4 concurrent reassemblies × 4 fragments × 154 bytes = **2,464 bytes**.
 
-```
+```text
 Reassembly timeout: 30 seconds (all fragments must arrive within this window)
 Duplicate fragment: silently dropped (after auth tag verification)
 Out-of-order: fragments decrypted individually, plaintext stored in bitmap; reassembled when all present
@@ -560,7 +568,7 @@ Invalid auth tag: fragment dropped immediately (no buffer allocation)
 
 Requests a mailbox node to store a message for an offline destination. Used when route discovery to the destination fails but a mailbox-capable neighbor is available.
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x0B)
@@ -578,6 +586,7 @@ Total: 34 + payload_len bytes (max 234 bytes)
 The `auth_hmac` is computed using a pairwise session key with the mailbox node, preventing unauthorized nodes from stuffing the mailbox.
 
 **Buffer limits:**
+
 - `MAILBOX_MAX_ENTRIES`: 32 total stored messages
 - `MAILBOX_MAX_PER_DEST`: 8 messages per destination address
 - `MAILBOX_MAX_PER_SOURCE`: 8 messages per source address
@@ -588,7 +597,7 @@ The `auth_hmac` is computed using a pairwise session key with the mailbox node, 
 
 Acknowledgment that a mailbox node has accepted and stored a message.
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x0C)
@@ -604,7 +613,7 @@ Total: 25 bytes
 
 Delivery of a stored message when the destination comes back online (detected via beacon).
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x0D)
@@ -624,7 +633,7 @@ Delivery is paced at one message per beacon interval (~60s) to avoid flooding a 
 
 A node queries a mailbox for pending messages (used when destination proactively polls rather than waiting for beacon-triggered delivery).
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x0E)
@@ -653,7 +662,7 @@ Removed unshipped. The XOR network-coding relay optimization (FEC-style coded pa
 
 Probes broadcast reachability to discover network topology. Used for network health visualization and delivery confirmation.
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       1     version          Protocol version (0x01)
@@ -667,11 +676,13 @@ Total: 12 bytes
 ```
 
 **Probe flags:**
+
 - `PROBE_FLAG_INCLUDE_RSSI` (0x01): Request responders include RSSI in ACK
 - `PROBE_FLAG_INCLUDE_PATH` (0x02): Request relay path in ACK
 - `PROBE_FLAG_SILENT` (0x04): Nodes should not acknowledge (observe-only)
 
 **Rate limiting:**
+
 - `PROBE_RATE_LIMIT_TOKENS`: 3 (max burst)
 - `PROBE_RATE_LIMIT_REFILL_MS`: 60,000 (1 token per minute)
 - `PROBE_ACK_COOLDOWN_MS`: 10,000 (10s between ACKs to same probe)
@@ -680,7 +691,7 @@ Total: 12 bytes
 
 Acknowledgment of a broadcast probe. Provides reachability and signal quality information.
 
-```
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       1     version          Protocol version (0x01)
@@ -704,7 +715,8 @@ Total: 12–13 bytes minimum (depending on flags), variable with path
 Location updates are sent as encrypted DATA packets (type=0x0A) with a location-specific `app_type` in the payload. Three privacy tiers are supported:
 
 **LOCATION_FULL (17 bytes):**
-```
+
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       4     latitude_e7      Latitude in degrees × 10⁷
@@ -719,7 +731,8 @@ Total: 17 bytes
 ```
 
 **LOCATION_COARSE (5 bytes):**
-```
+
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       2     grid_lat         Quantized latitude (~1 km resolution)
@@ -730,7 +743,8 @@ Total: 5 bytes
 ```
 
 **LOCATION_PRESENCE (1 byte):**
-```
+
+```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       1     status           Bit 0: online/offline
@@ -739,17 +753,20 @@ Total: 1 byte
 ```
 
 **Privacy tiers (per-contact configuration):**
+
 | Tier | Constant | Data Shared | Resolution |
-|------|----------|-------------|------------|
+| ------ | ---------- | ------------- | ------------ |
 | Full | `LOCATION_TIER_FULL` (0) | lat, lon, alt, speed, heading, accuracy | ~1m (GPS) |
 | Coarse | `LOCATION_TIER_COARSE` (1) | Grid square | ~1 km |
 | Presence | `LOCATION_TIER_PRESENCE` (2) | Online/offline only | None |
 
 **Update triggers:**
+
 - Time-based: default 5-minute interval (`LOCATION_DEFAULT_INTERVAL_MS`)
 - Distance-based: default 100m threshold (`LOCATION_MIN_DISTANCE_M`)
 
 **Cache:**
+
 - `LOCATION_MAX_CONTACTS`: 16 peers
 - `LOCATION_CACHE_TTL_MS`: 1 hour
 
@@ -803,7 +820,7 @@ Phases 2-4). Broadcast at boot and every 15 minutes
 (`send_identity_attestation` in `main/mesh_task.c`), flooded through the
 shared channel-flood engine, budget-gated on the broadcast airtime tier.
 
-```
+```text
 Offset  Size  Field            Description
 ------  ----  -----            -----------
 0       12    header           Common header (packet_type=0x15, dest=0xFFFFFFFF)
@@ -822,7 +839,7 @@ Total: 230 bytes
 **Canonical signed bytes** (84 bytes, built identically by signer and
 verifier via `bramble_identity_attestation_signed_msg`):
 
-```
+```text
 "bramble-ident-v1" (16 bytes, no NUL) || src_addr (4, big-endian)
     || x25519_pub (32) || ed25519_pub (32)
 ```
@@ -870,7 +887,7 @@ session (`docs/SECURITY-MODEL.md`).
 anchor's offline endorsement of this node's identity key. `endorsement_sig`
 is the anchor's Ed25519 signature over the canonical 58-byte message
 
-```
+```text
 "bramble-endorse-v1" (18 bytes, no NUL) || node_ed25519_pub (32)
     || not_after (8, big-endian, ms epoch)
 ```
@@ -904,7 +921,7 @@ This is the DM forward-secrecy flag day: session payloads move from one static p
 
 1. **Ratchet header added ahead of the ciphertext, session-keyed DATA/LOCATION only.** `DM_RATCHET_HEADER_SIZE` (`components/packet/include/packet.h`) is 3. Field layout, verified against the serializer (`dm_session_ratchet_encrypt`, `components/dm_session/dm_session.c`):
 
-   ```
+   ```text
    Offset  Size  Field       Description
    ------  ----  -----       -----------
    0       1     epoch       low byte of the session's current ke_epoch
@@ -915,7 +932,7 @@ This is the DM forward-secrecy flag day: session payloads move from one static p
 
 2. **Where it sits on the wire.** The DATA/LOCATION envelope prefix is unchanged since wire v4 (§4.27): `header(12) + src_addr(4) + prev_hop(4) + auth_hmac(8)` = `BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE` (28 bytes), followed by `nonce(BRAMBLE_NONCE_SIZE=12)`. For a session-keyed frame only, the 3-byte ratchet header now sits immediately after the nonce and immediately before the AEAD ciphertext, which is followed by `tag(BRAMBLE_TAG_SIZE=16)`:
 
-   ```
+   ```text
    ... | auth_hmac(8) | nonce(12) | epoch(1) | msg_index(2, BE) | ciphertext(N) | tag(16)
                                    \_____________ 3-byte ratchet header ____________/
    ```
@@ -938,7 +955,7 @@ This is the DM forward-secrecy flag day: session payloads move from one static p
 
 Each node generates a persistent identity on first boot:
 
-```
+```text
 function generate_identity():
     // X25519 long-term key pair (DM sessions / DH only)
     x_private = random_bytes(32)                // From ESP32 hardware RNG
@@ -979,7 +996,7 @@ wire-version flag days (sections 4.25-4.27).
 
 **Address collision handling:** With 4-byte addresses (2³² space) and target networks of ~200 nodes, collision probability is ~0.0005% (birthday problem). If a collision is detected via beacon (two nodes claiming same address with different pubkeys), the node with the lexicographically smaller public key regenerates. Collision detection runs on every received beacon.
 
-```
+```text
 function on_beacon_received(beacon):
     if beacon.src_addr == my_addr AND beacon.node_pubkey_hash != my_pubkey_hash:
         if my_pubkey < beacon_sender_pubkey:  // Lexicographic comparison
@@ -995,7 +1012,7 @@ When node A wants to send a DM to node B for the first time, they perform a key 
 
 **Step 1: A initiates** (requires knowing B's long-term public key, learned from beacons or cached)
 
-```
+```text
 function initiate_key_exchange(dest_addr, dest_pubkey):
     // Generate ephemeral key pair
     eph_private = random_bytes(32)
@@ -1028,7 +1045,7 @@ function initiate_key_exchange(dest_addr, dest_pubkey):
 
 **Step 2: B responds**
 
-```
+```text
 function handle_key_exchange_initiate(pkt):
     // Compute the same shared secret
     ss1 = x25519(my_private_key, pkt.ephemeral_pubkey)   // My static × their ephemeral
@@ -1056,7 +1073,7 @@ function handle_key_exchange_initiate(pkt):
 
 **Step 3: A confirms**
 
-```
+```text
 function handle_key_exchange_response(pkt):
     session_key = key_cache.lookup(pkt.src_addr, pkt.key_id)
     expected_tag = hmac_sha256(session_key, pkt.key_id || pkt.ephemeral_pubkey)[0..15]
@@ -1085,7 +1102,7 @@ function handle_key_exchange_response(pkt):
 
 Channels use pre-shared keys distributed out-of-band (QR code, manual entry, BLE provisioning).
 
-```
+```text
 Channel key derivation:
     channel_psk = user_provided_key (arbitrary length string)
     channel_key = hkdf_sha256(
@@ -1099,7 +1116,7 @@ Channel key derivation:
 
 Each node can belong to up to **16 channels** simultaneously (4-bit channel_id in encrypted payload). Channel keys are stored in NVS:
 
-```
+```text
 NVS layout:
     "bramble_ch_00_key" → 32 bytes (channel 0 AES-256 key, current epoch)
     "bramble_ch_00_name" → 32 bytes (channel 0 human-readable name)
@@ -1116,7 +1133,7 @@ Total channel NVS: 16 × 66 = 1,056 bytes
 
 Channel keys rotate via an epoch-based forward ratchet providing backward secrecy:
 
-```
+```text
 function advance_channel_epoch(channel_id):
     current_key = channel_keys[channel_id]
     current_epoch = channel_epochs[channel_id]
@@ -1140,6 +1157,7 @@ function advance_channel_epoch(channel_id):
 ```
 
 **Epoch advancement triggers:**
+
 - Every **24 hours** (configurable via `channel_epoch_hours`)
 - Every **256 messages** sent on the channel (configurable via `channel_epoch_messages`)
 - Whichever comes first
@@ -1147,6 +1165,7 @@ function advance_channel_epoch(channel_id):
 **Catch-up for offline nodes:** A node offline for N epochs computes N HKDF iterations from its last known key to derive the current epoch key (~0.1ms per iteration on ESP32-S3 with SHA-256 HW acceleration). The 2-byte epoch counter in each channel message header (see §4.4) tells the receiver which epoch to target.
 
 **Security properties:**
+
 - **Backward secrecy:** Old epoch keys are deleted. An attacker who compromises the current key cannot decrypt past messages.
 - **No forward secrecy:** An attacker who compromises the current key CAN derive all future keys via the same HKDF chain. True forward secrecy for channels would require interactive key exchange among all members, which is impractical over LoRa.
 - Old keys are permanently deleted from both RAM and NVS after epoch advancement.
@@ -1157,7 +1176,7 @@ Channel 0 is reserved as the default public channel. It uses a well-known PSK so
 
 > **Not the control-plane network key.** This public channel is a deliberate, opt-in, unauthenticated-to-everyone *broadcast* feature with no confidentiality expectation (its key is public by design). It is entirely separate from the control-plane network key (§4.25 item 9), which has NO public default and NO fallback: an unprovisioned node is inert and authenticates no routing/reliability traffic until a real per-fleet key is provisioned. `BRAMBLE_PUBLIC_CHANNEL_PSK` derives only this channel-0 key; it is never used in the control plane.
 
-```
+```text
 Public Channel Key Derivation:
     well_known_psk = "bramble-default"
     channel_key = hkdf_sha256(
@@ -1169,12 +1188,14 @@ Public Channel Key Derivation:
 ```
 
 **Properties:**
+
 - **Name:** "Bramble Common"
 - **Index:** 0 (reserved, cannot be deleted)
 - **Hop limit:** 3 (configurable via `BRAMBLE_PUBLIC_CHANNEL_HOP_LIMIT`)
 - **Purpose:** Town square for new node introduction, emergency broadcasts, general community messaging
 
 **Rate limiting (stricter than private channels to prevent spam):**
+
 - TX rate: 1 message per 30 seconds (`BRAMBLE_PUBLIC_CHANNEL_RATE_LIMIT_MS`)
 - Burst allowance: 3 messages (token bucket)
 - Per-source RX filter: drop if single source exceeds 1 msg/10s
@@ -1189,7 +1210,7 @@ Removed unshipped. The group-DM key manager (FNV-1a/BLAKE2s-derived group keys w
 
 The webapp encodes channel, node, and network-key material distributed out-of-band (QR code or copy-paste) as `bramble://` URIs, all implemented in `webapp/src/utils/`:
 
-```
+```text
 Channel share:  bramble://ch/v1?n={name}&k={psk_hex}
     n   URL-encoded channel name (required)
     k   hex-encoded PSK (omitted when the channel has none)
@@ -1209,7 +1230,7 @@ The network-key share is **write-only**: it exists solely to carry a freshly-gen
 
 The `encrypted_source` field in ROUTE_REQUEST must be decryptable only by the destination. We use a compact ECIES-like scheme:
 
-```
+```text
 function encrypt_source_for_rreq(my_addr, dest_pubkey):
     // Generate a throwaway ephemeral key
     eph_priv = random_bytes(32)
@@ -1264,7 +1285,7 @@ function encrypt_source_for_rreq(my_addr, dest_pubkey):
     // With ~200 peers, this is ~200 SHA-256 operations - <10ms on ESP32.
 ```
 
-```
+```text
 function decrypt_rreq_source(encrypted_source, rreq_salt, current_time):
     time_bucket = current_time / 3600
     
@@ -1290,7 +1311,7 @@ The scheme above requires the RREQ originator to know the destination's public k
 
 **Option B, open source (fallback):** When `allow_open_rreq = true` (config flag, default: false), and the destination's public key is unknown, the RREQ is sent with the `OPEN_SOURCE` flag bit set (see §4.6) and `encrypted_source` contains the plaintext source address. This enables first-contact discovery at the cost of revealing the source to all relay nodes.
 
-```
+```text
 function encrypt_source_for_rreq(my_addr, dest_pubkey):
     if dest_pubkey == NULL:
         if config.allow_open_rreq:
@@ -1309,6 +1330,7 @@ function encrypt_source_for_rreq(my_addr, dest_pubkey):
 ```
 
 **First-contact bootstrap flow:**
+
 1. Node A sends open RREQ (plaintext source) to node B
 2. Node B receives RREQ, sees A's address but has no shared secret → sends RREP with `auth_hmac = 0x00000000`
 3. Node A receives RREP, installs route marked **"unverified"** (no HMAC authentication)
@@ -1322,6 +1344,7 @@ This explicitly resolves the KEY_EXCHANGE bootstrapping gap: KEY_EXCHANGE requir
 ### 5.5 Key Rotation
 
 DM session keys rotate automatically:
+
 - **Time-based:** Every 24 hours, a new key exchange is initiated automatically on next DM send.
 - **Message-count-based:** After 2¹⁶ = 65,536 messages with the same key, force rekey (nonce space management).
 - **Manual:** User can force rekey via the UI.
@@ -1330,7 +1353,7 @@ Channel keys rotate automatically via the epoch-based ratchet (see §5.3): every
 
 ### 5.6 NVS Key Storage Summary
 
-```
+```text
 Item                     Size      Count    Total
 ─────────────────────    ─────     ─────    ─────
 Long-term private key    32 B      1        32 B
@@ -1355,6 +1378,7 @@ Total NVS:                                  4,708 B (~5KB)
 Bramble uses a reactive (on-demand) routing protocol inspired by AODV, with significant privacy enhancements. Routes are discovered only when needed and cached until broken.
 
 **Key differences from standard AODV:**
+
 - Source address in RREQ is encrypted (only destination can read it)
 - No sequence numbers broadcast globally (reduces metadata leakage)
 - Path quality metrics weighted by link reliability, not just hop count
@@ -1450,7 +1474,7 @@ struct reverse_route {
 
 **When a node wants to send to a destination with no cached route:**
 
-```
+```text
 function send_data(dest_addr, payload, tier):
     route = routing_table.lookup(dest_addr)
     
@@ -1487,6 +1511,7 @@ function send_data(dest_addr, payload, tier):
 ```
 
 **Retry schedule for route discovery (expanding ring):**
+
 - Attempt 1: immediate broadcast, hop_limit 4
 - Attempt 2: after 5 seconds, hop_limit 8
 - Attempt 3: 15 seconds after attempt 2, hop_limit 8
@@ -1509,7 +1534,7 @@ keeps the route with the better metric.
 
 **RREQ Forwarding (intermediate nodes):**
 
-```
+```text
 function handle_rreq(rreq, rx_rssi, rx_snr):
     // Dedup check
     if rreq_dedup.has(rreq.query_id):
@@ -1545,7 +1570,7 @@ function handle_rreq(rreq, rx_rssi, rx_snr):
     schedule_broadcast(rreq, delay)
 ```
 
-```
+```text
 function compute_link_penalty(rssi, snr):
     // Score 0 (excellent) to 50 (marginal)
     // RSSI: -60 dBm = excellent, -120 dBm = barely usable
@@ -1557,7 +1582,7 @@ function compute_link_penalty(rssi, snr):
 
 **RREQ handling at destination:**
 
-```
+```text
 function handle_rreq_at_destination(rreq):
     // Decrypt source
     source_addr = decrypt_rreq_source(rreq.encrypted_source, now())
@@ -1598,7 +1623,7 @@ function handle_rreq_at_destination(rreq):
 
 **RREP forwarding (intermediate nodes):**
 
-```
+```text
 function handle_rrep(rrep, rx_rssi):
     // Install forward route to the RREP originator (the RREQ destination)
     routing_table.install(
@@ -1620,7 +1645,7 @@ function handle_rrep(rrep, rx_rssi):
 
 **RREP arrival at RREQ originator:**
 
-```
+```text
 function handle_rrep_at_origin(rrep):
     discovery = pending_discoveries.lookup_by_query(rrep.query_id)
     if discovery == NULL:
@@ -1658,13 +1683,13 @@ function handle_rrep_at_origin(rrep):
 
 #### Route Timeouts
 
-```
+```text
 ROUTE_ACTIVE_TIMEOUT   = 300 seconds  (5 min - route goes STALE if unused)
 ROUTE_STALE_TIMEOUT    = 600 seconds  (10 min - stale route is deleted)
 ROUTE_HARD_TIMEOUT     = 3600 seconds (1 hr - route deleted even if recently used)
 ```
 
-```
+```text
 function route_maintenance_tick():  // Called every 10 seconds
     now = current_time()
     
@@ -1688,7 +1713,7 @@ function route_maintenance_tick():  // Called every 10 seconds
 
 When a forwarding node fails to receive a link-layer ACK (or Bramble-layer ACK for tier ≥ Normal) from the next hop after retries:
 
-```
+```text
 function handle_forwarding_failure(dest_addr, next_hop, failed_packet):
     route = routing_table.lookup(dest_addr)
     if route == NULL:
@@ -1727,7 +1752,7 @@ function handle_forwarding_failure(dest_addr, next_hop, failed_packet):
 
 #### RERR Propagation
 
-```
+```text
 function handle_route_error(rerr):
     route = routing_table.lookup(rerr.broken_dest)
     
@@ -1745,7 +1770,7 @@ function handle_route_error(rerr):
 
 Each route entry transitions through these states:
 
-```
+```text
                      ┌─────────────┐
           RREQ sent  │   DISCOVERING│
        ┌────────────►│  (no route)  │
@@ -1795,7 +1820,7 @@ Each route entry transitions through these states:
 
 ### 6.6 Data Forwarding
 
-```
+```text
 function forward_data(route, packet):
     if route.flags != ACTIVE:
         if route.flags == STALE:
@@ -1829,7 +1854,7 @@ function forward_data(route, packet):
 
 Channel messages use a limited controlled flood scoped by hop_limit:
 
-```
+```text
 function send_channel_message(channel_id, payload):
     // Channel messages are broadcast with a limited hop_limit
     pkt = build_channel_data(
@@ -1841,7 +1866,7 @@ function send_channel_message(channel_id, payload):
     broadcast(pkt)
 ```
 
-```
+```text
 function handle_channel_data_relay(pkt):
     // Channel ID is inside the ciphertext - relay nodes cannot determine which channel
     // this belongs to. Relay unconditionally if CHANNEL flag is set.
@@ -2083,7 +2108,7 @@ Meshcore, and scoped strictly to this transport:
 ### 7.1 Three-Tier Model
 
 | Tier | Flag Bits | ACK Required | Max Retries | Retry Backoff | Use Case |
-|------|-----------|-------------|-------------|---------------|----------|
+| ------ | ----------- | ------------- | ------------- | --------------- | ---------- |
 | **Critical** (10) | `TIER=10, ACK_REQ=1, RECEIPT=1` | End-to-end ACK + delivery receipt with relay path | 8 | Exponential: 3s, 6s, 12s, 24s, 48s, 96s, 192s, 384s | Emergency alerts, key exchange |
 | **Normal** (01) | `TIER=01, ACK_REQ=1, RECEIPT=0` | End-to-end ACK only (no relay path) | 3 | Exponential: 2s, 4s, 8s | Text messages, general communication |
 | **Broadcast** (00) | `TIER=00, ACK_REQ=0` | None | 0 | N/A | Beacons, telemetry, sensor data |
@@ -2092,7 +2117,7 @@ Meshcore, and scoped strictly to this transport:
 
 **End-to-end ACKs** travel from the destination back to the source along the reverse route:
 
-```
+```text
 function handle_data_at_destination(pkt):
     // Process the data...
     deliver_to_application(pkt)
@@ -2128,7 +2153,7 @@ function handle_data_at_destination(pkt):
 
 **Delivery receipt relay path building:**
 
-```
+```text
 function handle_delivery_receipt_relay(receipt):
     // Append my address to the relay path
     if receipt.hop_count < 8:
@@ -2146,7 +2171,7 @@ function handle_delivery_receipt_relay(receipt):
 
 ### 7.3 Retry Mechanics with Exponential Backoff
 
-```
+```text
 struct pending_ack {
     uint32_t packet_id;
     uint32_t dest_addr;
@@ -2163,7 +2188,7 @@ struct pending_ack {
 // Total: 1,888 bytes
 ```
 
-```
+```text
 function schedule_retry(pending):
     base_delay_ms = (pending.tier == CRITICAL) ? 3000 : 2000
     backoff = base_delay_ms * (1 << pending.attempt)  // Exponential
@@ -2207,8 +2232,9 @@ function retry_tick():  // Called every 500ms
 ### 7.4 Retry Timing Summary
 
 **Normal tier:**
+
 | Attempt | Delay | Cumulative |
-|---------|-------|------------|
+| --------- | ------- | ------------ |
 | 1 (initial) | 0s | 0s |
 | 2 | 2–2.5s | 2–2.5s |
 | 3 | 4–5s | 6–7.5s |
@@ -2216,8 +2242,9 @@ function retry_tick():  // Called every 500ms
 | Give up | - | ~15s total |
 
 **Critical tier:**
+
 | Attempt | Delay | Cumulative |
-|---------|-------|------------|
+| --------- | ------- | ------------ |
 | 1 (initial) | 0s | 0s |
 | 2 | 3–3.75s | 3–3.75s |
 | 3 | 6–7.5s | 9–11.25s |
@@ -2237,7 +2264,7 @@ Removed unshipped. The per-destination AIMD sliding window was deleted without e
 
 Every received packet is checked against a dedup buffer to prevent processing duplicates:
 
-```
+```text
 struct dedup_entry {
     uint32_t packet_id;      // 4 bytes
     uint32_t timestamp;      // 4 bytes
@@ -2276,6 +2303,7 @@ Current firmware uses a per-tier token bucket with **continuous refill** (not ho
 Every transmission is admitted through a single budget-gated TX path (`components/radio/tx_gate.c`): packets are classified by kind, costed with real time-on-air math, budget-checked, passed through listen-before-talk, then transmitted and debited. The raw radio transmit call is internal to the radio component, so no code path bypasses the budget. When the regional frequency plan enforces a regulatory duty-cycle limit (EU868: 1%), the tier maxima and refill are scaled to stay within it (`airtime_budget_set_duty_cap`); the US plan carries no enforced cap, and the self-imposed budgets below apply.
 
 Tier budgets (base):
+
 - `critical`: 36000 ms/hour
 - `normal`: 18000 ms/hour
 - `broadcast`: 18000 ms/hour
@@ -2284,13 +2312,14 @@ Tier budgets (base):
 Receipt traffic (broadcast delivery receipts + forwarded receipts) uses its own `receipt` tier so receipt storms do not directly consume broadcast-data tokens.
 
 Adaptive mesh-size profile (by peer count):
+
 - `<=15` peers (small mesh): relaxed budgets (normal +50%, broadcast/receipt +100%)
 - `16..40` peers: baseline budgets
 - `>40` peers (large mesh): conservative budgets (normal 75%, broadcast 60%, receipt 50%)
 
 This profile is applied at runtime via `airtime_budget_set_mesh_size(...)` and surfaced in airtime RPC output (`receipt_remaining_ms`, `receipt_max_ms`, etc.).
 
-```
+```text
 struct airtime_budget {
     uint32_t tokens_us;          // Current tokens in microseconds
     uint32_t max_tokens_us;      // Bucket capacity
@@ -2312,7 +2341,7 @@ struct airtime_budget {
 // Broadcast sub-bucket: 2,000,000 µs max, 20,000 µs/s refill
 ```
 
-```
+```text
 function refill_tokens():
     now = now_ms()
     elapsed_ms = now - budget.last_refill_time
@@ -2376,7 +2405,7 @@ function debit_airtime(packet_airtime_us, tier):
 
 ### 8.3 Airtime Calculation
 
-```
+```text
 function calculate_airtime_us(payload_bytes, sf, bw_hz, cr):
     // LoRa airtime calculation per Semtech AN1200.13
     
@@ -2436,6 +2465,7 @@ Every node includes its current time estimate and confidence in its BEACON packe
 > **Firmware reality.** Only the beacon-carried sync is implemented (`timesync_handle_sync` on beacon receipt in `main/mesh_task.c`); the dedicated `TIME_SYNC` packet type was removed unshipped (section 4.13). No stratum-0 source is wired yet (no GPS or operator seed), so nodes exchange offsets but none can bootstrap the mesh to synchronized absolute time.
 
 **Stratum model:**
+
 - Stratum 0: GPS-equipped node with valid fix (confidence = 0 ms)
 - Stratum 1: Direct neighbor of stratum-0 node (confidence = estimated OTA delay)
 - Stratum N: N hops from nearest stratum-0 (confidence grows with each hop)
@@ -2445,7 +2475,7 @@ Every node includes its current time estimate and confidence in its BEACON packe
 
 ### 9.3 Sync Algorithm
 
-```
+```text
 struct time_state {
     uint32_t network_time;      // Current network time estimate (epoch seconds)
     uint32_t local_offset;      // network_time = local_millis/1000 + local_offset
@@ -2456,7 +2486,7 @@ struct time_state {
 };
 ```
 
-```
+```text
 function handle_time_sync(pkt, rx_timestamp_local_ms):
     // Ignore if from a worse stratum (unless we have no sync at all)
     if pkt.stratum >= my_time.stratum and my_time.stratum < 15:
@@ -2522,7 +2552,7 @@ function get_network_time():
 
 On receiving any beacon:
 
-```
+```text
 function process_beacon_time(beacon, rx_time_local_ms):
     // Beacons carry time with lower precision than TIME_SYNC packets
     // but are more frequent, so use them as a background sync source
@@ -2541,7 +2571,7 @@ Removed unshipped. Proactive TIME_SYNC emission was deleted along with the packe
 
 > **Firmware reality.** Not implemented; the `anti_replay` module that implemented this design was deleted unshipped, and replay protection is being redesigned around dedup on authenticated fields. Today only the packet-id dedup buffer (section 7.6) ships.
 
-```
+```text
 REPLAY_WINDOW_S = 30   // ±30 seconds
 
 function check_replay(pkt_timestamp, packet_id):
@@ -2561,6 +2591,7 @@ function check_replay(pkt_timestamp, packet_id):
 ```
 
 Note: The ±30s window is deliberately large to accommodate:
+
 - Time sync uncertainty (±1-2s in well-connected mesh, up to ±5s at edges)
 - Multi-hop propagation delay (up to ~8 seconds for 8-hop path with queuing)
 - Clock drift between sync events (~10 ppm = 3s per 5-minute sync interval)
@@ -2580,6 +2611,7 @@ Note: The ±30s window is deliberately large to accommodate:
 ### 10.1 Threat Model
 
 **Attacker capabilities (assumed):**
+
 1. **Passive listener:** Can receive all LoRa transmissions within radio range. Has a Software Defined Radio (SDR) and can record all traffic.
 2. **Active attacker:** Can transmit crafted LoRa packets. Owns Bramble-compatible hardware.
 3. **Mesh participant:** Has joined the mesh with a valid node identity. May be malicious.
@@ -2590,7 +2622,7 @@ Note: The ±30s window is deliberately large to accommodate:
 #### 10.2.1 Confidentiality
 
 | Threat | Protection | Residual Risk |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | DM content interception | AES-256-GCM with per-pair X25519-derived keys. Relay nodes see only ciphertext. | Compromised endpoint reveals DM content for that pair only. |
 | Channel message interception | AES-256-GCM with channel PSK + epoch ratchet. Non-members cannot decrypt. Epoch rotation provides backward secrecy. | Any channel member can read all channel messages (by design). Current key compromise exposes future messages (attacker can derive forward epochs). Past messages protected by backward secrecy. |
 | Key exchange interception | X25519 Double-DH + ephemeral keys provide forward secrecy. | If both parties' long-term keys are compromised, past sessions (before last rekey) are exposed. |
@@ -2598,7 +2630,7 @@ Note: The ±30s window is deliberately large to accommodate:
 #### 10.2.2 Integrity & Authentication
 
 | Threat | Protection |
-|--------|-----------|
+| -------- | ----------- |
 | Packet tampering | AES-256-GCM auth tag (16 bytes) on all encrypted packets. Any modification is detected. |
 | Spoofed source address | DM: Source verified implicitly; only the real source has the session key to produce a valid auth tag. Channel: Source encrypted inside ciphertext with channel key; only channel members can verify. |
 | Spoofed beacons | Beacons include a 4-byte truncated HMAC (§4.9) keyed with pairwise DM session key. Beacons from known peers are authenticated; unknown peers' beacons are flagged lower-trust. A malicious beacon from an unknown node can claim false battery/queue/time, but its influence is limited (especially for time sync, see §9.3 corroboration requirements). |
@@ -2607,7 +2639,7 @@ Note: The ±30s window is deliberately large to accommodate:
 #### 10.2.3 Privacy
 
 | Threat | Protection | Residual Risk |
-|--------|-----------|---------------|
+| -------- | ----------- | --------------- |
 | Identify who talks to whom (DM) | RREQ source encrypted. Route-based forwarding reveals path only to nodes on the path. | Relay nodes see traffic patterns (timing, frequency, volume) between next-hop pairs. Local passive attacker can correlate. |
 | Identify channel message sender | Source addr encrypted inside channel ciphertext. Wire shows `0x00000000`. Channel ID also inside ciphertext: non-members cannot determine which channel. | Channel members see the sender. Non-member relay nodes cannot identify sender or channel. |
 
@@ -2620,7 +2652,7 @@ Note: The ±30s window is deliberately large to accommodate:
 **What a passive observer learns from a single captured packet:**
 
 | Packet Type | Observable Metadata |
-|-------------|-------------------|
+| ------------- | ------------------- |
 | DATA (DM) | dest_addr, next_hop, packet_id, packet size, tier, app_type. NOT: source, content. |
 | DATA (Channel) | next_hop, packet_id, packet size. NOT: source, content, dest, channel_id (inside ciphertext). |
 | ACK | src_addr (ACK sender = original destination), ack_packet_id. NOT: original source. |
@@ -2632,7 +2664,7 @@ Note: The ±30s window is deliberately large to accommodate:
 
 ### 10.4 Replay Attack Mitigation
 
-```
+```text
 Protection layers:
 1. Packet ID dedup buffer (256 entries, 60-second window)
    → Prevents exact packet replay within 60 seconds
@@ -2646,7 +2678,7 @@ Protection layers:
 
 ### 10.5 Flood/DoS Mitigation
 
-```
+```text
 Protection layers:
 1. Airtime budget - each node self-limits to 10% duty cycle
    → A compromised node can waste its own airtime but not others'
@@ -2659,7 +2691,7 @@ Protection layers:
 5. TX queue priority - flooding with low-priority packets doesn't affect critical traffic
 ```
 
-```
+```text
 function rreq_rate_check(source_neighbor, dest_addr, query_id):
     key = hash(source_neighbor, dest_addr)
     last = rreq_rate_table.lookup(key)
@@ -2690,7 +2722,7 @@ A Sybil attack (one attacker creating many fake node identities) is partially mi
 2. **Airtime cost:** Each Sybil identity must transmit its own beacons, consuming attacker's airtime. With 10% duty cycle per identity, one radio can support ~3-4 active Sybil identities before airtime exhaustion.
 3. **Neighbor suspicion:** Nodes track per-neighbor behavior metrics. If one physical neighbor produces packets from many identities (indicated by identical RSSI/timing patterns), a heuristic flags them:
 
-```
+```text
 function neighbor_sybil_check():
     // Group neighbors by similar RSSI (within ±3 dB)
     groups = cluster_neighbors_by_rssi(threshold=3)
@@ -2709,6 +2741,7 @@ This is a heuristic, not a guarantee. Bramble acknowledges that Sybil resistance
 ### 10.7 Compromised Node Containment
 
 If a node is compromised:
+
 - **DM keys:** Only DM sessions involving that node are exposed. Other pairs' sessions are safe.
 - **Channel keys:** If the compromised node is in a channel, that channel's content is exposed. Other channels are safe.
 - **Routing:** A compromised relay node can drop, delay, or misroute packets. Mitigation: senders detect via missing ACKs and discover alternate routes.
@@ -2727,7 +2760,7 @@ If a node is compromised:
 #### Mailbox / Store-and-Forward Security
 
 | Threat | Mitigation |
-|--------|-----------|
+| -------- | ----------- |
 | Mailbox buffer flooding | Per-destination cap (8 entries), per-source cap (8 entries) |
 | Spoofed STORE_REQUEST | HMAC authentication with pairwise session key |
 | Content inspection by mailbox | Messages are E2E encrypted: mailbox sees only ciphertext |
@@ -2744,13 +2777,14 @@ The emergency component was removed unshipped (section 4.19); there is no emerge
 #### Private Location Sharing Security
 
 | Threat | Mitigation |
-|--------|-----------|
+| -------- | ----------- |
 | Location leaked to relay nodes | Location payloads are E2E encrypted inside DM packets |
 | Recipient sharing location with others | Social/trust issue, not protocol-level: same as any private data |
 | Stale location data | 1-hour cache TTL; `location_cache_purge()` evicts expired entries |
 | Update flooding | Time-based (5 min default) and distance-based (100m) triggers; low priority in TX queue |
 
 **Privacy tiers rationale:**
+
 - FULL (17 bytes): Trusted contacts only: hiking partners, emergency contacts
 - COARSE (5 bytes): Casual contacts:  "which neighborhood are you in"
 - PRESENCE (1 byte): Acquaintances:  "are you online"
@@ -2766,7 +2800,7 @@ The network-coding component was removed unshipped (section 4.21); no coded pack
 #### Broadcast Probe Security
 
 | Threat | Mitigation |
-|--------|-----------|
+| -------- | ----------- |
 | Probe flooding | Rate limiting: 3 tokens, 1 refill/minute; cannot sustain more than 3/min |
 | Fake probe responses | Responses tied to observed probe_id; spoofer must have heard actual probe |
 | Network enumeration | Probes are visible to all nodes: inherent design. Use sparingly. |
@@ -2777,7 +2811,7 @@ The network-coding component was removed unshipped (section 4.21); no coded pack
 #### Public Channel Security
 
 | Threat | Mitigation |
-|--------|-----------|
+| -------- | ----------- |
 | Content confidentiality | **None**: well-known PSK means anyone can decrypt. By design. |
 | Spam flooding | Broadcast-tier airtime budget at the TX chokepoint (section 8.2.1). A dedicated public-channel TX/RX rate limiter was removed unshipped. |
 | Impersonation | Source address derives from the node's Ed25519 identity key; an identity attestation claiming an address without the deriving key is rejected by every receiver (section 4.28) |
@@ -2790,7 +2824,7 @@ The network-coding component was removed unshipped (section 4.21); no coded pack
 
 ### 11.1 RAM Budget
 
-```
+```text
 Subsystem                      Size        Notes
 ────────────────────────────   ─────────   ─────────────────────────
 Routing table                  1,536 B     64 entries × 24 B
@@ -2842,6 +2876,7 @@ Headroom:                     ~184,764 B    (~180 KB, 56% free)
 ```
 
 The 60% headroom accommodates:
+
 - Heap fragmentation (10–15%)
 - BLE connection buffers when active (~20KB)
 - Temporary crypto buffers (X25519, HKDF, AES-GCM working memory)
@@ -2849,7 +2884,7 @@ The 60% headroom accommodates:
 
 ### 11.2 Flash Budget
 
-```
+```text
 Component                      Size         Notes
 ────────────────────────────   ──────────   ─────────────────────────
 Bramble firmware               ~256 KB      Protocol + application code
@@ -2869,7 +2904,7 @@ Headroom:                     ~2,304 KB     (~2.25 MB, 56% free)
 
 All tables have hard size limits. When a table is full, the eviction policy determines what is removed:
 
-```
+```text
 Table                    Max    Eviction Policy
 ────────────────────     ────   ──────────────────────────────
 Routing table            64     LRU by last_used timestamp. Stale evicted before active.
@@ -2889,7 +2924,7 @@ RREQ rate table          64     LRU by timestamp.
 ## Appendix A: Cryptographic Primitive Summary
 
 | Primitive | Algorithm | Key Size | Library | ESP32 HW Accel |
-|-----------|-----------|----------|---------|----------------|
+| ----------- | ----------- | ---------- | --------- | ---------------- |
 | Key exchange | X25519 | 256-bit | mbedtls (bundled in ESP-IDF) | No (software, ~5ms on ESP32-S3) |
 | Symmetric encryption | AES-256-GCM | 256-bit | mbedtls | Yes (ESP32-S3 AES accelerator) |
 | Key derivation | HKDF-SHA256 | N/A | mbedtls | SHA-256 HW accelerated on ESP32-S3 |
@@ -2898,6 +2933,7 @@ RREQ rate table          64     LRU by timestamp.
 | Random numbers | Hardware RNG | N/A | esp_random() | Yes (true hardware RNG) |
 
 **AES-GCM nonce management:**
+
 - 96-bit (12-byte) nonce per packet
 - Constructed as: `nonce = src_addr (4B) || packet_counter (4B) || random (4B)`
 - The `packet_counter` is a per-session monotonic counter (stored in RAM, not NVS)
@@ -2905,7 +2941,7 @@ RREQ rate table          64     LRU by timestamp.
 
 ## Appendix B: Configuration Defaults
 
-```
+```text
 // Radio
 radio_profile        = LongRange           // SF10, 125kHz, CR 4/6
 tx_power_dbm         = 22                  // Max legal
@@ -2994,7 +3030,7 @@ Native mobile application (iOS/Android) for richer interaction beyond Web BLE ca
 ## Appendix C: Glossary
 
 | Term | Definition |
-|------|-----------|
+| ------ | ----------- |
 | **AODV** | Ad-hoc On-demand Distance Vector: reactive routing protocol that discovers routes only when needed |
 | **CAD** | Channel Activity Detection: LoRa radio feature to detect ongoing transmissions |
 | **CR** | Coding Rate: Forward Error Correction ratio in LoRa (4/5 through 4/8) |
@@ -3019,7 +3055,7 @@ Native mobile application (iOS/Android) for richer interaction beyond Web BLE ca
 ## Revision History
 
 | Date | Changes |
-|------|---------|
+| ------ | --------- |
 | 2026-02-15 | Initial design document (v0.1-draft) |
 | 2026-02-16 | **Adversarial review fixes:** Dedup buffer 128→256 entries. RREP HMAC 4→8 bytes (RREP_SIZE 30→34). RREQ salt field added (RREQ_SIZE 26→30) to prevent temporal correlation. Max fragments 8→4 (max reassembled 616B). Long-term pubkey added to KEY_EXCHANGE (69→101 bytes). KEY_EXCHANGE now Critical-tier (8 retries). Nonce counter persistence for reboot safety. Constant-time channel trial decryption. TX power reduction removed from congestion response (replaced with increased backoff). **New features:** NVS key backup via BLE with physical button authorization. Dummy traffic generation (privacy mode). Route advertisements in beacons. |
 | 2026-02-17 | **Packet type renumbering:** Types renumbered to match implementation (ACK=0x01 through DATA=0x0A, see §4.3). **New packet types (§4.15–4.23):** STORE_REQUEST (0x0B), STORE_ACK (0x0C), MAILBOX_DELIVERY (0x0D), MAILBOX_QUERY (0x0E) for store-and-forward; EMERGENCY (0x0F), EMERGENCY_CANCEL (0x10) for distress signaling; CODED (0x11) for XOR network coding; PKT_TYPE_PROBE (0x12), PKT_TYPE_PROBE_ACK (0x13) for delivery tracking. **Beacon flag extensions (§4.9):** BEACON_FLAG_MAILBOX (0x01), BEACON_FLAG_PROBE_ACK (0x02). **Header flag extension:** HEADER_FLAG_EMERGENCY (0x04) for emergency relay priority. **New channel features (§5.3):** Public channel "Bramble Common" with well-known PSK; Group DM key derivation with FNV-1a and epoch rotation. **Private location sharing (§4.24):** Three-tier privacy (full/coarse/presence), 17-byte full format, per-contact config. **Adaptive routing metrics (§6.8):** Composite metric with delivery rate, airtime, latency factors; EMA tracking; hysteresis. **Security analysis (§10.9):** New section covering security properties of all new features. **RAM budget update (§11.1):** Added ~13 KB for new components (mailbox 7KB, emergency 0.4KB, location 1KB, group 2.2KB, coding 1.5KB, probe 0.6KB). |

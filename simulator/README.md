@@ -5,13 +5,16 @@ Network simulator for Bramble that runs actual C component code against a virtua
 ## Quick Start
 
 ### Docker (recommended)
+
 ```bash
 cd simulator
 docker compose up --build
 ```
-Open http://localhost:3003
+
+Open <http://localhost:3003>
 
 ### Local Development
+
 ```bash
 # Build Go+C server
 cd gosim && go build -o bramble-gosim . && cd ..
@@ -22,6 +25,7 @@ cd ui && npm install && npm run build && cd ..
 # Run
 ./gosim/bramble-gosim --ui ui/dist --scenarios scenarios
 ```
+
 Open <http://localhost:3000>
 
 The local emulator (`emulator/`) also defaults to port 3000, so pass
@@ -29,6 +33,7 @@ The local emulator (`emulator/`) also defaults to port 3000, so pass
 variants do not collide: this one publishes 3003 and the emulator 3004.
 
 ### Headless Mode
+
 ```bash
 ./gosim/bramble-gosim --headless --scenario scenarios/ideal-10-node.json
 # Or use the script:
@@ -106,6 +111,7 @@ analytic pure-ALOHA collision rate; see `gosim/collision_test.go` and
 ## Scenarios
 
 Place JSON files in `scenarios/`. Supports:
+
 - **Deterministic:** Scripted events at specific timestamps
 - **Stochastic:** Seeded PRNG chaos events (reproducible)
 - **Anomaly detection:** Black hole, partition, route loop, excessive RREQ
@@ -130,7 +136,7 @@ run in real-time mode (wall clock), so durations are seconds, not instant.
 Per-node `env` knobs (host-only, honored only on the linux target):
 
 | Variable | Effect |
-|---|---|
+| --- | --- |
 | `EMU_NETWORK_KEY` | 32-byte network key as 64 hex chars. Seeds provisioning at boot so the fleet meshes (there is no emu-link provisioning RPC). Unset means the node boots INERT. |
 | `EMU_AUTO_SEND` | Message text the node originates after a delay (via the real `mesh_send_broadcast`/`mesh_send_message`). The scripted stand-in for a button compose+send. |
 | `EMU_AUTO_SEND_TO` | DM target: `neighbor` (first learned neighbor), a hex address, or unset for a channel broadcast. |
@@ -165,6 +171,7 @@ Bundled emulator scenarios: `emulator-3-pagers` (attach/persistence smoke),
 ## Interactive Controls
 
 Via the UI or WebSocket (`ws://host:port/ws`):
+
 - Load/start/restart scenarios
 - Play/pause with speed control (0.5×–100×)
 - **Add nodes**: "+ Node" button, placed near random existing node

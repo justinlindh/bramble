@@ -189,6 +189,12 @@ jobs:
   # false, and users will see the usual Gatekeeper / SmartScreen warnings.
   # The OTA firmware signing chain is unrelated to and untouched by these jobs.
   #
+  # Desktop auto-update: the Windows and Linux legs also emit electron-updater
+  # feed files (latest.yml, latest-linux.yml) that get attached to the release;
+  # a self-updating build (Windows NSIS, Linux AppImage) reads them to discover
+  # and install a newer version. macOS and Linux deb/pacman are notify-only and
+  # publish no feed (see the per-job upload notes and webapp/electron/updater.ts).
+  #
   # semantic-release does not commit a version bump into webapp/package.json
   # (.releaserc.webapp.cjs has no npm/git plugin), so every build injects the
   # released version with -c.extraMetadata.version; installer filenames and
@@ -270,7 +276,14 @@ jobs:
         run: |
           set -euo pipefail
           cd webapp
-          npx electron-builder --linux --win --config electron-builder.yml \
+          # --publish never: electron-builder.yml declares a github publish
+          # provider (so the latest*.yml update feed gets emitted), and GitHub
+          # Actions sets CI=true, which otherwise flips electron-builder into
+          # implicit "onTagOrDraft" publishing and makes it attempt a real
+          # upload that fails here (no GH_TOKEN in this job). This job only
+          # builds; the webapp-installers-publish job attaches every asset,
+          # feed files included.
+          npx electron-builder --linux --win --publish never --config electron-builder.yml \
             -c.extraMetadata.version="$VER"
           ls -lh release/ | grep -v -e '^total' -e 'unpacked'
 
@@ -278,11 +291,19 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: webapp-installers-linux-win
+          # latest.yml (Windows NSIS) and latest-linux.yml (Linux AppImage) are
+          # the electron-updater feed files. electron-builder emits them because
+          # electron-builder.yml declares a github publish provider; attaching
+          # them to the release is what lets a self-updating build discover a
+          # newer version. deb and pacman carry no feed (the system package
+          # manager owns those installs).
           path: |
             webapp/release/*.AppImage
             webapp/release/*.deb
             webapp/release/*.pacman
             webapp/release/*.exe
+            webapp/release/latest.yml
+            webapp/release/latest-linux.yml
           if-no-files-found: error
           retention-days: 1
 
@@ -343,7 +364,11 @@ jobs:
         run: |
           set -euo pipefail
           cd webapp
-          npx electron-builder --mac --arm64 --x64 --config electron-builder.yml \
+          # --publish never: see the Linux/Windows job. The github publish
+          # provider plus CI=true would otherwise make electron-builder attempt
+          # a real upload that fails here (no GH_TOKEN). This job only builds;
+          # the mac dmgs are attached by the webapp-installers-publish job.
+          npx electron-builder --mac --arm64 --x64 --publish never --config electron-builder.yml \
             -c.extraMetadata.version="$VER"
           ls -lh release/ | grep -v -e '^total' -e 'unpacked'
 
@@ -351,6 +376,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: webapp-installers-mac
+          # dmg only, no latest-mac.yml: the dmgs are unsigned, so Squirrel.Mac
+          # cannot validate and apply an in-app update. The desktop app treats
+          # macOS as a notify-only platform (it opens the releases page), so no
+          # mac update feed is published, by design.
           path: webapp/release/*.dmg
           if-no-files-found: error
           retention-days: 1

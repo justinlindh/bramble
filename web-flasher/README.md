@@ -11,7 +11,7 @@ Web Serial-based firmware flasher for Bramble boards, powered by [esptool-js](ht
 ## Supported Boards
 
 | Board | Chip | Flash |
-|-------|------|-------|
+| ------- | ------ | ------- |
 | Heltec WiFi LoRa 32 V3 | ESP32-S3 | 8MB |
 | LILYGO T-Deck Plus | ESP32-S3 | 16MB |
 | Heltec V4 | ESP32-S3 | 8MB |
@@ -28,6 +28,7 @@ Web Serial-based firmware flasher for Bramble boards, powered by [esptool-js](ht
 ## Release filtering contract
 
 Only complete releases are shown. A release is considered complete only if it contains the canonical artifacts for **all** supported boards (`heltec-v3`, `tdeck-plus`, `heltec-v4`):
+
 - `bootloader.bin`
 - `partition-table.bin`
 - `bramble.bin`

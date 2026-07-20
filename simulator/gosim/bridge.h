@@ -135,6 +135,19 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
                                         event_queue_t* events, metrics_state_t* metrics);
 
 /*
+ * bridge_handle_generate_location (issue #172):
+ *   Fires a scripted EVT_GENERATE_LOCATION: the named node broadcasts a GPS
+ *   position update mirroring firmware's mesh_send_location_packet broadcast
+ *   path (PKT_TYPE_LOCATION, tier byte + location_serialize_for_tier inner,
+ *   NORMAL airtime lane). Receivers cache it via location_cache_update and
+ *   emit "location_received"; the frame is delivered, never relayed, exactly
+ *   like firmware's handle_location.
+ */
+void bridge_handle_generate_location(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                                     pcg32_state_t* rng, event_queue_t* events,
+                                     metrics_state_t* metrics);
+
+/*
  * bridge_apply_duty_cycle_cap:
  *   Applies the scenario's optional regulatory duty-cycle cap (DES-8) to one
  *   node's real airtime budget via airtime_budget_set_duty_cap, exactly as

@@ -54,6 +54,7 @@ npm run test:e2e:smoke --prefix webapp
 ```
 
 Notes:
+
 - `test:e2e:smoke` starts/stops the unified runtime by default.
 - Managed start mode fails fast if the target port is already occupied (prevents false-positive passes against an unrelated runtime).
 - Set `SMOKE_START_RUNTIME=0` only when intentionally testing an already-running runtime.

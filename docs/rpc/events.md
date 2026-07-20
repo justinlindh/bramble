@@ -18,6 +18,7 @@ Notifications are delivered only to authenticated connections (WebSocket and BLE
 Emitted when a chat payload is successfully decoded and stored from mesh RX (single-packet and reassembled fragmented messages).
 
 **Trigger conditions**
+
 - A message packet (or completed fragment set) is received and parsed.
 - Message is written to message store first.
 - Notification is emitted before ACK/receipt handling (`send_ack(...)` / broadcast delivery receipt queueing).
@@ -25,7 +26,7 @@ Emitted when a chat payload is successfully decoded and stored from mesh RX (sin
 **Params**
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `from` | string | Sender address (8-char uppercase hex). |
 | `fromName` | string | Sender's node name; present only when the neighbor table knows it. |
 | `text` | string | Decoded message text. |
@@ -35,6 +36,7 @@ Emitted when a chat payload is successfully decoded and stored from mesh RX (sin
 | `broadcast` | boolean | `true` if classified as broadcast-in. |
 
 **Semantics notes**
+
 - Emitted for both fragmented and non-fragmented receives.
 - Correlates to inbound message history; not a delivery confirmation.
 
@@ -64,13 +66,14 @@ Emitted when a chat payload is successfully decoded and stored from mesh RX (sin
 Emitted for outgoing unicast delivery state transitions: delivered ACKs and failures.
 
 **Trigger conditions**
+
 - **Delivered**: receipt/ACK processing updates message status to delivered.
 - **Failed**: pending ACK is failed due to retry timeout or route-error fast-fail (`RERR`).
 
 **Params**
 
 | Field | Type | Present when | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `packet_id` | string | always | Packet id (8-char uppercase hex) matching send response. |
 | `status` | string | always | `"delivered"` or `"failed"`. |
 | `from` | string | delivered | Acknowledging node address. |
@@ -79,6 +82,7 @@ Emitted for outgoing unicast delivery state transitions: delivered ACKs and fail
 | `reason` | string | failed (optional) | Failure reason (e.g. `"route_broken"`). |
 
 **Semantics notes**
+
 - Failures may be emitted without `from`/`relayPath`.
 - Use `packet_id` as the correlation key.
 
@@ -123,13 +127,14 @@ Emitted for outgoing unicast delivery state transitions: delivered ACKs and fail
 Location-sharing activity event for local sends and peer location receives.
 
 **Trigger conditions**
+
 - `event: "sent"`: periodic location fan-out sends one or more location payloads to peers.
 - `event: "received"`: location packet received, parsed, cached, and persisted.
 
 **Params**
 
 | Field | Type | Present when | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `event` | string | always | `"sent"` or `"received"`. |
 | `tier` | string | always | Privacy tier string from firmware policy. |
 | `timestamp_ms` | integer | always | Milliseconds since boot. |
@@ -139,6 +144,7 @@ Location-sharing activity event for local sends and peer location receives.
 | `count` | integer | sent | Number of peers included in send batch. |
 
 **Semantics notes**
+
 - `bramble.onPeerLocation` and `bramble.onLocationEvent(event="received")` are emitted together on peer location ingest.
 
 **JSON-RPC example (received)**
@@ -166,14 +172,17 @@ Location-sharing activity event for local sends and peer location receives.
 Emitted when a peer location packet has been processed and persisted.
 
 **Trigger conditions**
+
 - Location packet is decoded for tier.
 - Cache update + NVS persistence complete.
 - Notification emitted immediately before `bramble.onLocationEvent(event="received")`.
 
 **Params**
+
 - No payload (`params: null`).
 
 **Semantics notes**
+
 - Treat this as an invalidation signal; call `bramble.getPeerLocations` for full state.
 
 **JSON-RPC example**
@@ -194,6 +203,7 @@ Emitted when a peer location packet has been processed and persisted.
 Emitted when node identity is regenerated due to detected address collision.
 
 **Trigger conditions**
+
 - Incoming authenticated beacon indicates same address but different pubkey hash.
 - Firmware regenerates keypair/identity and persists it.
 - Event emitted, then collision-path processing returns early.
@@ -201,11 +211,12 @@ Emitted when node identity is regenerated due to detected address collision.
 **Params**
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `new_address` | string | New node address (8-char uppercase hex). |
 | `reason` | string | Currently `"address_collision"`. |
 
 **Semantics notes**
+
 - Clients should immediately refresh cached local identity/address references.
 
 **JSON-RPC example**
@@ -229,13 +240,16 @@ Emitted when node identity is regenerated due to detected address collision.
 Emitted whenever beacon handling mutates/refreshes neighbor table data.
 
 **Trigger conditions**
+
 - Valid non-self beacon processed and neighbor state updated.
 - Emitted after neighbor update/state bookkeeping within beacon handler.
 
 **Params**
+
 - No payload (`params: null`).
 
 **Semantics notes**
+
 - No delta is included; call `bramble.getNeighbors` for current table.
 
 **JSON-RPC example**
@@ -256,6 +270,7 @@ Emitted whenever beacon handling mutates/refreshes neighbor table data.
 Terminal event for an active probe sweep window.
 
 **Trigger conditions**
+
 - Probe collection is active and collection window elapses.
 - Summary is built from accumulated responder state.
 - Event emitted once; probe collection is then marked complete.
@@ -263,7 +278,7 @@ Terminal event for an active probe sweep window.
 **Params**
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `probe_id` | string | Active probe id (8-char uppercase hex). |
 | `unique_count` | integer | Number of unique responders seen. |
 | `duration_ms` | integer | Elapsed probe collection duration. |
@@ -273,7 +288,7 @@ Terminal event for an active probe sweep window.
 Responder object fields:
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `address` | string | Responder address (8-char uppercase hex). |
 | `hops` | integer | Best/observed hops. |
 | `rssi` | integer | Best/observed RSSI. |
@@ -282,6 +297,7 @@ Responder object fields:
 | `seen_rounds` | integer | Number of probe rounds with responses. |
 
 **Semantics notes**
+
 - Exactly one complete event per active probe id.
 
 **JSON-RPC example**
@@ -311,6 +327,7 @@ Responder object fields:
 Per-response event during an active probe sweep.
 
 **Trigger conditions**
+
 - Probe ACK received and accepted while probe collection is active.
 - Per-responder aggregate state updated.
 - Event emitted for that response.
@@ -318,7 +335,7 @@ Per-response event during an active probe sweep.
 **Params**
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `address` | string | Responder address (8-char uppercase hex). |
 | `hops` | integer | Hop count in this response. |
 | `rssi` | integer | RSSI for this responder/sample. |
@@ -328,6 +345,7 @@ Per-response event during an active probe sweep.
 | `probe_id` | string | Active probe id (8-char uppercase hex). |
 
 **Semantics notes**
+
 - Multiple events can occur for one responder across rounds.
 - `bramble.onProbeComplete` closes the stream for that probe.
 
@@ -357,6 +375,7 @@ Per-response event during an active probe sweep.
 Broadcast delivery telemetry event for recipient confirmations.
 
 **Trigger conditions**
+
 - A delivery receipt for a previously sent broadcast is processed.
 - Telemetry record is persisted (`record_broadcast_delivery_event(...)`).
 - Notification is emitted.
@@ -364,7 +383,7 @@ Broadcast delivery telemetry event for recipient confirmations.
 **Params**
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `recipient` | string | Recipient node address (8-char uppercase hex). |
 | `broadcast_id` | string | Broadcast id (8-char uppercase hex). |
 | `status` | string | Currently always `"delivered"`. |
@@ -374,6 +393,7 @@ Broadcast delivery telemetry event for recipient confirmations.
 Relay path object fields: `addr` (string).
 
 **Semantics notes**
+
 - One broadcast can emit multiple events (one per recipient/report).
 - Correlate on `broadcast_id` + `recipient`.
 
@@ -420,13 +440,14 @@ dashboards, and batch interactive UI updates (100 to 250 ms coalescing).
 GPS connectivity state change event.
 
 **Trigger conditions**
+
 - GPS fix acquired or lost (state transition).
 - Polled periodically by the connectivity event loop.
 
 **Params**
 
 | Field | Type | Present when | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `event` | string | always | `"fix_acquired"` or `"fix_lost"`. |
 | `valid` | boolean | fix_acquired | Whether the position is valid. |
 | `lat` | number | fix_acquired | Latitude in degrees. |
@@ -435,6 +456,7 @@ GPS connectivity state change event.
 | `accuracy_m` | number | fix_acquired | Position accuracy in meters. |
 
 **Semantics notes**
+
 - Only emitted on state transitions (fix gained or lost), not on every GPS update.
 - `fix_lost` events have no position fields.
 
@@ -475,6 +497,7 @@ GPS connectivity state change event.
 Wi-Fi connectivity state change event.
 
 **Trigger conditions**
+
 - Wi-Fi connection or disconnection (state transition).
 - Wi-Fi mode change (off/station/AP).
 - Polled periodically by the connectivity event loop.
@@ -482,7 +505,7 @@ Wi-Fi connectivity state change event.
 **Params**
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `event` | string | Event type (`"connected"`, `"disconnected"`, `"mode_changed"`). |
 | `mode` | string | Wi-Fi mode: `"off"`, `"sta"`, or `"ap"`. |
 | `connected` | boolean | Whether an IP address is assigned. |
@@ -491,6 +514,7 @@ Wi-Fi connectivity state change event.
 | `rssi` | integer | Wi-Fi RSSI (dBm). |
 
 **Semantics notes**
+
 - Only emitted on state transitions, not on every poll cycle.
 - `ssid` is omitted when no SSID is available.
 
@@ -519,13 +543,14 @@ Wi-Fi connectivity state change event.
 Real-time packet telemetry event for traffic debug stream.
 
 **Trigger conditions**
+
 - Traffic debug recorder emits TX/RX event and callback builds JSON payload.
 - Event pushed via `rpc_notify` to WebSocket clients.
 
 **Params**
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `seq` | integer | Monotonic event sequence number. |
 | `timestamp_ms` | integer | Milliseconds since boot. |
 | `pkt_type` | integer | Raw packet type id. |
@@ -536,6 +561,7 @@ Real-time packet telemetry event for traffic debug stream.
 | `is_tx` | boolean | `true` for TX, `false` for RX. |
 
 **Semantics notes**
+
 - Stream behavior depends on traffic debug configuration and sampling.
 
 **JSON-RPC example**
@@ -565,13 +591,14 @@ Real-time packet telemetry event for traffic debug stream.
 Emitted during a background OTA update started by bramble.otaUpdate.
 
 **Trigger conditions**
+
 - OTA progress state transitions (`idle` -> `downloading` -> `verifying` -> `rebooting`, or `downloading`/`verifying` -> `failed`).
 - Every >= 5 percentage points of download progress.
 
 **Params**
 
 | Field | Type | Present when | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `state` | string | always | OTA state: `"idle"`, `"downloading"`, `"verifying"`, `"rebooting"`, or `"failed"`. |
 | `bytes` | integer | always | Bytes downloaded so far. |
 | `total` | integer | always | Total bytes expected for the update image. |
@@ -579,6 +606,7 @@ Emitted during a background OTA update started by bramble.otaUpdate.
 | `error` | string | failed | Failure text, same as `last_error` from `bramble.otaStatus`. |
 
 **Semantics notes**
+
 - `rebooting` is terminal for success: the node restarts about 2 seconds later and the connection drops.
 - `failed` is terminal for failure; the same text is available as `last_error` via bramble.otaStatus.
 

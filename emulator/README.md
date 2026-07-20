@@ -10,7 +10,7 @@ original Phase 1 implementation plan is archived at
 
 ### Docker (recommended, zero prerequisites)
 
-```
+```bash
 cd emulator
 docker compose up --build
 ```
@@ -26,7 +26,7 @@ build stage).
 
 ### Make targets (local toolchain)
 
-```
+```bash
 cd emulator
 make check      # verify idf.py (linux target), go, node/npm, jq are present
 make run        # build node + gosim + UI, then serve them
@@ -45,7 +45,7 @@ then load a scenario from the dropdown:
 Individual targets, each a thin wrapper documented inline in `Makefile`:
 
 | Target | Wraps |
-|---|---|
+| --- | --- |
 | `make check` | prerequisite check (`scripts/check_prereqs.sh`) |
 | `make node` | `idf.py build` for the linux target (`scripts/build_node.sh`, see `node/README.md`) |
 | `make broker` | `go build` in `simulator/gosim` |
@@ -75,7 +75,7 @@ More first-run stalls are collected in
 
 ## Manual build (what the targets above wrap)
 
-```
+```bash
 # 1. firmware node (linux target)
 source $IDF_PATH/export.sh
 cd emulator/node
@@ -145,7 +145,7 @@ if flattening is ever needed again as a scoped workaround.
 
 ## CI-equivalent scenario suite
 
-```
+```bash
 make headless
 ```
 
@@ -155,7 +155,7 @@ signatures. Exit code gates CI; budget under 5 minutes.
 
 ## Browser end-to-end suite
 
-```
+```bash
 make e2e
 ```
 
