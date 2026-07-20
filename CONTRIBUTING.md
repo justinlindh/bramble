@@ -54,6 +54,23 @@ What you need depends on what you want to touch.
 (gcc or clang), `make`, and `bash`. The host test suite compiles the protocol
 code natively and needs no ESP-IDF.
 
+The strict clang-format gate is pinned to an exact version, currently the one
+in [`.clang-format-version`](.clang-format-version) (`14.0.6`), because
+different clang-format releases disagree on macro and designated-initializer
+layout and there is no formatting that satisfies two versions at once (issue
+#161). Get the exact version with `uv`:
+
+```bash
+uv tool install "clang-format==$(cat .clang-format-version)"
+clang-format --version
+```
+
+CI's `Static checks` job asserts this version and fails with a clear message
+naming both versions when it does not match. `scripts/lint/run-clang-format-check.sh`
+(strict or not) prints the same comparison as a warning rather than a hard
+failure, so you still get advisory signal without the exact version installed,
+but a warning means its findings may not match what CI reports.
+
 **Webapp:** Node.js 20 or newer, and npm. That is what CI builds and tests
 with, it is the `engines` floor in `webapp/package.json`, and the repo root
 ships an [`.nvmrc`](.nvmrc) so `nvm use` picks a matching version.

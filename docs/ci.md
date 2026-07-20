@@ -118,7 +118,7 @@ changed. When in doubt, run the real checks rather than silently skip them.
 
 | Output | Marks changed when the diff touches |
 | --- | --- |
-| `firmware` | `main/`, `components/`, `test/`, `api/`, `scripts/`, `CMakeLists.txt`, `sdkconfig.*`, `partitions*.csv`, `.clang-format`, `.clang-tidy`, `.shellcheckrc`, `.markdownlint-cli2.yaml` |
+| `firmware` | `main/`, `components/`, `test/`, `api/`, `scripts/`, `CMakeLists.txt`, `sdkconfig.*`, `partitions*.csv`, `.clang-format`, `.clang-format-version`, `.clang-tidy`, `.shellcheckrc`, `.markdownlint-cli2.yaml` |
 | `simulator` | `simulator/` |
 | `emulator` | `emulator/` |
 | `webapp` | `webapp/` |
@@ -173,6 +173,18 @@ a failure attributes to the exact tool in the UI. It has no `if:` because it is
 THE universal gate: it must run (and report) on every PR, including a docs-only
 PR where it is the only job that executes. The individual checks are cheap and
 pass trivially when their scope did not change.
+
+The clang-format version is pinned, not just the binary's presence. The
+`.clang-format-version` file at the repo root is the single source of truth
+(currently `14.0.6`, matching what the runner image bakes); a dedicated step
+runs `clang-format --version` and fails with a clear message naming both the
+expected and actual version when they disagree, instead of letting a version
+skew masquerade as a formatting violation (issue #161: two prior incidents
+where a contributor's local clang-format and CI's disagreed on macro/designated-
+initializer layout, with no text satisfying both). `run-clang-format-check.sh`
+performs the same comparison locally and prints a warning banner (not a hard
+failure, so a contributor without the exact version can still get advisory
+signal) naming the mismatch and pointing at this file.
 
 ### `quality.yml`
 

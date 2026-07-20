@@ -19,7 +19,7 @@ the full job topology and the always-report contract.
   - Board matrix coverage (`bash scripts/lint/check-board-matrix.sh`: the `board-build-smoke` matrix in `quality.yml` must list exactly the boards `scripts/ci-build-firmware.sh` releases)
   - Strict shellcheck (`bash scripts/lint/run-shellcheck.sh --strict`)
   - Ruff baseline profile (`ruff check scripts --select E9,F63,F7,F82`)
-  - Strict clang-format, full scope (`bash scripts/lint/run-clang-format-check.sh --strict`)
+  - Strict clang-format, full scope (`bash scripts/lint/run-clang-format-check.sh --strict`), pinned to the version in `.clang-format-version` (currently 14.0.6); the `Static checks` job asserts the runner's `clang-format --version` matches before running the check, and the wrapper script prints a warning if your local version differs, because unpinned clang-format versions disagree on macro and designated-initializer layout and produce unreproducible findings (issue #161)
   - cppcheck (`--error-exitcode=2`, blocking)
   - RPC contract check (`bash scripts/check-rpc-contract.sh`: `api/openapi.yaml` vs the firmware registry in `main/rpc_methods.c`)
   - Actionlint over the four gating workflow files
