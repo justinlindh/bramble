@@ -60,11 +60,9 @@ bool beacon_verify_hmac(const bramble_beacon_t* beacon, const uint8_t* shared_ke
     uint8_t saved[sizeof(copy.auth_hmac)];
     memcpy(saved, copy.auth_hmac, sizeof(saved));
     beacon_compute_hmac(&copy, shared_key, key_len);
-    /* SEC-H2 (Task 3.4): constant-time compare, OR-accumulate XOR with no
-     * early exit, unlike memcmp. The non-constant-time compare was named
-     * as part of SEC-H2's root cause. */
-    uint8_t r = 0;
-    for (size_t i = 0; i < sizeof(saved); i++)
-        r |= saved[i] ^ copy.auth_hmac[i];
-    return r == 0;
+    /* SEC-H2 (Task 3.4): constant-time compare with no early exit, unlike
+     * memcmp. The non-constant-time compare was named as part of SEC-H2's
+     * root cause. Uses the shared crypto_ct_memeq so every tag/MAC check in
+     * the tree goes through one implementation. */
+    return crypto_ct_memeq(saved, copy.auth_hmac, sizeof(saved));
 }
