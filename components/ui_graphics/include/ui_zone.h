@@ -70,14 +70,16 @@ void ui_zone_track(lv_obj_t** slot, lv_obj_t* obj);
  * the hop target dangling. */
 void ui_zone_set_chrome_default(lv_obj_t* obj);
 
-/* Apply the chrome focus indicator (a bright accent outline on LV_STATE_FOCUSED)
+/* Apply the chrome focus indicator (a bright accent BORDER on LV_STATE_FOCUSED)
  * to a chrome widget. Distinct in colour from the content zone's fill
  * highlight, so which zone holds the live cursor is unambiguous. Call it on
- * every tab / header-action button added to the chrome group. */
+ * every tab / header-action button added to the chrome group. Borders, never
+ * outlines: an outline draws outside the widget and clips at unpadded
+ * container edges (see ui_zone_style_chrome's comment). */
 void ui_zone_style_chrome(lv_obj_t* obj);
 
-/* Apply the content zone's focus indicator (a primary-colour outline on
- * LV_STATE_FOCUSED, no explicit opa) to a content widget, e.g. a chat bubble. */
+/* Apply the content zone's focus indicator (a primary-colour border on
+ * LV_STATE_FOCUSED) to a content widget, e.g. a chat bubble. */
 void ui_zone_style_content(lv_obj_t* obj);
 
 /* Add obj to the chrome group, style it, and (if make_default) make it the
