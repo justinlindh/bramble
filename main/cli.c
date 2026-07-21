@@ -307,15 +307,28 @@ static void cli_task(void* param) {
      * to internal RAM on boards without it) covers a full message store, and an
      * overflow past even that now comes back as an explicit "response too large"
      * error from rpc_dispatch rather than silence. */
-    const size_t resp_cap = 16 * 1024;
+    size_t resp_cap = 16 * 1024;
     char* response = heap_caps_malloc(resp_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!response) {
+    /* No PSRAM (or PSRAM exhausted): step the internal-RAM fallback DOWN
+     * instead of dying. On the PSRAM-less heltec-v3 the largest free internal
+     * block at boot is under 16 KB, and the old single-shot fallback failed,
+     * which killed this task and with it the ONLY local control channel
+     * (serial RPC never answered again). A smaller cap degrades loudly
+     * per-call instead: rpc_dispatch reports "response too large" explicitly
+     * for anything that does not fit. */
+    while (!response && resp_cap >= 2 * 1024) {
         response = malloc(resp_cap);
+        if (!response)
+            resp_cap /= 2;
     }
     if (!response) {
-        ESP_LOGE(TAG, "CLI response buffer alloc failed (%u bytes)", (unsigned)resp_cap);
+        ESP_LOGE(TAG, "CLI response buffer alloc failed (even %u bytes)", (unsigned)resp_cap * 2);
         vTaskDelete(NULL);
         return;
+    }
+    if (resp_cap < 16 * 1024) {
+        ESP_LOGW(TAG, "CLI response buffer reduced to %u bytes (no PSRAM, tight internal heap)",
+                 (unsigned)resp_cap);
     }
 
     while (1) {

@@ -148,24 +148,29 @@ void ui_zone_set_chrome_default(lv_obj_t* obj) {
 void ui_zone_style_chrome(lv_obj_t* obj) {
     if (!obj)
         return;
-    /* Accent (blue) outline, distinct from the green fill the content zone uses
+    /* Accent (blue) BORDER, distinct from the green fill the content zone uses
      * for its focused row, so a chrome hop is visible even on the active tab
-     * that already carries a green background. */
-    lv_obj_set_style_outline_width(obj, 2, LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_color(obj, BR_COLOR_ACCENT, LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_opa(obj, LV_OPA_COVER, LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_pad(obj, 1, LV_STATE_FOCUSED);
+     * that already carries a green background. A border, never an outline:
+     * outlines draw outside the widget and clip at unpadded container edges
+     * (the tab bar sits flush on the screen's bottom edge, so a focused tab's
+     * outline lost its bottom side), and scroll-to-view ignores them so the
+     * clipped side is unrecoverable. Borders draw inside and cannot clip;
+     * bramble_theme.c banishes the default theme's outline for the same
+     * reason. */
+    lv_obj_set_style_border_width(obj, 2, LV_STATE_FOCUSED);
+    lv_obj_set_style_border_color(obj, BR_COLOR_ACCENT, LV_STATE_FOCUSED);
+    lv_obj_set_style_border_opa(obj, LV_OPA_COVER, LV_STATE_FOCUSED);
 }
 
 void ui_zone_style_content(lv_obj_t* obj) {
     if (!obj)
         return;
-    /* Primary-colour outline, distinct from the chrome accent. No explicit
-     * opa: content widgets (chat bubbles) never wanted the forced-opaque
-     * outline the chrome style uses. */
-    lv_obj_set_style_outline_width(obj, 2, LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_color(obj, BR_COLOR_PRIMARY, LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_pad(obj, 1, LV_STATE_FOCUSED);
+    /* Primary-colour border, distinct from the chrome accent. Border, not
+     * outline, for the clip-proofing reasons in ui_zone_style_chrome (the
+     * node-detail action column reproduced the clip on its top button). */
+    lv_obj_set_style_border_width(obj, 2, LV_STATE_FOCUSED);
+    lv_obj_set_style_border_color(obj, BR_COLOR_PRIMARY, LV_STATE_FOCUSED);
+    lv_obj_set_style_border_opa(obj, LV_OPA_COVER, LV_STATE_FOCUSED);
 }
 
 void ui_zone_add_chrome(lv_obj_t* obj, bool make_default) {
@@ -225,7 +230,9 @@ static void apply_focus_visual(lv_group_t* active) {
 }
 
 /* Focus moved WITHIN a group: LVGL lights the newly focused widget, but it
- * never touches the other group, so re-assert the one-cursor invariant. */
+ * never touches the other group, so re-assert the one-cursor invariant.
+ * (The zone highlights are borders now, but the FOCUS_KEY handling below
+ * still matters: widget styles can hang off either focus state.) */
 static void zone_focus_changed(lv_group_t* g) {
     lv_group_t* live = (s_zone == UI_ZONE_CHROME) ? s_chrome : s_content;
     if (g == live)

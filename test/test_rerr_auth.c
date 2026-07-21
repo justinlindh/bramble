@@ -17,7 +17,7 @@
  * broken_dest||broken_next_hop||seq, deliberately excluding only
  * header.packet_id (the one field every forwarder still rewrites on
  * re-origination that isn't otherwise covered). reporter_addr moved INTO
- * the MAC in ws 1.3b: mesh_task.c's send_rerr rebuilds a fresh struct with
+ * the MAC in ws 1.3b: mesh_routing.c's send_rerr rebuilds a fresh struct with
  * its OWN reporter_addr and a freshly-drawn seq on every call (original
  * detection AND every re-origination), re-signing each time, so each hop
  * safely signs its own reporter_addr/seq pair. This is what makes keying

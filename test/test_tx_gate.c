@@ -241,6 +241,46 @@ void test_mesh_size_propagates_to_budget(void) {
     TEST_ASSERT_EQUAL_UINT8(50, s_gate.budget.profile_peer_count);
 }
 
+/* Emulator-only beacon exemption (tx_gate_set_beacon_budget_exempt_core):
+ * exempt beacons pass an exhausted lane WITHOUT debiting it, the budget
+ * floor disappears, and every non-beacon kind stays fully gated. Off by
+ * default: the same drained-lane beacon is denied when the flag is clear. */
+void test_beacon_budget_exempt_bypasses_only_beacons(void) {
+    uint8_t beacon[60] = {0};
+    uint8_t bcast[60] = {0};
+
+    /* Drain the BROADCAST lane with broadcast data. */
+    while (tx_gate_transmit(&s_gate, bcast, sizeof(bcast), TX_KIND_DATA_BROADCAST) == TX_GATE_OK) {
+    }
+    TEST_ASSERT_EQUAL_INT(TX_GATE_ERR_BUDGET,
+                          tx_gate_transmit(&s_gate, beacon, sizeof(beacon), TX_KIND_BEACON));
+
+    tx_gate_set_beacon_profile(&s_gate, sizeof(beacon));
+    TEST_ASSERT_TRUE(tx_gate_min_beacon_interval_ms(&s_gate) > 0u);
+
+    tx_gate_set_beacon_budget_exempt_core(&s_gate, true);
+
+    /* Beacons now pass the drained lane, and do not debit it. */
+    uint32_t before = airtime_budget_remaining(&s_gate.budget, AIRTIME_TIER_BROADCAST);
+    TEST_ASSERT_EQUAL_INT(TX_GATE_OK,
+                          tx_gate_transmit(&s_gate, beacon, sizeof(beacon), TX_KIND_BEACON));
+    TEST_ASSERT_EQUAL_UINT32(before,
+                             airtime_budget_remaining(&s_gate.budget, AIRTIME_TIER_BROADCAST));
+    TEST_ASSERT_TRUE(tx_gate_can_transmit(&s_gate, sizeof(beacon), TX_KIND_BEACON));
+
+    /* No budget floor while exempt. */
+    TEST_ASSERT_EQUAL_UINT32(0u, tx_gate_min_beacon_interval_ms(&s_gate));
+
+    /* Non-beacon kinds on the same lane stay denied. */
+    TEST_ASSERT_EQUAL_INT(TX_GATE_ERR_BUDGET,
+                          tx_gate_transmit(&s_gate, bcast, sizeof(bcast), TX_KIND_DATA_BROADCAST));
+
+    /* Clearing the flag restores the deny. */
+    tx_gate_set_beacon_budget_exempt_core(&s_gate, false);
+    TEST_ASSERT_EQUAL_INT(TX_GATE_ERR_BUDGET,
+                          tx_gate_transmit(&s_gate, beacon, sizeof(beacon), TX_KIND_BEACON));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_kind_tier_mapping);
@@ -257,5 +297,6 @@ int main(void) {
     RUN_TEST(test_denied_then_allowed_after_refill);
     RUN_TEST(test_routing_flood_cannot_exhaust_data_lane);
     RUN_TEST(test_mesh_size_propagates_to_budget);
+    RUN_TEST(test_beacon_budget_exempt_bypasses_only_beacons);
     return UNITY_END();
 }

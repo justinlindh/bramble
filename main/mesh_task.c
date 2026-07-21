@@ -83,8 +83,8 @@ static void traffic_event_notify(const traffic_event_t* evt, void* ctx);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
+/* BEACON_JITTER_MS lives in beacon_policy_calc.h next to beacon_next_interval_ms. */
 #define BEACON_INTERVAL_MS 60000      /* 60 seconds between beacons (A/B test) */
-#define BEACON_JITTER_MS 5000         /* ±5s random jitter */
 #define NEIGHBOR_PURGE_INTERVAL 60000 /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH 16
 #define MESH_EVENT_QUEUE_DEPTH 8
@@ -1506,12 +1506,13 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
         send_beacon();
         *last_beacon_ms = t;
 
-        /* Add jitter for next interval */
+        /* Add jitter for next interval. The span-clamped helper is what keeps
+         * a short base (the emulator's EMU_BEACON_INTERVAL_MS override) from
+         * summing negative and wrapping the uint32, which permanently stopped
+         * beaconing after a handful of beacons. */
         uint8_t j[2];
         crypto_random(j, 2);
-        int32_t jitter =
-            ((int32_t)(j[0] | (j[1] << 8)) % (BEACON_JITTER_MS * 2)) - BEACON_JITTER_MS;
-        *beacon_interval = base_interval + jitter;
+        *beacon_interval = beacon_next_interval_ms(base_interval, (uint16_t)(j[0] | (j[1] << 8)));
     }
 
     /* Periodic identity attestation (Phase 2): low cadence, budget-gated.
@@ -1820,6 +1821,16 @@ static void mesh_task(void* param) {
         s_beacon_policy.base_interval_ms = emu_beacon_ms;
         if (s_beacon_policy.min_interval_ms > emu_beacon_ms)
             s_beacon_policy.min_interval_ms = emu_beacon_ms;
+        /* The override exists to give a short scenario many discovery
+         * chances, but at these cadences the beacon budget floor
+         * (tx_gate_min_beacon_interval) immediately stretches the interval
+         * back to tens of seconds and the bucket denies what the floor
+         * does not stop, so discovery collapses to the first two or three
+         * beacons. Exempt beacons from the budget for this run; every
+         * other kind stays budgeted, and exempt beacons do not debit the
+         * lane, so data budgeting in the scenario still matches device
+         * behavior. Dead on device builds (the override returns 0 there). */
+        tx_gate_set_beacon_budget_exempt(true);
     }
 
     /* Add initial jitter before first beacon */

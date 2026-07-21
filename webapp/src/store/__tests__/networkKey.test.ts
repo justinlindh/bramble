@@ -111,16 +111,6 @@ describe('network key actions', () => {
     expect(rpcMock).toHaveBeenCalledWith('bramble.setNetworkKey', { key: 'ab'.repeat(32) }, undefined);
   });
 
-  it('getNetworkKeyStatus returns provisioned + fingerprint', async () => {
-    const { connect, getNetworkKeyStatus } = await import('../actions');
-    await connect('serial');
-
-    rpcMock.mockResolvedValueOnce({ provisioned: true, fingerprint: 'deadbeef' });
-    const s = await getNetworkKeyStatus();
-    expect(s).toEqual({ provisioned: true, fingerprint: 'deadbeef' });
-    expect(rpcMock).toHaveBeenCalledWith('bramble.getNetworkKeyStatus', undefined, undefined);
-  });
-
   it('generateNetworkKey mints on-device and returns key + fingerprint', async () => {
     const { connect, generateNetworkKey } = await import('../actions');
     await connect('serial');
@@ -143,9 +133,8 @@ describe('network key actions', () => {
   });
 
   it('rejects when not connected', async () => {
-    const { setNetworkKey, getNetworkKeyStatus, generateNetworkKey } = await import('../actions');
+    const { setNetworkKey, generateNetworkKey } = await import('../actions');
     await expect(setNetworkKey('ab'.repeat(32))).rejects.toThrow('Not connected');
-    await expect(getNetworkKeyStatus()).rejects.toThrow('Not connected');
     await expect(generateNetworkKey()).rejects.toThrow('Not connected');
   });
 });

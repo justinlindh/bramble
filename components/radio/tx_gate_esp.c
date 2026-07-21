@@ -105,6 +105,12 @@ void tx_gate_set_beacon_size(uint8_t beacon_wire_len) {
     xSemaphoreGive(s_gate_mutex);
 }
 
+void tx_gate_set_beacon_budget_exempt(bool exempt) {
+    gate_lock();
+    tx_gate_set_beacon_budget_exempt_core(&s_gate, exempt);
+    xSemaphoreGive(s_gate_mutex);
+}
+
 uint32_t tx_gate_beacon_min_interval(void) {
     gate_lock();
     uint32_t interval = tx_gate_min_beacon_interval_ms(&s_gate);

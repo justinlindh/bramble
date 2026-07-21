@@ -286,7 +286,7 @@ void test_endorsement_clear_mem_does_not_erase_store(void) {
 }
 
 /* --- TX-path cert fill (P1) ----------------------------------------------- *
- * Mirrors exactly what send_identity_attestation (main/mesh_task.c) does:
+ * Mirrors exactly what send_identity_attestation (main/mesh_beacon.c) does:
  * zero-initialize the frame, then identity_endorsement_get() its cert fields.
  * mesh_task.c is never host-compiled, so this pins that the built-and-serialized
  * frame carries the stored cert when present and all-zeros ("no cert") when

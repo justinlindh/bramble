@@ -53,11 +53,6 @@ export async function setNetworkKey(keyHex: string): Promise<boolean> {
   return !!result?.ok;
 }
 
-export async function getNetworkKeyStatus(): Promise<{ provisioned: boolean; fingerprint: string }> {
-  if (!session.client) throw new Error('Not connected');
-  return await session.client.rpc('bramble.getNetworkKeyStatus');
-}
-
 /**
  * Mint a fresh network key on the device and provision THIS node as the fleet
  * founder. The device generates the key from its entropy-gated source and
@@ -92,11 +87,6 @@ export async function setAnchor(anchorPubHex: string): Promise<boolean> {
   if (!session.client) throw new Error('Not connected');
   const result = await session.client.rpc('bramble.setAnchor', { anchor_pubkey: anchorPubHex });
   return !!result?.ok;
-}
-
-export async function getAnchorStatus(): Promise<import('../../types/bramble').AnchorStatus> {
-  if (!session.client) throw new Error('Not connected');
-  return await session.client.rpc('bramble.getAnchorStatus');
 }
 
 export async function getIdentity(): Promise<import('../../types/bramble').NodeIdentityWire> {

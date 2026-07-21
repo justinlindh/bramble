@@ -20,7 +20,7 @@ bramble_rerr_t rerr_build(uint32_t my_addr, uint32_t broken_dest, uint32_t broke
 /* Marks the route to broken_dest as ROUTE_BROKEN (and bumps its fail_count)
  * when the route's current next_hop matches broken_next_hop. Returns true
  * when a route was actually marked broken, so a caller can decide whether
- * to re-originate the RERR further (mesh_task.c's handle_rerr does this;
+ * to re-originate the RERR further (mesh_routing.c's handle_rerr does this;
  * gosim's bridge.c does not need the return value). */
 bool rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr);
 

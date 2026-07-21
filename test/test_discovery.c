@@ -529,7 +529,7 @@ void test_rrep_build_intermediate_tamper_fails_verify(void) {
 }
 
 /* --- Integration: intermediate reply short-circuits the flood, mirroring
- * main/mesh_task.c's handle_rreq control flow (reply, do not also
+ * main/mesh_routing.c's handle_rreq control flow (reply, do not also
  * forward). Topology: A -- B -- I -- D was already discovered once (I
  * holds a fresh route to D); a NEW RREQ from E arrives at I via B. I must
  * answer on D's behalf and must NOT schedule a forward, so D never has to
@@ -560,7 +560,7 @@ void test_intermediate_reply_suppresses_forward(void) {
     bramble_rrep_t rrep;
     if (intermediate_rrep_route_usable(cached, now)) {
         rrep = rrep_build_intermediate(&at_i, cached, ADDR_C, -75, 6);
-        /* Reply path taken: mesh_task.c's handle_rreq returns here, with NO
+        /* Reply path taken: mesh_routing.c's handle_rreq returns here, with NO
          * fall-through to schedule_rreq_forward. */
     } else if (at_i.header.hop_limit > 1) {
         forwarded = true;

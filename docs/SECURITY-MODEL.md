@@ -929,7 +929,7 @@ additionally covers `reporter_addr` (`packet_id` stays excluded), because
 keying replay on `(reporter_addr, seq)` requires
 both halves to be authenticated; this is sound because every
 re-origination re-signs with the hop's own `reporter_addr` (`send_rerr`,
-`main/mesh_task.c`). RREP, ACK, and delivery-receipt seq is origin-stable
+`main/mesh_routing.c`). RREP, ACK, and delivery-receipt seq is origin-stable
 and carried through forwarding unchanged, like their existing HMACs;
 RERR's seq is freshly drawn on every re-origination, matching
 `reporter_addr`. Under a provisioned network key, a captured,

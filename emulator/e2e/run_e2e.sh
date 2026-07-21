@@ -59,8 +59,24 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 [ -x "$NODE_BIN" ]  || { red "FAIL: node binary missing: $NODE_BIN"; exit 2; }
-[ -x "$GOSIM_BIN" ] || { red "FAIL: gosim binary missing: $GOSIM_BIN"; exit 2; }
+
+# Always (re)build gosim: `go build` is itself the staleness check, a near
+# no-op when nothing changed (and CI's earlier Build-gosim step keeps it a
+# cache hit there). A build-if-missing check here once let a checked-out
+# binary from an older commit run as the broker, and the suite then failed
+# for reasons that looked like a firmware regression.
+( cd "$(dirname "$GOSIM_BIN")" && go build -o "$(basename "$GOSIM_BIN")" . ) \
+    || { red "FAIL: gosim build failed"; exit 2; }
+
 [ -d "$UI_DIR/dist" ] || { red "FAIL: UI dist missing: $UI_DIR/dist"; exit 2; }
+# The dist bundle must not predate the UI sources: the specs and the bundle
+# evolve together (e.g. the canvas paint-history hook the boot-text check
+# reads), and a stale bundle fails tests in ways that look like app or
+# firmware regressions. Fail loud instead of testing against it. On CI the
+# bundle is always built after checkout, so this never fires there.
+stale_src="$(find "$UI_DIR/src" "$UI_DIR/index.html" "$UI_DIR/package.json" \
+    -newer "$UI_DIR/dist/index.html" -print -quit 2>/dev/null || true)"
+[ -z "$stale_src" ] || { red "FAIL: UI dist is older than $stale_src (cd simulator/ui && npm run build)"; exit 2; }
 [ -d "$UI_DIR/node_modules/@playwright/test" ] || { red "FAIL: @playwright/test not installed (cd simulator/ui && npm install)"; exit 2; }
 
 # Node resolves bare-specifier imports by walking up from the importing
