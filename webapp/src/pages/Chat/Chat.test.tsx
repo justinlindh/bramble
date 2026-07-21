@@ -9,7 +9,7 @@ vi.mock('../../store/index', () => ({
 }));
 
 vi.mock('../../store/selectors', () => ({
-  useConversation: () => ({ conv: undefined, messages: conversationState.messages }),
+  useConversation: () => ({ messages: conversationState.messages }),
   useMyAddress: () => 0,
 }));
 

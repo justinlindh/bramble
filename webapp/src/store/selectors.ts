@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react';
 import { useStore } from './index';
-import type { Conversation, Message } from '../types/bramble';
+import type { Message } from '../types/bramble';
 
 function filterMessages(messages: Message[], id: string): Message[] {
   return messages.filter(m => {
@@ -21,12 +21,8 @@ function filterMessages(messages: Message[], id: string): Message[] {
   });
 }
 
-export function useConversation(id: string): {
-  conv: Conversation | undefined;
-  messages: Message[];
-} {
+export function useConversation(id: string): { messages: Message[] } {
   const allMessages = useStore(s => s.messages);
-  const conv = useStore(s => s.conversations.get(id));
   const prevRef = useRef<Message[]>([]);
 
   const messages = useMemo(() => {
@@ -52,7 +48,7 @@ export function useConversation(id: string): {
     return next;
   }, [allMessages, id]);
 
-  return { conv, messages };
+  return { messages };
 }
 
 export function useMyAddress(): number {
