@@ -88,7 +88,6 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
         {isOut && (
           <DeliveryBadge
             status={message.status}
-            tier={message.tier}
             broadcastRecipientCount={isOutgoingBroadcast ? recipientCount : undefined}
           />
         )}
