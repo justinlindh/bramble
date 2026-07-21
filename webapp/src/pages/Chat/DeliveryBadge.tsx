@@ -1,9 +1,8 @@
-import type { DeliveryStatus, MessageTier } from '../../types/bramble';
+import type { DeliveryStatus } from '../../types/bramble';
 import styles from './DeliveryBadge.module.css';
 
 interface DeliveryBadgeProps {
   status: DeliveryStatus;
-  tier: MessageTier;
   broadcastRecipientCount?: number;
 }
 
@@ -16,7 +15,7 @@ const STATUS_META: Record<DeliveryStatus, { label: string; cls: string }> = {
   timeout:   { label: 'No confirmation yet',    cls: 'warning'   },
 };
 
-export function DeliveryBadge({ status, tier: _tier, broadcastRecipientCount }: DeliveryBadgeProps) {
+export function DeliveryBadge({ status, broadcastRecipientCount }: DeliveryBadgeProps) {
   const meta = STATUS_META[status];
 
   return (
