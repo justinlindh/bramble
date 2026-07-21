@@ -513,6 +513,113 @@ func TestScenarioReliabilityPathTrace(t *testing.T) {
 	assertNoRoutingPathologies(t, run)
 }
 
+// TestScenarioReliabilityAckRetry gates
+// simulator/scenarios/reliability-ack-retry.json, the scenario that exists to
+// prove the ACK retransmit ladder actually recovers lost frames on a lossy
+// multi-hop line.
+//
+// The topology is a 3-hop line A-B-C-D at 100-unit spacing (150-unit range, so
+// each node reaches only its neighbours) carrying six well-spaced bidirectional
+// A<->D sends under 5 percent intermittent packet loss. When #212 rebuilt this
+// fixture it had to leave it ungated: the retransmit ladder was inert because
+// the pending-ack state machine was double-driven, a bug coupled to the
+// route_loop-detector false positive tracked in #144. #240 fixed both, so the
+// ladder is now live and this scenario can finally assert what it was built for.
+//
+// Three invariants, each of which is exactly what #240 unblocked:
+//   - every one of the six messages is delivered end to end; 5 percent loss on
+//     three hops must be fully masked by retransmission, not merely survived on
+//     average.
+//   - the ladder is load-bearing, not incidental: at least one message is
+//     delivered ON a retry (delivered_on_retry > 0), so a regression that
+//     silently re-inerts the pending-ack machine, delivering only the frames
+//     that happened not to drop, fails here even if the average rate still looks
+//     healthy.
+//   - every delivery receipt that returns walks the exact line path between its
+//     endpoints, so a retry storm cannot paper over a routing detour.
+func TestScenarioReliabilityAckRetry(t *testing.T) {
+	run := runGatedScenario(t, "reliability-ack-retry")
+
+	fm := run.finalMetrics(t)
+	metric := func(key string) float64 {
+		v, ok := fm[key].(float64)
+		if !ok {
+			t.Fatalf("final_metrics missing numeric %q: got %v", key, fm[key])
+		}
+		return v
+	}
+
+	// The scenario scripts exactly six sends; every one must be delivered.
+	const wantSends = 6
+	if got := metric("delivered"); got != wantSends {
+		t.Errorf("delivered = %v, want %d; this is a reliability scenario, so 5%% loss on a "+
+			"3-hop line must be fully masked by the retransmit ladder, not partially delivered",
+			got, wantSends)
+	}
+
+	// The ladder must actually fire and recover a loss, or the scenario is inert,
+	// which is exactly the state #212 left it in pending the #240 fix.
+	if got := metric("retried"); got <= 0 {
+		t.Errorf("retried = %v, want > 0; with 5%% loss the ACK ladder must retransmit, and a "+
+			"run with zero retries means the pending-ack machine went inert again", got)
+	}
+	if got := metric("delivered_on_retry"); got <= 0 {
+		t.Errorf("delivered_on_retry = %v, want > 0; at least one message must reach its "+
+			"destination on a retransmit, proving the ladder recovers real losses rather than "+
+			"the run happening to drop nothing", got)
+	}
+
+	// Every returned receipt must have walked the direct line path between its
+	// endpoints: a retry storm must not mask a routing detour.
+	line := []string{"A", "B", "C", "D"}
+	indexOf := map[string]int{}
+	for i, id := range line {
+		indexOf[id] = i
+	}
+	recs := run.receipts()
+	if len(recs) == 0 {
+		t.Fatal("no delivery receipt returned to any originator; a reliable-delivery scenario " +
+			"with no returned receipt is inert rather than passing")
+	}
+	multiHop := 0
+	for _, rec := range recs {
+		srcID, sok := indexOf[rec.to]
+		dstID, dok := indexOf[run.idOf[rec.from]]
+		if !sok || !dok {
+			t.Errorf("receipt %s references nodes outside the line A-B-C-D: to=%s from=%s",
+				rec.packetID, rec.to, rec.from)
+			continue
+		}
+		step := 1
+		if dstID < srcID {
+			step = -1
+		}
+		var want []string
+		for i := srcID + step; i != dstID; i += step {
+			want = append(want, line[i])
+		}
+		if strings.Join(rec.path, ",") != strings.Join(want, ",") {
+			t.Errorf("receipt %s (%s -> %s): return path = %v, want %v; on a line the only correct "+
+				"route is the direct walk, so a differing path means routing detoured or misreported it",
+				rec.packetID, rec.to, run.idOf[rec.from], rec.path, want)
+		}
+		if rec.hops != len(rec.path) {
+			t.Errorf("receipt %s: hops = %d but path lists %d intermediate nodes (%v)",
+				rec.packetID, rec.hops, len(rec.path), rec.path)
+		}
+		if rec.hops >= 2 {
+			multiHop++
+		}
+	}
+	if multiHop == 0 {
+		t.Errorf("no receipt traversed two or more intermediate hops (%d receipts); the A<->D "+
+			"exchanges span the full 3-hop line, so a run without a multi-hop receipt is not "+
+			"exercising the path this scenario exists to prove", len(recs))
+	}
+
+	assertNoRoutingPathologies(t, run)
+}
+
 // TestGatedScenariosAreDeterministic re-runs every gated scenario in-process
 // and requires the emitted event stream to be identical across runs.
 //
@@ -523,7 +630,7 @@ func TestScenarioReliabilityPathTrace(t *testing.T) {
 // introduces run-to-run variance fails here rather than showing up later as an
 // intermittently red gate.
 func TestGatedScenariosAreDeterministic(t *testing.T) {
-	for _, name := range []string{"anomaly-partition", "reliability-path-trace"} {
+	for _, name := range []string{"anomaly-partition", "reliability-path-trace", "reliability-ack-retry"} {
 		t.Run(name, func(t *testing.T) {
 			const runs = 5
 			var reference string
