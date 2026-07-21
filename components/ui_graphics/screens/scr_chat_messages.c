@@ -387,7 +387,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
     /* The bubble is this row's focus target for the trackball: navigating the
      * content zone walks bubbles (chat_sync_content_group adds them), a focus
-     * outline shows which one is selected, and the packet id lets a re-render
+     * border shows which one is selected, and the packet id lets a re-render
      * restore focus to the same message. */
     ui_zone_style_content(bubble);
     lv_obj_set_user_data(bubble, (void*)(uintptr_t)msg->packet_id);

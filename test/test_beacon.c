@@ -164,7 +164,7 @@ void test_beacon_seq_covered_by_hmac(void) {
 }
 
 /*
- * Red-team fix regression. send_beacon's TX buffer (main/mesh_task.c) is
+ * Red-team fix regression. send_beacon's TX buffer (main/mesh_beacon.c) is
  * not host-testable (ESP-IDF only, board-build-verified), but the size
  * invariant it depends on lives entirely in the host-testable serialize
  * path: BEACON_SIZE + 1 + BEACON_NAME_MAX is the wire size of a beacon

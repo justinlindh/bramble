@@ -78,7 +78,7 @@ void test_rerr_wrong_next_hop_ignored(void) {
     TEST_ASSERT_EQUAL(ROUTE_ACTIVE, e->state); /* unchanged */
 }
 
-/* Task 2: mesh_task.c's handle_rerr used to bump fail_count itself right
+/* Task 2: mesh_routing.c's handle_rerr used to bump fail_count itself right
  * alongside marking a route broken. That side effect now lives in
  * rerr_handle so firmware and gosim both get it instead of only whichever
  * hand-copy happened to remember it. */

@@ -101,17 +101,27 @@ func TestSupervisorSpawnConsoleAndRestart(t *testing.T) {
 	defer sup.Stop()
 
 	// Let the node boot, attach, and restart a few times (each boot lives
-	// ~150 ms, restarts have a 50 ms backoff).
+	// ~150 ms, restarts have a 50 ms backoff). Wait on the boot COUNTER, not
+	// just startCount: startCount increments when the supervisor initiates the
+	// second exec, but the restarted process only writes the boots file after
+	// its own runtime starts, and on a loaded runner reading the file in that
+	// gap raced to "1" and flaked this test.
 	deadline := time.Now().Add(3 * time.Second)
 	var proc *superProc
+	boots := 0
 	for time.Now().Before(deadline) {
 		sup.mu.Lock()
 		if len(sup.procs) > 0 {
 			proc = sup.procs[0]
 		}
 		sup.mu.Unlock()
-		if proc != nil && proc.startCount() >= 2 {
-			break
+		if proc != nil {
+			if b, err := os.ReadFile(filepath.Join(proc.nodeDir, "boots")); err == nil {
+				boots, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+			}
+			if boots >= 2 && proc.startCount() >= 2 {
+				break
+			}
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -125,12 +135,6 @@ func TestSupervisorSpawnConsoleAndRestart(t *testing.T) {
 	}
 
 	// The per-node state dir persisted across restarts (boot counter advanced).
-	countPath := filepath.Join(proc.nodeDir, "boots")
-	b, err := os.ReadFile(countPath)
-	if err != nil {
-		t.Fatalf("read boot counter: %v", err)
-	}
-	boots, _ := strconv.Atoi(strings.TrimSpace(string(b)))
 	if boots < 2 {
 		t.Fatalf("boot counter = %d, want >= 2 (persistent NODE_DIR across restarts)", boots)
 	}

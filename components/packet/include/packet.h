@@ -123,7 +123,7 @@ typedef struct {
      * hop_count to locate the tag. */
     uint8_t auth_hmac[8];
     /* ws 1.3b: 48-bit origin sequence, drawn once by the originating
-     * destination (control_seq_next in mesh_task.c's send_ack) and
+     * destination (control_seq_next in mesh_reliability.c's send_ack) and
      * carried through forward_ack unchanged, exactly like auth_hmac. Sits
      * at the same fixed, hop_count-independent offset immediately after
      * auth_hmac and BEFORE relay_path, for the same reason auth_hmac does:
@@ -152,7 +152,7 @@ typedef struct {
     uint8_t route_metric;
     uint8_t auth_hmac[8];
     /* ws 1.3b: 48-bit origin sequence, drawn once by the originator
-     * (control_seq_next in mesh_task.c) and carried through rrep_forward
+     * (control_seq_next in mesh_beacon.c) and carried through rrep_forward
      * unchanged, exactly like auth_hmac. MAC-covered (rrep_build_auth_buf).
      */
     uint8_t seq[6];
@@ -166,12 +166,12 @@ typedef struct {
     /* SEC-H1 (Task 3.3, STAGED, not closed: see network_key.h), extended by
      * ws 1.3b. Covers reporter_addr||broken_dest||broken_next_hop||seq;
      * excludes only header.packet_id, which every forwarder legitimately
-     * rewrites on re-origination (send_rerr, mesh_task.c). reporter_addr
+     * rewrites on re-origination (send_rerr, mesh_routing.c). reporter_addr
      * is MAC-covered because every forwarder re-signs with its OWN
      * reporter_addr on every re-origination (see routing_auth.h). */
     uint8_t auth_hmac[8];
     /* ws 1.3b: 48-bit origin sequence, freshly drawn by EACH hop on every
-     * re-origination (control_seq_next in mesh_task.c's send_rerr), not
+     * re-origination (control_seq_next in mesh_routing.c's send_rerr), not
      * origin-stable like RREP's. MAC-covered; replay-keyed on
      * (reporter_addr, seq), both authenticated. */
     uint8_t seq[6];
@@ -196,7 +196,7 @@ typedef struct {
      * before auth_hmac is covered automatically, and anything placed
      * after it (like name) needs its own explicit coverage, per Fix 4's
      * lesson (see beacon.c). Drawn once per periodic beacon
-     * (control_seq_next in mesh_task.c's send_beacon); beacons are
+     * (control_seq_next in mesh_beacon.c's send_beacon); beacons are
      * single-hop and never forwarded, so there is no carry-through case
      * to preserve here (unlike RREP/ACK/receipt). */
     uint8_t seq[6];
@@ -210,7 +210,7 @@ typedef struct {
  * APP_TYPE_KE). Struct kept as the inner-payload layout: dm_build_init/
  * dm_build_resp fill it, bramble_key_exchange_serialize/deserialize frame
  * it as the plaintext carried inside a channel-key-encrypted DATA packet
- * (see handle_ke_envelope in mesh_task.c), it never appears standalone on
+ * (see handle_ke_envelope in mesh_dm.c), it never appears standalone on
  * the wire under PKT_TYPE_KEY_EXCHANGE again. */
 typedef struct {
     bramble_header_t header;
@@ -236,7 +236,7 @@ typedef struct {
      * bramble_ack_t's auth_hmac above. */
     uint8_t auth_hmac[8];
     /* ws 1.3b: 48-bit origin sequence, drawn once by the originating
-     * builder (control_seq_next in mesh_task.c, via
+     * builder (control_seq_next in mesh_reliability.c, via
      * mesh_build_broadcast_delivery_receipt_packet) and carried through
      * forward_delivery_receipt unchanged, exactly like auth_hmac. Same
      * fixed, hop_count-independent offset rule as auth_hmac and
@@ -342,8 +342,10 @@ esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, u
  * DATA/LOCATION envelope layout (wire v4):
  *   header(HEADER_SIZE) + src_addr(4) + prev_hop(4) + auth_hmac(8)
  *   + nonce(BRAMBLE_NONCE_SIZE) + ciphertext(N) + tag(BRAMBLE_TAG_SIZE)
- * (main/mesh_task.c's send_data_packet/send_dm_packet/mesh_send_location_packet
- * build this layout; handle_data/handle_location parse it; gosim's bridge.c
+ * (send_data_packet (main/mesh_task.c), send_dm_packet (main/mesh_dm.c), and
+ * mesh_send_location_packet (main/mesh_location.c) build this layout;
+ * handle_data (main/mesh_task.c) and handle_location (main/mesh_location.c)
+ * parse it; gosim's bridge.c
  * uses its own out-of-band src_addr/prev_hop tracking instead of these wire
  * bytes, since its DATA framing already diverges from firmware's -- see
  * task-4-report.md).

@@ -937,7 +937,7 @@ This is the DM forward-secrecy flag day: session payloads move from one static p
                                    \_____________ 3-byte ratchet header ____________/
    ```
 
-   The header and ciphertext are written and read as one contiguous blob of `DM_RATCHET_HEADER_SIZE + N` bytes (`framed_len` in `dm_session_ratchet_encrypt`/`_decrypt`), so the on-wire frame is exactly 3 bytes longer than the plaintext it carries (`send_dm_packet` and the directed-location branch of `mesh_send_location_packet`, both in `main/mesh_task.c`, size their buffers for this).
+   The header and ciphertext are written and read as one contiguous blob of `DM_RATCHET_HEADER_SIZE + N` bytes (`framed_len` in `dm_session_ratchet_encrypt`/`_decrypt`), so the on-wire frame is exactly 3 bytes longer than the plaintext it carries (`send_dm_packet` in `main/mesh_dm.c` and the directed-location branch of `mesh_send_location_packet` in `main/mesh_location.c` size their buffers for this).
 
 3. **Authenticated, not encrypted.** The 3 header bytes are cleartext on the wire but are fed into the AEAD associated data: AAD = `bramble_build_aead_aad`'s output (`header(12, hop_limit masked) + src_addr(4)`, unchanged since §4.25 item 4) followed by the same 3 ratchet-header bytes, built identically on both the encrypt and decrypt side before the AES-256-GCM call. Flipping `epoch` or `msg_index` in flight fails the GCM tag rather than silently redirecting the receiver to the wrong key.
 

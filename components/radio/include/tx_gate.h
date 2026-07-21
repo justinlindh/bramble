@@ -63,6 +63,10 @@ typedef struct {
      * Funds the beacon reserve and the budget-derived minimum beacon
      * interval; 0 = unknown (no reserve, no interval floor). */
     uint8_t beacon_wire_len;
+    /* Emulator-only escape hatch (see tx_gate_set_beacon_budget_exempt):
+     * TX_KIND_BEACON bypasses the airtime budget entirely (no check, no
+     * debit, no interval floor). Never set on device builds. */
+    bool beacon_budget_exempt;
 } tx_gate_t;
 
 /* Share of the BROADCAST lane's hourly refill that beacon cadence may
@@ -120,6 +124,17 @@ void tx_gate_set_beacon_profile(tx_gate_t* g, uint8_t beacon_wire_len);
  * at transmit time. Returns 0 while the beacon size is unknown. */
 uint32_t tx_gate_min_beacon_interval_ms(tx_gate_t* g);
 
+/* Emulator-only: exempt TX_KIND_BEACON from the airtime budget (no check,
+ * no debit, no beacon reserve held against data, interval floor 0). The
+ * EMU_BEACON_INTERVAL_MS override exists so a short emulator scenario gets
+ * many neighbor-discovery chances; at those cadences the budget floor
+ * would immediately stretch beaconing back to tens of seconds and defeat
+ * the override, so the same linux-only code path that applies the override
+ * sets this. Exempt beacons also do not debit the lane, so data budgeting
+ * in the same scenario stays faithful to the device. Never called on
+ * device builds; every non-beacon kind stays fully budget-gated. */
+void tx_gate_set_beacon_budget_exempt_core(tx_gate_t* g, bool exempt);
+
 /* ── Firmware singleton (tx_gate_esp.c); thread-safe wrappers ───────── */
 
 void tx_gate_global_init(uint8_t max_duty_cycle_pct, bool duty_cycle_enforced);
@@ -127,6 +142,7 @@ int tx_gate_send(const uint8_t* buf, uint8_t len, tx_kind_t kind);
 bool tx_gate_check(uint8_t wire_len, tx_kind_t kind);
 void tx_gate_set_peer_count(uint8_t peer_count);
 void tx_gate_set_beacon_size(uint8_t beacon_wire_len);
+void tx_gate_set_beacon_budget_exempt(bool exempt);
 uint32_t tx_gate_beacon_min_interval(void);
 uint32_t tx_gate_remaining(uint8_t tier);
 void tx_gate_snapshot(airtime_budget_t* out);

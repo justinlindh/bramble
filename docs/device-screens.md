@@ -13,9 +13,14 @@ How these were captured, so you can trust them:
 - The **Heltec OLED** and **Pager** shots are the real firmware framebuffer
   too, but rendered headlessly in the emulator: the actual firmware compiled
   for the Linux target, driven through each screen by the e2e harness, with
-  the panel's backing store saved pixel-for-pixel. See
-  `emulator/e2e/specs/heltec-oled.spec.ts` and
-  `emulator/e2e/specs/pager-screens.spec.ts`.
+  the panel's backing store saved pixel-for-pixel. Each capture runs a
+  three-node scenario (the captured node plus two named neighbors, Bob and
+  Carol, exchanging real broadcasts over the simulated ether), so the
+  Messages, Nodes, and Stats screens show a real conversation and live
+  neighbor rows rather than an empty boot state. See
+  `emulator/e2e/specs/heltec-oled.spec.ts`,
+  `emulator/e2e/specs/pager-screens.spec.ts`, and the
+  `emu-heltec-oled` / `emu-pager-screens` scenarios.
 
 All GPS coordinates shown are canonical documentation placeholders
 (48.11730, 11.51667), not a real location.
@@ -93,15 +98,13 @@ real firmware in the emulator (the SSD1680 250x122 e-paper profile), through
 the same screen ring as the Heltec. Images are upscaled 6x from the native
 250x122; the source panel is exactly 250x122.
 
-Several captures show heavy ghosting: text from previously displayed screens
-remains overlaid on the current one. On the Settings capture this makes the
-middle rows genuinely hard to read, with "Rotation: Off" rendering over ghosted
-digits from the GPS screen. This is real e-paper partial-refresh behavior
-rather than a capture or rendering artifact, and it is what the device
-currently looks like in that state, which is why the images are published
-as-is. It is a display defect worth fixing rather than a documentation
-problem: the pager screen ring never issues a full-panel refresh to clear
-accumulated ghosting when switching screens.
+Some captures show faint ghosting: residue of the previously displayed screen
+under the current one. This is real e-paper partial-refresh behavior, not a
+capture artifact, and the images are published as-is. The screen ring bounds
+it by design: every third screen change and every entry into Settings issues
+a full-panel refresh (`UI_FULL_REFRESH_EVERY_N_SCREENS`), so light residue
+can appear on the one or two screens between full refreshes and is cleared
+at the next one, exactly as on the physical panel.
 
 | Screen | |
 | --- | --- |

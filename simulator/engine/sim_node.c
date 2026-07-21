@@ -176,12 +176,15 @@ void node_tick(sim_node_t* node, uint64_t now_us, const radio_config_t* radio,
                                beacon_policy->interval_ms, beacon_policy->min_interval_ms,
                                beacon_policy->max_interval_ms, beacon_policy->dense_threshold,
                                beacon_policy->churn_threshold, num_neighbors, churn_events);
-    uint64_t beacon_interval = (uint64_t)beacon_decision.interval_ms * 1000ULL; /* ms -> us */
     if (now_us >= node->next_beacon_due_us) {
-        uint64_t jitter_span_ms = (uint32_t)(2 * NODE_BEACON_JITTER_US / 1000ULL);
-        uint64_t jitter_us =
-            (uint64_t)pcg32_range(&node->beacon_rng, 0, (uint32_t)jitter_span_ms) * 1000ULL;
-        node->next_beacon_due_us = now_us + beacon_interval - NODE_BEACON_JITTER_US + jitter_us;
+        /* Same span-clamped interval+jitter the firmware uses
+         * (beacon_next_interval_ms): the old now + interval - JITTER + draw
+         * form went backwards past zero for sub-jitter intervals early in a
+         * sim and wrapped the uint64, ending that node's beaconing. */
+        uint16_t jitter_draw = (uint16_t)pcg32_range(&node->beacon_rng, 0, 0xFFFFu);
+        node->next_beacon_due_us =
+            now_us +
+            (uint64_t)beacon_next_interval_ms(beacon_decision.interval_ms, jitter_draw) * 1000ULL;
         node->last_beacon_us = now_us;
         node->uptime_min++;
 
