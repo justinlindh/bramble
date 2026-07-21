@@ -319,8 +319,9 @@ channel_suite() {
 # receiver's pending-ack retransmits and awaiting-session queue for the peer,
 # exactly what the reboot it emulates would destroy), which removes the last
 # known construction race. A genuine regression fails the run, exactly as it
-# should. The 180s budget is only a hang guard with tick-loss-skew headroom;
-# the scenario itself finishes in ~90s of wall clock on a healthy box.
+# should: it never produces the markers and the wait times out. The wait is
+# event-driven with a wide budget (see the comment inside dm_suite); a
+# healthy box exits at ~90s, only a starved one uses the headroom.
 #
 # There is deliberately NO invalidation-rerun here anymore: both POSIX-port
 # node-death causes are fixed, so a mid-run death has no known benign cause
@@ -330,15 +331,65 @@ channel_suite() {
 # correct behavior for a required gate.
 dm_suite() {
     echo "[2] emu-dm-desync"
-    local DM_LOG=""
-    run_scenario emu-dm-desync 180 DM_LOG
+    # EVENT-DRIVEN, exactly like channel_suite: poll the growing log for the
+    # three gate markers and stop the instant all are present, under a WIDE
+    # wall budget. The old shape (fixed 150s sim cap, assert after exit) was
+    # wall-clock arithmetic applied to a subjective-time workload: on a
+    # starved runner pod the firmware's subjective clock falls behind wall
+    # time (a cluster-wide IO storm once slowed it to ~1/4 speed), the cap
+    # truncated the scenario at ~45 subjective seconds, TX windows smeared
+    # into ~45% half-duplex frame loss, and the KE handshake never got the
+    # time it needed. Polling makes a healthy box exit at ~90s while a
+    # starved one keeps its full subjective schedule; a genuine regression
+    # still simply never produces the markers and times out.
+    local budget_s="${EMU_DM_BUDGET_S:-420}"
+    local sim_ms="${EMU_DM_SIM_CAP_MS:-420000}"
+    local scen="$SCEN_DIR/emu-dm-desync.json"
+    [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
+    local DM_LOG; DM_LOG="$LOG_DIR/emu-emu-dm-desync-$(date +%s).log"
 
-    # STRICT death rule first: deaths fail the run regardless of assertions.
+    info "running emu-dm-desync (marker budget ${budget_s}s, sim cap $((sim_ms / 1000))s)..."
+    EMU_SCENARIO_DURATION_MS="$sim_ms" \
+        timeout "$budget_s" "$GOSIM_BIN" -headless -scenario "$scen" >"$DM_LOG" 2>&1 &
+    local pid=$!
+    CHILD_PIDS+=("$pid")
+
+    dm_markers_present() {
+        grep -qF "Failed session decrypt" "$DM_LOG" \
+            && grep -qF "re-initiating handshake (self-heal)" "$DM_LOG" \
+            && "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" \
+                >/dev/null 2>&1
+    }
+
+    local seen=1 deadline
+    deadline=$(( $(date +%s) + budget_s ))
+    while :; do
+        if dm_markers_present; then
+            seen=0
+            break
+        fi
+        kill -0 "$pid" 2>/dev/null || break
+        [ "$(date +%s)" -lt "$deadline" ] || break
+        # 3s cadence: the screen-assert decodes every frame in the growing
+        # log, and a tighter loop would steal CPU from the very nodes it
+        # waits on (same reasoning as channel_suite's 2s).
+        sleep 3
+    done
+
+    kill "$pid" 2>/dev/null || true
+    pkill -P "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+
+    # Final check: the last markers may have landed in the frames gosim
+    # flushed on exit.
+    if [ "$seen" -ne 0 ] && dm_markers_present; then
+        seen=0
+    fi
+
+    # STRICT death rule: deaths fail the run regardless of assertions.
     check_no_deaths "$DM_LOG" 2 "emu-dm-desync" || return 1
 
-    if "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" >/dev/null 2>&1 \
-       && grep -qF "Failed session decrypt" "$DM_LOG" \
-       && grep -qF "re-initiating handshake (self-heal)" "$DM_LOG"; then
+    if [ "$seen" -eq 0 ]; then
         green "PASS: emu-dm-desync: ALPHA render + desync symptom + #138 self-heal"
         return 0
     fi
