@@ -1,19 +1,7 @@
 #include "include/routing_auth.h"
 #include "network_key.h"
+#include "crypto.h"
 #include <string.h>
-
-/*
- * Constant-time equality (tag comparison), same OR-accumulate pattern used
- * elsewhere in this codebase for MAC/tag checks (dm_session.c, discovery.c):
- * no early exit, so comparing a computed MAC against an attacker-supplied
- * one never leaks how many leading bytes matched.
- */
-static int ct_eq(const uint8_t* a, const uint8_t* b, size_t n) {
-    uint8_t acc = 0;
-    for (size_t i = 0; i < n; i++)
-        acc |= a[i] ^ b[i];
-    return acc == 0;
-}
 
 /* reporter_addr(4) || broken_dest(4) || broken_next_hop(4) || seq(6),
  * big-endian for the multi-byte fields: was broken_dest||broken_next_hop
@@ -57,7 +45,7 @@ int rerr_verify(const bramble_rerr_t* r) {
      * received all-zero MAC would otherwise ACCEPT a forgery. */
     if (network_key_mac("bramble-rerr-v2", buf, sizeof(buf), expect) != 0)
         return 0;
-    return ct_eq(expect, r->auth_hmac, sizeof(expect));
+    return crypto_ct_memeq(expect, r->auth_hmac, sizeof(expect));
 }
 
 /* src_addr(4) || ack_packet_id(4) || seq(6), big-endian for the
@@ -91,7 +79,7 @@ int ack_verify(const bramble_ack_t* a) {
     /* Reject before compare (see rerr_verify): unprovisioned cannot verify. */
     if (network_key_mac("bramble-ack-v2", buf, sizeof(buf), expect) != 0)
         return 0;
-    return ct_eq(expect, a->auth_hmac, sizeof(expect));
+    return crypto_ct_memeq(expect, a->auth_hmac, sizeof(expect));
 }
 
 /* src_addr(4) || orig_packet_id(4) || seq(6), big-endian for the
@@ -125,7 +113,7 @@ int receipt_verify(const bramble_delivery_receipt_t* r) {
     /* Reject before compare (see rerr_verify): unprovisioned cannot verify. */
     if (network_key_mac("bramble-receipt-v2", buf, sizeof(buf), expect) != 0)
         return 0;
-    return ct_eq(expect, r->auth_hmac, sizeof(expect));
+    return crypto_ct_memeq(expect, r->auth_hmac, sizeof(expect));
 }
 
 /* DATA origin authentication (Task 4-fix F1). The MAC covers exactly the
@@ -155,7 +143,7 @@ int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t
      * breadcrumb. */
     if (network_key_mac("bramble-data-v1", buf, sizeof(buf), expect) != 0)
         return 0;
-    return ct_eq(expect, hmac, sizeof(expect));
+    return crypto_ct_memeq(expect, hmac, sizeof(expect));
 }
 
 /* src_addr(4, BE) || x25519_pub(32) || ed25519_pub(32) || sig(64) ||
@@ -197,5 +185,5 @@ int ident_relay_verify(const bramble_identity_attestation_t* a) {
      * so an unprovisioned relay never propagates an attestation. */
     if (network_key_mac("bramble-ident-relay-v1", buf, sizeof(buf), expect) != 0)
         return 0;
-    return ct_eq(expect, a->auth_hmac, sizeof(expect));
+    return crypto_ct_memeq(expect, a->auth_hmac, sizeof(expect));
 }
