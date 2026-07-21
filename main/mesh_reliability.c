@@ -229,6 +229,27 @@ void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t origi
     mesh_schedule_next_receipt_timer();
 }
 
+/* Airtime-pressure multiplier for delivery-receipt retry delays. Both the
+ * deny-backoff and the normal-retry path scale their timings by the same
+ * factor derived from the remaining receipt budget; this reads the budget
+ * once, resolves the num/den scale, and logs it when it is not unity. */
+static void receipt_retry_scale(uint32_t* scale_num, uint32_t* scale_den) {
+    uint32_t remaining = tx_gate_remaining(AIRTIME_TIER_RECEIPT);
+    *scale_num = 1u;
+    *scale_den = 1u;
+    mesh_broadcast_receipt_retry_scale(remaining, scale_num, scale_den);
+    if (!(*scale_num == 1u && *scale_den == 1u)) {
+        uint32_t utilized_pct =
+            ((AIRTIME_BUDGET_RECEIPT_MS -
+              (remaining > AIRTIME_BUDGET_RECEIPT_MS ? AIRTIME_BUDGET_RECEIPT_MS : remaining)) *
+             100u) /
+            AIRTIME_BUDGET_RECEIPT_MS;
+        ESP_LOGD(TAG,
+                 "Receipt retry multiplier=%" PRIu32 "/%" PRIu32 " (utilization=%" PRIu32 "%%)",
+                 *scale_num, *scale_den, utilized_pct);
+    }
+}
+
 void mesh_process_receipt_tx_event(void) {
     uint32_t t_now = now_ms();
     int due_idx = -1;
@@ -268,22 +289,9 @@ void mesh_process_receipt_tx_event(void) {
                      item->original_packet_id, (unsigned)item->attempts_total);
             memset(item, 0, sizeof(*item));
         } else {
-            uint32_t remaining = tx_gate_remaining(AIRTIME_TIER_RECEIPT);
             uint32_t scale_num = 1u;
             uint32_t scale_den = 1u;
-            mesh_broadcast_receipt_retry_scale(remaining, &scale_num, &scale_den);
-            if (!(scale_num == 1u && scale_den == 1u)) {
-                uint32_t utilized_pct =
-                    ((AIRTIME_BUDGET_RECEIPT_MS - (remaining > AIRTIME_BUDGET_RECEIPT_MS
-                                                       ? AIRTIME_BUDGET_RECEIPT_MS
-                                                       : remaining)) *
-                     100u) /
-                    AIRTIME_BUDGET_RECEIPT_MS;
-                ESP_LOGD(TAG,
-                         "Receipt retry multiplier=%" PRIu32 "/%" PRIu32 " (utilization=%" PRIu32
-                         "%%)",
-                         scale_num, scale_den, utilized_pct);
-            }
+            receipt_retry_scale(&scale_num, &scale_den);
             uint32_t raw_backoff_ms =
                 1000u + ((uint32_t)item->attempts_sent * 2000u) + (esp_random() % 1000u);
             uint32_t backoff_ms = (raw_backoff_ms * scale_num) / scale_den;
@@ -314,20 +322,9 @@ void mesh_process_receipt_tx_event(void) {
     }
 
     uint8_t i = (uint8_t)(item->attempts_sent - 1u);
-    uint32_t remaining = tx_gate_remaining(AIRTIME_TIER_RECEIPT);
     uint32_t scale_num = 1u;
     uint32_t scale_den = 1u;
-    mesh_broadcast_receipt_retry_scale(remaining, &scale_num, &scale_den);
-    if (!(scale_num == 1u && scale_den == 1u)) {
-        uint32_t utilized_pct =
-            ((AIRTIME_BUDGET_RECEIPT_MS -
-              (remaining > AIRTIME_BUDGET_RECEIPT_MS ? AIRTIME_BUDGET_RECEIPT_MS : remaining)) *
-             100u) /
-            AIRTIME_BUDGET_RECEIPT_MS;
-        ESP_LOGD(TAG,
-                 "Receipt retry multiplier=%" PRIu32 "/%" PRIu32 " (utilization=%" PRIu32 "%%)",
-                 scale_num, scale_den, utilized_pct);
-    }
+    receipt_retry_scale(&scale_num, &scale_den);
 
     uint32_t raw_base_ms = 500u + ((uint32_t)i * 700u);
     uint32_t raw_jitter_range = 500u + ((uint32_t)i * 400u);
