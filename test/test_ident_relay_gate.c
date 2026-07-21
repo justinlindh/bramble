@@ -80,7 +80,7 @@ typedef struct {
     uint8_t relay_buf[IDENTITY_ATTESTATION_SIZE];
 } dispatch_result_t;
 
-/* Mirrors main/mesh_task.c's handle_identity_attestation exactly (order
+/* Mirrors main/mesh_beacon.c's handle_identity_attestation exactly (order
  * and all); budget_permits/random_value are explicit inputs the same way
  * test_flooded_ack.c passes them. */
 static dispatch_result_t dispatch_attestation(node_state_t* n, const uint8_t* buf, uint16_t len,

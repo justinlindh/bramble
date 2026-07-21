@@ -50,3 +50,13 @@ beacon_interval_decide(int enabled, int mode_is_adaptive, uint32_t base_interval
     }
     return d;
 }
+
+uint32_t beacon_next_interval_ms(uint32_t base_interval_ms, uint16_t rand16) {
+    uint32_t span = BEACON_JITTER_MS;
+    if (span > base_interval_ms / 2)
+        span = base_interval_ms / 2;
+    if (span == 0)
+        return base_interval_ms;
+    int32_t jitter = (int32_t)(rand16 % (2u * span)) - (int32_t)span;
+    return (uint32_t)((int32_t)base_interval_ms + jitter);
+}

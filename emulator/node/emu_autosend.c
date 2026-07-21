@@ -67,6 +67,7 @@
  * and resolve at the final link. */
 extern int mesh_send_broadcast(const uint8_t* data, size_t len);
 extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len);
+extern void mesh_set_node_name(const char* name);
 extern uint32_t emu_mesh_first_neighbor(void);
 extern int emu_mesh_drop_dm_sessions(void);
 extern int emu_mesh_dm_session_count(void);
@@ -269,6 +270,14 @@ static void drop_session_task(void* arg) {
  * EMU_DROP_DM_SESSION_AT_MS is set. Returns 0 if any was started, -1 if none. */
 int emu_node_start_autosend(void) {
     int started = -1;
+
+    /* EMU_NODE_NAME gives a scenario node a friendly beacon name (e.g. Alice),
+     * so neighbors render it on their Nodes and Messages screens instead of a
+     * bare address. Set at startup; it rides the next beacon. */
+    const char* node_name = getenv("EMU_NODE_NAME");
+    if (node_name && *node_name)
+        mesh_set_node_name(node_name);
+
     if (getenv("EMU_AUTO_SEND") && *getenv("EMU_AUTO_SEND")) {
         /* 8 KB stack: the send path runs crypto (channel/DM encrypt + MAC) like
          * the DM handshake worker, bumped to the same for its stack (PR #133). */

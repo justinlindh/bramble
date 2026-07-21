@@ -26,8 +26,12 @@ module.exports = {
   plugins: [
     [squashExpander, {
       _wrapped: wrapped,
-      // Wrapped commit-analyzer options. Scope-gated: only commits scoped
-      // to firmware release firmware.
+      // Wrapped commit-analyzer options. Scope-gated: commits scoped to
+      // firmware release firmware, and so do commits scoped to ui, because
+      // scope `ui` is DEVICE-UI code (components/ui_graphics, the T-Deck
+      // LVGL screens) that ships inside the firmware image; without this a
+      // user-visible on-device UI fix sat unreleased until an unrelated
+      // firmware-scoped commit happened to land.
       preset: 'conventionalcommits',
       releaseRules: [
         { breaking: true, scope: 'firmware', release: 'major' },
@@ -35,23 +39,28 @@ module.exports = {
         { type: 'feat', scope: 'firmware', release: 'minor' },
         { type: 'fix', scope: 'firmware', release: 'patch' },
         { type: 'perf', scope: 'firmware', release: 'patch' },
+        { breaking: true, scope: 'ui', release: 'major' },
+        { revert: true, scope: 'ui', release: 'patch' },
+        { type: 'feat', scope: 'ui', release: 'minor' },
+        { type: 'fix', scope: 'ui', release: 'patch' },
+        { type: 'perf', scope: 'ui', release: 'patch' },
         // Suppress the preset default rules for any OTHER scope so an
         // out-of-scope fix/feat never leaks a firmware release. The negated
         // glob is deliberate: a plain { scope: '*', release: false } would
         // also match firmware-scoped commits, and commit-analyzer treats a
         // matched release:false as the highest-priority match (its index in
         // the release-type table is -1), so it would shadow the specific
-        // firmware rules above and suppress every firmware release. Matching
-        // only non-firmware scopes returns `false` for out-of-scope commits
+        // firmware and ui rules above and suppress every firmware release.
+        // Matching only out-of-scope scopes returns `false` for them
         // (blocking the default-rule fallback) while leaving in-scope commits
         // to the specific rules.
-        { scope: '!(firmware)', release: false }
+        { scope: '!(firmware|ui)', release: false }
       ],
-      // Wrapped release-notes-generator options: only list firmware-scoped
-      // commits so the GitHub release notes stay component-specific.
+      // Wrapped release-notes-generator options: only list firmware- and
+      // ui-scoped commits so the GitHub release notes stay component-specific.
       writerOpts: {
         transform: (commit) => {
-          if (!commit.scope || !/(^|,)firmware(,|$)/.test(commit.scope)) return;
+          if (!commit.scope || !/(^|,)(firmware|ui)(,|$)/.test(commit.scope)) return;
           const typeMap = { feat: 'Features', fix: 'Bug Fixes', perf: 'Performance Improvements' };
           if (!typeMap[commit.type]) return;
           return { ...commit, type: typeMap[commit.type], shortHash: commit.hash && commit.hash.substring(0, 7) };

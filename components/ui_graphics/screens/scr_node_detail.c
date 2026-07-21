@@ -95,11 +95,22 @@ static void share_loc_click_cb(lv_event_t* e) {
     ui_toast_show("Location shared");
 }
 
-static void add_action_btn(lv_obj_t* parent, const char* text, lv_event_cb_t cb, bool focus) {
+/* One compact action per column of a single horizontal row. grow 0 keeps a
+ * fixed-width button (the Back arrow); grow 1 shares the remaining width
+ * equally. Height stays at the touch-target minimum: the T-Deck has a
+ * touchscreen, so the buttons shrank in width and count, not in tap size. */
+static void add_action_btn(lv_obj_t* parent, const char* text, lv_event_cb_t cb, bool focus,
+                           uint8_t grow) {
     lv_obj_t* btn = lv_btn_create(parent);
-    lv_obj_set_size(btn, 180, BR_TAP_TARGET_MIN);
+    lv_obj_set_height(btn, BR_TAP_TARGET_MIN);
+    if (grow) {
+        lv_obj_set_flex_grow(btn, grow);
+    } else {
+        lv_obj_set_width(btn, BR_TAP_TARGET_MIN);
+    }
     lv_obj_set_style_bg_color(btn, BR_COLOR_SURFACE_2, 0);
     lv_obj_set_style_radius(btn, BR_RADIUS, 0);
+    lv_obj_set_style_pad_all(btn, 2, 0);
     lv_obj_t* lbl = lv_label_create(btn);
     lv_label_set_text(lbl, text);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
@@ -189,18 +200,24 @@ void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neig
     lv_obj_set_style_text_font(loc_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(loc_lbl, BR_COLOR_TEXT_SEC, 0);
 
+    /* Actions: ONE horizontal row instead of the old column of four
+     * screen-wide buttons. The stack forced this screen to scroll (and put
+     * the top button flush against the clip edge); a single row of compact
+     * buttons fits the whole screen without scrolling. Back is a fixed-width
+     * arrow (leftmost, mirroring where back lives in the chrome), the three
+     * real actions share the rest of the width. */
     lv_obj_t* actions = lv_obj_create(card);
     lv_obj_set_width(actions, lv_pct(100));
     lv_obj_set_height(actions, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(actions, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(actions, 0, 0);
     lv_obj_set_style_pad_all(actions, 0, 0);
-    lv_obj_set_style_pad_row(actions, 6, 0);
-    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_column(actions, 6, 0);
+    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(actions, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    add_action_btn(actions, "DM", dm_click_cb, true);
-    add_action_btn(actions, "Show on Map", map_click_cb, false);
-    add_action_btn(actions, "Share My Location", share_loc_click_cb, false);
-    add_action_btn(actions, "Back", back_click_cb, false);
+    add_action_btn(actions, LV_SYMBOL_LEFT, back_click_cb, false, 0);
+    add_action_btn(actions, "DM", dm_click_cb, true, 1);
+    add_action_btn(actions, "Map", map_click_cb, false, 1);
+    add_action_btn(actions, "Share", share_loc_click_cb, false, 1);
 }

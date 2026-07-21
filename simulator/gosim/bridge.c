@@ -599,7 +599,7 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
                intermediate_rrep_route_usable(route_lookup(&rx->routes, rreq.header.dest_addr),
                                               now_ms)) {
         /* Phase 2 "save reactive routing" Part B: intermediate-node RREP.
-         * Mirrors main/mesh_task.c's handle_rreq using the SAME real
+         * Mirrors main/mesh_routing.c's handle_rreq using the SAME real
          * component functions (intermediate_rrep_route_usable,
          * rrep_build_intermediate) so the sim cannot drift from firmware's
          * trust/freshness rules. g_intermediate_rrep_enabled (default true)
@@ -631,7 +631,7 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
 
         /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. Having
          * replied, this node does NOT also forward the RREQ (see
-         * main/mesh_task.c's handle_rreq for the airtime-saving/safety
+         * main/mesh_routing.c's handle_rreq for the airtime-saving/safety
          * rationale): no fall-through to the forward branch below. */
         budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
                           now_us);
@@ -640,7 +640,7 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
         rreq_maybe_install_src_route(rx, &rreq, now_ms);
     } else if (rreq.header.hop_limit > 1) {
         /* Global forwarded-RREQ token bucket (SEC-M4), same decision point as
-         * firmware's handle_rreq (main/mesh_task.c:2460): gated AFTER the
+         * firmware's handle_rreq (main/mesh_routing.c): gated AFTER the
          * dedup check above, BEFORE building the forward packet or scheduling
          * the jittered rebroadcast. Denied means dropped, same as firmware
          * (which only logs and returns; no queue). */
@@ -761,7 +761,7 @@ static void _handle_rerr(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
         emit_link_broken(stdout, now_us, rx->id, rerr.broken_next_hop);
 
         /* Re-originate the teardown one ring further, exactly like
-         * firmware's handle_rerr (main/mesh_task.c): only a node that
+         * firmware's handle_rerr (main/mesh_routing.c): only a node that
          * actually marked a route broken propagates, so the route-match
          * chain (not the hop limit) bounds how far a teardown travels. */
         if (rerr.header.hop_limit > 1) {
@@ -1369,7 +1369,7 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
 
     if (fwd_res.route_error) {
         /* broken_next_hop is this relay's OWN address, matching firmware's
-         * forward_data_packet no-route branch (main/mesh_task.c: send_rerr
+         * forward_data_packet no-route branch (main/mesh_routing.c: send_rerr
          * (header->dest_addr, s_identity->address)): the report means "do
          * not route dest through ME". Passing fwd_res.next_hop here (issue
          * #144) made the no-route case advertise 0, which matched nobody's
@@ -1518,7 +1518,7 @@ void bridge_handle_flood_relay(sim_event_t* event, node_array_t* nodes, radio_co
 
 /* ─── Identity attestation RX (per-node identity Phase 3) ──────────────── */
 /*
- * Mirrors main/mesh_task.c's handle_identity_attestation with the same
+ * Mirrors main/mesh_beacon.c's handle_identity_attestation with the same
  * verification ORDER: exact-length deserialize, then the CHEAP network-key
  * relay-gate MAC (ident_relay_verify) before anything else (fail = drop:
  * no relay, no pinning, no Ed25519 verify), then deliver to the node's
@@ -2284,7 +2284,7 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
 
 /* ─── Identity attestation origination (per-node identity Phase 3) ───── */
 /*
- * Mirrors firmware's send_identity_attestation (main/mesh_task.c) step for
+ * Mirrors firmware's send_identity_attestation (main/mesh_beacon.c) step for
  * step, order included: canonical message -> Ed25519 sign -> seq draw ->
  * ident_relay_sign (the MAC covers sig and seq) -> serialize -> one
  * BROADCAST-lane budget-gated transmission. event->data.node.addr != 0

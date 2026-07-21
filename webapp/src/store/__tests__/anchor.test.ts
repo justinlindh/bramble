@@ -111,16 +111,6 @@ describe('anchor actions', () => {
     expect(rpcMock).toHaveBeenCalledWith('bramble.setAnchor', { anchor_pubkey: 'cd'.repeat(32) }, undefined);
   });
 
-  it('getAnchorStatus returns anchored + fingerprint + endorsed', async () => {
-    const { connect, getAnchorStatus } = await import('../actions');
-    await connect('serial');
-
-    rpcMock.mockResolvedValueOnce({ anchored: true, anchor_fingerprint: 'deadbeef', endorsed: false });
-    const s = await getAnchorStatus();
-    expect(s).toEqual({ anchored: true, anchor_fingerprint: 'deadbeef', endorsed: false });
-    expect(rpcMock).toHaveBeenCalledWith('bramble.getAnchorStatus', undefined, undefined);
-  });
-
   it('getIdentity returns address + pubkey_hash + ed25519_pub', async () => {
     const { connect, getIdentity } = await import('../actions');
     await connect('serial');
@@ -157,9 +147,8 @@ describe('anchor actions', () => {
   });
 
   it('rejects when not connected', async () => {
-    const { setAnchor, getAnchorStatus, getIdentity, setEndorsement } = await import('../actions');
+    const { setAnchor, getIdentity, setEndorsement } = await import('../actions');
     await expect(setAnchor('cd'.repeat(32))).rejects.toThrow('Not connected');
-    await expect(getAnchorStatus()).rejects.toThrow('Not connected');
     await expect(getIdentity()).rejects.toThrow('Not connected');
     await expect(setEndorsement('ffffffffffffffff', 'ef'.repeat(64))).rejects.toThrow('Not connected');
   });

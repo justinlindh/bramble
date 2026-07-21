@@ -107,4 +107,4 @@ If a route exists but the DATA packet is lost in transit (e.g., swallowed by a b
 
 Messages pending retry when the simulation ends are also counted as dropped.
 
-**Note:** gosim now runs the firmware's real reliability machinery (3-tier: fire-and-forget, acknowledged, reliable) and measures ACK/receipt return paths; see the `reliability-ack-retry` scenario and [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md). The detection timings quoted in this document are from the February simulation runs that introduced the detectors and have not been re-measured since.
+**Note:** gosim now runs the firmware's real reliability machinery (3-tier: fire-and-forget, acknowledged, reliable) and measures ACK retransmission and receipt return paths under loss; see the `reliability-ack-retry` and `reliability-path-trace` scenarios, both gated in `simulator/gosim/scenario_gate_test.go`, and [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md). The detection timings quoted in this document are from the February simulation runs that introduced the detectors and have not been re-measured since.

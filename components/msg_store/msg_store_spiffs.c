@@ -7,7 +7,6 @@
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include <stdio.h>
-#include <sys/stat.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -29,9 +28,14 @@ static msg_file_header_t s_header;
 static bool s_initialized = false;
 
 int msg_store_spiffs_init(void) {
-    /* Check if SPIFFS is mounted */
-    struct stat st;
-    if (stat("/spiffs", &st) != 0) {
+    /* Check if SPIFFS is mounted. Must be esp_spiffs_mounted(), never
+     * stat("/spiffs"): SPIFFS is flat, the VFS has no root directory entry,
+     * so stat() on the bare mountpoint fails EVEN WHEN MOUNTED. That check
+     * disabled persistence on every real-hardware boot since the feature
+     * shipped (boot log: "SPIFFS mounted: used=0" immediately followed by
+     * "SPIFFS not mounted, persistence disabled"). NULL = the default
+     * partition label main.c registers with. */
+    if (!esp_spiffs_mounted(NULL)) {
         ESP_LOGW(TAG, "SPIFFS not mounted, persistence disabled");
         return -1;
     }
@@ -48,6 +52,32 @@ int msg_store_spiffs_init(void) {
             s_msg_file = NULL;
             unlink(MSG_FILE_PATH);
         } else {
+            /* The record count is derived from the FILE SIZE, never trusted
+             * from the header: a record append and its header update are two
+             * separate flash writes, so a crash (or the pre-fsync firmware)
+             * can leave records the header does not count. Counting from the
+             * size keeps every fully-written record visible, and load_recent's
+             * offset math stays aligned with reality. A torn trailing record
+             * (partial append) is truncated away so the next append cannot
+             * land misaligned after it. */
+            long size = 0;
+            if (fseek(s_msg_file, 0, SEEK_END) == 0)
+                size = ftell(s_msg_file);
+            long payload = (size > (long)sizeof(s_header)) ? size - (long)sizeof(s_header) : 0;
+            uint32_t actual = (uint32_t)(payload / (long)sizeof(stored_msg_t));
+            long aligned = (long)sizeof(s_header) + (long)actual * (long)sizeof(stored_msg_t);
+            if (size != aligned) {
+                ESP_LOGW(TAG, "Truncating torn trailing record (%ld -> %ld bytes)", size, aligned);
+                if (ftruncate(fileno(s_msg_file), aligned) != 0)
+                    ESP_LOGW(TAG, "ftruncate failed");
+            }
+            if (actual != s_header.record_count) {
+                ESP_LOGW(TAG,
+                         "Header counted %" PRIu32 " records, file holds %" PRIu32
+                         "; using the file",
+                         s_header.record_count, actual);
+                s_header.record_count = actual;
+            }
             ESP_LOGI(TAG, "Loaded message file: %" PRIu32 " messages", s_header.record_count);
             s_initialized = true;
             return 0;
@@ -77,6 +107,7 @@ int msg_store_spiffs_init(void) {
     }
 
     fflush(s_msg_file);
+    fsync(fileno(s_msg_file)); /* see msg_store_spiffs_save: durability needs fsync */
     s_initialized = true;
     ESP_LOGI(TAG, "Created new message file");
     return 0;
@@ -113,7 +144,16 @@ int msg_store_spiffs_save(const stored_msg_t* msg) {
         return -1;
     }
 
+    /* fflush only drains the stdio buffer into VFS writes; the SPIFFS write
+     * cache (CONFIG_SPIFFS_CACHE_WR) can still hold the pages in RAM, and a
+     * reboot then loses them. Observed exactly here: the appended record
+     * reached flash but this in-place header update did not, so every boot
+     * restored "0 messages". fsync forces the cache to flash. */
     fflush(s_msg_file);
+    if (fsync(fileno(s_msg_file)) != 0) {
+        ESP_LOGE(TAG, "fsync failed");
+        return -1;
+    }
     return 0;
 }
 
@@ -213,6 +253,7 @@ void msg_store_spiffs_rollover(int max_messages, int keep_pct) {
     }
 
     fflush(s_msg_file);
+    fsync(fileno(s_msg_file)); /* see msg_store_spiffs_save: durability needs fsync */
     free(keep_msgs);
 
     ESP_LOGI(TAG, "Rollover complete: %d messages retained", keep_count);

@@ -33,8 +33,9 @@ static lv_point_precise_t s_head_pts[2];
 
 /* Simple equirectangular projection (good enough for tens of km).
  * 1 degree latitude ~ 111 km; longitude scaled by cos(lat).
- * Canvas is 280x140: the window shows +-zoom_km horizontally and
- * +-zoom_km/2 vertically. */
+ * Canvas is 280x132 (the container is sized flush to the content area, so
+ * its bottom border stays visible; see the map_cont sizing note): the window
+ * shows +-zoom_km horizontally, proportionally less vertically. */
 static void lat_lon_to_km(double lat, double lon, double center_lat, double center_lon,
                           double* x_km, double* y_km) {
     double km_per_deg_lat = 111.0;
@@ -46,7 +47,7 @@ static void lat_lon_to_km(double lat, double lon, double center_lat, double cent
 static void km_to_pixel(double x_km, double y_km, double zoom_km, int* px, int* py) {
     double pixels_per_km = 140.0 / zoom_km;
     *px = (int)(140 + x_km * pixels_per_km);
-    *py = (int)(70 - y_km * pixels_per_km); /* Invert Y for screen coords */
+    *py = (int)(66 - y_km * pixels_per_km); /* Invert Y for screen coords */
 }
 
 /* Smallest zoom level whose window contains every active peer (20% margin),
@@ -201,7 +202,7 @@ typedef struct {
 
 static bool create_marker(lv_obj_t* parent, int x, int y, lv_color_t color, const char* label,
                           label_anchor_t* placed, int* placed_count) {
-    if (x < 5 || x >= 275 || y < 5 || y >= 135) {
+    if (x < 5 || x >= 275 || y < 5 || y >= 129) {
         return false; /* Off-screen or too close to edge */
     }
 
@@ -292,8 +293,8 @@ static void draw_scale_bar(lv_obj_t* map_cont, double zoom_km) {
         return;
 
     int x1 = 276 - bar_px;
-    s_scale_pts[0] = (lv_point_precise_t){x1, 130};
-    s_scale_pts[1] = (lv_point_precise_t){276, 130};
+    s_scale_pts[0] = (lv_point_precise_t){x1, 124};
+    s_scale_pts[1] = (lv_point_precise_t){276, 124};
     lv_obj_t* bar = lv_line_create(map_cont);
     lv_line_set_points(bar, s_scale_pts, 2);
     lv_obj_set_style_line_color(bar, BR_COLOR_TEXT_SEC, 0);
@@ -378,7 +379,12 @@ void scr_map_create(bramble_layout_t* layout) {
      * (UI_ZONE_FLAG_CONSUMES_VERTICAL), keyboard +/- too, 0 returns to auto-fit.
      * LEFT/RIGHT still hop to chrome, so the map cannot trap focus. */
     lv_obj_t* map_cont = lv_obj_create(cont);
-    lv_obj_set_size(map_cont, 312, 148);
+    /* Height fits the content area EXACTLY (y 38 + height = BR_CONTENT_H).
+     * The old 148 overflowed the 180px content area by 6px, so the
+     * container's bottom edge (and its border, which draws inside the
+     * OBJECT but outside the PARENT's clip) rendered under the tab bar:
+     * the chopped bottom border this screen shipped with. */
+    lv_obj_set_size(map_cont, 312, BR_CONTENT_H - 38);
     lv_obj_set_pos(map_cont, 4, 38);
     lv_obj_set_style_bg_color(map_cont, BR_COLOR_SURFACE, 0);
     lv_obj_set_style_bg_opa(map_cont, LV_OPA_COVER, 0);
@@ -398,8 +404,8 @@ void scr_map_create(bramble_layout_t* layout) {
     }
 
     /* Draw grid crosshair lines using LVGL line objects (no canvas/buffer needed) */
-    static lv_point_precise_t h_points[] = {{0, 70}, {280, 70}};
-    static lv_point_precise_t v_points[] = {{140, 0}, {140, 140}};
+    static lv_point_precise_t h_points[] = {{0, 66}, {280, 66}};
+    static lv_point_precise_t v_points[] = {{140, 0}, {140, 132}};
 
     lv_obj_t* h_line = lv_line_create(map_cont);
     lv_line_set_points(h_line, h_points, 2);
@@ -417,8 +423,8 @@ void scr_map_create(bramble_layout_t* layout) {
      * (a 3 m fix at any sane zoom is sub-pixel). */
     int acc_r_px = (int)((double)self_pos->accuracy_m / 1000.0 * pixels_per_km);
     if (acc_r_px >= 4) {
-        if (acc_r_px > 70)
-            acc_r_px = 70;
+        if (acc_r_px > 66)
+            acc_r_px = 66;
         lv_obj_t* acc = lv_obj_create(map_cont);
         lv_obj_set_size(acc, acc_r_px * 2, acc_r_px * 2);
         lv_obj_set_style_radius(acc, LV_RADIUS_CIRCLE, 0);
@@ -426,7 +432,7 @@ void scr_map_create(bramble_layout_t* layout) {
         lv_obj_set_style_border_width(acc, 1, 0);
         lv_obj_set_style_border_color(acc, BR_COLOR_ACCENT, 0);
         lv_obj_set_style_border_opa(acc, LV_OPA_50, 0);
-        lv_obj_set_pos(acc, 144 - acc_r_px, 74 - acc_r_px);
+        lv_obj_set_pos(acc, 144 - acc_r_px, 70 - acc_r_px);
         lv_obj_clear_flag(acc, LV_OBJ_FLAG_SCROLLABLE);
     }
 
@@ -434,9 +440,9 @@ void scr_map_create(bramble_layout_t* layout) {
      * GPS course over ground is noise below walking pace. */
     if (self_pos->speed_kmh >= 2) {
         double hdg_rad = (double)(self_pos->heading_deg2 * 2) * M_PI / 180.0;
-        s_head_pts[0] = (lv_point_precise_t){144, 74};
+        s_head_pts[0] = (lv_point_precise_t){144, 70};
         s_head_pts[1] =
-            (lv_point_precise_t){144 + (int)(sin(hdg_rad) * 14.0), 74 - (int)(cos(hdg_rad) * 14.0)};
+            (lv_point_precise_t){144 + (int)(sin(hdg_rad) * 14.0), 70 - (int)(cos(hdg_rad) * 14.0)};
         lv_obj_t* hdg = lv_line_create(map_cont);
         lv_line_set_points(hdg, s_head_pts, 2);
         lv_obj_set_style_line_color(hdg, lv_color_hex(0x0066FF), 0);
@@ -454,7 +460,7 @@ void scr_map_create(bramble_layout_t* layout) {
     bool wide_zoom = zoom_km >= 10.0;
 
     /* Draw self position (blue marker) at the window center */
-    create_marker(map_cont, 144, 74, lv_color_hex(0x0066FF), "You", label_anchors,
+    create_marker(map_cont, 144, 70, lv_color_hex(0x0066FF), "You", label_anchors,
                   &label_anchor_count);
 
     /* Draw peer positions from cache */

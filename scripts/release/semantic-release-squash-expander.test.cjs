@@ -310,6 +310,33 @@ async function runReleaseRuleRegression() {
     // bug; the writerOpts.transform handles multi-scope for release NOTES, but
     // the release DECISION does not. If multi-scope release decisions are ever
     // wanted, change the rules deliberately and update this assertion.
+    // Scope `ui` is DEVICE-UI code (components/ui_graphics, the T-Deck LVGL
+    // screens): it compiles into the firmware image, so ui-scoped changes cut
+    // FIRMWARE releases and stay out-of-scope for every other component. Pinned
+    // here so the mapping cannot silently regress in either direction.
+    const uiExpectations = [
+        ["firmware", "fix(ui): device UI fix", "patch"],
+        ["firmware", "feat(ui): device UI feature", "minor"],
+        ["firmware", "perf(ui): device UI perf", "patch"],
+        ["firmware", "feat(ui)!: device UI breaking change", "major"],
+        ["firmware", "feat(webapp): squash subject (#2)\n\n* fix(ui): bullet fix\n\nbody", "patch"],
+        ["webapp", "fix(ui): device UI fix", null],
+        ["sim", "fix(ui): device UI fix", null],
+        ["protocol", "fix(ui): device UI fix", null],
+    ];
+    for (const [component, message, expected] of uiExpectations) {
+        const actual = await releaseFor(component, message);
+        const label = `${component}: ${JSON.stringify(message.split("\n")[0])} => ${JSON.stringify(
+            actual,
+        )} (expect ${JSON.stringify(expected)})`;
+        if (actual === expected) {
+            console.log(`PASS ${label}`);
+        } else {
+            console.error(`FAIL ${label}`);
+            process.exitCode = 1;
+        }
+    }
+
     const multiScope = await releaseFor("firmware", "feat(firmware,webapp): shared change");
     if (multiScope === null) {
         console.log('PASS firmware: multi-scope "feat(firmware,webapp)" => null (known limitation)');

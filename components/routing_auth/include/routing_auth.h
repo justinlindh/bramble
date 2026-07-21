@@ -24,7 +24,7 @@
 /*
  * Authenticates reporter_addr||broken_dest||broken_next_hop||seq with
  * label "bramble-rerr-v2", excluding only header.packet_id: every
- * forwarder re-originates a RERR (mesh_task.c's send_rerr) with its own
+ * forwarder re-originates a RERR (mesh_routing.c's send_rerr) with its own
  * reporter_addr and a freshly-drawn seq, passing broken_dest/
  * broken_next_hop through unchanged, and re-signs the WHOLE struct
  * (including its own reporter_addr and seq) on every call. reporter_addr
@@ -47,7 +47,7 @@ int rerr_verify(const bramble_rerr_t* r);
  * Task 3.5 (NEW-SEC-8, STAGED, NOT closed: see network_key.h), extended by
  * ws 1.3b. Authenticates src_addr||ack_packet_id||seq with label
  * "bramble-ack-v2", excluding relay_path/hop_count/header.hop_limit:
- * mesh_task.c's forward_ack grows relay_path, increments hop_count, and
+ * mesh_reliability.c's forward_ack grows relay_path, increments hop_count, and
  * decrements hop_limit on every relay hop, so those three are the only
  * per-hop-mutated fields. seq (ws 1.3b) is origin-stable, drawn once by
  * send_ack and carried through forward_ack unchanged, so it sits in the
