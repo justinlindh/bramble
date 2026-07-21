@@ -2998,22 +2998,12 @@ static int handle_get_traffic_events(const cJSON* params, cJSON* result) {
         cJSON_AddNumberToObject(obj, "timestamp_ms", evt->timestamp_ms);
         cJSON_AddNumberToObject(obj, "pkt_type", evt->pkt_type);
 
-        /* Category as string */
-        static const char* cat_names[] = {"beacon", "timesync",    "routing", "ack",
-                                          "chat",   "maintenance", "other"};
-        if (evt->category < 7) {
-            cJSON_AddStringToObject(obj, "category", cat_names[evt->category]);
-        } else {
-            cJSON_AddStringToObject(obj, "category", "unknown");
-        }
-
-        /* Airtime tier as string */
-        static const char* tier_names[] = {"none", "normal", "critical", "broadcast"};
-        if (evt->airtime_tier <= 3) {
-            cJSON_AddStringToObject(obj, "airtime_tier", tier_names[evt->airtime_tier]);
-        } else {
-            cJSON_AddStringToObject(obj, "airtime_tier", "unknown");
-        }
+        /* Category and airtime tier as canonical strings (shared with the
+         * traffic_event notification serializer via the traffic_debug
+         * component). */
+        cJSON_AddStringToObject(obj, "category", traffic_debug_category_name(evt->category));
+        cJSON_AddStringToObject(obj, "airtime_tier",
+                                traffic_debug_airtime_tier_name(evt->airtime_tier));
 
         cJSON_AddNumberToObject(obj, "packet_len", evt->packet_len);
         cJSON_AddNumberToObject(obj, "rssi", evt->rssi);
