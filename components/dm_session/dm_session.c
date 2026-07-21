@@ -554,20 +554,6 @@ int dm_derive_identity_sas(const uint8_t id_x25519_a[32], const uint8_t id_x2551
 }
 
 /*
- * Constant-time equality over two byte buffers (tag comparison). OR-
- * accumulate every byte's XOR difference with no early exit, so comparing
- * a computed tag against an attacker-supplied one never leaks how many
- * leading bytes matched through timing. Used for EVERY tag check below;
- * never memcmp on a tag.
- */
-static int ct_eq(const uint8_t* a, const uint8_t* b, size_t n) {
-    uint8_t r = 0;
-    for (size_t i = 0; i < n; i++)
-        r |= a[i] ^ b[i];
-    return r == 0;
-}
-
-/*
  * Derives a handshake tag: HKDF(salt="bramble-dm-v2", ikm, label || info)
  * used as an HMAC key over transcript, truncated to 16 bytes. Shared by
  * both the K_ke_init/transcript_1 tag (dm_build_init/dm_verify_init) and
@@ -742,7 +728,7 @@ int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* 
                          transcript, sizeof(transcript), expect_tag) != 0)
         goto out;
 
-    rc = ct_eq(expect_tag, msg->auth_tag, 16) ? 0 : -1;
+    rc = crypto_ct_memeq(expect_tag, msg->auth_tag, 16) ? 0 : -1;
 out:
     /* Wipe the DH outputs and IKM on every exit past the DH steps. */
     crypto_secure_wipe(dh2, sizeof(dh2));
@@ -850,7 +836,7 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
                          ke_epoch, transcript, sizeof(transcript), expect_tag) != 0)
         goto out;
 
-    if (!ct_eq(expect_tag, resp->auth_tag, 16))
+    if (!crypto_ct_memeq(expect_tag, resp->auth_tag, 16))
         goto out;
 
     memcpy(session_key_out, local_key, 32);

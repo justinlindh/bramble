@@ -61,6 +61,19 @@ static inline int crypto_x25519_check_shared(const uint8_t ss[32]) {
         acc |= ss[i];
     return acc == 0 ? -1 : 0;
 }
+
+/* Constant-time equality over two n-byte buffers, for tag/MAC comparison.
+ * OR-accumulates every byte's XOR difference with no early exit, so comparing
+ * a computed tag against an attacker-supplied one never leaks how many leading
+ * bytes matched through timing. Returns 1 on equal, 0 otherwise. Use this for
+ * EVERY tag/MAC check; never memcmp on a secret-derived tag. Header-only like
+ * crypto_x25519_check_shared so host, device, and sim builds share one copy. */
+static inline int crypto_ct_memeq(const uint8_t* a, const uint8_t* b, size_t n) {
+    uint8_t acc = 0;
+    for (size_t i = 0; i < n; i++)
+        acc |= a[i] ^ b[i];
+    return acc == 0;
+}
 int crypto_hkdf_sha256(const uint8_t* salt, size_t salt_len, const uint8_t* ikm, size_t ikm_len,
                        const uint8_t* info, size_t info_len, uint8_t* okm, size_t okm_len);
 int crypto_aes256gcm_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* plaintext,

@@ -1,5 +1,6 @@
 #include "include/discovery.h"
 #include "network_key.h"
+#include "crypto.h"
 #include <string.h>
 
 /* Saturating 8-bit hop-count arithmetic. hop_count is a single wire byte and,
@@ -119,19 +120,6 @@ bramble_rreq_t rreq_forward(const bramble_rreq_t* incoming, uint32_t my_addr, in
     return r;
 }
 
-/*
- * Constant-time equality (tag comparison), same OR-accumulate pattern used
- * elsewhere in this codebase for MAC/tag checks (e.g. dm_session.c's
- * ct_eq): no early exit, so comparing a computed MAC against an
- * attacker-supplied one never leaks how many leading bytes matched.
- */
-static int ct_eq(const uint8_t* a, const uint8_t* b, size_t n) {
-    uint8_t acc = 0;
-    for (size_t i = 0; i < n; i++)
-        acc |= a[i] ^ b[i];
-    return acc == 0;
-}
-
 /* query_id(4) || src_addr(4) || hop_count(1) || route_metric(1) || seq(6),
  * big-endian for the multi-byte fields: the origin-stable fields, exactly
  * excluding next_hop and header.dest_addr (the only two fields rrep_forward
@@ -168,7 +156,7 @@ int rrep_verify(const bramble_rrep_t* r) {
      * would otherwise ACCEPT a forgery. */
     if (network_key_mac("bramble-rrep-v2", buf, sizeof(buf), expect) != 0)
         return 0;
-    return ct_eq(expect, r->auth_hmac, sizeof(expect));
+    return crypto_ct_memeq(expect, r->auth_hmac, sizeof(expect));
 }
 
 bramble_rrep_t rrep_build_destination(const bramble_rreq_t* rreq, uint32_t my_addr) {
