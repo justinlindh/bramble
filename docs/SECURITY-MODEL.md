@@ -35,7 +35,7 @@ provisioned fleet, this attacker cannot forge any of the five
 control-plane message types, and cannot replay one against a node that has
 been running continuously since it saw the original. Replay across a
 reboot is NOT closed: the replay windows are RAM-only
-(`replay_table_init` at `main/mesh_task.c:6424-6425`, no NVS save or
+(`replay_table_init` at `main/mesh_task.c`, no NVS save or
 restore anywhere in the tree) while sender-side counters persist, so a
 captured batch replayed in ascending counter order after the target
 reboots is accepted as fresh. Tracked as issue #72; see the residuals note
@@ -838,13 +838,13 @@ concurrent distinct senders to matter).
 
 The larger residual is reboot. All of this state is RAM-only: both tables
 are initialized empty at boot (`replay_table_init(&s_replay)` and
-`replay_table_init(&s_control_replay)`, `main/mesh_task.c:6424-6425`) and
+`replay_table_init(&s_control_replay)`, `main/mesh_task.c`) and
 nothing in the tree saves or restores them to NVS. A fresh slot accepts
 any counter (`components/replay_window/replay_window.c:49-53`), and the
 tier-1 accept path applies no `sent_at` freshness gate (that check runs
-only on the below-window path, `main/mesh_task.c:2692`), while the
+only on the below-window path, `main/mesh_task.c`), while the
 sender-side counter is persistent (`nonce_counter_next`,
-`main/mesh_task.c:1468-1478`). So an attacker who captured a batch of
+`main/mesh_task.c`). So an attacker who captured a batch of
 authenticated frames can replay them in ascending counter order after the
 target reboots and have them accepted as fresh. A replayed RERR tears down
 routes; replayed LOCATION and CHAT are privacy and integrity problems; and
@@ -1229,7 +1229,7 @@ same PR that fixes it.
   and gains the full authenticated RPC surface. Same exposure class as the
   plaintext-HTTP bullet above.
 - **Replay windows are RAM-only and reset on reboot** (issue #72). Both
-  tables are initialized empty at boot (`main/mesh_task.c:6424-6425`) with
+  tables are initialized empty at boot (`main/mesh_task.c`) with
   no NVS save or restore anywhere in the tree, a fresh slot accepts any
   counter (`components/replay_window/replay_window.c:49-53`), and the
   tier-1 accept path has no `sent_at` freshness gate, while the sender-side

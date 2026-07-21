@@ -441,7 +441,7 @@ Three delivery tiers:
 | Normal | 3 | 2s base, exponential backoff with ±25% jitter | End-to-end ACK required |
 | Critical | 8 | 3s base, exponential backoff with ±25% jitter | Delivery receipt + full relay path |
 
-(Constants: `tier_max_retries` / `tier_base_delay_ms` in `components/reliability/reliability.c`; jitter applied in `main/mesh_task.c`.)
+(Constants: `tier_max_retries` / `tier_base_delay_ms` in `components/reliability/reliability.c`; jitter applied in `main/mesh_reliability.c`.)
 
 The retry/ACK machinery above is live. A per-destination AIMD sliding window and the CONGESTION packet type were removed unshipped; in-flight traffic is bounded by the 8-entry pending-ACK table and the airtime budget.
 
