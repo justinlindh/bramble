@@ -10,6 +10,9 @@ import { NetworkKeySection } from './NetworkKeySection';
 import { AnchorSection } from './AnchorSection';
 import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation, IconWarning, IconDatabase, IconLock } from '../../components/Icons';
 import { messageDb } from '../../store/messageDb';
+import { deliveryEventStore } from '../../store/deliveryEventStore';
+import { clearUnreadCounts } from '../../store/unreadStore';
+import { formatAddrHex } from '../../utils/address';
 import styles from './Config.module.css';
 
 export function Config() {
@@ -21,6 +24,14 @@ export function Config() {
   const handleClearHistory = async () => {
     if (!window.confirm('Clear all cached messages from this browser? This cannot be undone.')) return;
     await messageDb.clearAll();
+    // Clearing messages must also drop the state that hangs off them: the
+    // per-message delivery-receipt records (their own IndexedDB) and the
+    // per-node unread counts persisted to localStorage, which would otherwise
+    // resurface on the next load against reused conversation ids.
+    await deliveryEventStore.clearAll();
+    if (config?.identity?.address) {
+      clearUnreadCounts(formatAddrHex(config.identity.address));
+    }
     useStore.setState({ messages: [], conversations: new Map() });
   };
 
