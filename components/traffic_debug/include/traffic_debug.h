@@ -92,6 +92,24 @@ traffic_category_t traffic_debug_classify_packet(uint8_t pkt_type);
 uint8_t traffic_debug_get_airtime_tier(traffic_category_t category, uint8_t tier_hint);
 
 /**
+ * Canonical lowercase category name for JSON/telemetry serialization
+ * (e.g. TRAFFIC_CAT_ROUTING -> "routing"). Its bound derives from the enum,
+ * so adding a category cannot silently mis-serialize as a stale string.
+ * @param category Traffic category
+ * @return Static string, "unknown" for out-of-range values
+ */
+const char* traffic_debug_category_name(traffic_category_t category);
+
+/**
+ * Canonical airtime-tier name for JSON/telemetry serialization:
+ * 0 -> "none", 1 -> "normal", 2 -> "critical", 3 -> "broadcast"
+ * (the AIRTIME_TIER_* values, with 0 for an unset tier).
+ * @param tier Raw airtime-tier value from a traffic_event_t
+ * @return Static string, "unknown" for out-of-range values
+ */
+const char* traffic_debug_airtime_tier_name(uint8_t tier);
+
+/**
  * Record TX event
  * @param td Traffic debug instance
  * @param pkt_type Packet type

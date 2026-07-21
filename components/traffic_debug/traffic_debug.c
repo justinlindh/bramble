@@ -92,6 +92,25 @@ uint8_t traffic_debug_get_airtime_tier(traffic_category_t category, uint8_t tier
     }
 }
 
+const char* traffic_debug_category_name(traffic_category_t category) {
+    static const char* const names[] = {"beacon", "timesync",    "routing", "ack",
+                                        "chat",   "maintenance", "other"};
+    _Static_assert(sizeof(names) / sizeof(names[0]) == TRAFFIC_CAT_OTHER + 1,
+                   "category name table must cover every traffic_category_t value");
+    if ((unsigned)category <= (unsigned)TRAFFIC_CAT_OTHER) {
+        return names[category];
+    }
+    return "unknown";
+}
+
+const char* traffic_debug_airtime_tier_name(uint8_t tier) {
+    static const char* const names[] = {"none", "normal", "critical", "broadcast"};
+    if (tier < sizeof(names) / sizeof(names[0])) {
+        return names[tier];
+    }
+    return "unknown";
+}
+
 static void record_event(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, int8_t rssi,
                          bool is_tx, uint8_t tier) {
     if (!td->enabled) {

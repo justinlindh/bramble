@@ -403,6 +403,14 @@ int mesh_traffic_debug_set_config(const traffic_debug_config_t* cfg) {
 }
 void mesh_traffic_debug_get_config(traffic_debug_config_t* cfg) { memset(cfg, 0, sizeof(*cfg)); }
 bool mesh_get_traffic_debug(void) { return false; }
+const char* traffic_debug_category_name(int category) {
+    (void)category;
+    return "other";
+}
+const char* traffic_debug_airtime_tier_name(uint8_t tier) {
+    (void)tier;
+    return "none";
+}
 const char* ota_get_running_partition(void) { return "ota_0"; }
 /* ── OTA stubs (URL policy via real ota_url.c, linked into these bins) ── */
 #include "ota_origin.h"
