@@ -491,23 +491,29 @@ func (s *Sim) handleTickNode(evt *C.sim_event_t) {
 }
 
 func (s *Sim) handleReceivePacket(evt *C.sim_event_t) {
-	handleReceivePacket(evt, &s.nodes, &s.radio, &s.rng, &s.events,
+	C.bridge_handle_receive_packet(evt, &s.nodes, &s.radio, &s.rng, &s.events,
 		&s.metrics, &s.anomaly[0], &s.msgTrack[0], C.MAX_MSG_TRACK)
 }
 
 func (s *Sim) handleGenerateMessage(evt *C.sim_event_t) {
-	handleGenerateMessage(evt, &s.nodes, &s.radio, &s.rng, &s.events,
+	C.bridge_handle_generate_message(evt, &s.nodes, &s.radio, &s.rng, &s.events,
 		&s.metrics, &s.anomaly[0], &s.msgTrack[0], C.MAX_MSG_TRACK)
 }
 
+// handleGenerateAttestation fires a scripted identity-attestation origination
+// (per-node identity Phase 3, "send_attestation" scenario event): the named
+// node signs and broadcasts its (or, for the impersonation scenario, someone
+// else's) address binding through the real firmware origination path in
+// bridge.c.
 func (s *Sim) handleGenerateAttestation(evt *C.sim_event_t) {
-	handleGenerateAttestation(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
+	C.bridge_handle_generate_attestation(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
 // handleGenerateLocation (issue #172): a scripted GPS position broadcast
-// through the real firmware location serialization path in bridge.c.
+// through the real firmware location serialization path in bridge.c. Every
+// in-range receiver caches it via the real location_cache_update.
 func (s *Sim) handleGenerateLocation(evt *C.sim_event_t) {
-	handleGenerateLocation(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
+	C.bridge_handle_generate_location(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
 // handleProvisionAnchor (trust-anchor campaign P2 red-team): a scripted runtime
@@ -521,7 +527,7 @@ func (s *Sim) handleProvisionAnchor(evt *C.sim_event_t) {
 // bridge.c's _handle_data broadcast branch, which schedules these via
 // EVT_SEND_PACKET (repurposed; previously declared but unused).
 func (s *Sim) handleFloodRelay(evt *C.sim_event_t) {
-	handleFloodRelay(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
+	C.bridge_handle_flood_relay(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
 // applyDutyCycleCap re-applies the scenario's optional regulatory
