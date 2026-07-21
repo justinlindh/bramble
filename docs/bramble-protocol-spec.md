@@ -2462,7 +2462,7 @@ Removed unshipped. The priority TX queue was deleted without ever being wired: t
 
 Every node includes its current time estimate and confidence in its BEACON packet (§4.9). Additionally, dedicated TIME_SYNC packets provide higher-precision synchronization.
 
-> **Firmware reality.** Only the beacon-carried sync is implemented (`timesync_handle_sync` on beacon receipt in `main/mesh_task.c`); the dedicated `TIME_SYNC` packet type was removed unshipped (section 4.13). No stratum-0 source is wired yet (no GPS or operator seed), so nodes exchange offsets but none can bootstrap the mesh to synchronized absolute time.
+> **Firmware reality.** Only the beacon-carried sync is implemented (`timesync_handle_sync` on beacon receipt in `main/mesh_beacon.c`); the dedicated `TIME_SYNC` packet type was removed unshipped (section 4.13). No stratum-0 source is wired yet (no GPS or operator seed), so nodes exchange offsets but none can bootstrap the mesh to synchronized absolute time.
 
 **Stratum model:**
 
