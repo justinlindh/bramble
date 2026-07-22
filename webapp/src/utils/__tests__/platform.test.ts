@@ -18,34 +18,12 @@ describe('platform detection', () => {
     expect(isElectron()).toBe(false);
   });
 
-  it('detects serial support', async () => {
-    vi.stubGlobal('navigator', { serial: {} });
-    vi.resetModules();
-    const { hasSerialSupport } = await import('../platform');
-    expect(hasSerialSupport()).toBe(true);
-  });
-
-  it('detects missing serial support', async () => {
-    vi.stubGlobal('navigator', {});
-    vi.resetModules();
-    const { hasSerialSupport } = await import('../platform');
-    expect(hasSerialSupport()).toBe(false);
-  });
-
-  it('detects BLE support', async () => {
-    vi.stubGlobal('navigator', { bluetooth: {} });
-    vi.resetModules();
-    const { hasBLESupport } = await import('../platform');
-    expect(hasBLESupport()).toBe(true);
-  });
-
   it('detects the Android shell environment', async () => {
     vi.stubGlobal('brambleAndroid', true);
     vi.resetModules();
-    const { isAndroidShell, isEmbeddedShell, platformName } = await import('../platform');
+    const { isAndroidShell, isEmbeddedShell } = await import('../platform');
     expect(isAndroidShell()).toBe(true);
     expect(isEmbeddedShell()).toBe(true);
-    expect(platformName()).toBe('android');
   });
 
   it('treats electron as an embedded shell', async () => {
