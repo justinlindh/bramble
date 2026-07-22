@@ -26,21 +26,3 @@ export function isAndroidShell(): boolean {
 export function isEmbeddedShell(): boolean {
   return isElectron() || isAndroidShell();
 }
-
-/** Returns true when Web Serial API is available */
-export function hasSerialSupport(): boolean {
-  return typeof navigator !== 'undefined' && 'serial' in navigator;
-}
-
-/** Returns true when Web Bluetooth API is available */
-export function hasBLESupport(): boolean {
-  return typeof navigator !== 'undefined' && 'bluetooth' in navigator;
-}
-
-/** Returns the platform runtime name for display purposes */
-export function platformName(): string {
-  if (isElectron()) return 'desktop';
-  if (isAndroidShell()) return 'android';
-  if ('serviceWorker' in navigator) return 'pwa';
-  return 'browser';
-}
