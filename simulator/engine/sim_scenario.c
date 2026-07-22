@@ -677,17 +677,29 @@ bool scenario_load_file(const char* path, scenario_t* scenario) {
         return false;
     }
 
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fprintf(stderr, "Error: cannot size scenario file '%s'\n", path);
+        fclose(f);
+        return false;
+    }
     long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    if (size < 0) {
+        fprintf(stderr, "Error: cannot size scenario file '%s'\n", path);
+        fclose(f);
+        return false;
+    }
+    rewind(f);
 
     char* data = malloc((size_t)size + 1);
     if (!data) {
         fclose(f);
         return false;
     }
-    fread(data, 1, (size_t)size, f);
-    data[size] = '\0';
+    /* Opened in text mode, so a short read (for example CRLF translation) is
+     * expected; terminate at the byte count actually read rather than the
+     * on-disk size. */
+    size_t read_len = fread(data, 1, (size_t)size, f);
+    data[read_len] = '\0';
     fclose(f);
 
     cJSON* root = cJSON_Parse(data);
