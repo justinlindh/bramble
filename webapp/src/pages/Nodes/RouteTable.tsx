@@ -1,23 +1,13 @@
 import { useState } from 'react';
 import type { Route } from '../../types/bramble';
 import { AddressLabel } from '../../components/AddressLabel';
+import { formatAge } from '../../hooks/useAgeTick';
 import styles from './RouteTable.module.css';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type SortKey = 'dest' | 'nextHop' | 'hopCount' | 'metric' | 'state' | 'lastUsedMs';
 type SortDir = 'asc' | 'desc';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatAgo(ms: number): string {
-  if (ms < 1000) return 'just now';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  return `${Math.floor(m / 60)}h ago`;
-}
 
 // ─── State badge ─────────────────────────────────────────────────────────────
 
@@ -120,7 +110,7 @@ export function RouteTable({ routes }: RouteTableProps) {
                 <td className={styles.mono}>{r.hopCount}</td>
                 <td className={styles.mono}>{r.metric}</td>
                 <td><StateBadge state={r.state} /></td>
-                <td className={styles.mono}>{formatAgo(r.lastUsedMs)}</td>
+                <td className={styles.mono}>{formatAge(r.lastUsedMs)}</td>
               </tr>
             ))
           )}

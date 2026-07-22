@@ -7,6 +7,7 @@ import type { Neighbor, Route } from '../../types/bramble';
 import { useStore } from '../../store/index';
 import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
+import { formatAge } from '../../hooks/useAgeTick';
 import styles from './PeerManager.module.css';
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
@@ -58,15 +59,6 @@ function loadNotes(): Map<number, string> {
 
 function saveNotes(m: Map<number, string>): void {
   saveStringMap(LS_NOTES_KEY, m);
-}
-
-function formatAgo(ms: number): string {
-  if (ms < 1000) return 'just now';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  return `${Math.floor(m / 60)}h ago`;
 }
 
 async function readFileText(file: File): Promise<string> {
@@ -187,7 +179,7 @@ function PeerRow({ peer, name, note, onSaveName, onSaveNote }: PeerRowProps) {
           )}
           {note && <span className={styles.peerNote}>{note}</span>}
           {peer.lastHeardMs !== undefined && (
-            <span className={styles.lastHeard}>{formatAgo(peer.lastHeardMs)}</span>
+            <span className={styles.lastHeard}>{formatAge(peer.lastHeardMs)}</span>
           )}
           <button
             className={styles.editBtn}

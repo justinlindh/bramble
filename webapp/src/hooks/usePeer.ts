@@ -3,6 +3,7 @@ import { useStore } from '../store/index';
 import { resolvePeerName } from '../store/peerName';
 import { loadPeerVerification } from '../store/actions';
 import { formatAddr0x, formatAddrShort } from '../utils/address';
+import { formatAge } from './useAgeTick';
 
 export type PeerStatus = 'online' | 'reachable' | 'unknown';
 
@@ -29,10 +30,7 @@ export function usePeerInfo(addr: number) {
 
   let lastSeen: string | null = null;
   if (neighbor && status !== 'online') {
-    const secs = Math.round(neighbor.lastHeardMs / 1000);
-    if (secs < 60) lastSeen = `${secs}s ago`;
-    else if (secs < 3600) lastSeen = `${Math.round(secs / 60)}m ago`;
-    else lastSeen = `${Math.round(secs / 3600)}h ago`;
+    lastSeen = formatAge(neighbor.lastHeardMs);
   }
 
   return { name: resolvedName, displayName, shortHex, fullHex, status, lastSeen };
