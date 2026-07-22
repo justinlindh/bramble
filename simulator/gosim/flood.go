@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"unsafe"
 )
@@ -231,17 +230,12 @@ type routingConfigJSON struct {
 	FloodHopLimit *int   `json:"flood_hop_limit"`
 }
 
-// loadRoutingConfig reads a scenario file's optional "routing" ("reactive",
-// the default, or "flood") and "flood_hop_limit" fields. Any read/parse
-// failure or unrecognized value falls back to "reactive" (today's only
-// behavior before this task), never silently changes an existing scenario's
-// interpretation.
-func loadRoutingConfig(path string) (mode string, hopLimit byte) {
+// loadRoutingConfig reads the scenario bytes' optional "routing" ("reactive",
+// the default, or "flood") and "flood_hop_limit" fields. Any parse failure or
+// unrecognized value falls back to "reactive" (today's only behavior before
+// this task), never silently changes an existing scenario's interpretation.
+func loadRoutingConfig(data []byte) (mode string, hopLimit byte) {
 	hopLimit = floodDefaultHopLimit
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "reactive", hopLimit
-	}
 	var cfg routingConfigJSON
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return "reactive", hopLimit
@@ -264,15 +258,11 @@ type intermediateRREPConfigJSON struct {
 	IntermediateRREP *bool `json:"intermediate_rrep"`
 }
 
-// loadIntermediateRREPConfig reads a scenario file's optional
+// loadIntermediateRREPConfig reads the scenario bytes' optional
 // "intermediate_rrep" field (default true, matching firmware's always-on
-// shipped behavior). Any read/parse failure or omitted field returns true,
-// same fail-open-to-today's-default convention as loadRoutingConfig.
-func loadIntermediateRREPConfig(path string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return true
-	}
+// shipped behavior). Any parse failure or omitted field returns true, same
+// fail-open-to-today's-default convention as loadRoutingConfig.
+func loadIntermediateRREPConfig(data []byte) bool {
 	var cfg intermediateRREPConfigJSON
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return true
@@ -304,20 +294,16 @@ type floodTransportConfigJSON struct {
 // cgo-free; the C side clamps the value it is handed.
 const floodTransportDefaultHopLimit = 8
 
-// loadFloodTransportConfig reads a scenario file's optional "flood_transport"
+// loadFloodTransportConfig reads the scenario bytes' optional "flood_transport"
 // field (default false, matching s_flood_transport's shipped NVS default) and
 // the optional "flood_hop_limit" field (default floodTransportDefaultHopLimit,
-// matching firmware's s_flood_hop_limit default). Any read/parse failure or
+// matching firmware's s_flood_hop_limit default). Any parse failure or
 // omitted field returns those defaults, the same fail-open-to-today's-default
 // convention as loadRoutingConfig / loadIntermediateRREPConfig. The hop limit
 // is returned unclamped; bridge_set_flood_hop_limit clamps it to the firmware
 // range, so operators/tests can sweep it to match a network's diameter.
-func loadFloodTransportConfig(path string) (transport bool, hopLimit int) {
+func loadFloodTransportConfig(data []byte) (transport bool, hopLimit int) {
 	hopLimit = floodTransportDefaultHopLimit
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, hopLimit
-	}
 	var cfg floodTransportConfigJSON
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return false, hopLimit

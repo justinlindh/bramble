@@ -737,11 +737,20 @@ func (s *Sim) cmdLoad(cmd Command) {
 		return
 	}
 
+	// The Go-side scenario extensions below (routing, intermediate_rrep,
+	// flood_transport, per-node trust flags, firmware_nodes) each read a few
+	// optional fields the C cJSON loader ignores. Read the file once here and
+	// hand the bytes to every parser instead of re-reading and re-parsing the
+	// same file per field; a read failure leaves scenarioData nil, and each
+	// parser falls open to its shipped default exactly as a read error did
+	// before.
+	scenarioData, _ := os.ReadFile(scenarioPath)
+
 	// Phase 2 Task 0: optional "routing"/"flood_hop_limit" fields, read
-	// directly off the scenario file (see flood.go's loadRoutingConfig),
+	// directly off the scenario bytes (see flood.go's loadRoutingConfig),
 	// independent of the C-side cJSON parse above. Defaults to "reactive"
 	// (today's only behavior) for every scenario that omits "routing".
-	routingMode, floodHopLimit := loadRoutingConfig(scenarioPath)
+	routingMode, floodHopLimit := loadRoutingConfig(scenarioData)
 	s.routingMode = routingMode
 	if routingMode == "flood" {
 		s.flood = newFloodSim(floodHopLimit)
@@ -756,7 +765,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// explicitly re-applied on every run (not just when disabling) so one
 	// scenario's setting never leaks into the next run in the same process
 	// (see bridge.h's doc comment on bridge_set_intermediate_rrep_enabled).
-	C.bridge_set_intermediate_rrep_enabled(C.bool(loadIntermediateRREPConfig(scenarioPath)))
+	C.bridge_set_intermediate_rrep_enabled(C.bool(loadIntermediateRREPConfig(scenarioData)))
 
 	// Flooding F1 Task 1: optional "flood_transport" scenario field, read the
 	// same way as "intermediate_rrep" above (independent Go-side JSON read,
@@ -766,7 +775,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// Defaults to false (firmware's shipped NVS default); re-applied on every
 	// load so one scenario's setting never leaks into the next run in the
 	// same process.
-	floodTransport, floodTransportHopLimit := loadFloodTransportConfig(scenarioPath)
+	floodTransport, floodTransportHopLimit := loadFloodTransportConfig(scenarioData)
 	C.bridge_set_flood_transport_enabled(C.bool(floodTransport))
 	// Flooding F1 finalize: optional "flood_hop_limit" scenario field drives the
 	// flood-transport origination hop budget (firmware's s_flood_hop_limit),
@@ -792,18 +801,18 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// Mandatory-provisioning (Task 2): optional per-node "unprovisioned"
 	// scenario field, read Go-side like flood_transport/intermediate_rrep
 	// (no C-side sim_scenario change). Defaults to provisioned for every node.
-	unprovisioned := loadNodeFlagIDs(scenarioPath, "unprovisioned")
+	unprovisioned := loadNodeFlagIDs(scenarioData, "unprovisioned")
 
 	// Trust-anchor campaign (P2): optional per-node "unendorsed" scenario field,
 	// read the same Go-side way. Defaults to endorsed for every node (the fleet
 	// anchor vouches for all), so existing scenarios still pin under the
 	// endorsed-only gate.
-	unendorsed := loadNodeFlagIDs(scenarioPath, "unendorsed")
+	unendorsed := loadNodeFlagIDs(scenarioData, "unendorsed")
 
 	// Trust-anchor campaign (P2 red-team): optional per-node "unanchored" field.
 	// Defaults to anchored (the harness default); a marked node boots un-anchored
 	// and TOFU-pins until a provision_anchor event hardens it.
-	unanchored := loadNodeFlagIDs(scenarioPath, "unanchored")
+	unanchored := loadNodeFlagIDs(scenarioData, "unanchored")
 
 	// Broadcast node_joined for each initial node
 	count := nodeCount(&s.nodes)
@@ -889,7 +898,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// switch the scenario to real-time (wall-clock) execution. Pure harness
 	// scenarios declare no firmware nodes and leave s.realtime false, so their
 	// virtual-time path is untouched.
-	fwNodes := loadFirmwareNodes(scenarioPath)
+	fwNodes := loadFirmwareNodes(scenarioData)
 	if len(fwNodes) > 0 || s.emuListen != "" {
 		s.startEmulator(fwNodes)
 	}
