@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 )
 
 // firmwareNodesConfigJSON reads the scenario's optional top-level
@@ -30,15 +29,11 @@ type firmwareNodesConfigJSON struct {
 }
 
 // loadFirmwareNodes returns the firmware-node groups declared in the scenario
-// file. Any read/parse failure (or a scenario with no "firmware_nodes" key)
-// returns nil, the same fail-open-to-today's-default convention as the other
-// Go-side scenario loaders, so a pure harness scenario stays on the untouched
+// bytes. Any parse failure (or a scenario with no "firmware_nodes" key) returns
+// nil, the same fail-open-to-today's-default convention as the other Go-side
+// scenario loaders, so a pure harness scenario stays on the untouched
 // virtual-time path.
-func loadFirmwareNodes(path string) []firmwareNodeSpec {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
+func loadFirmwareNodes(data []byte) []firmwareNodeSpec {
 	var cfg firmwareNodesConfigJSON
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil
