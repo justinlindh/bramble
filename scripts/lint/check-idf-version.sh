@@ -42,7 +42,7 @@ major="${bare%%.*}"
 #    drops its ESP-IDF context word, so assert the exact expected text.
 required=(
   "docker/firmware-builder/Dockerfile::FROM espressif/idf:${want}"
-  "emulator/Dockerfile::ARG IDF_VERSION=${want}"
+  "emulator/Dockerfile::FROM espressif/idf:${want}"
   "docs/BUILDING.md::git clone --depth 1 -b ${want} https://github.com/espressif/esp-idf.git"
   "emulator/scripts/check_prereqs.sh::git clone -b ${want} --recurse-submodules"
   "scripts/ci-ensure-idf.sh::ESP-IDF ${want}"
