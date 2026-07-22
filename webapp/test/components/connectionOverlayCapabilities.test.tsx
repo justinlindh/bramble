@@ -16,7 +16,6 @@ describe('ConnectionOverlay capability gating', () => {
     useStore.setState({
       connectionState: 'disconnected',
       connectionError: undefined,
-      manualDisconnect: false,
     });
   });
 

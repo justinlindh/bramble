@@ -131,7 +131,6 @@ export async function connect(
     session.client = null;
   }
 
-  store.setManualDisconnect(false);
   store.setConnectionState('connecting');
   try {
     const transport = createTransport(type, options);
@@ -374,7 +373,6 @@ export async function disconnect(): Promise<void> {
   session.client?.clearSubscriptions();
   await session.client?.disconnect();
   session.client = null;
-  useStore.getState().setManualDisconnect(true);
   useStore.getState().setConnectionState('disconnected');
   useStore.getState().setTransport(null);
 }

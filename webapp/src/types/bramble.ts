@@ -353,7 +353,6 @@ export interface ConnectionCapabilities {
 export interface AppState {
   connectionState: ConnectionState;
   connectionError?: string;
-  manualDisconnect: boolean;
   transport: Transport | null;
   connectionCapabilities: ConnectionCapabilities;
   config: BrambleConfig | null;

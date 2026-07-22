@@ -80,7 +80,6 @@ describe('send-status machine', () => {
     useStore.setState({
       connectionState: 'disconnected',
       connectionError: undefined,
-      manualDisconnect: false,
       transport: null,
       config: null,
       status: null,
