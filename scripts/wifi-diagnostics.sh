@@ -51,7 +51,7 @@ echo ""
 
 # Test 3: WebSocket handshake
 echo "[3/5] Testing WebSocket handshake..."
-python3 -c "
+if python3 -c "
 import asyncio
 import websockets
 import sys
@@ -70,8 +70,9 @@ async def test():
         return 1
 
 sys.exit(asyncio.run(test()))
-"
-if [ $? -ne 0 ]; then
+"; then
+    :
+else
     echo ""
     echo "DIAGNOSIS: WebSocket handshake failed."
     echo "Possible causes:"
@@ -83,7 +84,7 @@ echo ""
 
 # Test 4: RPC via WebSocket
 echo "[4/5] Testing bramble.getStatus RPC..."
-python3 -c "
+if python3 -c "
 import asyncio
 import websockets
 import json
@@ -114,8 +115,7 @@ async def test():
         return 1
 
 sys.exit(asyncio.run(test()))
-"
-if [ $? -eq 0 ]; then
+"; then
     echo ""
 else
     echo ""
