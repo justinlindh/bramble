@@ -34,11 +34,6 @@ export function dismissToast(id: string) {
   emit();
 }
 
-export function clearToasts() {
-  toastList = [];
-  emit();
-}
-
 // ── Single toast renderer ──────────────────────────────────────────────
 
 function ToastEntry({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: string) => void }) {
