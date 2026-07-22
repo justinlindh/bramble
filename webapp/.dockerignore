@@ -11,3 +11,14 @@ coverage
 .idea
 docs
 scripts
+# Standalone packages installed separately (CI checkouts never have these
+# populated; excluding them keeps `COPY . .` identical between local and CI
+# builds and stops a local install from busting the build layer).
+mock/node_modules
+ws-proxy/node_modules
+# Local test/e2e output that would otherwise ride into `COPY . .`.
+e2e-artifacts
+test-results
+playwright-report
+e2e-screenshots
+*.log

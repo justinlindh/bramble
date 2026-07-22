@@ -375,38 +375,58 @@ reopening the hole.
 job, no workflow built any of them: a base-image bump (the trigger case,
 \#179's `node` 22-to-26 jump) could merge with every required context green and
 nothing having ever constructed the image, which is worse than no bump at
-all because it carries the appearance of a passing check. Each leg runs
-`docker build` against its own Dockerfile and build context, directly on the
-runner host, exactly as every other job in this workflow runs its own
-toolchain (`idf.py`, `go`, `npm`) directly rather than inside a `container:`.
-Nothing is pushed or loaded, since the job exists to catch a broken
-Dockerfile before merge; a successful build is the entire assertion.
-`DOCKER_BUILDKIT=1` is forced on so the Dockerfiles' `# syntax=` directives
-and `--mount=type=cache` RUN steps are honoured by the host daemon's
-BuildKit. No layer-cache backend is wired yet: a registry or `type=gha`
-cache needs the buildx docker-container driver plus the runner's cache
-service, both extra failure surface, so caching is a follow-up once the
-plain build is proven green on the pool.
+all because it carries the appearance of a passing check. Each leg builds its
+own Dockerfile and build context with buildx; nothing is pushed or loaded,
+since the job exists to catch a broken Dockerfile before merge, and a
+successful build is the entire assertion.
+
+The legs run on GitHub-hosted `ubuntu-latest` runners, not the self-hosted
+pool, because the caching model requires it. The pool provides docker to each
+runner pod through an ephemeral dind sidecar whose daemon state is destroyed
+with the pod, so every build there was fully cold: neither the layer cache nor
+the Dockerfiles' `--mount=type=cache` mounts survived a single job, and
+multi-GB image builds competed with the firmware suites for pool pods and pool
+disk I/O. Hosted runners ship docker and buildx ready for the GitHub cache
+service, so each leg round-trips its layer cache with `type=gha` under a
+per-image scope (`docker-webapp`, `docker-simulator`, ...), `mode=max` so
+intermediate multi-stage layers are cached too, which is where the toolchain
+and dependency-install cost lives. Cache entries follow the same branch
+scoping as `actions/cache`: a PR restores from its own branch or from `main`,
+and the post-merge `push` run on `main` is what publishes the shared warm
+cache. The docker scopes share the repository's 10 GB Actions cache quota
+with the ccache entries; eviction is LRU and only costs a colder build, never
+a failure.
+
+The Dockerfiles are ordered for that cache: every stage installs its
+toolchain and dependencies (keyed on lockfiles or manifests alone) before any
+source COPY, so an ordinary code change re-runs only the final compile
+layers. The root `.dockerignore` whitelists exactly the trees the
+root-context Dockerfiles COPY, which keeps the context upload small (no
+`.git`, no `node_modules`, no local build output) and stops gitignored local
+artifacts (`emulator/node/build/`, `sdkconfig`, `dependencies.lock`, ...)
+from busting or poisoning layers, so a local build is byte-identical to
+CI's. `emulator/Dockerfile` builds its ESP-IDF stage `FROM
+espressif/idf:v5.4.1` (the same pinned base `docker/firmware-builder/
+Dockerfile` uses) instead of git-cloning esp-idf and running `install.sh`
+inside the build, which was the bulk of that image's cold build time.
 
 The gate caught a real latent bug on its first run: `emulator/Dockerfile`'s
 ESP-IDF stage resolves managed components (libsodium, lvgl) from the Espressif
-component registry at build time, and the manager bundled with the v5.4.1
-install defaulted to the now-dead `api.components.espressif.com` subdomain, so
-the emulator image had never been buildable from a clean checkout (the
+component registry at build time, and the manager bundled with v5.4.1
+defaulted to the now-dead `api.components.espressif.com` subdomain, so the
+emulator image had never been buildable from a clean checkout (the
 `Emulator suite` builds `emulator/node` directly on the host, never through
-the Dockerfile, and a gitignored `dependencies.lock` masked it locally). Two
-fixes ship together: the registry-URL pin in `emulator/Dockerfile` (which
-alone repairs `docker compose up --build` for developers), and `--network=host`
-on the emulator leg's build, because the component file host
-(`components-file.espressif.com`) is reachable from the runner host but not
-from the build's default bridge network. Only the emulator leg carries the
-host-network flag, via a `netmode: host` matrix field; the other three build
-on the default bridge network. That live fetch is consistent with the rest of
-CI: the required `Emulator suite` builds `emulator/node` by fetching the same
-components live, and the other three docker legs run live `npm ci` /
-`go mod download` / `apt` at build time. `--network=host` on a trusted CI
-runner building first-party Dockerfiles with no untrusted input is the same
-trust model as the docker.sock mount the publish workflow already uses.
+the Dockerfile, and a gitignored `dependencies.lock` masked it locally). The
+registry-URL pin in `emulator/Dockerfile` fixes that for CI and for
+`docker compose up --build` alike, and the root `.dockerignore` excludes
+`dependencies.lock` so local builds resolve exactly as CI does. That live
+fetch is consistent with the rest of CI: the required `Emulator suite` builds
+`emulator/node` by fetching the same components live, and the other docker
+legs run live `npm ci` / `go mod download` / `apt` at build time. Hosted
+runners reach `components-file.espressif.com` from the default build network,
+which retires the `--network=host` workaround the emulator leg needed on the
+pool (the component file host was not reachable from the pods' default bridge
+network).
 
 The area gate is on the job's STEPS, not the job, for the same
 matrix-collapse reason as `Board build smoke` above. Each leg's gate is the
@@ -422,8 +442,9 @@ gates on `emulator`, `simulator`, or `firmware`; `firmware-builder` gates on
 `docker_firmware_builder` alone, because its build context is
 `docker/firmware-builder/` (a toolchain image that does not `COPY` `main/` or
 `components/`), so a firmware source change must not rebuild it. `ci_core` is
-OR'd into every leg, per the usual safety rule. `max-parallel: 2` for the same
-small-pool reason as the board matrix.
+OR'd into every leg, per the usual safety rule. There is no `max-parallel`
+cap: the legs run on isolated hosted VMs, so they cannot crowd out the
+self-hosted pool.
 
 ### `webapp-quality.yml`
 

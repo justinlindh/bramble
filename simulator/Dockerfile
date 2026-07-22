@@ -1,17 +1,27 @@
 # syntax=docker/dockerfile:1
+#
+# Build context is the repo root (compose sets `context: ..`); the root
+# .dockerignore whitelists exactly the trees the COPY steps below read.
+# Layer-cache discipline: each stage installs its dependencies (keyed on the
+# lockfiles alone) before any source COPY, so a source change re-runs only
+# that stage's final compile layer. CI persists these layers through the
+# GitHub cache service (see docs/ci.md).
 
 # Stage 1: Build React UI
 FROM node:26-slim AS ui-build
 WORKDIR /app/simulator/ui
-COPY simulator/ui/package*.json .
+COPY simulator/ui/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 COPY simulator/ui/ .
 RUN npm run build
 
-# Stage 2: Build Go server (with embedded C via cgo)
+# Stage 2: Build Go server (with embedded C via cgo).
+# golang:1.26-bookworm already ships gcc, g++, libc6-dev, and pkg-config;
+# only the OpenSSL headers the cgo build needs are missing.
 FROM golang:1.26-bookworm AS go-build
-RUN apt-get update && apt-get install -y gcc libc6-dev libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY simulator/gosim/go.mod simulator/gosim/go.sum simulator/gosim/
 RUN --mount=type=cache,target=/go/pkg/mod \

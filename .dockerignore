@@ -1,0 +1,30 @@
+# The repo root is the build context for simulator/Dockerfile and
+# emulator/Dockerfile (both compose files set `context: ..`). Whitelist
+# exactly the trees those Dockerfiles COPY so the context upload stays small
+# (no .git, no node_modules, no local build output) and so local artifacts
+# can never bust or poison the source COPY layers: a CI checkout contains
+# none of them, and excluding them here makes a local build byte-identical
+# to CI's.
+*
+!components/
+!main/
+!simulator/engine/
+!simulator/gosim/
+!simulator/scenarios/
+!simulator/ui/
+!test/stubs/
+!emulator/node/
+# Generated or locally installed artifacts inside the whitelisted trees.
+# Every path here is gitignored; keep the two lists in step.
+simulator/ui/node_modules
+simulator/ui/dist
+simulator/gosim/bramble-gosim
+simulator/gosim/cover.out
+emulator/node/build
+emulator/node/build-heltec
+emulator/node/managed_components
+emulator/node/dependencies.lock
+emulator/node/sdkconfig
+emulator/node/sdkconfig.old
+emulator/node/sdkconfig.heltec
+emulator/node/sdkconfig.heltec.old
