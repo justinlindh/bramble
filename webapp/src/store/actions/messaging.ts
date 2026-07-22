@@ -752,11 +752,6 @@ export function handleIncomingMessage(params: unknown): void {
   maybeNotifyIncoming(msg);
 }
 
-/** Test seam for the incoming-message + native-notification path. */
-export function handleIncomingForTest(params: unknown): void {
-  handleIncomingMessage(params);
-}
-
 /**
  * Raise a native Android notification for an incoming message. No-op outside
  * the Android shell (web and Electron have no bridge). Suppressed for a

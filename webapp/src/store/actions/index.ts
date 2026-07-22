@@ -19,7 +19,7 @@ export {
   sendMessage,
   handleAck,
   normalizeIncomingRealtimeMessage,
-  handleIncomingForTest,
+  handleIncomingMessage,
   openDM,
   upsertProbeResponse,
   sendProbe,
