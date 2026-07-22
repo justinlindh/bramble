@@ -234,31 +234,6 @@ export interface SendParams {
   channelIndex?: number;    // set for channel messages
 }
 
-export interface SendMessageResult {
-  packetId: string;
-  status: 'sent';
-  fragmented: boolean;
-  fragments_total?: number;  // only present if fragmented=true
-  max_bytes: number;
-  actual_bytes: number;
-}
-
-export interface IncomingMessage {
-  from: number;
-  to: number;
-  text: string;
-  tier: MessageTier;
-  channelIndex?: number;
-  timestamp: number;        // node epoch seconds
-  msgId: string;
-}
-
-export interface AckNotification {
-  packetId: number;
-  status: 'delivered' | 'failed';
-  relayPath?: RelayHop[];
-}
-
 // ─── Probe / Network Reach ─────────────────────────────────────────────
 
 export interface ProbeResponse {
