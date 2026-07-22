@@ -431,58 +431,43 @@ jobs:
     # firmware-builder). The gate caught a real latent bug in the emulator
     # image on its first run: emulator/Dockerfile's ESP-IDF stage resolves
     # managed components (libsodium, lvgl) from the Espressif component
-    # registry at build time, and the manager bundled with the v5.4.1 install
-    # defaulted to the dead api.components.espressif.com subdomain, so the
-    # image had never been buildable from a clean checkout (the Emulator suite
-    # builds emulator/node directly on the host, never through the Dockerfile,
-    # and a gitignored dependencies.lock masked it locally). Two fixes: the
-    # registry-URL pin in emulator/Dockerfile (which alone repairs
-    # `docker compose up --build` for developers), and `--network=host` on the
-    # emulator leg's build below, because the component FILE host
-    # (components-file.espressif.com) is reachable from the runner HOST but not
-    # from the build's default bridge network. That live fetch is consistent
-    # with how the rest of CI already works: the required Emulator suite builds
-    # emulator/node by fetching the same components live, and the other three
-    # docker legs run live npm ci / go mod download / apt at build time.
+    # registry at build time, and the manager bundled with v5.4.1 defaulted
+    # to the dead api.components.espressif.com subdomain, so the image had
+    # never been buildable from a clean checkout. The registry-URL pin in
+    # emulator/Dockerfile fixes that for CI and developers alike.
     #
-    # SECURITY: `--network=host` on our own trusted CI runner building our own
-    # Dockerfiles is the same trust model as the docker.sock mount the publish
-    # workflow already uses; the build has no untrusted input, so sharing the
-    # host network namespace to reach a first-party registry is acceptable.
+    # RUNNER + CACHING: these legs run on GitHub-hosted ubuntu-latest, not
+    # the self-hosted pool, because the caching model requires it. The pool's
+    # runner pods provide docker through an ephemeral dind sidecar whose
+    # daemon state dies with the pod, so every build there was fully cold
+    # (neither the layer cache nor the Dockerfiles' cache mounts survived a
+    # single job) and multi-GB image builds competed with the firmware
+    # suites for pool pods and pool disk I/O. Hosted runners ship docker and
+    # buildx ready for the GitHub cache service backend: each leg restores
+    # and saves its layer cache with type=gha under a per-image scope,
+    # mode=max so intermediate multi-stage layers are cached too, which is
+    # where the dependency-install cost lives. The Dockerfiles order their
+    # dependency layers before any source COPY, so on a warm cache an
+    # ordinary code change rebuilds only the final compile layers. Hosted
+    # runners also reach components-file.espressif.com from the default
+    # build network, which retires the `--network=host` workaround the
+    # emulator leg needed on the pool (the component file host was not
+    # reachable from the build's default bridge network there).
     #
     # THE AREA GATE IS ON THE STEPS, NOT THE JOB, AND MUST STAY THERE: see
     # Board build smoke's comment above for why a job-level `if:` on a matrix
     # job strands the expanded contexts. Every leg here always reports its
     # own real "Docker build (<image>)" context; out of scope, it does no
     # work and reports success.
-    #
-    # Runs `docker build` directly on the runner host, exactly like every
-    # other job in this workflow runs its own toolchain (idf.py, go, npm)
-    # directly, rather than inside a `container:`. An earlier revision copied
-    # webapp-build-publish.yml's `container: ghcr.io/catthehacker/...` +
-    # docker.sock pattern, but that pattern needs the runner to inject its
-    # node externals into the job container for JS actions like checkout, and
-    # the off-cluster burst pool does not provide that mount, so every leg
-    # died at checkout with `/__e/node24/bin/node: no such file or directory`.
-    # Building on the host needs only docker with BuildKit (the default), and
-    # the four Dockerfiles' `# syntax=` directives and `--mount=type=cache`
-    # RUN steps are honoured by the host daemon's BuildKit just as they are
-    # locally. No layer cache backend is wired yet: type=gha requires the
-    # buildx docker-container driver plus the runner's cache service, both
-    # extra failure surface on a pool this job has not yet been proven on;
-    # caching is a follow-up once the plain build is green here.
     needs: detect
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       # Every image reports its own result, same reasoning as Board build
       # smoke: a webapp-only bump breaking the emulator image (or vice versa)
-      # must not hide behind a cancelled sibling.
+      # must not hide behind a cancelled sibling. No max-parallel: the legs
+      # run on isolated hosted VMs, so there is no shared pool to protect.
       fail-fast: false
-      # Four Dockerfiles on a small self-hosted pool that also runs the board
-      # matrix, gosim, and the emulator suite; two at a time keeps the rest of
-      # the wave moving.
-      max-parallel: 2
       matrix:
         include:
           - image: webapp
@@ -494,10 +479,6 @@ jobs:
           - image: emulator
             dockerfile: emulator/Dockerfile
             context: .
-            # Only this leg needs host networking: its ESP-IDF stage fetches
-            # managed components from components-file.espressif.com, reachable
-            # from the runner host but not the build's default bridge network.
-            netmode: host
           - image: firmware-builder
             dockerfile: docker/firmware-builder/Dockerfile
             context: docker/firmware-builder
@@ -544,12 +525,6 @@ jobs:
           echo "leg=${IMAGE} build=${build}"
       - uses: actions/checkout@v7
         if: steps.gate.outputs.build == 'true'
-      - name: Verify docker is available on the runner
-        if: steps.gate.outputs.build == 'true'
-        run: |
-          set -euo pipefail
-          command -v docker >/dev/null || { echo "::error::docker CLI missing from the runner host"; exit 1; }
-          docker version
       - name: Stage web-flasher into the webapp build context
         # webapp/Dockerfile's `COPY . .` expects webapp/public/web-flasher/ to
         # be populated, but that path is gitignored (.gitignore) and only ever
@@ -566,22 +541,26 @@ jobs:
           rm -rf webapp/public/web-flasher
           mkdir -p webapp/public/web-flasher
           cp -a web-flasher/. webapp/public/web-flasher/
-      - name: Build ${{ matrix.image }} image (verify only, no push)
+      - name: Set up Docker Buildx
+        # The docker-container driver this configures is what makes the
+        # type=gha cache exporter below available; the hosted image's default
+        # docker driver cannot export a layer cache.
         if: steps.gate.outputs.build == 'true'
-        env:
-          DOCKERFILE_PATH: ${{ matrix.dockerfile }}
-          BUILD_CONTEXT: ${{ matrix.context }}
-          # host on the emulator leg only (see the matrix entry and the job
-          # header's SECURITY note); empty for the others, which build fine on
-          # the default bridge network.
-          NETMODE: ${{ matrix.netmode }}
-          # Force BuildKit on regardless of the host daemon's default, so the
-          # Dockerfiles' `# syntax=` directives and `--mount=type=cache` RUN
-          # steps are honoured. No push, no load: a successful build IS the
-          # assertion; the resulting image layers stay in the host build cache.
-          DOCKER_BUILDKIT: "1"
-        run: |
-          set -euo pipefail
-          netflag=()
-          [ "${NETMODE:-}" = host ] && netflag=(--network=host)
-          docker build "${netflag[@]}" -f "$DOCKERFILE_PATH" "$BUILD_CONTEXT"
+        uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.image }} image (verify only, no push)
+        # No push, no load: a successful build IS the assertion. The layer
+        # cache round-trips through the GitHub cache service under a
+        # per-image scope; mode=max caches intermediate stage layers (the
+        # toolchain and dependency-install layers), so a warm build re-runs
+        # only the layers a change actually busts. Cache entries follow the
+        # same branch scoping as actions/cache: a PR restores from its own
+        # branch or from main, and the post-merge push run on main is what
+        # publishes the shared warm cache.
+        if: steps.gate.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          cache-from: type=gha,scope=docker-${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=docker-${{ matrix.image }}
