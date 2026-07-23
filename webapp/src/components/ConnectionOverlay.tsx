@@ -13,7 +13,7 @@ import styles from './ConnectionOverlay.module.css';
 
 const WIFI_IP_KEY = 'bramble_wifi_ip';
 
-export function buildWifiUrl(ip: string, protocol: string, host: string, _token?: string): string {
+export function buildWifiUrl(ip: string, protocol: string, host: string): string {
   let url: string;
   if (ip.includes('://')) url = ip;
   // Embedded shells talk to the node directly regardless of page origin.
@@ -33,7 +33,7 @@ export function buildWifiUrl(ip: string, protocol: string, host: string, _token?
 // IP now answers as a different node.
 export function connectToSavedDevice(d: SavedDevice, ip: string): void {
   const tok = getDeviceToken(d.address);
-  const url = buildWifiUrl(ip, location.protocol, location.host, tok || undefined);
+  const url = buildWifiUrl(ip, location.protocol, location.host);
   connect('wifi', {
     url,
     token: tok || undefined,
@@ -154,7 +154,7 @@ export function ConnectionOverlay() {
       // The device book owns per-device tokens (saved by address post-connect);
       // here we only persist the IP so the empty form prefills it next time.
       saveLastIp(ip);
-      const url = buildWifiUrl(ip, location.protocol, location.host, token || undefined);
+      const url = buildWifiUrl(ip, location.protocol, location.host);
       connect(transportType, { url, token: token || undefined, ip, remember: wifiRemember, name: wifiName.trim() || undefined });
     } else if (transportType === 'ble') {
       const token = bleToken.trim();
