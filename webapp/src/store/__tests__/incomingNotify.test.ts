@@ -4,14 +4,12 @@ import { normalizeIncomingRealtimeMessage } from '../actions';
 
 // The native message-notification bridge fires for incoming messages in the
 // Android shell, but not for self-messages and not for the conversation the
-// user is currently looking at. Drive handleIncomingMessage via the real
-// onMessage subscription by exercising the exported normalize + the store.
-// Since handleIncomingMessage is module-private, test the observable effect:
+// user is currently looking at. Test the observable effect:
 // window.brambleAndroidNotify.onMessage is called with the right payload.
 
-// handleIncomingMessage is wired into connect()'s subscription; to test the
-// notify branch in isolation we re-import actions with the Android shell
-// stubbed and call the subscription path through a minimal harness.
+// handleIncomingMessage is the exported subscription handler wired into
+// connect()'s onMessage subscription; to test the notify branch in isolation
+// we re-import actions with the Android shell stubbed and call it directly.
 
 vi.mock('../messageDb', () => ({
   messageDb: { saveMessage: vi.fn(async () => {}), open: vi.fn(async () => {}), getMessages: vi.fn(async () => []), saveMessages: vi.fn(async () => {}), updateMessageStatus: vi.fn(async () => {}) },
@@ -42,8 +40,8 @@ afterEach(() => {
 // through the public subscription contract. We invoke the normalize + the
 // same guard logic the action uses, asserting the bridge call shape.
 async function deliver(params: Record<string, unknown>) {
-  const { handleIncomingForTest } = await import('../actions');
-  handleIncomingForTest(params);
+  const { handleIncomingMessage } = await import('../actions');
+  handleIncomingMessage(params);
 }
 
 describe('incoming message native notification', () => {
