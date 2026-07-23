@@ -62,9 +62,6 @@ func (h *emuHarness) reserveSlot(x, y float32, label string) {
 // overlapping transmissions actually collide instead of being backed off).
 func (h *emuHarness) setLBT(on bool) { h.sim.radio.lbt_enabled = C.bool(on) }
 
-// setCollisions toggles the collision/half-duplex model.
-func (h *emuHarness) setCollisions(on bool) { h.sim.radio.collisions_enabled = C.bool(on) }
-
 // advance pushes the simulation clock forward by deltaUs and processes every
 // event and broker action that has come due, exactly as the real-time loop
 // does one tick at a time.

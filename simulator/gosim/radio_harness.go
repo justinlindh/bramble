@@ -199,12 +199,6 @@ func (h *radioHarness) setBeaconAdaptive(adaptive bool) {
 	h.beacon.adaptive = C.bool(adaptive)
 }
 
-// setBeaconIntervalMs sets the fixed/base interval (ms) of the harness's
-// shared beacon policy.
-func (h *radioHarness) setBeaconIntervalMs(ms uint32) {
-	h.beacon.interval_ms = C.uint32_t(ms)
-}
-
 // setNeighborCount inflates or shrinks a node's neighbor table to exactly n
 // distinct entries via the real neighbor_update, so beacon_interval_decide
 // (called from node_tick with the real neighbor_count()) sees a genuine
