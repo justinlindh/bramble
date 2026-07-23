@@ -147,7 +147,6 @@ function persistUnreads(conversations: Map<string, any>, config: BrambleConfig |
 
 interface Actions {
   setConnectionState: (s: ConnectionState, err?: string) => void;
-  setManualDisconnect: (manual: boolean) => void;
   setTransport: (t: Transport | null) => void;
   setConnectionCapabilities: (c: ConnectionCapabilities) => void;
   setConfig: (c: BrambleConfig) => void;
@@ -186,7 +185,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   // ─── Initial state ───────────────────────────────────────────────────
   connectionState: 'disconnected',
   connectionError: undefined,
-  manualDisconnect: false,
   transport: null,
   connectionCapabilities: {
     mode: 'hosted',
@@ -218,8 +216,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   // ─── Actions ─────────────────────────────────────────────────────────
   setConnectionState: (s, err?) =>
     set({ connectionState: s, connectionError: err }),
-
-  setManualDisconnect: (manual) => set({ manualDisconnect: manual }),
 
   setTransport: (t) => set({ transport: t }),
 

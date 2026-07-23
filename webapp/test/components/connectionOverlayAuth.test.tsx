@@ -20,7 +20,6 @@ describe('ConnectionOverlay auth token flow', () => {
     useStore.setState({
       connectionState: 'disconnected',
       connectionError: undefined,
-      manualDisconnect: false,
       connectionCapabilities: {
         mode: 'local',
         localLanAllowed: true,
