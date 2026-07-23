@@ -1,3 +1,4 @@
+import { parseAddr } from '../../lib/addr';
 import type { Neighbor, PeerLocation, Route } from '../../types/bramble';
 
 export interface KnownPeer {
@@ -7,23 +8,17 @@ export interface KnownPeer {
   peerLocation?: PeerLocation;
 }
 
-function normalizeAddr(value: number | string | undefined): number {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') return parseInt(value.replace(/^0x/i, ''), 16) || 0;
-  return 0;
-}
-
 export function buildKnownPeers(neighbors: Neighbor[], routes: Route[], peerLocations: PeerLocation[]): KnownPeer[] {
   const byAddr = new Map<number, KnownPeer>();
 
   for (const n of neighbors) {
-    const addr = normalizeAddr(n.addr);
+    const addr = parseAddr(n.addr);
     if (!addr) continue;
     byAddr.set(addr, { addr, hasNeighbor: true, hasRoute: false, peerLocation: byAddr.get(addr)?.peerLocation });
   }
 
   for (const r of routes) {
-    const addr = normalizeAddr(r.dest as unknown as number | string);
+    const addr = parseAddr(r.dest as unknown as number | string);
     if (!addr) continue;
     const existing = byAddr.get(addr);
     byAddr.set(addr, {
@@ -35,7 +30,7 @@ export function buildKnownPeers(neighbors: Neighbor[], routes: Route[], peerLoca
   }
 
   for (const p of peerLocations) {
-    const addr = normalizeAddr(p.addr);
+    const addr = parseAddr(p.addr);
     if (!addr) continue;
     const existing = byAddr.get(addr);
     byAddr.set(addr, {
