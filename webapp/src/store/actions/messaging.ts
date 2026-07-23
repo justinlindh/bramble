@@ -10,6 +10,7 @@ import { parseAddr } from '../../lib/addr';
 import { isAndroidShell } from '../../utils/platform';
 import type { RelayHop, MessageTier, ProbeResponse, Message } from '../../types/bramble';
 import type { RpcSchemas, WirePartial } from '../../types/rpc';
+import type { NativeMessageNotification } from '../../types/desktop';
 
 // A message row as the firmware sends it: the contract's Message schema made
 // deep-optional (older firmware omits fields) plus the extras the firmware
@@ -775,14 +776,16 @@ function maybeNotifyIncoming(msg: Message): void {
   const senderName = store.peerNames.get(msg.from) ?? `0x${(msg.from >>> 0).toString(16).toUpperCase()}`;
   const conversationTitle = conversationTitleFor(conversationId, senderName, store);
 
+  const payload: NativeMessageNotification = {
+    conversationId,
+    conversationTitle,
+    sender: senderName,
+    text: msg.text ?? '',
+    timestamp: msg.timestampMs ?? Date.now(),
+  };
+
   try {
-    notify.onMessage(JSON.stringify({
-      conversationId,
-      conversationTitle,
-      sender: senderName,
-      text: msg.text ?? '',
-      timestamp: msg.timestampMs ?? Date.now(),
-    }));
+    notify.onMessage(JSON.stringify(payload));
   } catch { /* notification is best-effort */ }
 }
 
