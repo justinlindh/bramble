@@ -120,10 +120,6 @@ export async function loadRoutes(): Promise<void> {
   useStore.getState().setRoutes(result.routes ?? []);
 }
 
-export async function refreshNeighbors(): Promise<void> {
-  await loadNeighbors();
-}
-
 export function showOnMap(addr: number): void {
   const store = useStore.getState();
   store.setMapFocusAddr(addr);
