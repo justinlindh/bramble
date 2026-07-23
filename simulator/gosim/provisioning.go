@@ -12,10 +12,12 @@ type nodeFlagConfigJSON struct {
 	Nodes []map[string]json.RawMessage `json:"nodes"`
 }
 
-// loadNodeFlagIDs returns the set of node IDs whose named boolean flag is true
-// in the scenario bytes. Any parse failure (or a scenario with no such field)
-// returns an empty set, the fail-open-to-today's-default convention shared
-// with loadFloodTransportConfig / loadIntermediateRREPConfig.
+// loadNodeFlagIDs returns, for each named boolean flag, the set of node IDs
+// whose flag is true in the scenario bytes. It parses the scenario once for all
+// requested flags rather than once per flag. Any parse failure (or a scenario
+// with no such field) yields empty sets, the fail-open-to-today's-default
+// convention shared with loadFloodTransportConfig / loadIntermediateRREPConfig.
+// Every requested flag is always present as a key in the returned map.
 //
 // The recognised flags select which nodes boot in a degraded trust state; every
 // flag defaults false, matching a fleet where each node is fully provisioned:
@@ -35,26 +37,31 @@ type nodeFlagConfigJSON struct {
 //
 // Read Go-side like the other scenario extensions (loadFloodTransportConfig in
 // flood.go), so no C-side sim_scenario change is needed.
-func loadNodeFlagIDs(data []byte, flag string) map[string]bool {
-	out := map[string]bool{}
+func loadNodeFlagIDs(data []byte, flags ...string) map[string]map[string]bool {
+	out := make(map[string]map[string]bool, len(flags))
+	for _, flag := range flags {
+		out[flag] = map[string]bool{}
+	}
 	var cfg nodeFlagConfigJSON
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return out
 	}
 	for _, n := range cfg.Nodes {
-		var set bool
-		if raw, ok := n[flag]; ok {
-			_ = json.Unmarshal(raw, &set)
-		}
-		if !set {
-			continue
-		}
 		var id string
 		if raw, ok := n["id"]; ok {
 			_ = json.Unmarshal(raw, &id)
 		}
-		if id != "" {
-			out[id] = true
+		if id == "" {
+			continue
+		}
+		for _, flag := range flags {
+			var set bool
+			if raw, ok := n[flag]; ok {
+				_ = json.Unmarshal(raw, &set)
+			}
+			if set {
+				out[flag][id] = true
+			}
 		}
 	}
 	return out

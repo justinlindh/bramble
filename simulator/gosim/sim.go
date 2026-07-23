@@ -798,21 +798,22 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// Broadcast sim_reset
 	s.emitJSON(map[string]interface{}{"type": "sim_reset"})
 
-	// Mandatory-provisioning (Task 2): optional per-node "unprovisioned"
-	// scenario field, read Go-side like flood_transport/intermediate_rrep
-	// (no C-side sim_scenario change). Defaults to provisioned for every node.
-	unprovisioned := loadNodeFlagIDs(scenarioData, "unprovisioned")
-
-	// Trust-anchor campaign (P2): optional per-node "unendorsed" scenario field,
-	// read the same Go-side way. Defaults to endorsed for every node (the fleet
-	// anchor vouches for all), so existing scenarios still pin under the
-	// endorsed-only gate.
-	unendorsed := loadNodeFlagIDs(scenarioData, "unendorsed")
-
-	// Trust-anchor campaign (P2 red-team): optional per-node "unanchored" field.
-	// Defaults to anchored (the harness default); a marked node boots un-anchored
-	// and TOFU-pins until a provision_anchor event hardens it.
-	unanchored := loadNodeFlagIDs(scenarioData, "unanchored")
+	// Optional per-node trust-state flags, read Go-side like
+	// flood_transport/intermediate_rrep (no C-side sim_scenario change) in a
+	// single scenario parse. Each defaults to the fully-provisioned state for
+	// every node:
+	//   - "unprovisioned" (mandatory-provisioning Task 2): boots without the
+	//     network key and stays inert; defaults to provisioned.
+	//   - "unendorsed" (trust-anchor campaign P2): boots without a fleet-anchor
+	//     endorsement so anchored receivers refuse to pin it; defaults to
+	//     endorsed, so existing scenarios still pin under the endorsed-only gate.
+	//   - "unanchored" (trust-anchor campaign P2 red-team): boots without a fleet
+	//     anchor and TOFU-pins until a provision_anchor event hardens it;
+	//     defaults to anchored (the harness default).
+	trustFlags := loadNodeFlagIDs(scenarioData, "unprovisioned", "unendorsed", "unanchored")
+	unprovisioned := trustFlags["unprovisioned"]
+	unendorsed := trustFlags["unendorsed"]
+	unanchored := trustFlags["unanchored"]
 
 	// Broadcast node_joined for each initial node
 	count := nodeCount(&s.nodes)
