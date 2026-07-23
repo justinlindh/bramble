@@ -1571,6 +1571,52 @@ static void rpc_location_write_rule_string(char* out, size_t out_len,
              (unsigned)rule->interval_s);
 }
 
+/* Build a per-target location rule from a request JSON entry, starting from the
+   node policy's default tier and interval and letting the entry override any of
+   enabled/tier/interval_s. Shared by the contact_rules and channel_targets
+   write loops in set_location_config, which differ only in how the rule is
+   keyed into NVS. */
+static rpc_location_rule_t rpc_location_rule_from_json(const cJSON* entry,
+                                                       const location_policy_t* policy) {
+    rpc_location_rule_t rule = {
+        .enabled = true,
+        .tier = policy->default_tier,
+        .interval_s = policy->interval_s,
+    };
+
+    const cJSON* rule_enabled = cJSON_GetObjectItem(entry, "enabled");
+    if (rule_enabled && cJSON_IsBool(rule_enabled))
+        rule.enabled = cJSON_IsTrue(rule_enabled);
+
+    const cJSON* rule_tier = cJSON_GetObjectItem(entry, "tier");
+    if (rule_tier && cJSON_IsString(rule_tier))
+        rule.tier = location_tier_from_string(rule_tier->valuestring);
+
+    const cJSON* rule_interval = cJSON_GetObjectItem(entry, "interval_s");
+    if (rule_interval && cJSON_IsNumber(rule_interval)) {
+        int v = rule_interval->valueint;
+        if (v > 0)
+            rule.interval_s = location_policy_clamp_interval_s((uint16_t)v);
+    }
+    return rule;
+}
+
+/* Parse a stored rule string and append its enabled/tier/interval_s fields to a
+   response entry. The caller adds the identifying field (address or channel)
+   first. Shared by the contact_rules and channel_targets read loops in
+   get_location_config. */
+static void rpc_location_rule_emit_fields(cJSON* entry, const char* raw) {
+    rpc_location_rule_t rule = {
+        .enabled = true,
+        .tier = LOCATION_TIER_COARSE,
+        .interval_s = LOCATION_DEFAULT_INTERVAL_S,
+    };
+    rpc_location_parse_rule_string(raw, &rule);
+    cJSON_AddBoolToObject(entry, "enabled", rule.enabled);
+    cJSON_AddStringToObject(entry, "tier", location_tier_to_string(rule.tier));
+    cJSON_AddNumberToObject(entry, "interval_s", rule.interval_s);
+}
+
 static int handle_set_location_config(const cJSON* params, cJSON* result) {
     if (!params)
         return RPC_ERR_INVALID_PARAMS;
@@ -1631,26 +1677,7 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
             if (!cJSON_IsString(address) || !address->valuestring)
                 continue;
 
-            rpc_location_rule_t rule = {
-                .enabled = true,
-                .tier = policy.default_tier,
-                .interval_s = policy.interval_s,
-            };
-
-            const cJSON* rule_enabled = cJSON_GetObjectItem(entry, "enabled");
-            if (rule_enabled && cJSON_IsBool(rule_enabled))
-                rule.enabled = cJSON_IsTrue(rule_enabled);
-
-            const cJSON* rule_tier = cJSON_GetObjectItem(entry, "tier");
-            if (rule_tier && cJSON_IsString(rule_tier))
-                rule.tier = location_tier_from_string(rule_tier->valuestring);
-
-            const cJSON* rule_interval = cJSON_GetObjectItem(entry, "interval_s");
-            if (rule_interval && cJSON_IsNumber(rule_interval)) {
-                int v = rule_interval->valueint;
-                if (v > 0)
-                    rule.interval_s = location_policy_clamp_interval_s((uint16_t)v);
-            }
+            rpc_location_rule_t rule = rpc_location_rule_from_json(entry, &policy);
 
             char key[20];
             char val[48];
@@ -1669,26 +1696,7 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
             if (!cJSON_IsNumber(channel))
                 continue;
 
-            rpc_location_rule_t rule = {
-                .enabled = true,
-                .tier = policy.default_tier,
-                .interval_s = policy.interval_s,
-            };
-
-            const cJSON* rule_enabled = cJSON_GetObjectItem(entry, "enabled");
-            if (rule_enabled && cJSON_IsBool(rule_enabled))
-                rule.enabled = cJSON_IsTrue(rule_enabled);
-
-            const cJSON* rule_tier = cJSON_GetObjectItem(entry, "tier");
-            if (rule_tier && cJSON_IsString(rule_tier))
-                rule.tier = location_tier_from_string(rule_tier->valuestring);
-
-            const cJSON* rule_interval = cJSON_GetObjectItem(entry, "interval_s");
-            if (rule_interval && cJSON_IsNumber(rule_interval)) {
-                int v = rule_interval->valueint;
-                if (v > 0)
-                    rule.interval_s = location_policy_clamp_interval_s((uint16_t)v);
-            }
+            rpc_location_rule_t rule = rpc_location_rule_from_json(entry, &policy);
 
             char key[20];
             char val[48];
@@ -2200,15 +2208,9 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
                     char raw[64] = {0};
                     size_t raw_len = sizeof(raw);
                     if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
-                        rpc_location_rule_t rule = {.enabled = true,
-                                                    .tier = LOCATION_TIER_COARSE,
-                                                    .interval_s = LOCATION_DEFAULT_INTERVAL_S};
-                        rpc_location_parse_rule_string(raw, &rule);
                         cJSON* entry = cJSON_CreateObject();
                         cJSON_AddStringToObject(entry, "address", addr_suffix);
-                        cJSON_AddBoolToObject(entry, "enabled", rule.enabled);
-                        cJSON_AddStringToObject(entry, "tier", location_tier_to_string(rule.tier));
-                        cJSON_AddNumberToObject(entry, "interval_s", rule.interval_s);
+                        rpc_location_rule_emit_fields(entry, raw);
                         cJSON_AddItemToArray(contact_rules, entry);
                     }
                 }
@@ -2218,17 +2220,11 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
                     char raw[64] = {0};
                     size_t raw_len = sizeof(raw);
                     if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
-                        rpc_location_rule_t rule = {.enabled = true,
-                                                    .tier = LOCATION_TIER_COARSE,
-                                                    .interval_s = LOCATION_DEFAULT_INTERVAL_S};
-                        rpc_location_parse_rule_string(raw, &rule);
                         cJSON* entry = cJSON_CreateObject();
                         cJSON_AddNumberToObject(
                             entry, "channel",
                             atoi(info.key + strlen(LOCATION_CHANNEL_RULE_PREFIX)));
-                        cJSON_AddBoolToObject(entry, "enabled", rule.enabled);
-                        cJSON_AddStringToObject(entry, "tier", location_tier_to_string(rule.tier));
-                        cJSON_AddNumberToObject(entry, "interval_s", rule.interval_s);
+                        rpc_location_rule_emit_fields(entry, raw);
                         cJSON_AddItemToArray(channel_targets, entry);
                     }
                 }
