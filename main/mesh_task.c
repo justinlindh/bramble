@@ -883,7 +883,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
                             cJSON_AddNumberToObject(params, "rssi", rssi);
                             cJSON_AddNumberToObject(params, "snr", snr);
                             cJSON_AddNumberToObject(params, "channel",
-                                                    (info.channel_id > 0) ? info.channel_id : -1);
+                                                    msg_store_rx_channel_index(info.channel_id));
                             cJSON_AddBoolToObject(params, "broadcast",
                                                   (dir == MSG_DIR_BROADCAST_IN));
                             rpc_notify("bramble.onMessage", params);
@@ -982,8 +982,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             cJSON_AddStringToObject(params, "text", text);
             cJSON_AddNumberToObject(params, "rssi", rssi);
             cJSON_AddNumberToObject(params, "snr", snr);
-            cJSON_AddNumberToObject(params, "channel",
-                                    (info.channel_id > 0) ? info.channel_id : -1);
+            cJSON_AddNumberToObject(params, "channel", msg_store_rx_channel_index(info.channel_id));
             cJSON_AddBoolToObject(params, "broadcast", dir == MSG_DIR_BROADCAST_IN);
             rpc_notify("bramble.onMessage", params);
             cJSON_Delete(params);
