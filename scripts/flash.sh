@@ -8,13 +8,11 @@ set -euo pipefail
 
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-MODE="local"
 BOARD="heltec-v3"
 ACTION="flash"
 PORT=""
 EXTRA_ARGS=()
 
-is_mode() { [[ "$1" == "local" ]]; }
 is_board() { [[ "$1" == "heltec-v3" || "$1" == "heltec-v4" || "$1" == "tdeck-plus" || "$1" == "bramble-pager" ]]; }
 is_action() { [[ "$1" == "flash" || "$1" == "monitor" || "$1" == "build" ]]; }
 is_port() { [[ "$1" == /dev/* ]]; }
@@ -25,7 +23,8 @@ Usage:
   bash scripts/flash.sh [local] [heltec-v3|heltec-v4|tdeck-plus|bramble-pager] [flash|monitor|build] [PORT] [extra idf.py args...]
 
 Notes:
-  - MODE defaults to: local
+  - The leading "local" token is optional and accepted for compatibility
+    (serial-local is the only build path); it is skipped if present
   - BOARD defaults to: heltec-v3
   - ACTION defaults to: flash
   - Default PORT: /dev/ttyACM0 for tdeck-plus and bramble-pager (native USB), /dev/ttyUSB0 otherwise
@@ -43,8 +42,10 @@ if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
   exit 0
 fi
 
-if [[ $# -gt 0 ]] && is_mode "$1"; then
-  MODE="$1"
+# Serial-local is the only build path (this script does no OTA/remote flashing).
+# The optional leading "local" token is a compatibility no-op: callers and docs
+# still pass it, so accept and skip it rather than mistaking it for a board name.
+if [[ ${1:-} == "local" ]]; then
   shift
 fi
 
@@ -277,12 +278,7 @@ run_local() {
   esac
 }
 
-if [[ "$MODE" == "local" ]]; then
-  prepare_local_env
-  run_local
-else
-  print_usage
-  exit 1
-fi
+prepare_local_env
+run_local
 
 echo "==> Done!"
