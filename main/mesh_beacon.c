@@ -246,10 +246,10 @@ void attempt_identity_attestation(uint32_t t) {
 }
 
 /*
- * ws 1.3b infra: control-plane seq draw + replay check. No callers yet
- * (tasks 2-6 wire these into the five control-plane build/handle sites);
- * kept static like every other file-local helper here, so an unused-function
- * warning is expected and harmless until those callers land.
+ * ws 1.3b infra: control-plane seq draw + replay check. Called at the
+ * control-plane origination sites (beacons and attestations here, RERR/RREP
+ * in mesh_routing.c, delivery receipts and ACKs in mesh_reliability.c) and
+ * exported via mesh_internal.h so every site shares the one counter.
  *
  * control_seq_next mirrors the data-plane nonce draw above (e.g.
  * send_data_packet): take s_nonce_mutex, call nonce_counter_next, and on
