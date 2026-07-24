@@ -30,9 +30,6 @@ type LocationWire = WirePartial<Omit<RpcSchemas['LocationConfig'], 'source'>> & 
   // Legacy 'auto' predates the contract's 'hybrid' and is normalized to it.
   source?: RpcSchemas['LocationConfig']['source'] | 'auto';
   contacts?: Array<{ addr: number; tier: LocationTier; intervalSec?: number; distanceTriggerM?: number }>;
-  defaultIntervalSec?: number;
-  defaultDistanceTriggerM?: number;
-  stationaryBackoff?: LocationConfig['stationaryBackoff'];
 };
 
 type ConfigWire = WirePartial<Omit<RpcSchemas['ConfigResponse'], 'channels' | 'radio' | 'location'>> & {
@@ -97,10 +94,6 @@ export function normalizeConfig(raw: ConfigWire): BrambleConfig {
       lon: rawLocation.lon,
       contact_rules: contactRules,
       channel_targets: rawLocation.channel_targets ?? [],
-      contacts: legacyContacts,
-      defaultIntervalSec: rawLocation.defaultIntervalSec,
-      defaultDistanceTriggerM: rawLocation.defaultDistanceTriggerM,
-      stationaryBackoff: rawLocation.stationaryBackoff,
     },
   } as BrambleConfig;
 }
