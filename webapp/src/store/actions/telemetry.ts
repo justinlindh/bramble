@@ -99,7 +99,7 @@ type NeighborWire = WirePartial<RpcSchemas['Neighbor']> & {
 
 function normalizeNeighbor(raw: NeighborWire): Neighbor & { name?: string } {
   return {
-    addr: typeof raw.address === 'string' ? parseInt(raw.address, 16) : (raw.addr ?? 0),
+    addr: parseAddr(raw.address ?? raw.addr),
     rssi: raw.rssi ?? 0,
     snr: raw.snr ?? 0,
     deliveryRate: raw.deliveryRate ?? 0,
