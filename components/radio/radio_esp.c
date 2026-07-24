@@ -615,8 +615,6 @@ void radio_set_rx_callback(radio_rx_callback_t cb) { s_rx_cb = cb; }
 
 void radio_set_tx_done_callback(radio_tx_done_callback_t cb) { s_tx_done_cb = cb; }
 
-void radio_set_cad_done_callback(radio_cad_done_callback_t cb) { s_cad_done_cb = cb; }
-
 void radio_sleep(void) {
     radio_standby();
     int rc = sx1262_set_sleep(0x04); /* warm start (retain config) */

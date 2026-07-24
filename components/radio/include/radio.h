@@ -47,7 +47,6 @@ void radio_set_tx_power(int8_t power);
 radio_state_t radio_get_state(void);
 void radio_set_rx_callback(radio_rx_callback_t cb);
 void radio_set_tx_done_callback(radio_tx_done_callback_t cb);
-void radio_set_cad_done_callback(radio_cad_done_callback_t cb);
 void radio_sleep(void);
 
 /**
