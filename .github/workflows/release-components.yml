@@ -30,11 +30,31 @@ on:
         required: false
         default: ""
         type: string
+      firmware_factory_tag:
+        description: >-
+          Existing firmware-vX.Y.Z tag to rebuild factory images for.
+          Skips semantic-release entirely and attaches the images to that
+          tag's release, then publishes it. This only works while that
+          release is still an unpublished DRAFT: once a release is published
+          it is immutable and rejects new assets (HTTP 422), so this cannot
+          recover a release that already completed a run. Combine with dry_run
+          to build the images without uploading anything.
+        required: false
+        default: ""
+        type: string
 
+# Read by default; the three jobs that create tags, releases or assets opt into
+# contents: write themselves. issues: write and pull-requests: write are
+# deliberately absent: all four .releaserc.<component>.cjs pass
+# successComment: false, failComment: false and failTitle: false to
+# @semantic-release/github, and those flags short-circuit the plugin's entire
+# issue and pull-request surface. The released-labels call sits inside the
+# successComment branch of the plugin's success handler, the issue open and
+# close paths sit behind the failComment/failTitle checks, and addReleases
+# defaults to false. The plugin also skips its token-permission probe when it
+# detects GitHub Actions, so nothing here ever needed those two scopes.
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
 
 # A single serialized group so back-to-back merges queue instead of racing
 # semantic-release into silently skipping a tag. Never cancel an in-flight
@@ -49,16 +69,27 @@ defaults:
 
 jobs:
   release:
-    # Skipped only when a manual dispatch asks to rebuild installers for an
-    # existing webapp tag; the installer jobs below key off that skip.
-    if: github.event_name != 'workflow_dispatch' || inputs.webapp_installers_tag == ''
+    # Skipped only when a manual dispatch asks to rebuild assets for an existing
+    # tag; the asset jobs below key off that skip.
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      (inputs.webapp_installers_tag == '' && inputs.firmware_factory_tag == '')
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Four semantic-release runs over a full-history checkout; the asset builds
+    # live in their own jobs with their own budgets. A cap is load-bearing here
+    # because concurrency.cancel-in-progress is false: without one, a single
+    # wedged run holds the release-components group for the six-hour default and
+    # every merge behind it waits.
+    timeout-minutes: 20
+    permissions:
+      contents: write
     outputs:
+      firmware_published: ${{ steps.firmware.outputs.published }}
+      firmware_tag: ${{ steps.firmware.outputs.tag }}
       webapp_published: ${{ steps.webapp.outputs.published }}
       webapp_tag: ${{ steps.webapp.outputs.tag }}
       webapp_version: ${{ steps.webapp.outputs.version }}
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # "true" only on a manual dispatch that requested a dry run; empty on push.
       DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     steps:
@@ -67,17 +98,31 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          # Same Node major as every other Node job in CI, so the release
+          # toolchain does not run on whatever the runner image happens to ship.
+          node-version: 20
+
       - name: Install release dependencies
-        run: |
-          npm install --no-save \
-            semantic-release@24 \
-            @semantic-release/commit-analyzer@13 \
-            @semantic-release/release-notes-generator@14 \
-            @semantic-release/github@11 \
-            conventional-changelog-conventionalcommits@9
+        # npm ci against the committed root package-lock.json, not a floating
+        # `npm install --no-save semantic-release@24 ...`: that form re-resolved
+        # every transitive dependency on every push to main, inside the job that
+        # holds the write token, so an upstream publish could change the release
+        # tooling with no commit and no review. The root package.json exists only
+        # to pin this toolchain (the webapp keeps its own package.json), and the
+        # Release config job in quality.yml installs from the same lockfile so
+        # its scope-gating regression test exercises the versions that actually
+        # cut releases.
+        run: npm ci --no-audit --no-fund
 
       # Components run sequentially in one job so their tag fetches never race.
+      # GITHUB_TOKEN is step-scoped rather than job-scoped so only the four
+      # semantic-release invocations see the write-capable token.
       - name: Release protocol
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "$DRY" = "true" ]; then
             npx semantic-release --extends ./.releaserc.protocol.cjs --dry-run
@@ -87,6 +132,8 @@ jobs:
 
       - name: Release firmware
         id: firmware
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # semantic-release exposes no machine-readable "did it publish?" exit
           # signal (it exits 0 whether or not a release was cut), so detect a
@@ -101,10 +148,21 @@ jobs:
           # published, leaving a bare release. Set membership is all we need, so
           # lexical order is correct here.
           before="$(git tag -l 'firmware-v*' | LC_ALL=C sort)"
+          # Capture semantic-release's exit status instead of letting set -e
+          # abort the step on it. semantic-release pushes the tag and creates the
+          # draft release before its run finishes, so any later failure (a GitHub
+          # API hiccup, a plugin error) would otherwise skip the tag diff below,
+          # leave `published` unset, and strand the draft with no factory images
+          # and no way to re-cut it (the tag already exists). Diff the tags,
+          # publish the outputs, then re-raise the failure at the end of the
+          # step: the firmware-factory-images job gates on the output under
+          # !cancelled(), not on this job's result, so the draft still gets its
+          # images attached and published while the run is still marked failed.
+          status=0
           if [ "$DRY" = "true" ]; then
-            npx semantic-release --extends ./.releaserc.firmware.cjs --dry-run
+            npx semantic-release --extends ./.releaserc.firmware.cjs --dry-run || status=$?
           else
-            npx semantic-release --extends ./.releaserc.firmware.cjs
+            npx semantic-release --extends ./.releaserc.firmware.cjs || status=$?
           fi
           after="$(git tag -l 'firmware-v*' | LC_ALL=C sort)"
           # LC_ALL=C on comm too: comm's own sorted-order check uses the ambient
@@ -123,19 +181,25 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
             echo "No firmware release published this run"
           fi
+          exit "$status"
 
       - name: Release webapp
         id: webapp
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Same tag-diff publish detection as the firmware step above, with the
           # same LC_ALL=C requirement: version sort would break comm at the
           # double-digit rollover and fail the step after publishing. The
-          # desktop-installer jobs below consume these outputs.
+          # desktop-installer jobs below consume these outputs. The exit status
+          # is captured and re-raised for the same reason as well: a failure
+          # after the tag push must not skip the diff and strand the draft.
           before="$(git tag -l 'webapp-v*' | LC_ALL=C sort)"
+          status=0
           if [ "$DRY" = "true" ]; then
-            npx semantic-release --extends ./.releaserc.webapp.cjs --dry-run
+            npx semantic-release --extends ./.releaserc.webapp.cjs --dry-run || status=$?
           else
-            npx semantic-release --extends ./.releaserc.webapp.cjs
+            npx semantic-release --extends ./.releaserc.webapp.cjs || status=$?
           fi
           after="$(git tag -l 'webapp-v*' | LC_ALL=C sort)"
           # LC_ALL=C on comm too (see the firmware step): comm's sorted-order
@@ -152,8 +216,11 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
             echo "No webapp release published this run"
           fi
+          exit "$status"
 
       - name: Release sim
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "$DRY" = "true" ]; then
             npx semantic-release --extends ./.releaserc.sim.cjs --dry-run
@@ -161,18 +228,71 @@ jobs:
             npx semantic-release --extends ./.releaserc.sim.cjs
           fi
 
-      # Attach per-board factory images to the firmware release semantic-release
-      # just published. Plain images for INITIAL esptool flashing only: the
-      # build signs each app with a throwaway key
-      # (BRAMBLE_OTA_ALLOW_GENERATED_KEY=1), never the production OTA signing
-      # key, and the OTA update channel is not involved here. Runs last so the
-      # fast per-component releases publish before this multi-board build.
+  # ---------------------------------------------------------------------------
+  # Per-board factory images for the firmware release. Plain images for INITIAL
+  # esptool flashing only: the build signs each app with a throwaway key
+  # (BRAMBLE_OTA_ALLOW_GENERATED_KEY=1), never the production OTA signing key,
+  # and the OTA update channel is not involved here.
+  #
+  # semantic-release created the firmware release as a DRAFT (draftRelease: true
+  # in .releaserc.firmware.cjs) precisely so these assets can be attached: a
+  # published release is immutable and rejects asset uploads with HTTP 422. The
+  # attach script uploads to the draft, then flips it to published (immutable)
+  # with the assets already in place. It uses the REST API via curl, so the
+  # runner needs no gh CLI.
+  #
+  # This is a separate job, not a tail of the release job, so a
+  # firmware_factory_tag dispatch can re-run it against an existing tag. Without
+  # that lever a failed image build left the firmware-v* tag pushed and its
+  # release a permanent unpublished draft: re-running the release job cuts
+  # nothing because the tag already exists, and the release can never be
+  # published. It mirrors the webapp_installers_tag escape hatch below.
+  firmware-factory-images:
+    needs: release
+    # Gate on the firmware_published OUTPUT, not needs.release.result: the
+    # firmware release step runs before the webapp and sim steps, so a failure
+    # in one of those (or in the firmware step itself after the tag was pushed)
+    # marks the release job 'failure' while a real draft release is waiting for
+    # its images. The outputs stay readable regardless.
+    # !cancelled() lifts the implicit success() gate, which would otherwise skip
+    # this job before the condition is ever read, both for that failure case and
+    # for a firmware_factory_tag dispatch that skips the release job on purpose.
+    if: >-
+      !cancelled() &&
+      (needs.release.outputs.firmware_published == 'true' ||
+       (needs.release.result == 'skipped' && inputs.firmware_factory_tag != ''))
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Three sequential ESP-IDF board builds (45m step budget) plus the upload.
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      FW_TAG: ${{ inputs.firmware_factory_tag || needs.release.outputs.firmware_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # On a normal release run the tag sits on this push's HEAD, so the
+          # default sha is the tagged commit; a manual rebuild checks out the
+          # requested tag itself.
+          ref: ${{ inputs.firmware_factory_tag || github.sha }}
+          # Nothing in this job pushes, and the image build runs a full ESP-IDF
+          # toolchain over the tree. Do not leave a contents:write git
+          # credential in .git/config for it; the attach step below carries its
+          # own step-scoped GH_TOKEN.
+          persist-credentials: false
+
+      - name: Resolve version from tag
+        id: ver
+        run: |
+          set -euo pipefail
+          case "$FW_TAG" in
+            firmware-v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Unexpected firmware tag: '$FW_TAG'" >&2; exit 1 ;;
+          esac
+          echo "version=${FW_TAG#firmware-v}" >> "$GITHUB_OUTPUT"
+
       - name: Build firmware factory images
-        # !cancelled() lifts the implicit success() gate: the webapp and sim
-        # release steps run before this one, and without a status function a
-        # failure in either would skip these image steps even though the
-        # firmware release already published, leaving a bare firmware release.
-        if: ${{ !cancelled() && steps.firmware.outputs.published == 'true' }}
         # Three sequential ESP-IDF board builds; each already saturates the
         # runner's cores via ninja. Local timing on 8 CPUs: see PR body.
         timeout-minutes: 45
@@ -181,24 +301,18 @@ jobs:
           # Step outputs flow through env, never inline in run: text
           # (script-injection hardening; the firmware-vX.Y.Z tag format
           # constrains them today, env keeps that true if it ever loosens).
-          FW_VERSION: ${{ steps.firmware.outputs.version }}
+          FW_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           bash scripts/release/build-factory-images.sh "$FW_VERSION"
 
-      # semantic-release created this release as a DRAFT (draftRelease: true in
-      # .releaserc.firmware.cjs) precisely so these assets can be attached: a
-      # published release is immutable and rejects asset uploads with HTTP 422.
-      # The script uploads to the draft, then flips it to published (immutable)
-      # with the assets already in place. Uses the REST API via curl (no gh CLI
-      # dependency on the runner).
       - name: Attach factory images to firmware release and publish
-        # See the build step: run whenever firmware published, even if an
-        # earlier component's release step failed.
-        if: ${{ !cancelled() && steps.firmware.outputs.published == 'true' }}
+        # A dry-run dispatch builds the images without uploading anything, the
+        # same way the webapp installer legs build under dry_run and only the
+        # publish job is suppressed.
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         timeout-minutes: 5
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FW_TAG: ${{ steps.firmware.outputs.tag }}
         run: |
           bash scripts/release/attach-release-assets.sh \
             "$FW_TAG" \
@@ -207,7 +321,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Desktop installers for the webapp release. Linux (AppImage, deb, pacman)
-  # and Windows (NSIS) cross-build in electronuserland/builder:wine on the
+  # and Windows (NSIS) cross-build in electronuserland/builder:20-wine on the
   # Linux runner; macOS dmgs need real Apple hardware, so they build on a
   # GitHub-hosted mac runner. All installers are UNSIGNED: there are no Apple
   # or Windows code-signing certificates, CSC_IDENTITY_AUTO_DISCOVERY stays
@@ -233,11 +347,11 @@ jobs:
   webapp-installers-linux-win:
     needs: release
     # Gate on the webapp_published output, not needs.release.result: the webapp
-    # release step runs before the sim and firmware-image steps, so a failure in
-    # one of those later steps marks the whole release job 'failure' even though
-    # the webapp release already published. Its outputs stay readable regardless,
-    # so keying on the output attaches installers to a real release that would
-    # otherwise be left bare.
+    # release step runs before the sim step, so a failure there (or in the webapp
+    # step itself after the tag was pushed) marks the whole release job 'failure'
+    # even though the webapp release already published. Its outputs stay readable
+    # regardless, so keying on the output attaches installers to a real release
+    # that would otherwise be left bare.
     # !cancelled() lifts the implicit success() gate: a webapp_installers_tag
     # dispatch skips the release job on purpose, and without a status function
     # here GitHub would skip this dependent job too before ever reading the
@@ -250,7 +364,7 @@ jobs:
     # container: job, and the self-hosted burst pool cannot run container jobs.
     # Burst runners do not mount the runner's node externals into the job
     # container, so every step dies at Checkout with 'exec /__e/node24/bin/node:
-    # no such file or directory'. The electron-builder:wine image is
+    # no such file or directory'. The electron-builder wine image is
     # self-contained (node + wine for NSIS, no ESP-IDF/go tooling), so a hosted
     # runner needs nothing from the self-hosted pool; releases are infrequent,
     # so hosted minutes are fine.
@@ -259,8 +373,15 @@ jobs:
     permissions:
       contents: read
     container:
-      # electron-builder's own image: node + wine for NSIS cross-builds.
-      image: electronuserland/builder:wine
+      # electron-builder's own image: node + wine for NSIS cross-builds. Pinned
+      # to the Node 20 variant rather than the floating :wine tag, which always
+      # points at the newest Node base electron-builder publishes (Node 24 when
+      # this was pinned: :wine and :24-wine resolve to the same digest). That
+      # meant this leg silently built the renderer and electron bundles under a
+      # different Node major than the macOS leg below and than every other Node
+      # job in this repo, and would move again on the next upstream base bump.
+      # Node 20 is the repo-wide pin (.nvmrc, webapp/package.json engines).
+      image: electronuserland/builder:20-wine
       options: --user 0:0
     env:
       WEBAPP_TAG: ${{ inputs.webapp_installers_tag || needs.release.outputs.webapp_tag }}
@@ -283,6 +404,14 @@ jobs:
           esac
           echo "version=${WEBAPP_TAG#webapp-v}" >> "$GITHUB_OUTPUT"
 
+      # The macOS leg runs the identical two commands. That duplication is not
+      # removable: electron-builder packs the app's production dependencies out
+      # of webapp/node_modules, so `npm ci` has to run on both platforms
+      # regardless, and hoisting only `build:electron` into a shared job would
+      # trade a few seconds of electron-vite for a third npm ci plus an artifact
+      # round trip. What the two legs must NOT do is disagree on the Node major,
+      # which is why the container above is pinned to :20-wine and setup-node on
+      # the macOS leg pins the same 20.
       - name: Build renderer and electron bundles
         run: |
           set -euo pipefail
@@ -374,6 +503,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
+          # Must stay the same major as the linux/win leg's container image tag
+          # (electronuserland/builder:20-wine): both legs build the same
+          # platform-independent renderer and electron bundles.
           node-version: 20
 
       - name: Resolve version from tag
@@ -448,6 +580,10 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.webapp_installers_tag || github.sha }}
+          # Nothing here pushes; the attach step below carries its own
+          # step-scoped GH_TOKEN, so no contents:write git credential needs to
+          # sit in .git/config for the rest of the job.
+          persist-credentials: false
 
       - name: Download installers
         uses: actions/download-artifact@v8

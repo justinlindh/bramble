@@ -140,7 +140,7 @@ changed. When in doubt, run the real checks rather than silently skip them.
 | `web_flasher` | `web-flasher/` |
 | `api` | `api/` |
 | `idf_build_scripts` | `scripts/ci-source-idf*`, `scripts/ci-ensure-idf*`, `scripts/ci-ccache-env*`, `scripts/flash*`, `scripts/flash-all*`, `scripts/ensure-ota-signing-key*`, `.esp-idf-version` |
-| `release_config` | `.releaserc.*`, `scripts/release/` |
+| `release_config` | `.releaserc.*`, `scripts/release/`, root `package.json` / `package-lock.json` |
 | `docker_firmware_builder` | `docker/firmware-builder/` |
 | `coverage_tooling` | `scripts/ci/check_coverage.py`, `scripts/ci/host_coverage.py`, `scripts/ci/run-host-coverage.sh`, `ci/coverage-baseline.json` |
 | `size_tooling` | `scripts/ci/check-firmware-size.sh`, `scripts/ci/check_size.py`, `scripts/ci/extract_firmware_sizes.py`, `ci/size-baseline.json` |
@@ -231,7 +231,8 @@ wrapper scripts (`idf_build_scripts`); the four-board build (which gates PRs)
 additionally reads root `CMakeLists.txt`, `sdkconfig.defaults*`,
 `partitions*.csv` (`firmware`), its flash wrappers (`idf_build_scripts`), and the
 size ratchet (`size_tooling`); the `Release config` job loads `.releaserc.*` +
-`scripts/release/` (`release_config`); and the firmware-builder Docker leg builds
+`scripts/release/` and installs the root `package.json` / `package-lock.json`
+(`release_config`); and the firmware-builder Docker leg builds
 `docker/firmware-builder/` (`docker_firmware_builder`). If one of these jobs
 gains a new input, widen its area, not the shared `firmware` catch-all.
 
@@ -332,9 +333,10 @@ flattened for liveness, so genuine priority-starvation bugs are hardware-only
 detection; this suite cannot catch them.
 
 `Release config` runs the release-rule scope-gating regression
-(`node scripts/release/semantic-release-squash-expander.test.cjs`) after a small
-`npm install` of the pinned `@semantic-release/commit-analyzer`,
-`release-notes-generator`, and `conventional-changelog-conventionalcommits`. It
+(`node scripts/release/semantic-release-squash-expander.test.cjs`) after an
+`npm ci` from the root `package-lock.json`, which is the same lockfile
+`release-components.yml` installs, so the test runs against the exact
+semantic-release toolchain that cuts releases. It
 loads the real `.releaserc.<component>.cjs` files and asserts, per component,
 that an in-scope `fix`/`feat`/`perf`/breaking commit cuts the right release
 level while out-of-scope and non-releasing commits do not, so a scope-gating

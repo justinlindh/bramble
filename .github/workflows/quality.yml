@@ -235,8 +235,9 @@ jobs:
     # The per-component semantic-release configs (.releaserc.<component>.cjs)
     # and the squash-expander they wrap decide whether any binary ever
     # publishes. A silent scope-gating regression here stops every release, so
-    # this cheap check runs whenever a release config or the release scripts
-    # change (release_config = .releaserc.* + scripts/release/); ci_core forces
+    # this cheap check runs whenever a release config, the release scripts, or
+    # the pinned release toolchain changes (release_config = .releaserc.* +
+    # scripts/release/ + the root package.json/package-lock.json); ci_core forces
     # it for the safety rule. It no longer piggybacks on the broad firmware area,
     # so an ordinary firmware code change stops spinning up this pod.
     needs: detect
@@ -250,13 +251,12 @@ jobs:
           node-version: 20
       - name: Install semantic-release analyzer deps
         # The regression test loads the real .releaserc.<component>.cjs files,
-        # which require these at load time. Pin the same major versions the
-        # release workflow installs so the test exercises the real behavior.
-        run: |
-          npm install --no-save --no-audit --no-fund \
-            @semantic-release/commit-analyzer@13 \
-            @semantic-release/release-notes-generator@14 \
-            conventional-changelog-conventionalcommits@9
+        # which require the analyzer packages at load time. Installing from the
+        # root lockfile, exactly as release-components.yml does, is what makes
+        # the test exercise the versions that actually cut releases: a
+        # hand-listed set of major ranges here could drift from the release job
+        # and pass against code the pipeline never runs.
+        run: npm ci --no-audit --no-fund
       - name: Release-rule scope-gating regression
         # Asserts, per component, that an in-scope fix/feat/perf/breaking cuts
         # the right release level and that out-of-scope / non-releasing commits

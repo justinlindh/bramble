@@ -41,7 +41,12 @@ for board in "${BOARDS[@]}"; do
   echo "==> [$board] build start"
   start=$(date +%s)
 
-  bash scripts/flash.sh local "$board" build
+  # -DPROJECT_VER is required, not optional: flash.sh pins PROJECT_VER to
+  # "0.0.0-local" whenever the caller does not pass one, so without this every
+  # published factory image reported 0.0.0-local from the device while its
+  # filename claimed the release version. The stamp is what the UI shows and
+  # what the OTA update check compares against.
+  bash scripts/flash.sh local "$board" build -DPROJECT_VER="$VERSION"
 
   build_dir="build-${board}"
   if [[ ! -f "$build_dir/flash_args" ]]; then

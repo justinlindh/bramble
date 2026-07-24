@@ -194,8 +194,12 @@ jobs:
           # source changed; host tests and gosim use no IDF, so they stay out.
           idf_build_scripts=$(area_changed '^scripts/(ci-source-idf|ci-ensure-idf|ci-ccache-env|flash|flash-all|ensure-ota-signing-key)|^\.esp-idf-version$')
           # release_config is what the Release config job loads: the per-component
-          # .releaserc.*.cjs files and the release scripts (the squash-expander).
-          release_config=$(area_changed '^\.releaserc\.|^scripts/release/')
+          # .releaserc.*.cjs files, the release scripts (the squash-expander),
+          # and the ROOT package.json/package-lock.json, which pin the
+          # semantic-release toolchain that job installs with npm ci. The root
+          # lockfile is release tooling only (the webapp has its own under
+          # webapp/), so it belongs here and nowhere else.
+          release_config=$(area_changed '^\.releaserc\.|^scripts/release/|^package(-lock)?\.json$')
           # docker_firmware_builder is the firmware-builder image's build context.
           # Its Docker leg builds with context docker/firmware-builder/ (a
           # toolchain image FROM espressif/idf), so it reads only that dir and
