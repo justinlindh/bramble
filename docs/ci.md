@@ -20,7 +20,10 @@ Publish-oriented workflows (`firmware-build.yml`, `release-components.yml`,
 check `ci-smoke-artifacts.yml` are out of scope here; they run on
 `workflow_dispatch`, tags, or their own events and do not gate normal PRs. Desktop installers (Linux,
 Windows, macOS) are built and attached to webapp releases by
-`release-components.yml` itself.
+`release-components.yml` itself. Firmware OTA is published only by a manual
+dispatch of `firmware-build.yml`, never by merging to `main`; see "Firmware OTA
+publishing is manual" below before you assume a merged firmware release reached
+any device.
 
 Two housekeeping workflows (`burst-runner-watchdog.yml`, `cache-cleanup.yml`)
 also sit outside the gating set: they keep CI's shared resources healthy,
@@ -605,6 +608,36 @@ It gates nothing and reports no required context, the same as
 produces no correctness signal. It still fails loudly rather than warning,
 because a silent failure would let the budget refill unnoticed, which is the
 condition it exists to prevent.
+
+## Firmware OTA publishing is manual, and the ref you dispatch picks the channel
+
+Firmware OTA reaches devices only when someone manually dispatches
+`firmware-build.yml`. Nothing on the push-to-`main` path publishes OTA:
+`release-components.yml` runs semantic-release, cuts the `firmware-v*` tag,
+builds the per-board factory images and attaches them to the GitHub release,
+and stops there. A merged firmware fix is therefore tagged, released, and
+downloadable, but it is on no device until that dispatch happens. This is
+intentional, not an oversight, so do not read a merged firmware release as
+shipped to the mesh.
+
+Two mechanics decide what a dispatch actually does, and both are easy to get
+wrong:
+
+- The ref you dispatch on selects the channel. `firmware-build.yml` matches
+  the ref name against `^firmware-v(.+)$`: dispatching on a `firmware-v*` tag
+  resolves `channel=stable` at that tag's version, and dispatching on anything
+  else (`main`, a branch) resolves `channel=dev` at a version derived from
+  `scripts/ci-publish-ota.sh --print-version`. There is no channel input, so
+  picking the ref is picking the channel.
+- A `workflow_dispatch` on a tag runs the workflow file **as of that tag**, not
+  the copy on `main`. Workflow fixes merged to `main` do not apply to
+  dispatches of tags cut before them; to pick them up, dispatch a tag that
+  contains them.
+
+Publishing a stable OTA release is therefore: dispatch Firmware Build on the
+`firmware-v*` tag you want on devices, then confirm the new version appears in
+the OTA index (the workflow's own verification step fails the run if the
+release is incomplete).
 
 ## Dual-tree arrangement: .github is authoritative, .gitea is a frozen mirror
 

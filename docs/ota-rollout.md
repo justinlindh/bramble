@@ -46,10 +46,14 @@ server's headers. The Android app lives in a separate repository
 
 ## A) Production rollout (official origin)
 
-The default origin is `https://bramblemesh.org/ota/`. CI publishes signed
-artifacts there for every release; the index at
-`https://bramblemesh.org/ota/index.json` lists artifact paths per release
-(`docs/ota-release-schema.md`).
+The default origin is `https://bramblemesh.org/ota/`. Signed artifacts are
+published there by a manual `workflow_dispatch` of the Firmware Build workflow,
+not automatically on merge or on tag: a released firmware version is only on
+this origin once someone dispatches it, and dispatching on a `firmware-v*` tag
+is what selects the `stable` channel (see "Firmware OTA publishing is manual"
+in `docs/ci.md`). The index at `https://bramblemesh.org/ota/index.json` lists
+artifact paths per published release (`docs/ota-release-schema.md`), and is the
+authoritative answer to what is actually available to devices.
 
 Trigger the update with the artifact path relative to the origin:
 
