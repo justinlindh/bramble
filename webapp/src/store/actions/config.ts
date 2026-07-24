@@ -4,6 +4,7 @@
 import { session } from './client';
 import { useStore } from '../index';
 import { formatAddrHex } from '../../utils/address';
+import { parseAddr } from '../../lib/addr';
 import type { BrambleConfig, LocationConfig, LocationTier } from '../../types/bramble';
 import type { RpcSchemas, WirePartial } from '../../types/rpc';
 import { loadPeerLocations } from './telemetry';
@@ -29,9 +30,6 @@ type LocationWire = WirePartial<Omit<RpcSchemas['LocationConfig'], 'source'>> & 
   // Legacy 'auto' predates the contract's 'hybrid' and is normalized to it.
   source?: RpcSchemas['LocationConfig']['source'] | 'auto';
   contacts?: Array<{ addr: number; tier: LocationTier; intervalSec?: number; distanceTriggerM?: number }>;
-  defaultIntervalSec?: number;
-  defaultDistanceTriggerM?: number;
-  stationaryBackoff?: LocationConfig['stationaryBackoff'];
 };
 
 type ConfigWire = WirePartial<Omit<RpcSchemas['ConfigResponse'], 'channels' | 'radio' | 'location'>> & {
@@ -62,7 +60,7 @@ export function normalizeConfig(raw: ConfigWire): BrambleConfig {
 
   return {
     identity: {
-      address: typeof raw.address === 'string' ? parseInt(raw.address, 16) : (raw.identity?.address ?? 0),
+      address: parseAddr(raw.address ?? raw.identity?.address),
       pubkeyHash: typeof raw.pubkey_hash === 'string' ? parseInt(raw.pubkey_hash, 16) : (raw.identity?.pubkeyHash ?? 0),
       name: raw.node_name ?? raw.identity?.name ?? '',
       pubkeyB64: raw.identity?.pubkeyB64 ?? '',
@@ -96,10 +94,6 @@ export function normalizeConfig(raw: ConfigWire): BrambleConfig {
       lon: rawLocation.lon,
       contact_rules: contactRules,
       channel_targets: rawLocation.channel_targets ?? [],
-      contacts: legacyContacts,
-      defaultIntervalSec: rawLocation.defaultIntervalSec,
-      defaultDistanceTriggerM: rawLocation.defaultDistanceTriggerM,
-      stationaryBackoff: rawLocation.stationaryBackoff,
     },
   } as BrambleConfig;
 }

@@ -149,8 +149,6 @@ int display_init(void) {
 
 void display_clear(void) { memset(fb, 0, sizeof(fb)); }
 
-void display_fill(void) { memset(fb, 0xFF, sizeof(fb)); }
-
 void display_pixel(int x, int y, bool on) {
     if (x < 0 || x >= DISPLAY_WIDTH || y < 0 || y >= DISPLAY_HEIGHT)
         return;
@@ -250,10 +248,6 @@ void display_flush(void) {
 }
 
 void display_power(bool on) { ssd1306_cmd(on ? 0xAF : 0xAE); }
-
-void display_set_contrast(uint8_t val) { ssd1306_cmd2(0x81, val); }
-
-void display_invert(bool invert) { ssd1306_cmd(invert ? 0xA7 : 0xA6); }
 
 void display_set_rotated_180(bool rotated) {
     s_rotated_180 = rotated;

@@ -65,8 +65,6 @@ int wifi_manager_get_ap_password(char* out, size_t out_len) {
 
 const char* ota_get_last_error(void) { return NULL; }
 
-int ota_ble_start(void) { return -1; }
-
 int ota_wifi_start(const char* url, bool allow_downgrade) {
     (void)url;
     (void)allow_downgrade;

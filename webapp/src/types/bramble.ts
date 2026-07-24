@@ -150,13 +150,6 @@ export interface Position {
 
 export type LocationTier = 'off' | 'full' | 'coarse' | 'presence';
 
-export interface LocationContact {
-  addr: number;             // peer node address
-  tier: LocationTier;
-  intervalSec: number;      // update interval seconds
-  distanceTriggerM: number; // distance trigger meters
-}
-
 export type LocationSource = 'gps' | 'manual' | 'hybrid';
 
 export interface LocationContactRule {
@@ -207,12 +200,6 @@ export interface LocationConfig {
   lon?: number;
   contact_rules: LocationContactRule[];
   channel_targets: LocationChannelTarget[];
-
-  // Legacy fields used by older UI paths.
-  contacts?: LocationContact[];
-  defaultIntervalSec?: number;
-  defaultDistanceTriggerM?: number;
-  stationaryBackoff?: number;
 }
 
 // ─── Config (full) ─────────────────────────────────────────────────────

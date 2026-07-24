@@ -312,14 +312,6 @@ void display_clear(void) {
     memset(fb, 0, FB_SIZE);
 }
 
-void display_fill(void) {
-    if (!fb)
-        return;
-    for (int i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++) {
-        fb[i] = COLOR_WHITE;
-    }
-}
-
 void display_pixel(int x, int y, bool on) {
     if (!fb)
         return;
@@ -486,23 +478,6 @@ void display_set_backlight(uint8_t level) {
 
 uint8_t display_get_backlight(void) { return s_backlight_level; }
 
-void display_set_contrast(uint8_t val) {
-    /* ST7789 doesn't have a simple contrast command like SSD1306 */
-    /* Could adjust VCOM or backlight brightness, but not implemented yet */
-    (void)val;
-}
-
-void display_invert(bool invert) {
-    if (!initialized)
-        return;
-    /* Shares the SPI bus with the radio; guard like display_power(). */
-    if (g_spi_mutex)
-        xSemaphoreTake(g_spi_mutex, portMAX_DELAY);
-    st7789_write_cmd(invert ? 0x21 : 0x20); /* INVON / INVOFF */
-    if (g_spi_mutex)
-        xSemaphoreGive(g_spi_mutex);
-}
-
 void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t* buf) {
     if (!initialized || !buf)
         return;
@@ -568,6 +543,3 @@ void display_set_rotated_180(bool rotated) {
 }
 
 bool display_get_rotated_180(void) { return s_rotated_180; }
-
-int display_get_width(void) { return DISPLAY_WIDTH; }
-int display_get_height(void) { return DISPLAY_HEIGHT; }
