@@ -52,7 +52,7 @@
     "@types/react-dom": "^19.0.0",
     "@types/w3c-web-serial": "^1.0.8",
     "@types/web-bluetooth": "^0.0.21",
-    "@vitejs/plugin-react": "^4.0.0",
+    "@vitejs/plugin-react": "^6.0.4",
     "@vitest/coverage-v8": "^4.1.10",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
