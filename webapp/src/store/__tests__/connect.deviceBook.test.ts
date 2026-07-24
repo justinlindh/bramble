@@ -117,18 +117,18 @@ describe('device save on connect', () => {
 describe('connect() device-book guards', () => {
   it('does not book a device when the connected node reports address 0', async () => {
     setRpc(0);
-    await connect('wifi', { url: 'ws://127.0.0.1/ws', ip: '10.0.0.5', token: 't', remember: true });
+    await connect('wifi', { url: 'ws://127.0.0.1/ws', ip: '192.0.2.5', token: 't', remember: true });
     expect(useStore.getState().connectionState).toBe('connected');
     expect(listDevices()).toHaveLength(0);
   });
 
   it('books the device on a normal wifi connect once the address is known', async () => {
     setRpc(0xA001);
-    await connect('wifi', { url: 'ws://127.0.0.1/ws', ip: '10.0.0.9', token: 'tok', remember: true, name: 'Shed' });
+    await connect('wifi', { url: 'ws://127.0.0.1/ws', ip: '192.0.2.9', token: 'tok', remember: true, name: 'Shed' });
     const d = listDevices();
     expect(d).toHaveLength(1);
     expect(d[0].address).toBe('0000A001');
-    expect(d[0].lastIp).toBe('10.0.0.9');
+    expect(d[0].lastIp).toBe('192.0.2.9');
     expect(getDeviceToken('0000A001')).toBe('tok');
   });
 
@@ -136,7 +136,7 @@ describe('connect() device-book guards', () => {
     setRpc(0xA001);
     await connect('wifi', {
       url: 'ws://127.0.0.1/ws',
-      ip: '10.0.0.9',
+      ip: '192.0.2.9',
       token: 'tok',
       remember: true,
       expectAddressHex: 'CAFEBABE',

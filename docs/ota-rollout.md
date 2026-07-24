@@ -64,17 +64,20 @@ needs none of it.
 ## A) Production rollout (official origin)
 
 The default origin is `https://bramblemesh.org/ota/`. Signed artifacts are
-published there; the index at `https://bramblemesh.org/ota/index.json` lists
-artifact paths per release (`docs/ota-release-schema.md`).
+published there by a manual `workflow_dispatch` of the Firmware Build workflow,
+not automatically on merge or on tag: a released firmware version is only on
+this origin once someone dispatches it, and the ref it is dispatched on picks
+the channel (a `firmware-v*` tag publishes to `stable`, any other ref such as
+`main` publishes to `dev`). See "Firmware OTA publishing is manual" in
+`docs/ci.md`.
 
-Publishing is a deliberate manual step, not a consequence of tagging a
-release: `.github/workflows/firmware-build.yml` is `workflow_dispatch` only,
-and the ref it is dispatched on picks the channel (a `firmware-v*` tag
-publishes to `stable`, any other ref such as `main` publishes to `dev`). The
-newest published release is therefore not necessarily the newest tag, so read
-the current list from the index rather than assuming a version exists. As of
-2026-07-24 the newest published stable is `v1.5.15`, published the same day,
-with a complete artifact set for all four boards.
+The index at `https://bramblemesh.org/ota/index.json` lists artifact paths per
+published release (`docs/ota-release-schema.md`), and is the authoritative
+answer to what is actually available to devices. The newest published release
+is therefore not necessarily the newest tag, so read the current list from the
+index rather than assuming a version exists. As of 2026-07-24 the newest
+published stable is `v1.5.15`, published the same day, with a complete artifact
+set for all four boards.
 
 Trigger the update with the artifact path relative to the origin:
 

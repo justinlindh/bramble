@@ -82,7 +82,7 @@ beforeEach(() => {
 describe('message DB namespace on connect', () => {
   it('opens the DB under the connected node address', async () => {
     setNodeAddress(0xdeadbeef);
-    await connect('wifi', { url: 'ws://10.0.0.1/ws', ip: '10.0.0.1' });
+    await connect('wifi', { url: 'ws://192.0.2.1/ws', ip: '192.0.2.1' });
     expect(messageDb.open).toHaveBeenCalledWith('DEADBEEF');
   });
 
@@ -95,7 +95,7 @@ describe('message DB namespace on connect', () => {
     // Switch to a real node. The DB must open under ITS address, not the mock's.
     (messageDb.open as any).mockClear();
     setNodeAddress(0xdeadbeef);
-    await connect('wifi', { url: 'ws://10.0.0.1/ws', ip: '10.0.0.1' });
+    await connect('wifi', { url: 'ws://192.0.2.1/ws', ip: '192.0.2.1' });
     expect(messageDb.open).toHaveBeenLastCalledWith('DEADBEEF');
     expect(messageDb.open).not.toHaveBeenCalledWith('1A2B3C4D');
   });

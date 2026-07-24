@@ -1,4 +1,5 @@
-# PHASE-2 PORT PENDING: Gitea-coupled publish path, dispatch-only until rewritten
+# Dispatch-only: builds and signs the per-board firmware images, publishes them
+# to the OTA endpoint, and verifies the published release in the OTA index.
 name: Firmware Build
 
 on:
@@ -8,8 +9,9 @@ permissions:
   contents: read
 
 concurrency:
+  # No cancel-in-progress: this workflow publishes to the production OTA
+  # endpoint, so overlapping dispatches queue rather than cancel each other.
   group: firmware-build-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -84,8 +86,19 @@ jobs:
           command -v curl >/dev/null 2>&1 || missing+=(curl)
           command -v jq >/dev/null 2>&1 || missing+=(jq)
           if [ ${#missing[@]} -gt 0 ]; then
-            apt-get update
-            apt-get install -y "${missing[@]}"
+            # The container runner runs as root; the ubuntu-latest fallback
+            # does not, so escalate when we are not already root.
+            sudo_cmd=()
+            if [ "$(id -u)" -ne 0 ]; then
+              if command -v sudo >/dev/null 2>&1; then
+                sudo_cmd=(sudo)
+              else
+                echo "::error::missing ${missing[*]} and no root or sudo available to install them"
+                exit 1
+              fi
+            fi
+            "${sudo_cmd[@]}" apt-get update
+            "${sudo_cmd[@]}" apt-get install -y "${missing[@]}"
           fi
           chmod +x scripts/ci-publish-ota.sh
 
@@ -126,49 +139,11 @@ jobs:
 
           echo "Verified complete published release in index: channel=$CHANNEL version=$VERSION boards=heltec-v3,tdeck-plus,heltec-v4,bramble-pager"
 
-      - name: Create or update Gitea Release (firmware tags)
-        if: startsWith(github.ref, 'refs/tags/firmware-v')
-        env:
-          # GITEA_SYNC_TOKEN: to be provisioned on GitHub; carries the Gitea
-          # PAT used to write releases back to the frozen Gitea mirror repo.
-          # Phase 2 replaces this whole step with a GitHub-native release.
-          GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
-          GITEA_REPO: ${{ github.repository }}
-          RELEASE_FORGE_URL: ${{ github.server_url }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_NAME: Firmware ${{ steps.version.outputs.version }}
-          RELEASE_BODY_FILE: /tmp/firmware-release-notes.md
-          ASSET_GLOBS: |
-            build-artifacts/firmware-ci/*/bootloader.bin
-            build-artifacts/firmware-ci/*/partition-table.bin
-            build-artifacts/firmware-ci/*/bramble.bin
-            build-artifacts/firmware-ci/*/flasher_args.json
-            build-artifacts/firmware-ci/*/SHA256SUMS.txt
-        run: |
-          PREV_TAG=$(git tag --list 'firmware-v*' --sort=-version:refname | grep -v "^${RELEASE_TAG}$" | head -n1 || true)
-          {
-            echo "## Firmware release ${RELEASE_TAG}"
-            echo
-            echo "Channel: stable"
-            echo
-            if [ -n "$PREV_TAG" ]; then
-              echo "### Changes since $PREV_TAG"
-              git log --pretty='- %s (%h)' "$PREV_TAG..$RELEASE_TAG"
-            else
-              echo "### Changes"
-              git log --pretty='- %s (%h)' -n 20 "$RELEASE_TAG"
-            fi
-          } > /tmp/firmware-release-notes.md
-
-          chmod +x scripts/ci-register-gitea-release.sh
-          scripts/ci-register-gitea-release.sh
-
       - name: Remove signing key from workspace
         if: always()
         run: rm -f keys/ota_signing_key.pem /tmp/ota_signing_key.pem
 
       - name: Upload firmware artifacts
-        if: startsWith(github.server_url, 'https://github.com')
         uses: actions/upload-artifact@v7
         with:
           name: firmware-build-artifacts

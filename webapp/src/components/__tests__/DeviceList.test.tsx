@@ -24,7 +24,7 @@ describe('DeviceList', () => {
     }));
   });
   it('forget removes the device from the list', () => {
-    upsertDevice({ address: 'DEADBEEF', name: 'V4', lastIp: '10.0.0.1', transport: 'wifi', remember: false, nowMs: 1 });
+    upsertDevice({ address: 'DEADBEEF', name: 'V4', lastIp: '192.0.2.1', transport: 'wifi', remember: false, nowMs: 1 });
     actions.refreshDevices();
     render(<DeviceList />);
     fireEvent.click(screen.getByRole('button', { name: /forget V4/i }));

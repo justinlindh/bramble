@@ -8,8 +8,8 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 
 describe('deviceBook', () => {
   it('upserts and lists by most-recent first', () => {
-    upsertDevice({ address: 'AAAA0001', transport: 'wifi', remember: false, lastIp: '10.0.0.1', nowMs: 100 });
-    upsertDevice({ address: 'BBBB0002', transport: 'wifi', remember: false, lastIp: '10.0.0.2', nowMs: 200 });
+    upsertDevice({ address: 'AAAA0001', transport: 'wifi', remember: false, lastIp: '192.0.2.1', nowMs: 100 });
+    upsertDevice({ address: 'BBBB0002', transport: 'wifi', remember: false, lastIp: '192.0.2.2', nowMs: 200 });
     const list = listDevices();
     expect(list.map(d => d.address)).toEqual(['BBBB0002', 'AAAA0001']);
     expect(list[0].name).toBe('Node BBBB0002'); // default name
@@ -17,10 +17,10 @@ describe('deviceBook', () => {
 
   it('upsert merges by address and does not clobber a user-set name with an auto name', () => {
     upsertDevice({ address: 'AAAA0001', name: 'Node A', transport: 'wifi', remember: false, nowMs: 1 });
-    upsertDevice({ address: 'AAAA0001', transport: 'wifi', remember: true, lastIp: '10.0.0.9', nowMs: 2 });
+    upsertDevice({ address: 'AAAA0001', transport: 'wifi', remember: true, lastIp: '192.0.2.9', nowMs: 2 });
     const d = listDevices()[0];
     expect(d.name).toBe('Node A');       // preserved
-    expect(d.lastIp).toBe('10.0.0.9');   // updated
+    expect(d.lastIp).toBe('192.0.2.9');  // updated
     expect(d.remember).toBe(true);       // updated
     expect(listDevices()).toHaveLength(1); // merged, not duplicated
   });

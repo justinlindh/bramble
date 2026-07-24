@@ -421,12 +421,12 @@ void test_station_event_transitions_disconnected_and_got_ip(void) {
     TEST_ASSERT_EQUAL_INT(0, wifi_manager_init(0x1234));
 
     ip_event_got_ip_t got_ip = {0};
-    got_ip.ip_info.ip.addr = ESP_IP4TOADDR(10, 0, 0, 42);
+    got_ip.ip_info.ip.addr = ESP_IP4TOADDR(192, 0, 2, 42);
     g_sta_handler(NULL, IP_EVENT, IP_EVENT_STA_GOT_IP, &got_ip);
 
     wifi_status_t status = {0};
     wifi_manager_get_status(&status);
-    TEST_ASSERT_EQUAL_STRING("10.0.0.42", status.ip_addr);
+    TEST_ASSERT_EQUAL_STRING("192.0.2.42", status.ip_addr);
 
     g_ws_running = true;
     wifi_event_sta_disconnected_t disc = {.reason = 7};

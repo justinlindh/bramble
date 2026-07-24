@@ -3,7 +3,7 @@ import { buildWifiUrl } from '../../src/components/ConnectionOverlay';
 
 describe('ConnectionOverlay URL logic', () => {
   it('keeps full URL inputs unchanged', () => {
-    expect(buildWifiUrl('ws://10.0.0.5/ws', 'http:', 'localhost:4173')).toBe('ws://10.0.0.5/ws');
+    expect(buildWifiUrl('ws://192.0.2.5/ws', 'http:', 'localhost:4173')).toBe('ws://192.0.2.5/ws');
   });
 
   it('uses proxy URL on https pages', () => {
@@ -15,8 +15,8 @@ describe('ConnectionOverlay URL logic', () => {
   });
 
   it('leaves an explicit ws:// URL with a query string untouched', () => {
-    expect(buildWifiUrl('ws://10.0.0.5/ws?foo=bar', 'http:', 'app.local'))
-      .toBe('ws://10.0.0.5/ws?foo=bar');
+    expect(buildWifiUrl('ws://192.0.2.5/ws?foo=bar', 'http:', 'app.local'))
+      .toBe('ws://192.0.2.5/ws?foo=bar');
   });
 
   it('uses direct ws URL in an embedded shell even on an https origin', () => {
