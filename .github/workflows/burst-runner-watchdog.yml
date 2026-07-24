@@ -31,12 +31,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The burst host's ephemeral runners register with this label and this name
-  # prefix. The default pool answers to the pool label. Kept generic on
-  # purpose: no hostnames, no addresses, no machine names.
+  # The burst host's ephemeral runners register with this label. The default
+  # pool answers to the pool label. Routing is by label alone, so the health
+  # probe below matches on the runner's labels and never on its name: a runner
+  # name is cosmetic and carries no routing meaning. Kept generic on purpose:
+  # no hostnames, no addresses, no machine names.
   BURST_LABEL: bramble-burst
   POOL_LABEL: bramble-runner
-  RUNNER_PREFIX: burst-
 
 jobs:
   watchdog:
@@ -51,10 +52,10 @@ jobs:
     # Only act when routing currently points at the burst label. When it is the
     # default pool label there is nothing to recover and this skips green,
     # needing no elevated token. NOTE: this literal must stay in sync with
-    # env.BURST_LABEL below; the env context is not available in a job-level
+    # env.BURST_LABEL above; the env context is not available in a job-level
     # if, so the value is duplicated here on purpose. If you change
     # env.BURST_LABEL, change this literal too or the watchdog silently stops
-    # triggering.
+    # triggering while the step below probes a label nothing routes to.
     if: ${{ vars.RUNNER_LABEL == 'bramble-burst' }}
     steps:
       - name: Check for an online burst runner and recover if none
@@ -65,9 +66,13 @@ jobs:
           # secret, scoped to this repo with:
           #   - Administration: read   (list self-hosted runners)
           #   - Variables:      write  (update RUNNER_LABEL)
-          # If the secret is unset the workflow reports and exits without
-          # flipping, so a scheduled run never hard-fails on a repo that has
-          # not configured burst routing.
+          # A missing secret is a hard failure, not a warning. This step only
+          # runs when RUNNER_LABEL already points at the burst label, so burst
+          # routing IS configured and the pool may be stranded right now; a
+          # green run with a warning annotation would hide that forever,
+          # because annotations on scheduled runs surface nowhere. This
+          # workflow gates nothing and reports no required context, so failing
+          # loudly is safe and is the only signal an operator will see.
           GH_TOKEN: ${{ secrets.BURST_ROUTING_TOKEN }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
           REPO: ${{ github.repository }}
@@ -75,22 +80,28 @@ jobs:
           set -euo pipefail
 
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::BURST_ROUTING_TOKEN is not set; cannot list runners or flip routing."
-            echo "RUNNER_LABEL is ${BURST_LABEL} but the watchdog has no token to act. Reporting only."
-            exit 0
+            echo "::error::BURST_ROUTING_TOKEN is not set; cannot list runners or flip routing."
+            echo "RUNNER_LABEL is ${BURST_LABEL}, so burst routing is live and the pool may already be stranded."
+            echo "Set the secret (Administration: read, Variables: write) or point RUNNER_LABEL at ${POOL_LABEL} by hand."
+            exit 1
           fi
 
+          # Match on labels, not on the runner name: `runs-on` resolves by
+          # label, so a runner carrying BURST_LABEL is exactly what routing
+          # can reach, whatever it happens to be named. BURST_LABEL reaches jq
+          # through the environment (env.BURST_LABEL), which keeps the label
+          # out of the jq program text.
           online="$(gh api "repos/${REPO}/actions/runners" --paginate \
-            --jq "[.runners[] | select(.name | startswith(\"${RUNNER_PREFIX}\")) | select(.status == \"online\")] | length" \
+            --jq '[.runners[] | select(.status == "online") | select(any(.labels[]?; .name == env.BURST_LABEL))] | length' \
             | awk '{ sum += $1 } END { print sum + 0 }')"
-          echo "Online ${RUNNER_PREFIX}* runners: ${online}"
+          echo "Online runners carrying ${BURST_LABEL}: ${online}"
 
           if [ "${online}" -ge 1 ]; then
             echo "Burst host is healthy; leaving RUNNER_LABEL=${BURST_LABEL}."
             exit 0
           fi
 
-          echo "::warning::No ${RUNNER_PREFIX}* runner online while RUNNER_LABEL=${BURST_LABEL}; routing would strand jobs."
+          echo "::warning::No online runner carries ${BURST_LABEL} while RUNNER_LABEL=${BURST_LABEL}; routing would strand jobs."
 
           if [ "${DRY_RUN:-false}" = "true" ]; then
             echo "dry_run=true: would flip RUNNER_LABEL back to ${POOL_LABEL}, but taking no action."
