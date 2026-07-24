@@ -50,10 +50,14 @@ func (fn *fakeNode) sendRaw(v any) {
 }
 
 // tx sends a tx message carrying payload (raw bytes, base64-encoded on the wire).
-func (fn *fakeNode) tx(payload []byte) {
+func (fn *fakeNode) tx(payload []byte) { fn.txPHY(payload, 10, 125000) }
+
+// txPHY is tx with an explicit reported PHY, for the adoption tests: the real
+// firmware reports whatever mesh_init_radio_config left in its radio config.
+func (fn *fakeNode) txPHY(payload []byte, sf, bwHz int) {
 	fn.sendRaw(map[string]any{
 		"t": "tx", "payload": base64.StdEncoding.EncodeToString(payload),
-		"freq": 915000000, "sf": 10, "bw": 125000, "cr": 1, "power": 22,
+		"freq": 915000000, "sf": sf, "bw": bwHz, "cr": 1, "power": 22,
 	})
 }
 
@@ -173,6 +177,119 @@ func TestExtNodeTxPricedAndDeliveredWithRSSI(t *testing.T) {
 	}
 	if toa := uint32(td["toa_ms"].(float64)); toa != h.toaMs(len(payload)) {
 		t.Fatalf("txdone toa_ms = %d, want %d (deterministic ToA)", toa, h.toaMs(len(payload)))
+	}
+}
+
+// The ether prices airtime at the PHY the attached firmware reports, not at the
+// C radio model's own default. The real node comes up on the frequency plan's
+// SF9/125 kHz, not the SF10 the radio-profile table suggests, and pricing every
+// frame at SF10 charged roughly double the true airtime, which is what pushed
+// the emulator scenarios' short beacon cadence past channel capacity.
+func TestExtNodeAdoptsReportedPHY(t *testing.T) {
+	h := newEmuHarness()
+	defer h.close()
+	path := filepath.Join(t.TempDir(), "emu.sock")
+	if err := h.startBroker(path); err != nil {
+		t.Fatal(err)
+	}
+	h.reserveSlot(0, 0, "A")
+	nodeA := dialFakeNode(t, path, "A")
+	defer nodeA.close()
+
+	sf10Toa := h.toaMs(60)
+	nodeA.txPHY(make([]byte, 60), 9, 125000)
+
+	td := pumpUntil(h, func() map[string]any { return nodeA.read(20 * time.Millisecond) })
+	if td == nil || td["t"] != "txdone" {
+		t.Fatalf("node A expected txdone, got %v", td)
+	}
+	if sf := int(h.sim.radio.sf); sf != 9 {
+		t.Fatalf("ether sf = %d after a node reported SF9, want 9", sf)
+	}
+	sf9Toa := h.toaMs(60)
+	if toa := uint32(td["toa_ms"].(float64)); toa != sf9Toa {
+		t.Fatalf("txdone toa_ms = %d, want %d (priced at the reported SF9)", toa, sf9Toa)
+	}
+	// The whole point: SF9 is materially cheaper than the SF10 default, so a
+	// short beacon cadence no longer oversubscribes the emulated channel.
+	if sf9Toa >= sf10Toa {
+		t.Fatalf("SF9 ToA %d ms is not below the SF10 default %d ms", sf9Toa, sf10Toa)
+	}
+	// Coding rate is a ToA input too, so it is adopted alongside SF/BW.
+	if cr := int(h.sim.radio.cr); cr != 1 {
+		t.Fatalf("ether cr = %d after a node reported CR 1, want 1", cr)
+	}
+}
+
+// Coding rate rides the same adoption: a node on CR 4/8 makes the ether price
+// its frames at CR 4/8, so the priced ToA keeps agreeing with radio_airtime.c.
+func TestExtNodeAdoptsReportedCodingRate(t *testing.T) {
+	h := newEmuHarness()
+	defer h.close()
+	path := filepath.Join(t.TempDir(), "emu.sock")
+	if err := h.startBroker(path); err != nil {
+		t.Fatal(err)
+	}
+	h.reserveSlot(0, 0, "A")
+	nodeA := dialFakeNode(t, path, "A")
+	defer nodeA.close()
+
+	cr45Toa := h.toaMs(60)
+	nodeA.sendRaw(map[string]any{
+		"t": "tx", "payload": base64.StdEncoding.EncodeToString(make([]byte, 60)),
+		"freq": 915000000, "sf": 10, "bw": 125000, "cr": 4, "power": 22,
+	})
+	if td := pumpUntil(h, func() map[string]any { return nodeA.read(20 * time.Millisecond) }); td == nil {
+		t.Fatal("node A expected txdone")
+	}
+	if cr := int(h.sim.radio.cr); cr != 4 {
+		t.Fatalf("ether cr = %d after a node reported CR 4, want 4", cr)
+	}
+	if cr48Toa := h.toaMs(60); cr48Toa <= cr45Toa {
+		t.Fatalf("CR 4/8 ToA %d ms is not above the CR 4/5 default %d ms", cr48Toa, cr45Toa)
+	}
+}
+
+// A scenario that pins radio.sf owns the PHY: an attached node never overrides
+// it, so scenarios written against a deliberate PHY keep reproducing.
+func TestExtNodePinnedScenarioPHYWins(t *testing.T) {
+	h := newEmuHarness()
+	defer h.close()
+	h.sim.emuPHYPinned = true
+	path := filepath.Join(t.TempDir(), "emu.sock")
+	if err := h.startBroker(path); err != nil {
+		t.Fatal(err)
+	}
+	h.reserveSlot(0, 0, "A")
+	nodeA := dialFakeNode(t, path, "A")
+	defer nodeA.close()
+
+	nodeA.txPHY(make([]byte, 60), 7, 250000)
+	if td := pumpUntil(h, func() map[string]any { return nodeA.read(20 * time.Millisecond) }); td == nil {
+		t.Fatal("node A expected txdone")
+	}
+	if sf := int(h.sim.radio.sf); sf != 10 {
+		t.Fatalf("pinned ether sf = %d after a node reported SF7, want the scenario's 10", sf)
+	}
+}
+
+// scenarioPinsPHY drives that ownership: only an explicit sf/bw_hz counts.
+func TestScenarioPinsPHY(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		want bool
+	}{
+		{"no radio block", `{"name":"x"}`, false},
+		{"radio without phy", `{"radio":{"range":150,"loss_pct":0}}`, false},
+		{"radio with sf", `{"radio":{"range":150,"sf":7}}`, true},
+		{"radio with bw_hz", `{"radio":{"range":150,"bw_hz":250000}}`, true},
+		{"unparseable", `{`, false},
+	}
+	for _, c := range cases {
+		if got := scenarioPinsPHY([]byte(c.json)); got != c.want {
+			t.Errorf("%s: scenarioPinsPHY = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 

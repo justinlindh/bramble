@@ -60,6 +60,13 @@ The shared LoRa medium is modeled in `engine/sim_radio.c`:
   ToA at the configured SF/BW/CR, computed by the firmware's own
   `bramble_calculate_airtime_us` (Semtech AN1200.13). The default PHY mirrors
   the firmware's `RADIO_PROFILE_LONG_RANGE`: SF10, 125 kHz, CR 4/5, 22 dBm.
+  That default is only the starting point for an emulator scenario: a real
+  firmware node reports the PHY it actually configured on every `tx`, and the
+  broker adopts it (`extConn.adoptReportedPHY`) unless the scenario pinned
+  `radio.sf`/`radio.bw_hz` itself. The running firmware overwrites the profile's
+  SF with the frequency plan's default (SF9/125 kHz on every shipped plan), so
+  without that adoption the ether charged roughly twice the true airtime and the
+  emulator scenarios' short beacon cadence oversubscribed the channel.
 - **Collisions.** Two packets overlapping in time at a receiver, both audible
   there (within the range disk), destroy each other.
 - **Capture effect.** The packet at least 6 dB stronger survives an overlap if

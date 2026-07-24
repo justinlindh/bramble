@@ -104,7 +104,9 @@ thin client of emu_link and implements an existing firmware interface unchanged:
 
 - `radio_virt.c` implements `components/radio/include/radio.h`. TX serializes the
   frame plus modulation params to the broker; tx_done fires after the broker acks
-  with the priced time-on-air (which must agree with `radio_airtime.c`). RX frames
+  with the priced time-on-air (which must agree with `radio_airtime.c`, and does
+  because the broker prices at the modulation params the node reports rather than
+  at its own default: see `extConn.adoptReportedPHY`). RX frames
   from the broker invoke the registered rx callback with broker-computed
   RSSI/SNR. CAD is answered by the broker (channel busy model). All TX still
   funnels through the real `tx_gate` logic.

@@ -147,6 +147,16 @@ type Sim struct {
 	// most recent tx's freq and echoed on every rx. The phase-1 model is
 	// single-channel, so a received frame's frequency is the channel's.
 	emuFreq int
+	// emuPHYPinned is true when the scenario's "radio" block declared sf or
+	// bw_hz. Pinned scenarios keep the author's PHY; unpinned ones adopt the
+	// PHY an attached firmware node reports (see extConn.adoptReportedPHY).
+	emuPHYPinned bool
+	// emuPHYAdopted records the (sf, bw_hz) already learned from a firmware
+	// node, so the adoption happens once and a second node disagreeing about
+	// the single-channel ether's PHY is reported instead of silently winning.
+	emuPHYAdopted bool
+	emuPHYSF      int
+	emuPHYBWHz    int
 }
 
 // brokerAction is a deferred broker-side side effect (e.g. sending txdone
@@ -900,6 +910,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// scenarios declare no firmware nodes and leave s.realtime false, so their
 	// virtual-time path is untouched.
 	fwNodes := loadFirmwareNodes(scenarioData)
+	s.emuPHYPinned = scenarioPinsPHY(scenarioData)
 	if len(fwNodes) > 0 || s.emuListen != "" {
 		s.startEmulator(fwNodes)
 	}
