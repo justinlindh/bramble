@@ -84,7 +84,7 @@ RUN npm run build
 # against the build stage's glibc, and a debian:bookworm runtime (glibc 2.36)
 # refuses to load it (`GLIBC_2.38' not found). libssl3t64 is noble's name for
 # the libssl.so.3 runtime the gosim cgo build links.
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates libssl3t64 libbsd0 libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
