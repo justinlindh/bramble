@@ -152,6 +152,17 @@ messages are fire-and-forget and are not individually confirmed. See
 [webapp/chat.md](webapp/chat.md) for current chat behavior and
 [SECURITY-MODEL.md](SECURITY-MODEL.md) for what is and is not protected.
 
+## 7. Keep it updated
+
+A node on WiFi installs new firmware over the air from the web client, under
+**Config -> Device Management -> Firmware Update**. No cable, no toolchain,
+and the update origin is already configured.
+[updating-your-node.md](updating-your-node.md) walks the whole journey and
+covers the two things that surprise people: a node only accepts images signed
+by the key that signed the firmware it is running (so a node you flashed from
+source will not take official builds), and going back to an older version
+needs the **Allow downgrade** checkbox.
+
 That is a first node from zero to a confirmed message. From here,
 [network-key-provisioning.md](network-key-provisioning.md) and
 [trust-anchor.md](trust-anchor.md) cover fleet-wide provisioning, and

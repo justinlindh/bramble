@@ -140,6 +140,8 @@ flashes a device over USB straight from the browser. If a build or flash
 stalls (serial permissions, a missing toolchain, a port collision), see
 [docs/troubleshooting.md](docs/troubleshooting.md).
 
+**Keeping it up to date.** Once a node is on your WiFi it installs new firmware over the air from the web client, no cable and no toolchain: [docs/updating-your-node.md](docs/updating-your-node.md).
+
 **First-time setup.** A freshly flashed node boots unprovisioned and inert: it has no network key, so it will not mesh (it neither emits nor accepts authenticated control-plane traffic) until you provision one, and the web client shows a prominent UNPROVISIONED banner until then. Follow [docs/getting-started.md](docs/getting-started.md) to connect the web client, provision a network key, optionally enroll the node under a trust anchor, and send your first message.
 
 ## Testing
@@ -169,7 +171,8 @@ For the full component breakdown and interaction diagrams, see [docs/bramble-arc
 - [docs/COMPARISON.md](docs/COMPARISON.md): comparison with other mesh systems
 - [docs/bramble-protocol-spec.md](docs/bramble-protocol-spec.md): protocol details
 - [docs/bramble-testing.md](docs/bramble-testing.md): test strategy and coverage
-- [docs/ota-rollout.md](docs/ota-rollout.md): OTA operator workflow
+- [docs/updating-your-node.md](docs/updating-your-node.md): update your node over the air from the web client
+- [docs/ota-rollout.md](docs/ota-rollout.md): OTA operator workflow (RPC recipes, dev-build loop)
 - [docs/quality-policy.md](docs/quality-policy.md): repo-wide CI gates, promotion criteria, and rollback levers
 - [docs/quality-policy-webapp.md](docs/quality-policy-webapp.md): webapp workflow required/advisory mapping, local parity commands, and rollback levers
 - [simulator/README.md](simulator/README.md): simulator usage
