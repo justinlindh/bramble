@@ -206,7 +206,7 @@ jobs:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Assert clang with libFuzzer is pre-baked on the runner
         # Hard failure, never a skip. A missing toolchain that silently
         # passed the job would be an advisory check in disguise, which
@@ -223,7 +223,7 @@ jobs:
         # The reproducing input is the entire value of a fuzz finding, and
         # it lives in a pod that is about to disappear.
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
           path: test/fuzz/artifacts/
@@ -567,7 +567,7 @@ jobs:
         # type=gha cache exporter below available; the hosted image's default
         # docker driver cannot export a layer cache.
         if: steps.gate.outputs.build == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Build ${{ matrix.image }} image (verify only, no push)
         # No push, no load: a successful build IS the assertion. The layer
         # cache round-trips through the GitHub cache service under a
@@ -578,7 +578,7 @@ jobs:
         # branch or from main, and the post-merge push run on main is what
         # publishes the shared warm cache.
         if: steps.gate.outputs.build == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
