@@ -34,11 +34,6 @@ static void set_last_error(const char* fmt, ...) {
 
 const char* ota_get_last_error(void) { return s_last_error[0] ? s_last_error : NULL; }
 
-int ota_ble_start(void) {
-    ESP_LOGW(TAG, "BLE OTA not implemented yet");
-    return -1;
-}
-
 static int ota_https_start(const char* url, bool allow_downgrade) {
     esp_http_client_config_t http_cfg = {
         .url = url,
