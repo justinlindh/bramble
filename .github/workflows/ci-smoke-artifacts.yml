@@ -1,4 +1,6 @@
-# PHASE-2 PORT PENDING: Gitea-coupled publish path, dispatch-only until rewritten
+# Runner health check, dispatch-only. Exercises no repo code and gates nothing:
+# it confirms the runner pool picks up a job and that artifact upload works,
+# which is the cheap probe to run after runner or infra changes.
 name: CI Smoke Artifacts
 
 on:
@@ -14,6 +16,7 @@ defaults:
 jobs:
   smoke:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v7

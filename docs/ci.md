@@ -15,10 +15,10 @@ Three workflows gate pull requests, plus one reusable helper they all call:
 | `quality.yml` | The heavy firmware/emulator compute jobs: host tests, gosim, the board build smoke, and the emulator suite. |
 | `webapp-quality.yml` | The consolidated webapp job (one `npm ci`, all webapp checks) plus the web-flasher tests. |
 
-Publish-oriented workflows (`firmware-build.yml`, `firmware-publish-ota.yml`,
-`ci-smoke-artifacts.yml`, `release-components.yml`, `webapp-build-publish.yml`,
-`claude.yml`) are out of scope here; they run on `workflow_dispatch`, tags, or
-their own events and do not gate normal PRs. Desktop installers (Linux,
+Publish-oriented workflows (`firmware-build.yml`, `release-components.yml`,
+`webapp-build-publish.yml`, `claude.yml`) plus the dispatch-only runner health
+check `ci-smoke-artifacts.yml` are out of scope here; they run on
+`workflow_dispatch`, tags, or their own events and do not gate normal PRs. Desktop installers (Linux,
 Windows, macOS) are built and attached to webapp releases by
 `release-components.yml` itself.
 
@@ -611,6 +611,8 @@ condition it exists to prevent.
 `.github/workflows/` is the source of truth for CI and runs on the self-hosted
 ARC scale set (runner label from the `RUNNER_LABEL` repo variable).
 `.gitea/workflows/` is a frozen, unmodified mirror-side copy and is not touched
-by workflow edits. The publish-oriented workflows still carry Gitea API coupling
-and are gated to `workflow_dispatch` until a Phase 2 pass rewrites them for
-GitHub natively; each carries a `PHASE-2 PORT PENDING` header.
+by workflow edits, so it can reference scripts that no longer exist on the
+`.github` side. Of the publish-oriented workflows, only `webapp-build-publish.yml`
+still carries Gitea API coupling (its host-deploy dispatch step) and still
+carries a `PHASE-2 PORT PENDING` header; it is gated to `workflow_dispatch`
+until a Phase 2 pass rewrites that step for GitHub natively.
