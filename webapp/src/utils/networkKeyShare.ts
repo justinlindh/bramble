@@ -7,7 +7,7 @@
  * the channel-PSK share pattern. It is never read back from a device; only the
  * one-way fingerprint (SHA256(key)[0:4]) is surfaced for verification.
  */
-import type { ParseResult } from './channelShare';
+import { parseShareParams, type ParseResult } from './channelShare';
 
 const PREFIX = 'bramble://net/v1?';
 const HEX64 = /^[0-9a-fA-F]{64}$/;
@@ -19,18 +19,11 @@ export function encodeNetworkKeyShare(keyHex: string): string {
 }
 
 export function parseNetworkKeyShare(input: string): ParseResult<{ key: string }> {
-  const s = input.trim();
-  if (!s.startsWith(PREFIX)) {
-    return { ok: false, error: 'Not a valid Bramble network-key share string.' };
+  const parsed = parseShareParams(input, PREFIX, 'Not a valid Bramble network-key share string.');
+  if (!parsed.ok) return parsed;
+  const key = parsed.data.get('k');
+  if (!key || !HEX64.test(key.trim())) {
+    return { ok: false, error: 'Missing or malformed network key (need 64 hex chars).' };
   }
-  try {
-    const params = new URLSearchParams(s.slice(PREFIX.length));
-    const key = params.get('k');
-    if (!key || !HEX64.test(key.trim())) {
-      return { ok: false, error: 'Missing or malformed network key (need 64 hex chars).' };
-    }
-    return { ok: true, data: { key: key.trim().toLowerCase() } };
-  } catch {
-    return { ok: false, error: 'Malformed share string.' };
-  }
+  return { ok: true, data: { key: key.trim().toLowerCase() } };
 }

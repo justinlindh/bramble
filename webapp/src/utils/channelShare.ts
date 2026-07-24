@@ -54,51 +54,60 @@ export type ParseResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
-export function parseChannelShare(input: string): ParseResult<ChannelShareData> {
+/**
+ * Shared prefix-check + query decode for the ParseResult-style share parsers.
+ * Fails with `notValidError` when the prefix is wrong and with a generic
+ * "Malformed share string." if URLSearchParams construction throws, leaving
+ * each caller to validate its own fields. Mirrors anchorShare.ts's paramsFor,
+ * adapted to carry a distinct not-a-share message.
+ */
+export function parseShareParams(
+  input: string,
+  prefix: string,
+  notValidError: string
+): ParseResult<URLSearchParams> {
   const s = input.trim();
-  if (!s.startsWith('bramble://ch/v1?')) {
-    return { ok: false, error: 'Not a valid Bramble channel share string.' };
+  if (!s.startsWith(prefix)) {
+    return { ok: false, error: notValidError };
   }
   try {
-    const query = s.slice('bramble://ch/v1?'.length);
-    const params = new URLSearchParams(query);
-    const name = params.get('n');
-    if (!name || name.trim() === '') {
-      return { ok: false, error: 'Missing channel name.' };
-    }
-    const psk = params.get('k') ?? undefined;
-    return { ok: true, data: { name: name.trim(), psk } };
+    return { ok: true, data: new URLSearchParams(s.slice(prefix.length)) };
   } catch {
     return { ok: false, error: 'Malformed share string.' };
   }
 }
 
+export function parseChannelShare(input: string): ParseResult<ChannelShareData> {
+  const parsed = parseShareParams(input, 'bramble://ch/v1?', 'Not a valid Bramble channel share string.');
+  if (!parsed.ok) return parsed;
+  const params = parsed.data;
+  const name = params.get('n');
+  if (!name || name.trim() === '') {
+    return { ok: false, error: 'Missing channel name.' };
+  }
+  const psk = params.get('k') ?? undefined;
+  return { ok: true, data: { name: name.trim(), psk } };
+}
+
 export function parseNodeShare(input: string): ParseResult<NodeShareData> {
-  const s = input.trim();
-  if (!s.startsWith('bramble://node/v1?')) {
-    return { ok: false, error: 'Not a valid Bramble node share string.' };
+  const parsed = parseShareParams(input, 'bramble://node/v1?', 'Not a valid Bramble node share string.');
+  if (!parsed.ok) return parsed;
+  const params = parsed.data;
+  const name = params.get('n') ?? '';
+  const addrHex = params.get('a');
+  const pkUrl = params.get('pk');
+  if (!addrHex) {
+    return { ok: false, error: 'Missing node address.' };
   }
-  try {
-    const query = s.slice('bramble://node/v1?'.length);
-    const params = new URLSearchParams(query);
-    const name = params.get('n') ?? '';
-    const addrHex = params.get('a');
-    const pkUrl = params.get('pk');
-    if (!addrHex) {
-      return { ok: false, error: 'Missing node address.' };
-    }
-    const address = parseInt(addrHex, 16);
-    if (isNaN(address)) {
-      return { ok: false, error: 'Invalid node address.' };
-    }
-    // Convert base64url → standard base64
-    const pubkeyB64 = pkUrl
-      ? pkUrl.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice(0, (4 - (pkUrl.length % 4)) % 4)
-      : '';
-    return { ok: true, data: { name, address, pubkeyB64 } };
-  } catch {
-    return { ok: false, error: 'Malformed share string.' };
+  const address = parseInt(addrHex, 16);
+  if (isNaN(address)) {
+    return { ok: false, error: 'Invalid node address.' };
   }
+  // Convert base64url → standard base64
+  const pubkeyB64 = pkUrl
+    ? pkUrl.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice(0, (4 - (pkUrl.length % 4)) % 4)
+    : '';
+  return { ok: true, data: { name, address, pubkeyB64 } };
 }
 
 /** Returns true if the string looks like any Bramble share (channel, node, or network key). */
