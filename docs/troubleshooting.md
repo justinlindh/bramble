@@ -6,6 +6,7 @@ adding it to this file is a welcome pull request.
 
 - [Paths and prerequisites](#paths-and-prerequisites)
 - [Serial and flashing](#serial-and-flashing)
+- [Firmware updates over the air](#firmware-updates-over-the-air)
 - [Simulator and emulator](#simulator-and-emulator)
 - [Tests and quality gates](#tests-and-quality-gates)
 - [Commits and CI](#commits-and-ci)
@@ -106,6 +107,37 @@ non-`sudo` build.
 Flash real hardware only through `scripts/flash.sh` or `scripts/flash-all.py`.
 They apply the right board defaults, build directory, and sdkconfig. Raw
 `esptool` invocations skip that and have bricked devices in the past.
+
+## Firmware updates over the air
+
+The full journey, including every state the web client shows, is
+[updating-your-node.md](updating-your-node.md). The three failures that send
+people here:
+
+### "OTA rejected: image signature verification failed"
+
+The node and the image are in different trust domains. A node only installs
+images signed by the key that signed the firmware it is currently running, so
+a node you flashed with a build from source (signed with your dev key) will
+not take official CI-signed images, and vice versa. Crossing back is a USB
+flash; there is no over-the-air route, deliberately
+([design/ota-signing.md](design/ota-signing.md)).
+
+### "OTA rejected: version `<x>` is below the anti-rollback floor"
+
+The node refuses anything below the highest version it has booted. Tick
+**Allow downgrade** on the confirm step in the web client (or pass
+`allow_downgrade` over RPC, see [ota-rollout.md](ota-rollout.md)). That also
+lowers the floor, so the node is not stranded.
+
+### "Could not load the release index from ..."
+
+The web client could not read the list of published builds. In a browser this
+is usually CORS: the release index is fetched from the page, so the update
+server has to send an `Access-Control-Allow-Origin` header the page's origin
+satisfies. The packaged desktop app fetches it from its main process instead
+and is not subject to that. Details, including the current state of the
+public update server, are in [ota-rollout.md](ota-rollout.md).
 
 ## Simulator and emulator
 

@@ -2,6 +2,13 @@
 
 Last verified: 2026-07-16 (heltec-v4 bench, HTTP dev loop, upgrade + floor-gated downgrade)
 
+**Updating your own node? Use
+[updating-your-node.md](updating-your-node.md).** It is the same OTA path
+driven from the web client, with no JSON-RPC client, auth token handling, or
+`websocat` involved. This runbook is the operator-level reference: the raw
+RPC recipes, the local dev-build loop, and the recovery notes behind that
+journey.
+
 Use this runbook to deploy a `bramble.bin` build to one WiFi-connected node
 without USB flashing.
 
@@ -14,7 +21,33 @@ Two things changed with signed OTA (see `docs/design/ota-signing.md`):
 - **URLs are gone from the OTA RPC.** The node downloads only from its
   configured OTA origin; `bramble.otaUpdate` takes a relative artifact path.
 
-## Prerequisites
+## Webapp rollout (recommended, and what most people want)
+
+Open Config, then Device Management, then Firmware Update. Pick the version
+from the list (release notes, if published, show alongside each entry), watch
+the progress indicator while the node downloads and installs the image, and
+wait for the node to reboot; the UI confirms the new running version once it
+reconnects. Screen-by-screen steps, the confirm and downgrade gates, and the
+failure messages are in [updating-your-node.md](updating-your-node.md).
+
+CORS caveat: when the webapp runs in a BROWSER from a different origin than
+the OTA server (for example, the webapp on `https://app.example` fetching an
+index from `https://ota.example`), the release-index fetch (`index.json`)
+happens in the page, so the OTA origin server must send an
+`Access-Control-Allow-Origin` header (the webapp's origin, or `*`) on
+`index.json`, or the browser blocks the fetch. As of 2026-07-24
+`https://bramblemesh.org/ota/index.json` answers without any
+`Access-Control-Allow-Origin` header, so a cross-origin browser fetch of it
+fails today. The packaged Electron desktop app routes that fetch through its
+main process (`net.fetch`) instead of the renderer, so it is not subject to
+CORS and works regardless of the OTA server's headers. The Android app lives
+in a separate repository (`bramble-android`) and is not covered by this
+document.
+
+## Prerequisites for the RPC recipes below
+
+Everything from here down drives the OTA RPCs directly. The webapp path above
+needs none of it.
 
 - Node reachable over JSON-RPC WebSocket (example: `ws://192.0.2.179/ws`)
 - RPC auth token for the node (all OTA methods are authenticated)
@@ -22,39 +55,27 @@ Two things changed with signed OTA (see `docs/design/ota-signing.md`):
   contract (tracked as bramble-cli#36); until that lands, drive the RPCs
   directly, e.g. with `websocat` as shown below (`TOKEN` is the device auth
   token)
-- Choose target board: `heltec-v3`, `heltec-v4`, or `tdeck-plus`
-
-## A0) Webapp rollout (recommended)
-
-For most upgrades, skip the JSON-RPC recipes below and use the webapp: open
-Config, then Device Management, then Firmware Update. Pick the version from
-the list (release notes, if published, show alongside each entry), watch the
-progress indicator while the node downloads and installs the image, and wait
-for the node to reboot; the UI confirms the new running version once it
-reconnects.
-
-CORS caveat: when the webapp runs in a BROWSER from a different origin than
-the OTA server (for example, the webapp on `https://app.example` fetching an
-index from `https://ota.example`), the release-index fetch (`index.json`)
-happens in the page, so the OTA origin server must send an
-`Access-Control-Allow-Origin` header (the webapp's origin, or `*`) on
-`index.json`, or the browser blocks the fetch. The packaged Electron desktop
-app routes that fetch through its main process (`net.fetch`) instead of the
-renderer, so it is not subject to CORS and works regardless of the OTA
-server's headers. The Android app lives in a separate repository
-(`bramble-android`) and is not covered by this document.
+- Choose target board: `heltec-v3`, `heltec-v4`, `tdeck-plus`, or
+  `bramble-pager`. Those four are the boards CI builds and publishes
+  (`scripts/ci-build-firmware.sh`, the `board-build-smoke` matrix in
+  `.github/workflows/quality.yml`, and the per-board publish and
+  index-completeness steps in `.github/workflows/firmware-build.yml`)
 
 ## A) Production rollout (official origin)
 
 The default origin is `https://bramblemesh.org/ota/`. CI publishes signed
-artifacts there for every release; the index at
-`https://bramblemesh.org/ota/index.json` lists artifact paths per release
-(`docs/ota-release-schema.md`).
+artifacts there; the index at `https://bramblemesh.org/ota/index.json` lists
+artifact paths per release (`docs/ota-release-schema.md`). Read the current
+list from that index rather than assuming a version exists: publishing runs
+from `.github/workflows/firmware-build.yml`, which is `workflow_dispatch`
+only, so the newest published release is not necessarily the newest tag. As
+of 2026-07-24 the newest published stable is `v1.3.10` and the index carries
+`heltec-v3`, `heltec-v4`, and `tdeck-plus` artifacts only.
 
 Trigger the update with the artifact path relative to the origin:
 
 ```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.4.0/heltec-v3/bramble.bin"}}' \
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.3.10/heltec-v3/bramble.bin"}}' \
   | websocat -n1 "ws://192.0.2.179/ws?token=$TOKEN"
 ```
 
@@ -109,7 +130,9 @@ the anti-rollback floor, and the running version.
 ## Downgrades
 
 The node refuses images whose version is below its anti-rollback floor (the
-highest version it has booted). For a deliberate downgrade:
+highest version it has booted). In the webapp this is the **Allow downgrade**
+checkbox on the confirm step; over RPC it is the `allow_downgrade` flag. For
+a deliberate downgrade:
 
 ```bash
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.3.9/heltec-v3/bramble.bin","allow_downgrade":true}}' \
