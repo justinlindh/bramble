@@ -166,22 +166,43 @@ dump_diagnostics() {
     echo "--- end diagnostics: $label ---"
 }
 
-# check_no_deaths <log> <expected_joins> <label> : STRICT death rule, applied
-# to EVERY run of every scenario, pass or fail. Both POSIX-port death causes
-# (FreeRTOS entered from the reader thread; tasks futex-blocked while holding
-# FreeRTOS mutexes) are fixed on this branch, so a mid-scenario node death no
-# longer has a known benign cause: any death is treated as a suite FAILURE
-# with a full post-mortem, never absorbed by a retry or a lucky assertion
-# (a crash-and-restart can still render late sends and green the assertion;
-# adversarial review showed a 30% crash regression would pass a rerun-based
-# gate ~91% of the time). Detected two ways: the supervisor's unexpected-exit
-# log line, and more node_joined events than the scenario has nodes (a
-# restart re-attaches and re-joins).
+# check_no_deaths <log> <expected_joins> <label> [prefix_lines] : STRICT death
+# rule, applied to EVERY run of every scenario, pass or fail. Both POSIX-port
+# death causes (FreeRTOS entered from the reader thread; tasks futex-blocked
+# while holding FreeRTOS mutexes) are fixed on this branch, so a mid-scenario
+# node death no longer has a known benign cause: any death is treated as a
+# suite FAILURE with a full post-mortem, never absorbed by a retry or a lucky
+# assertion (a crash-and-restart can still render late sends and green the
+# assertion; adversarial review showed a 30% crash regression would pass a
+# rerun-based gate ~91% of the time). Detected two ways: the supervisor's
+# unexpected-exit log line, and more node_joined events than the scenario has
+# nodes (a restart re-attaches and re-joins).
+#
+# prefix_lines SCOPES THE RULE TO THE SCENARIO, NOT THE SUITE'S OWN TEARDOWN.
+# The marker-driven suites stop a PASSING run by killing gosim and its
+# children; the supervisor can observe its node child dying from that same
+# kill and log "exited unexpectedly: signal: terminated" in the instant
+# before it dies itself. Whether that line lands in the log is a scheduling
+# race, and on 2026-07-24 it landed: a healthy run (all markers present at
+# ~30s) was failed by its own teardown artifact. Callers snapshot the log's
+# line count AT THE MOMENT their assertions passed, before any kill, and this
+# check reads only that prefix. A real death always precedes the assertions
+# passing, so it is always inside the prefix; only post-teardown fallout is
+# excluded. Callers on their failure paths snapshot after the wait loop ends,
+# which is still before any kill, so the strict rule is untouched there.
 check_no_deaths() {
-    local log="$1" expected="$2" label="$3"
-    local deaths joins
-    deaths="$(grep -c "exited unexpectedly" "$log")" || true
-    joins="$(grep -c '"type":"node_joined"' "$log")" || true
+    local log="$1" expected="$2" label="$3" prefix_lines="${4:-}"
+    local deaths joins scope
+    scope="$log"
+    if [ -n "$prefix_lines" ]; then
+        scope="$(mktemp -t emu-death-scope.XXXXXX)"
+        head -n "$prefix_lines" "$log" > "$scope"
+    fi
+    deaths="$(grep -c "exited unexpectedly" "$scope")" || true
+    joins="$(grep -c '"type":"node_joined"' "$scope")" || true
+    if [ -n "$prefix_lines" ]; then
+        rm -f "$scope"
+    fi
     if [ "${deaths:-0}" -eq 0 ] && [ "${joins:-0}" -le "$expected" ]; then
         return 0
     fi
@@ -282,6 +303,12 @@ channel_suite() {
         sleep 2
     done
 
+    # Snapshot the scenario window BEFORE any teardown signal: the death rule
+    # below judges only lines logged up to this point, so the suite's own
+    # kill cannot manufacture a "death" (see check_no_deaths).
+    local scenario_lines
+    scenario_lines="$(wc -l < "$log")"
+
     # Stop the run; it has either rendered or run out of budget.
     kill "$pid" 2>/dev/null || true
     pkill -P "$pid" 2>/dev/null || true
@@ -296,7 +323,7 @@ channel_suite() {
     # STRICT death rule: even a run that rendered fine fails if a node died
     # mid-scenario (a restarted receiver can still catch late sends and green
     # the assertion, hiding a crash regression). See check_no_deaths.
-    check_no_deaths "$log" 3 "emu-channel-delivery" || return 1
+    check_no_deaths "$log" 3 "emu-channel-delivery" "$scenario_lines" || return 1
 
     if [ "$rendered" -eq 0 ]; then
         green "PASS: emu-channel-delivery: rendered on both receivers"
@@ -393,6 +420,13 @@ dm_suite() {
         sleep 3
     done
 
+    # Snapshot the scenario window BEFORE any teardown signal: the death rule
+    # below judges only lines logged up to this point, so the suite's own
+    # kill cannot manufacture a "death" (see check_no_deaths; this exact race
+    # failed a healthy run on 2026-07-24).
+    local scenario_lines
+    scenario_lines="$(wc -l < "$DM_LOG")"
+
     kill "$pid" 2>/dev/null || true
     pkill -P "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
@@ -404,7 +438,7 @@ dm_suite() {
     fi
 
     # STRICT death rule: deaths fail the run regardless of assertions.
-    check_no_deaths "$DM_LOG" 2 "emu-dm-desync" || return 1
+    check_no_deaths "$DM_LOG" 2 "emu-dm-desync" "$scenario_lines" || return 1
 
     if [ "$seen" -eq 0 ]; then
         green "PASS: emu-dm-desync: ALPHA render + desync symptom + #138 self-heal"
