@@ -527,8 +527,7 @@ bool bridge_msg_track_confirm(msg_tracker_t* track, int count, uint32_t packet_i
 /* ─── Internal packet handlers ─────────────────────────────────────────── */
 
 static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_t rssi,
-                           uint64_t now_us, uint32_t now_ms, node_array_t* nodes,
-                           node_anomaly_tracker_t* anomaly) {
+                           uint64_t now_us, uint32_t now_ms, node_array_t* nodes) {
     bramble_beacon_t beacon;
     if (bramble_beacon_deserialize(&beacon, buf, len) != ESP_OK)
         return;
@@ -544,9 +543,8 @@ static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int
      * (see _handle_rrep / rrep_rx_decide), never back toward a message's
      * originator. Route installation now happens exclusively via RREQ/RREP,
      * matching firmware, so the sim can reproduce that bug instead of hiding
-     * it. anomaly is now unused here since the beacon-triggered route-flap
-     * check went away with the route_install it guarded. */
-    (void)anomaly;
+     * it. The beacon-triggered route-flap check went away with the
+     * route_install it guarded, so no anomaly tracker is needed here. */
     int node_idx = (int)(rx - nodes->nodes);
     bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
 
@@ -675,10 +673,10 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
     }
 }
 
-static void _handle_rrep(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint32_t pkt_src_addr,
-                         uint64_t now_us, uint32_t now_ms, node_array_t* nodes,
-                         radio_config_t* radio, pcg32_state_t* rng, event_queue_t* events,
-                         metrics_state_t* metrics, node_anomaly_tracker_t* anomaly) {
+static void _handle_rrep(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint64_t now_us,
+                         uint32_t now_ms, node_array_t* nodes, radio_config_t* radio,
+                         pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics,
+                         node_anomaly_tracker_t* anomaly) {
     bramble_rrep_t rrep;
     if (bramble_rrep_deserialize(&rrep, buf, len) != ESP_OK)
         return;
@@ -687,9 +685,9 @@ static void _handle_rrep(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
      * copy, so the simulator cannot drift from mesh_task.c's handle_rrep: the
      * next_hop = forwarder-address fix and the discovery-participation install
      * gate both come for free. The simulator does not apply a link penalty, so
-     * it passes rrep.route_metric through as the link metric. pkt_src_addr is
-     * now unused: rrep.next_hop already carries the forwarder's own address. */
-    (void)pkt_src_addr;
+     * it passes rrep.route_metric through as the link metric. The packet's
+     * source address is not needed here: rrep.next_hop already carries the
+     * forwarder's own address. */
     int node_idx = (int)(rx - nodes->nodes);
     rrep_rx_decision_t d = rrep_rx_decide(&rrep, rx->addr, rrep.route_metric,
                                           &rx->pending_discoveries, &rx->reverse_routes);
@@ -1722,15 +1720,15 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
 
     switch (hdr.type) {
     case PKT_TYPE_BEACON:
-        _handle_beacon(rx, buf, len, rssi, event->timestamp_us, now_ms, nodes, anomaly);
+        _handle_beacon(rx, buf, len, rssi, event->timestamp_us, now_ms, nodes);
         break;
     case PKT_TYPE_RREQ:
         _handle_rreq(rx, buf, len, rssi, event->timestamp_us, now_ms, nodes, radio, rng, events,
                      metrics, anomaly);
         break;
     case PKT_TYPE_RREP:
-        _handle_rrep(rx, buf, len, event->data.packet.src_addr, event->timestamp_us, now_ms, nodes,
-                     radio, rng, events, metrics, anomaly);
+        _handle_rrep(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng, events, metrics,
+                     anomaly);
         break;
     case PKT_TYPE_RERR:
         _handle_rerr(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng, events, metrics);
