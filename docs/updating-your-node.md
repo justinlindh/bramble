@@ -43,7 +43,7 @@ a local dev-build origin, or fleet notes want
    device, a badge reads **Update available: `<version>`**.
 5. Pick the build you want in the **Version** dropdown. Entries read version,
    channel, and publication date in your locale's format, for example
-   `v1.3.10 (stable) 3/2/2026`, newest first. If the release carries release
+   `v1.5.15 (stable) 7/24/2026`, newest first. If the release carries release
    notes they appear as a line of text under the dropdown.
 6. Click **Update**. Nothing is installed yet: the card asks
    "Install `<version>`? The node reboots when it finishes." with
@@ -84,6 +84,12 @@ published build for your device regardless of channel, so if a dev build is
 the newest thing published, the badge names the dev build. Check the channel
 in the dropdown before you install.
 
+Nothing here happens on its own. Publishing to the update server is a
+deliberate step the maintainer takes, so the newest version in your picker is
+the newest build that was published, which is not always the newest version
+that exists. And nothing is ever pushed to your node: a node installs an
+update only when you pick a version and click through the confirm.
+
 ## Which devices get updates
 
 Firmware is built and published for four boards:
@@ -100,12 +106,9 @@ is and only offers builds published for that board. If nothing has been
 published for your device, the card says "No published updates for this node
 yet."
 
-Honest state of the public update server as of 2026-07-24: it carries
-`heltec-v3`, `heltec-v4`, and `tdeck-plus` artifacts, and the newest
-published stable release is v1.3.10. `bramble-pager` is built and published
-by the release workflow but has no published artifact yet (the v1 boards are
-not built yet either, see [BUILDING.md](BUILDING.md)), so a pager would show
-"No published updates for this node yet".
+State of the public update server as of 2026-07-24: the newest published
+stable release is v1.5.15, and it carries a complete set of artifacts for
+all four boards above.
 
 ## Where updates come from, and why one signed image is refused
 
@@ -213,9 +216,10 @@ page come from the web client source that renders them
 firmware that produces the failure messages (`components/ota/ota.c`,
 `components/ota/ota_rollback.c`). The quoted strings were then confirmed by
 rendering the firmware-update card in the webapp's own test environment
-(vitest and jsdom) against a stubbed release index and a mocked node, walking
-the confirm, progress, reboot, success, downgrade, index-failure, and
-install-failure states.
+(vitest and jsdom) against a mocked node and a release index holding the
+release data actually published on the update server, walking the confirm,
+progress, reboot, success, downgrade, index-failure, and install-failure
+states.
 
 What that does not cover: no real image was downloaded to real hardware for
 this page, and the published-artifact statements above are a snapshot of

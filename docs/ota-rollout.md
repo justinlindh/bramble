@@ -63,19 +63,23 @@ needs none of it.
 
 ## A) Production rollout (official origin)
 
-The default origin is `https://bramblemesh.org/ota/`. CI publishes signed
-artifacts there; the index at `https://bramblemesh.org/ota/index.json` lists
-artifact paths per release (`docs/ota-release-schema.md`). Read the current
-list from that index rather than assuming a version exists: publishing runs
-from `.github/workflows/firmware-build.yml`, which is `workflow_dispatch`
-only, so the newest published release is not necessarily the newest tag. As
-of 2026-07-24 the newest published stable is `v1.3.10` and the index carries
-`heltec-v3`, `heltec-v4`, and `tdeck-plus` artifacts only.
+The default origin is `https://bramblemesh.org/ota/`. Signed artifacts are
+published there; the index at `https://bramblemesh.org/ota/index.json` lists
+artifact paths per release (`docs/ota-release-schema.md`).
+
+Publishing is a deliberate manual step, not a consequence of tagging a
+release: `.github/workflows/firmware-build.yml` is `workflow_dispatch` only,
+and the ref it is dispatched on picks the channel (a `firmware-v*` tag
+publishes to `stable`, any other ref such as `main` publishes to `dev`). The
+newest published release is therefore not necessarily the newest tag, so read
+the current list from the index rather than assuming a version exists. As of
+2026-07-24 the newest published stable is `v1.5.15`, published the same day,
+with a complete artifact set for all four boards.
 
 Trigger the update with the artifact path relative to the origin:
 
 ```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.3.10/heltec-v3/bramble.bin"}}' \
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.5.15/heltec-v3/bramble.bin"}}' \
   | websocat -n1 "ws://192.0.2.179/ws?token=$TOKEN"
 ```
 
@@ -135,7 +139,7 @@ checkbox on the confirm step; over RPC it is the `allow_downgrade` flag. For
 a deliberate downgrade:
 
 ```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.3.9/heltec-v3/bramble.bin","allow_downgrade":true}}' \
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.3.10/heltec-v3/bramble.bin","allow_downgrade":true}}' \
   | websocat -n1 "ws://192.0.2.179/ws?token=$TOKEN"
 ```
 
