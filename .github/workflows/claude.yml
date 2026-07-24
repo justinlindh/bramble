@@ -118,8 +118,9 @@ jobs:
           # Deliberately absent, and each for a reason worth keeping:
           #   git push / gh pr merge / gh api  - can mutate the repo or its
           #     metadata. gh api in particular is a full write surface.
-          #   make - the Makefile's mirror-github target force-pushes and
-          #     iterates $(HOME)/src/*.
+          #   make - every recipe is arbitrary local execution (toolchain
+          #     installs, image builds, flashing attached hardware), which is
+          #     the same escape hatch as the interpreter entries below.
           #   curl / wget - outbound network.
           #   python3 / node / awk / sed - these look like analysis tools but
           #     each is an arbitrary-execution escape hatch that reaches the

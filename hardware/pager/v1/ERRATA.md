@@ -24,12 +24,12 @@ and the `DESIGN.md` do-not-regress invariants.
   brings up and TXs cleanly at 2.7V on a first article; if not, try 3.0V. Bench against a
   known-good Heltec V3 for a reference RSSI.
 
-- **Heltec V3 fleet DIO2 RF-switch A/B test pending (Gitea issue #181).** The
-  `radio_dio2_rf_switch` flag (one-time 0x9D `SetDio2AsRfSwitchCtrl` at init) is blocking
-  for this board and must be bench-verified before ordering. Separately, run the A/B on a
+- **Heltec V3 fleet DIO2 RF-switch A/B test pending.** The `radio_dio2_rf_switch` flag
+  (one-time 0x9D `SetDio2AsRfSwitchCtrl` at init) is blocking for this board and must be
+  bench-verified before ordering. Separately, run the A/B on a
   Heltec V3 (fixed-peer RSSI with the flag on vs off): Meshtastic sets it for V3 and
   Bramble does not, so this may be a latent fleet TX bug worth chasing regardless of the
-  pager. The fleet-wide A/B is tracked as Gitea issue #181.
+  pager. The fleet-wide A/B needs bench hardware and is still outstanding here.
 
 - **freerouting headless hangs.** The headless freerouting run hangs on this project. Use
   the KiCad GUI autorouter manually, or run the freerouting jar under a `timeout` wrapper

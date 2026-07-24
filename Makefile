@@ -2,7 +2,7 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 .PHONY: help setup-hooks ci check-fast ci-quality ci-firmware-quality ci-webapp-quality \
-	ci-quality-host-tests ci-quality-shellcheck ci-quality-actionlint ci-quality-ruff ci-quality-clang-format ci-quality-cppcheck ci-quality-board-build \
+	ci-quality-host-tests ci-quality-shellcheck ci-quality-ruff ci-quality-clang-format ci-quality-cppcheck ci-quality-board-build \
 	ci-fw-clang-format ci-fw-shellcheck ci-fw-actionlint \
 	ci-web-lint ci-web-typecheck ci-web-typecheck-electron ci-web-unit ci-web-build ci-web-smoke
 
@@ -35,21 +35,10 @@ package-android: ## Sync webapp into the Android shell repo and build the APK
 
 package-all: package-linux package-android ## Everything installable (win excluded; see package-win)
 
-.PHONY: flash-fleet mirror-github
+.PHONY: flash-fleet
 
 flash-fleet: ## Flash every connected bench node (auto-applies the V3 --encrypt rule)
 	bash scripts/flash-fleet.sh build
-
-# GitHub is canonical. These mirrors are manual-refresh copies pushed from the
-# local checkouts; nothing reads back from them.
-MIRROR_REPOS ?= bramble bramble-android bramble-go bramble-cli bramblemesh.org-site
-mirror-github: ## Force-push all family repos to their private GitHub mirrors
-	@for r in $(MIRROR_REPOS); do \
-		echo "== $$r =="; \
-		git -C $(HOME)/src/$$r fetch -q origin && \
-		git -C $(HOME)/src/$$r push --force github 'refs/remotes/origin/*:refs/heads/*' && \
-		git -C $(HOME)/src/$$r push --force github --tags; \
-	done
 
 help:
 	@echo "Setup"
@@ -57,9 +46,9 @@ help:
 	@echo "                          # see CONTRIBUTING.md"
 	@echo "CI parity targets"
 	@echo "  make ci                 # run all local CI parity checks"
-	@echo "  make ci-quality         # parity for .gitea/workflows/quality.yml"
-	@echo "  make ci-firmware-quality# parity for .gitea/workflows/firmware-quality.yml"
-	@echo "  make ci-webapp-quality  # parity for .gitea/workflows/webapp-quality.yml"
+	@echo "  make ci-quality         # host tests, board build, broader script sweep"
+	@echo "  make ci-firmware-quality# the strict lint gates CI runs in Static checks"
+	@echo "  make ci-webapp-quality  # webapp lint, typecheck, unit tests, build, smoke"
 	@echo "  make check-fast         # webapp typecheck + unit tests (what the pre-commit hook runs)"
 	@echo "Packaging targets"
 	@echo "  make package-linux      # Electron AppImage + deb + pacman (webapp/release/)"
@@ -72,7 +61,7 @@ check-fast: ci-web-typecheck ci-web-typecheck-electron ci-web-unit
 
 ci: ci-quality ci-firmware-quality ci-webapp-quality
 
-ci-quality: ci-quality-host-tests ci-quality-shellcheck ci-quality-actionlint ci-quality-ruff ci-quality-clang-format ci-quality-cppcheck ci-quality-board-build
+ci-quality: ci-quality-host-tests ci-quality-shellcheck ci-quality-ruff ci-quality-clang-format ci-quality-cppcheck ci-quality-board-build
 
 ci-quality-host-tests:
 	bash test/run_all_tests.sh
@@ -85,13 +74,8 @@ ci-quality-shellcheck:
 		scripts/flash-all.sh \
 		scripts/publish-firmware-release.sh \
 		scripts/sha256-artifacts.sh \
-		scripts/test-ota-ci-board-matrix.sh \
 		scripts/traffic-capture.sh \
 		scripts/validate-broadcast-telemetry.sh
-
-ci-quality-actionlint:
-	command -v actionlint >/dev/null
-	actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/quality.yml
 
 ci-quality-ruff:
 	command -v uvx >/dev/null
@@ -116,11 +100,13 @@ ci-fw-clang-format:
 ci-fw-shellcheck:
 	bash scripts/lint/run-shellcheck.sh --strict
 
+# Mirrors the "Actionlint (every workflow)" step in firmware-quality.yml: the
+# glob is the point, so a workflow added later is covered by construction.
 ci-fw-actionlint:
 	if command -v actionlint >/dev/null; then \
-		actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml; \
+		actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .github/workflows/*.yml; \
 	else \
-		go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml; \
+		go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .github/workflows/*.yml; \
 	fi
 
 ci-webapp-quality: ci-web-lint ci-web-typecheck ci-web-typecheck-electron ci-web-unit ci-web-build ci-web-smoke

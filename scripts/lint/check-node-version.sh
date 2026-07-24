@@ -13,10 +13,6 @@
 # Moving Node is a deliberate act: edit `.nvmrc`, then update every file this
 # script names. The major lives in exactly one place, so a bump never means
 # editing this script.
-#
-# Not covered on purpose: `.gitea/workflows/**` is a frozen mirror-side copy
-# that is not maintained (see docs/ci.md, "Dual-tree arrangement"), so it is
-# excluded rather than edited.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
