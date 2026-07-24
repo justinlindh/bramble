@@ -115,10 +115,17 @@ jobs:
             main components
       - name: RPC contract (spec vs firmware registry)
         run: bash scripts/check-rpc-contract.sh
-      - name: Actionlint (PR-gating workflows)
+      - name: Actionlint (every workflow)
+        # A glob, not a hand-maintained file list. The list this replaced named
+        # four workflows, so every other one (the release, publish, review-bot,
+        # commit-lint, PR-template, and watchdog workflows, and any workflow
+        # added later) was never linted at all. That is worse than it sounds:
+        # `ci_core` deliberately excludes non-gating workflows from the heavy
+        # suites, so a PR touching only an unlinted workflow got no automated
+        # validation of it whatsoever, and a YAML or expression error there
+        # produces NO check run, which branch protection cannot tell apart from
+        # a check still pending (see docs/ci.md). Globbing means a new workflow
+        # is covered by construction instead of by remembering to extend a list.
         run: |
           actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml \
-            .github/workflows/_detect-changes.yml \
-            .github/workflows/quality.yml \
-            .github/workflows/firmware-quality.yml \
-            .github/workflows/webapp-quality.yml
+            .github/workflows/*.yml

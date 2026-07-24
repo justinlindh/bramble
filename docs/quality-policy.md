@@ -23,7 +23,7 @@ the full job topology and the always-report contract.
   - cppcheck (`--error-exitcode=2`, blocking)
   - RPC contract check (`bash scripts/check-rpc-contract.sh`: `api/openapi.yaml` vs the firmware registry in `main/rpc_methods.c`)
   - Markdownlint (`bash scripts/lint/run-markdownlint.sh`, issue #160): `markdownlint-cli2` against the root `.markdownlint-cli2.yaml` config, over every tracked markdown file. The runner image bakes the tool (issue #222, image 1.2.0); the script asserts the PATH binary matches its pinned version and fails loud on drift, falling back to a pinned `npx --yes markdownlint-cli2@0.23.1` only where no binary is on PATH
-  - Actionlint over the four gating workflow files
+  - Actionlint over every workflow file
 - `Host tests` (`bash test/run_all_tests.sh`, `quality.yml`)
 - `Parser fuzzing` (`bash test/fuzz/run_fuzz.sh`, `quality.yml`): a 30-second-per-target libFuzzer campaign, under ASan and UBSan, over the wire-frame parsers in `components/packet/packet.c` and the fragment reassembler. Both harnesses start from committed seed corpora (`test/fuzz/corpus/`) built from the host suites' own test vectors. Requires `clang` with libFuzzer on the runner image; the job asserts the toolchain is present and fails hard when it is not, because a skip here would be an advisory check in disguise.
 - `Release config` (`node scripts/release/semantic-release-squash-expander.test.cjs`, `quality.yml`): the release-rule scope-gating regression, run against the real `.releaserc.<component>.cjs` files, so a config change that would silently stop every component release fails the PR
@@ -189,7 +189,7 @@ bash scripts/lint/run-shellcheck.sh --strict
 bash test/fuzz/run_fuzz.sh                    # same 30s/target budget as CI
 FUZZ_SECONDS=600 bash test/fuzz/run_fuzz.sh   # longer local campaign
 bash test/fuzz/run_fuzz.sh --regen-corpus     # after a wire-format change
-actionlint -color -oneline -config-file .actionlint.yaml .github/workflows/firmware-quality.yml
+actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .github/workflows/*.yml
 
 bash scripts/lint/check-no-internal-refs.sh
 bash scripts/lint/check-no-em-dash.sh

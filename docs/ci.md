@@ -22,6 +22,12 @@ their own events and do not gate normal PRs. Desktop installers (Linux,
 Windows, macOS) are built and attached to webapp releases by
 `release-components.yml` itself.
 
+Two housekeeping workflows (`burst-runner-watchdog.yml`, `cache-cleanup.yml`)
+also sit outside the gating set: they keep CI's shared resources healthy,
+report no context, and gate nothing. See
+[Cache budget hygiene](#cache-budget-hygiene) for what the second one does and
+why it has to exist.
+
 ## Trigger rules: the PR is the single gate
 
 All three gating workflows use the same `on:` block:
@@ -245,7 +251,7 @@ the detector here was worse than merely useless.
 preserve a former standalone job's exact command: no-internal-refs, no-em-dash,
 markdownlint (issue #160), the board-matrix coverage check, strict shellcheck,
 ruff baseline, strict clang-format, cppcheck, the rpc-contract check, and
-actionlint over the four gating workflow files. Each check is its own step so
+actionlint over every workflow file. Each check is its own step so
 a failure attributes to the exact tool in the UI. It has no `if:` because it is
 THE universal gate: it must run (and report) on every PR, including a docs-only
 PR where it is the only job that executes. The individual checks are cheap and
@@ -557,6 +563,48 @@ no-advisory-tier rule, not a softened check: the step produces no
 correctness signal, nothing downstream reads its outcome, so no terminal
 fail-collector step applies. A missing accelerator must not fail a
 correctness check.
+
+## Cache budget hygiene
+
+Everything above that makes CI fast draws on one shared, finite resource: the
+repository's 10 GB GitHub Actions cache budget. The ccache entries described in
+the previous section, the `buildkit-blob` and `index-docker-*` layer cache the
+four `Docker build` legs write with `type=gha,mode=max`, and anything code
+scanning stores all come out of the same 10 GB.
+
+Cache entries are scoped to the ref that wrote them. A pull request's entries
+live under `refs/pull/<n>/merge` and can only ever be restored by that same
+pull request, and GitHub does not delete them when the pull request closes.
+Nothing here deleted them either, so they accumulated. Measured before
+`cache-cleanup.yml` existed: 10.15 GB used of 10 GB across 449 entries, 2.9 GB
+of it (29 percent) belonging to twelve pull requests that had all already
+merged. Over budget, GitHub frees space by evicting the least recently used
+entry, so those dead entries were not merely idle, they were displacing live
+ones. A cold Docker leg costs about five minutes against about 25 seconds warm,
+and a cold board build gives up everything ccache is there for, so the failure
+mode was not "no caching" but "caching that works until it randomly does not",
+which is considerably harder to notice.
+
+`cache-cleanup.yml` reclaims that space. It purges a pull request's caches on
+`pull_request_target: [closed]`, and a daily sweep re-derives the whole dead
+set from the live cache listing and each pull request's current state. The
+sweep is not a backstop for a broken primary path, it is the reconciliation
+half of the design: a run still in flight when its pull request merges writes
+its cache after the close event, and no event-driven purge can catch that.
+
+Two things about it are deliberate. It uses `pull_request_target` rather than
+`pull_request` because deleting a cache entry needs `actions: write`, which a
+fork's `pull_request` token does not grant; it is safe here only because the
+workflow never checks out or executes repository code, and that property has to
+hold for any future edit to it. And it runs on `ubuntu-latest`, never
+`vars.RUNNER_LABEL`, because a job whose purpose is relieving CI pressure must
+not queue behind the pool it is relieving.
+
+It gates nothing and reports no required context, the same as
+`burst-runner-watchdog.yml`. The no-advisory-tier rule governs checks; this
+produces no correctness signal. It still fails loudly rather than warning,
+because a silent failure would let the budget refill unnoticed, which is the
+condition it exists to prevent.
 
 ## Dual-tree arrangement: .github is authoritative, .gitea is a frozen mirror
 

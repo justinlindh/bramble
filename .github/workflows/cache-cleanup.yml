@@ -1,0 +1,183 @@
+name: Cache cleanup
+
+# Reclaims GitHub Actions cache quota held by pull requests that are already
+# closed.
+#
+# WHY THIS EXISTS. A repository gets one 10 GB Actions cache budget, shared by
+# every cache consumer: the per-board and emulator `ccache-*` entries the
+# firmware builds restore, the `buildkit-blob` / `index-docker-*` layer cache
+# the four Docker legs write with `type=gha,mode=max`, and anything code
+# scanning stores. Cache entries are scoped to the ref that wrote them, so a
+# pull request's entries live under `refs/pull/<n>/merge` and can only ever be
+# restored by that same pull request. GitHub never deletes them when the pull
+# request closes; they sit in the budget until they are evicted or removed by
+# hand.
+#
+# Nothing removed them here, so they accumulated. Measured on this repository
+# before this workflow existed: 10.15 GB of 10 GB used across 449 entries, of
+# which 2.9 GB (29 percent) belonged to twelve pull requests that had all
+# already merged. Over budget, GitHub frees space by evicting the least
+# recently used entry, so those dead entries were not merely idle: every new
+# cache write displaced a live one. That is a direct tax on the two
+# accelerators this repository deliberately invested in, the ESP-IDF ccache
+# keyed per board and the Docker layer cache (a cold Docker leg costs about
+# five minutes against about 25 seconds warm), and it makes those savings look
+# unreliable rather than absent, which is the hardest kind of regression to
+# notice.
+#
+# HOUSEKEEPING, NOT A CHECK. This workflow gates nothing and reports no
+# required context, exactly like `burst-runner-watchdog.yml`. The no-advisory-
+# tier rule in docs/quality-policy.md governs checks; this produces no
+# correctness signal. It still fails loudly rather than warning, because a
+# silent failure would let the budget refill unnoticed, which is the condition
+# it exists to prevent.
+
+on:
+  # A closed pull request's caches are unreachable the moment it closes, so
+  # reclaim them immediately rather than waiting for the daily sweep.
+  #
+  # pull_request_target, not pull_request, on purpose: deleting a cache entry
+  # needs `actions: write`, and a `pull_request` run from a fork gets a
+  # read-only token, so the cleanup would 403 on exactly the contributions
+  # least likely to be cleaned up any other way. The usual danger of
+  # pull_request_target is that it grants a write token to a workflow that then
+  # checks out and executes the pull request's code. This one never checks out
+  # anything and never runs repository code: it reads one integer from the
+  # event payload and calls the REST API. The workflow definition itself is
+  # always read from the base branch, so a pull request cannot alter what runs.
+  pull_request_target:
+    types: [closed]
+  # Reconciliation sweep. The event above can miss entries in two ordinary
+  # ways: a run still in flight when the pull request merged writes its cache
+  # after the purge, and any pull request closed before this workflow existed
+  # was never purged at all. Rather than treat either as a gap to chase, the
+  # sweep re-derives the whole dead set from the live cache list and the pull
+  # requests' current states, so the steady state is self-correcting.
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Enumerating and deleting cache entries.
+  actions: write
+  # Reading each pull request's state during the sweep.
+  pull-requests: read
+
+concurrency:
+  # One cleanup at a time. Two concurrent runs would race on the same entries
+  # and the loser would fail on an already-deleted id.
+  group: cache-cleanup
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  purge:
+    name: Purge caches for closed pull requests
+    # GitHub-hosted, never vars.RUNNER_LABEL. This job exists to relieve
+    # pressure on CI, so it must not queue behind the saturated self-hosted
+    # pool it is trying to help, and it does nothing a pool pod is needed for:
+    # no checkout, no build, just REST calls.
+    runs-on: ubuntu-latest
+    # Deletions are a handful of API calls. A hung run must not hold the
+    # concurrency group (cancel-in-progress is false) for the 360-minute
+    # default and stall the next scheduled sweep.
+    timeout-minutes: 10
+    steps:
+      - name: Purge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          CLOSED_PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          freed_total=0
+          deleted_total=0
+
+          # Delete every cache entry scoped to one ref, reporting the bytes
+          # reclaimed. The list is re-read per ref rather than filtered from a
+          # single global listing so a large repository never has to hold every
+          # entry in memory to purge one pull request.
+          purge_ref() {
+            local ref="$1"
+            local id size freed=0 deleted=0
+
+            # Load-bearing guard, not a sanity check. The API treats an EMPTY
+            # `ref=` query value as no filter at all and returns every cache in
+            # the repository (verified against the live API: `ref=` returns the
+            # full listing, a valid ref returns only its own entries, an
+            # unknown ref returns an empty list). So the blast radius of any
+            # future edit that let an unset pull request number reach this
+            # function is the entire cache, not one pull request's. Refuse
+            # anything that is not exactly the ref shape this workflow purges,
+            # and fail the run rather than continue.
+            if [[ ! "${ref}" =~ ^refs/pull/[0-9]+/merge$ ]]; then
+              echo "::error::refusing to purge unexpected ref '${ref}'"
+              return 1
+            fi
+
+            while IFS=$'\t' read -r id size; do
+              [ -n "${id:-}" ] || continue
+              gh api -X DELETE "/repos/${REPO}/actions/caches/${id}" --silent
+              freed=$(( freed + size ))
+              deleted=$(( deleted + 1 ))
+            done < <(gh api --paginate \
+              "/repos/${REPO}/actions/caches?per_page=100&ref=${ref}" \
+              --jq '.actions_caches[] | [.id, .size_in_bytes] | @tsv')
+
+            freed_total=$(( freed_total + freed ))
+            deleted_total=$(( deleted_total + deleted ))
+            printf '%s: deleted %d entries, %d bytes\n' "${ref}" "${deleted}" "${freed}"
+          }
+
+          if [ "${EVENT}" = "pull_request_target" ]; then
+            echo "Pull request #${CLOSED_PR} closed; purging its caches."
+            purge_ref "refs/pull/${CLOSED_PR}/merge"
+          else
+            echo "Sweep: reconciling every pull-request-scoped ref against its current state."
+
+            # Every distinct pull-request ref that currently holds a cache.
+            # `|| true` covers the legitimate empty case: grep exits 1 when the
+            # repository has no pull-request-scoped entries left, which is the
+            # steady state this workflow is driving toward, not a failure.
+            mapfile -t refs < <(gh api --paginate \
+              "/repos/${REPO}/actions/caches?per_page=100" \
+              --jq '.actions_caches[].ref' \
+              | sort -u | grep -E '^refs/pull/[0-9]+/merge$' || true)
+
+            echo "Pull-request refs holding caches: ${#refs[@]}"
+
+            for ref in "${refs[@]}"; do
+              num="${ref#refs/pull/}"
+              num="${num%/merge}"
+              # `state` is open or closed; a merged pull request reports
+              # closed, which is what matters here (its ref is unreachable
+              # either way). An API error is a real failure and stops the run
+              # rather than being guessed past: deleting a live pull request's
+              # cache would silently cost it a cold build.
+              state="$(gh api "/repos/${REPO}/pulls/${num}" --jq '.state')"
+              if [ "${state}" = "closed" ]; then
+                purge_ref "${ref}"
+              else
+                echo "${ref}: pull request #${num} is ${state}; keeping its caches."
+              fi
+            done
+          fi
+
+          usage="$(gh api "/repos/${REPO}/actions/cache/usage" \
+            --jq '[.active_caches_size_in_bytes, .active_caches_count] | @tsv')"
+          size_now="$(printf '%s' "${usage}" | cut -f1)"
+          count_now="$(printf '%s' "${usage}" | cut -f2)"
+
+          {
+            echo "### Actions cache cleanup"
+            echo
+            echo "Deleted **${deleted_total}** entries, reclaiming **$(( freed_total / 1048576 )) MiB**."
+            echo
+            echo "Cache now holds ${count_now} entries totalling $(( size_now / 1048576 )) MiB of the 10 GB budget."
+          } >> "$GITHUB_STEP_SUMMARY"
