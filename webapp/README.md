@@ -24,7 +24,7 @@ npm run dev
 That serves the client on <http://localhost:5173/>. `npm ci` is required
 first: without `node_modules` the dev server does not start at all.
 
-Node.js 20 or newer is required, which is what CI builds and tests with. The
+Node.js 24 or newer is required, which is what CI builds and tests with. The
 repo root ships an [`.nvmrc`](../.nvmrc), so `nvm use` from the root selects a
 matching version.
 

@@ -14,9 +14,8 @@
 # version must MATCH the pin below: a silently different linter version is
 # image drift, and drift fails loud here rather than producing findings (or
 # passes) that no local run can reproduce. Environments without the bake fall
-# back to the same pinned version via npx. The package's declared engines
-# (node >=22) versus the image's node 20 is an EBADENGINE warning only,
-# verified to run correctly.
+# back to the same pinned version via npx. The package declares engines
+# node >=22, which the repo's pinned Node major satisfies.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"

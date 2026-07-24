@@ -185,9 +185,18 @@ updates:
   # trigger a heavy rebuild, so these follow the same monthly, staggered,
   # minor-and-patch-grouped pattern as npm and gomod, with majors left
   # individual. Note that most of these tags float at major or minor
-  # granularity (node:22-slim, golang:1.25-bookworm, debian:bookworm), so in
+  # granularity (node:24-slim, golang:1.25-bookworm, debian:bookworm), so in
   # practice the grouped bucket mostly catches golang minor moves and the
   # interesting updates arrive as ungrouped majors, which is the intent.
+  #
+  # A Node major bump arrives here as one of those ungrouped majors, and it
+  # will fail CI on its own until .nvmrc moves with it: .nvmrc is the single
+  # source of truth for the Node major and scripts/lint/check-node-version.sh
+  # gates every reference against it. That red check is the intended
+  # behavior, not a broken bot. Merging a Node major means editing .nvmrc
+  # plus every file that check names, which is a human decision (the previous
+  # unattended bump is how the published image ended up on a different major
+  # than every CI job and the desktop installers).
   #
   # Only FROM lines are tracked. emulator/Dockerfile also git-clones ESP-IDF
   # via an IDF_VERSION build arg, which Dependabot cannot see, so that pin

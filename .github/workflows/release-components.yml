@@ -67,6 +67,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Node.js
+        # Pinned for the same reason as the installer jobs: without it this
+        # job runs semantic-release on whatever Node the runner image happens
+        # to carry, which is the drift this repo just spent a change removing.
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
       - name: Install release dependencies
         run: |
           npm install --no-save \
@@ -273,6 +281,16 @@ jobs:
           # requested tag itself.
           ref: ${{ inputs.webapp_installers_tag || github.sha }}
 
+      - name: Setup Node.js
+        # Without this the job builds on whatever Node the
+        # electronuserland/builder:wine tag happens to ship, which is nobody's
+        # decision and drifts under us. Pin it to the repo's Node major
+        # (.nvmrc) so the Linux/Windows installers, the mac dmgs and the
+        # container image are all produced by the same runtime.
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
       - name: Resolve version from tag
         id: ver
         run: |
@@ -374,7 +392,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Resolve version from tag
         id: ver
