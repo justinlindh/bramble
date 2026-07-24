@@ -5,7 +5,7 @@
   "description": "Root package that pins the semantic-release toolchain the release pipeline runs. Not an application: the webapp keeps its own package.json under webapp/, and nothing in this file is published to a registry. It exists so .github/workflows/release-components.yml and the Release config job in .github/workflows/quality.yml install identical, lockfile-resolved versions instead of re-resolving every transitive dependency on each push to main.",
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",
-    "@semantic-release/github": "^11.0.6",
+    "@semantic-release/github": "^12.0.9",
     "@semantic-release/release-notes-generator": "^14.1.0",
     "conventional-changelog-conventionalcommits": "^10.2.1",
     "semantic-release": "^24.2.9"
