@@ -51,13 +51,25 @@ jobs:
         with:
           node-version: 20
       - name: Install dependencies (lockfile-safe)
-        # One npm ci for the whole job: lint, both typechecks, unit tests, the
-        # build, and the e2e smoke run all reuse this single install and the
-        # single build output below (no second install, no second build).
+        # One npm ci for the whole job: both typechecks, unit tests, the build,
+        # and the e2e smoke run all reuse this single install and the single
+        # build output below (no second install, no second build).
         run: npm ci --prefix webapp
-      - name: Lint
-        run: npm run lint --prefix webapp
       - name: Typecheck
+        # THE tsc --noEmit run for this job, exactly one. It used to be three.
+        # webapp/package.json defines `lint` as a bare alias for `typecheck`,
+        # and `build` as `npm run typecheck && vite build`, so the former
+        # Lint / Typecheck / Build sequence invoked the identical
+        # `tsc --noEmit` three times over one checkout and one install. Two of
+        # those were pure cost on a small self-hosted pool, which is the
+        # duplicated-work rule in docs/quality-policy.md.
+        #
+        # The Lint step is gone rather than renamed: there is no eslint,
+        # biome, prettier, or any other linter in webapp/ (no config file, no
+        # dependency), so the step never linted anything and its name asserted
+        # a gate that does not exist. Adding a real linter is a separate
+        # decision, not a rename; until someone makes it, this job typechecks
+        # and does not claim otherwise.
         run: npm run typecheck --prefix webapp
       - name: Electron typecheck
         run: npm run typecheck:electron --prefix webapp
@@ -93,7 +105,14 @@ jobs:
           npm ci
           bash ci-smoke.sh
       - name: Build webapp
-        run: npm run build --prefix webapp
+        # vite directly, not `npm run build`, because that script is
+        # `npm run typecheck && vite build` and the Typecheck step above
+        # already ran that exact tsc over this same checkout and install. The
+        # emitted bundle is identical either way; only the redundant typecheck
+        # is dropped. `npm run build` keeps its typecheck for local use, where
+        # nothing ran tsc beforehand.
+        working-directory: webapp
+        run: npx vite build
       - name: E2E smoke (reuses the build above)
         env:
           SMOKE_MAX_WAIT_SECONDS: '90'

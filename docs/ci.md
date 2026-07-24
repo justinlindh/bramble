@@ -454,10 +454,25 @@ self-hosted pool.
 | `Webapp checks` | `webapp`, `api`, `coverage_tooling`, or `ci_core` | yes |
 | `web-flasher tests` | `web_flasher` or `ci_core` | yes |
 
-`Webapp checks` is one job with a single `npm ci`, then lint, typecheck, electron
+`Webapp checks` is one job with a single `npm ci`, then typecheck, electron
 typecheck, unit tests, build, and the e2e smoke run as sequential steps. The smoke
 run reuses the build produced earlier in the same job, so there is no second
-`npm ci` and no second build. `web-flasher tests` stays separate because it runs
+`npm ci` and no second build, and `tsc --noEmit` runs exactly once.
+
+That last part was not true until recently, and the reason is a trap worth
+naming: `webapp/package.json` defines `lint` as a bare alias for `typecheck`,
+and `build` as `npm run typecheck && vite build`. A job with separate Lint,
+Typecheck, and Build steps therefore ran the identical `tsc --noEmit` three
+times. The build step now calls `vite` directly (verified to emit a
+byte-identical `dist/`), leaving the one explicit Typecheck step, which is
+where a type failure should attribute anyway.
+
+There is deliberately no lint step. The webapp has no linter: no eslint,
+biome, or prettier config, and no such dependency. The former Lint step ran
+the typecheck alias and was removed rather than renamed, because a step named
+for a gate that does not exist is worse than no step. Adding a real linter is
+an open decision, not a rename, and this page will say so only once one
+exists. `web-flasher tests` stays separate because it runs
 `node --test web-flasher/` with no webapp install.
 
 ## What a docs-only (or review-bot-config) PR looks like now
