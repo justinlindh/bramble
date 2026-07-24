@@ -1,6 +1,7 @@
 // Read-side telemetry: status, airtime, neighbors, routes, peer locations,
 // and the traffic monitor (debug status, event decode, live event feed).
-import { session, parseHexAddr } from './client';
+import { session } from './client';
+import { parseAddr } from '../../lib/addr';
 import { useStore } from '../index';
 import type { NodeStatus, AirtimeStatus, AirtimeTier, Neighbor, Route, PeerLocation, TrafficEvent, TrafficDebugStatus } from '../../types/bramble';
 import type { RpcSchemas, WirePartial } from '../../types/rpc';
@@ -120,10 +121,6 @@ export async function loadRoutes(): Promise<void> {
   useStore.getState().setRoutes(result.routes ?? []);
 }
 
-export async function refreshNeighbors(): Promise<void> {
-  await loadNeighbors();
-}
-
 export function showOnMap(addr: number): void {
   const store = useStore.getState();
   store.setMapFocusAddr(addr);
@@ -149,7 +146,7 @@ type LocationPeerWire = WirePartial<Omit<RpcSchemas['LocationPeer'], 'position'>
 };
 
 function normalizePeerLocation(raw: LocationPeerWire | null | undefined): PeerLocation {
-  const addr = parseHexAddr(raw?.addr ?? raw?.address);
+  const addr = parseAddr(raw?.addr ?? raw?.address);
   const rawPos = raw?.position;
   const position = rawPos
     ? {

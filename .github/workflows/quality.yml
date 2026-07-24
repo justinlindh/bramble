@@ -314,7 +314,13 @@ jobs:
       needs.detect.outputs.idf_build_scripts == 'true' ||
       needs.detect.outputs.ci_core == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    timeout-minutes: 25
+    # Sized for the scenario suite's starvation headroom, not the healthy
+    # path: emu-dm-desync may legitimately use up to ~21 min of wall clock on
+    # a CPU-starved pod (see the budget comment in
+    # emulator/ci/run_scenarios.sh) on top of the builds, the other
+    # scenarios, and the browser E2E. A healthy run still completes in
+    # roughly 6 to 8 minutes.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - name: Mark workspace safe for git inside the job container

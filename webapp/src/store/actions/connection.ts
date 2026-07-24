@@ -27,7 +27,6 @@ import {
   loadAirtime,
   loadStatus,
   loadPeerLocations,
-  refreshNeighbors,
   handleLocationUpdate,
   handleTrafficEvent,
 } from './telemetry';
@@ -224,7 +223,7 @@ export async function connect(
     // self position only appears after a manual reload.
     session.client.subscribe('bramble.onGpsEvent', () => { loadPeerLocations().catch(() => {}); });
     session.client.subscribe('delivery.update', (params) => handleDeliveryUpdate(params));
-    session.client.subscribe('bramble.onNeighborChange', () => refreshNeighbors());
+    session.client.subscribe('bramble.onNeighborChange', () => loadNeighbors());
     // NOTE: no firmware build emits bramble.onRouteUpdate today (nothing in
     // main/ or components/ calls rpc_notify with it, and it is absent from
     // api/openapi.yaml). Kept for forward compatibility, but route freshness

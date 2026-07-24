@@ -236,6 +236,19 @@ int msg_store_count(void) {
 
 uint32_t msg_store_total_incoming(void) { return s_total_incoming; }
 
+uint32_t msg_store_count_outgoing_delivered(void) {
+    uint32_t c = 0;
+    MSG_LOCK();
+    int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+    for (int i = 0; i < s_count; i++) {
+        const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
+        if (m->direction == MSG_DIR_OUTGOING && m->status == MSG_STATUS_DELIVERED)
+            c++;
+    }
+    MSG_UNLOCK();
+    return c;
+}
+
 const stored_msg_t* msg_store_get(int index) {
     if (index < 0 || index >= s_count)
         return NULL;

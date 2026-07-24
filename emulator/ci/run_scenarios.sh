@@ -342,8 +342,25 @@ dm_suite() {
     # time it needed. Polling makes a healthy box exit at ~90s while a
     # starved one keeps its full subjective schedule; a genuine regression
     # still simply never produces the markers and times out.
-    local budget_s="${EMU_DM_BUDGET_S:-420}"
-    local sim_ms="${EMU_DM_SIM_CAP_MS:-420000}"
+    #
+    # SIZE THE BUDGET AS A STARVATION MULTIPLE, NOT A DURATION. Both knobs
+    # are wall clock (gosim runs the firmware in real time), and the markers
+    # land by ~90 subjective seconds, so budget/90 is the starvation factor
+    # this gate survives. The previous 420s pair gave ~4.7x over that
+    # schedule, thinner than the ~12x channel_suite has run at since its
+    # redesign (180s over a ~15s render schedule) with zero false fails;
+    # 1200s puts this gate in the same margin class, since the historical
+    # IO-storm starvation (~4x observed) left no headroom at 4.7x. Cost on a
+    # healthy box: none (it still exits at ~90s); cost on a genuine
+    # regression: red after 20 min instead of 7. The outer budget runs 30s
+    # past the cap so a capped run self-exits cleanly and flushes its final
+    # frames before timeout SIGTERMs it, mirroring channel_suite's 180/150
+    # gap. Note the 2026-07-23 gate failures were NOT this budget: they were
+    # the phase-2 queue-eviction race fixed in emulator/node/emu_autosend.c
+    # (ALPHA evicted from the awaiting-session queue before the KE handshake
+    # completed, making the render impossible in any budget).
+    local budget_s="${EMU_DM_BUDGET_S:-1230}"
+    local sim_ms="${EMU_DM_SIM_CAP_MS:-1200000}"
     local scen="$SCEN_DIR/emu-dm-desync.json"
     [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
     local DM_LOG; DM_LOG="$LOG_DIR/emu-emu-dm-desync-$(date +%s).log"

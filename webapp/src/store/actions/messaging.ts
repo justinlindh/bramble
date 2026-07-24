@@ -1,7 +1,7 @@
 // Messaging: the message store lifecycle, firmware message merge, send paths,
 // delivery-event replay and correlation, broadcast telemetry, probe flows,
 // incoming-message handling, and native notifications.
-import { session, LAST_NODE_ADDR_KEY, parseHexAddr } from './client';
+import { session, LAST_NODE_ADDR_KEY } from './client';
 import { useStore, conversationIdForMessage } from '../index';
 import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
@@ -518,7 +518,7 @@ function applyBroadcastDelivery(event: BroadcastDeliveryNotification): void {
   }
 
   const recipient = {
-    addr: parseHexAddr(event.from),
+    addr: parseAddr(event.from),
     status: event.status,
     hopCount: event.hopCount ?? 0,
     deliveredAtMs: event.deliveredAtMs ?? Date.now(),

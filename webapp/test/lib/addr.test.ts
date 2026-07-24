@@ -25,4 +25,24 @@ describe('parseAddr', () => {
   it('defaults undefined to 0', () => {
     expect(parseAddr(undefined)).toBe(0);
   });
+
+  it('strips a 0x prefix', () => {
+    expect(parseAddr('0xDEADBEEF')).toBe(0xDEADBEEF);
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(parseAddr('  DEADBEEF  ')).toBe(0xDEADBEEF);
+  });
+
+  it('treats an all-decimal-digit string as hex, not decimal', () => {
+    expect(parseAddr('12345678')).toBe(0x12345678);
+  });
+
+  it('defaults an empty string to 0', () => {
+    expect(parseAddr('')).toBe(0);
+  });
+
+  it('defaults an unparseable string to 0', () => {
+    expect(parseAddr('zzzz')).toBe(0);
+  });
 });

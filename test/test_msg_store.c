@@ -117,6 +117,29 @@ void test_get_copy_snapshots_message_and_bounds_check(void) {
     TEST_ASSERT_EQUAL_STRING("hello", out.text);
 }
 
+void test_count_outgoing_delivered_tracks_receipted_dms_only(void) {
+    msg_store_init();
+    TEST_ASSERT_EQUAL_UINT32(0, msg_store_count_outgoing_delivered());
+
+    /* Outgoing DM, transmitted but not yet receipted: not counted. */
+    msg_store_add_ex(0x1111, MSG_DIR_OUTGOING, "dm1", 3, 0, 0, 101, MSG_STATUS_SENT);
+    TEST_ASSERT_EQUAL_UINT32(0, msg_store_count_outgoing_delivered());
+
+    /* The delivery receipt arrives: counted. */
+    TEST_ASSERT_TRUE(msg_store_update_status(101, MSG_STATUS_DELIVERED));
+    TEST_ASSERT_EQUAL_UINT32(1, msg_store_count_outgoing_delivered());
+
+    /* Incoming and broadcast rows never count, whatever their status. */
+    msg_store_add(0x2222, MSG_DIR_INCOMING, "in", 2, -70, 5);
+    msg_store_add_ex(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, "b", 1, 0, 0, 102, MSG_STATUS_SENT);
+    TEST_ASSERT_EQUAL_UINT32(1, msg_store_count_outgoing_delivered());
+
+    /* A failed DM (retries exhausted) is not a delivery. */
+    msg_store_add_ex(0x3333, MSG_DIR_OUTGOING, "dm2", 3, 0, 0, 103, MSG_STATUS_SENT);
+    TEST_ASSERT_TRUE(msg_store_update_status(103, MSG_STATUS_FAILED));
+    TEST_ASSERT_EQUAL_UINT32(1, msg_store_count_outgoing_delivered());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_msg_store_default_channel_index_is_minus_one);
@@ -126,5 +149,6 @@ int main(void) {
     RUN_TEST(test_total_incoming_is_monotonic_and_ignores_outgoing);
     RUN_TEST(test_ring_keeps_newest_window_at_capacity);
     RUN_TEST(test_get_copy_snapshots_message_and_bounds_check);
+    RUN_TEST(test_count_outgoing_delivered_tracks_receipted_dms_only);
     return UNITY_END();
 }

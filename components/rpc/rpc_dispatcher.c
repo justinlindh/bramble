@@ -58,36 +58,6 @@ int rpc_register_notify_transport(rpc_notify_cb_t cb, void* ctx) {
     return 0;
 }
 
-static int format_error(cJSON* id, int code, const char* message, char* json_out, size_t out_len) {
-    cJSON* resp = cJSON_CreateObject();
-    cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
-
-    cJSON* err = cJSON_CreateObject();
-    cJSON_AddNumberToObject(err, "code", code);
-    cJSON_AddStringToObject(err, "message", message);
-    cJSON_AddItemToObject(resp, "error", err);
-
-    if (id) {
-        cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id, 1));
-    } else {
-        cJSON_AddNullToObject(resp, "id");
-    }
-
-    char* out = cJSON_PrintUnformatted(resp);
-    cJSON_Delete(resp);
-    if (!out)
-        return -1;
-
-    size_t len = strlen(out);
-    if (len >= out_len) {
-        free(out);
-        return -1;
-    }
-    memcpy(json_out, out, len + 1);
-    free(out);
-    return (int)len;
-}
-
 static int format_error_with_details(cJSON* id, int code, const char* message, const char* details,
                                      char* json_out, size_t out_len) {
     cJSON* resp = cJSON_CreateObject();
@@ -120,6 +90,10 @@ static int format_error_with_details(cJSON* id, int code, const char* message, c
     memcpy(json_out, out, len + 1);
     free(out);
     return (int)len;
+}
+
+static int format_error(cJSON* id, int code, const char* message, char* json_out, size_t out_len) {
+    return format_error_with_details(id, code, message, NULL, json_out, out_len);
 }
 
 static const char* error_message_for_code(int code) {
