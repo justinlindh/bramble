@@ -19,13 +19,17 @@ defaults:
     shell: bash
 
 jobs:
-  detect:
-    name: Detect changed areas
-    uses: ./.github/workflows/_detect-changes.yml
-
+  # NO `detect` JOB HERE, DELIBERATELY. This workflow defines exactly one job
+  # and that job has no `if:`, so it has nothing to gate on: the reusable
+  # detector was called, spent a pod on a full-history checkout, computed
+  # fourteen booleans, and not one of them was ever read (`static-checks`
+  # referenced `needs.detect.outputs.*` zero times). Worse than the wasted
+  # pod, `needs:` serialized it: the universal gate, the only job that runs on
+  # a docs-only PR, could not start until that dead pod finished. If a future
+  # job here does need area gating, add the `detect` job back together with
+  # the `needs:` and the `if:` that reads it, never on its own.
   static-checks:
     name: Static checks
-    needs: detect
     # No `if:` on purpose: this single-pod bundle is THE universal gate. It runs
     # on every trigger (including docs-only PRs, where it is the ONLY job that
     # executes) so a required context always reports. The individual checks are

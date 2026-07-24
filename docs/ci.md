@@ -99,9 +99,17 @@ jobs:
 ```
 
 This replaces the three near-identical copies of the detection script that used
-to live inline in each workflow with one definition. It still runs once per
-caller (three detector pods per PR wave, one per workflow), but the diff-to-area
-mapping now lives in exactly one place.
+to live inline in each workflow with one definition. It runs once per caller
+that actually reads it, which is two detector pods per PR wave
+(`quality.yml` and `webapp-quality.yml`), and the diff-to-area mapping lives in
+exactly one place.
+
+Call it only from a workflow that gates on its outputs. `firmware-quality.yml`
+used to call it and never read a single output: its one job has no `if:`, so
+there was nothing to gate. That cost a pod on a full-history checkout per wave,
+and because the call was wired with `needs:`, it also delayed the universal
+gate, the one job that runs on a docs-only PR, behind a job whose results
+nobody read.
 
 Its `Compute changed areas` step resolves a git diff range in this order:
 
@@ -227,8 +235,11 @@ gains a new input, widen its area, not the shared `firmware` catch-all.
 
 | Job (context name) | Runs when | Required? |
 | --- | --- | --- |
-| `Detect changed areas` (via reusable `detect`) | always | no |
 | `Static checks` | always (no `if:`) | yes |
+
+One job, and no `detect` call: `Static checks` has no `if:`, so it has nothing
+to gate on. See [The reusable detector](#the-reusable-detector) for why calling
+the detector here was worse than merely useless.
 
 `Static checks` is one pod, one checkout, and a sequence of named steps that each
 preserve a former standalone job's exact command: no-internal-refs, no-em-dash,
@@ -462,9 +473,10 @@ run reuses the build produced earlier in the same job, so there is no second
 
 ## What a docs-only (or review-bot-config) PR looks like now
 
-A PR that touches only `docs/**` still triggers all three workflows. The three
+A PR that touches only `docs/**` still triggers all three workflows. The two
 `detect` jobs run (fast: a diff, no build), the `Static checks` bundle runs (one
-pod), and every other job reports `skipped`. The same holds for a PR that edits
+pod, and starts immediately rather than waiting on a detector it does not read),
+and every other job reports `skipped`. The same holds for a PR that edits
 only a NON-core workflow plus a doc, e.g. `CLAUDE.md` + `.github/workflows/claude.yml`
 (the review bot): because `claude.yml` is not in `ci_core`, none of the heavy
 firmware / emulator / board / docker / host / gosim / webapp suites activate, and
