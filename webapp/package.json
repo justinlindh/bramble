@@ -6,7 +6,7 @@
   "homepage": "https://bramblemesh.org",
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "main": "out/main/index.js",
   "scripts": {

@@ -65,24 +65,55 @@ fi
 # bramble.disconnect, issue #101). This closes that gap.
 WEBAPP_SRC="webapp/src"
 if [ -d "$WEBAPP_SRC" ]; then
-    if ! command -v perl >/dev/null 2>&1; then
-        echo "::warning::perl not found; skipping webapp RPC call-site check" >&2
-    else
-        # Capture the first string-literal argument of every .rpc(...) call,
-        # tolerating a generic type argument and a newline before the literal.
-        # Matches .rpc(, never .sendRPC( (used with a deliberately fake method
-        # in transport tests), so those stay out of the comparison.
-        webapp_calls=$(find "$WEBAPP_SRC" \( -name '*.ts' -o -name '*.tsx' \) -print0 \
-            | xargs -0 perl -0777 -ne \
-                'while(/\.rpc\s*(?:<[^>]*>)?\s*\(\s*(["\x27])(bramble\.[A-Za-z0-9_.]+)\1/g){print "$2\n"}' \
-            | sort -u)
-        if [ -n "$webapp_calls" ]; then
-            webapp_phantom=$(comm -23 <(printf '%s\n' "$webapp_calls") <(printf '%s\n' "$fw_methods"))
-            if [ -n "$webapp_phantom" ]; then
-                fail=1
-                echo "::error::methods the webapp calls via client.rpc() but $FIRMWARE_SRC does not register:" >&2
-                printf '%s\n' "$webapp_phantom" | sed 's/^/  /' >&2
-            fi
+    # NO SKIP PATH HERE, DELIBERATELY. This check used to run under perl and
+    # emit `::warning::perl not found; skipping` when perl was absent, which
+    # meant a runner image that dropped the interpreter would silently stop
+    # enforcing half of this gate while Static checks still reported success.
+    # That is the advisory-check-in-disguise failure mode the clang-format,
+    # ruff, and commitlint version asserts in firmware-quality.yml exist to
+    # prevent, so it fails loud instead. python3 rather than perl because CI
+    # already depends on it outright (the host, gosim, and webapp coverage
+    # ratchets are all python3), so this stops being an extra dependency at
+    # all rather than trading one optional interpreter for another.
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "::error::python3 not found, so the webapp RPC call-site check cannot run." >&2
+        echo "  This check is required, not optional: it is the only thing that catches a" >&2
+        echo "  webapp calling a method that exists in neither $SPEC nor $FIRMWARE_SRC." >&2
+        exit 1
+    fi
+    # Capture the first string-literal argument of every .rpc(...) call,
+    # tolerating a generic type argument and a newline before the literal.
+    # Matches .rpc(, never .sendRPC( (used with a deliberately fake method
+    # in transport tests), so those stay out of the comparison.
+    #
+    # `sort -u` on the result, not python's own sorted(), so both sides of the
+    # comm below are ordered by the SAME collation. comm compares byte order
+    # under the ambient locale and silently misreports when its two inputs
+    # disagree about it.
+    webapp_calls=$(python3 - "$WEBAPP_SRC" <<'PY' | sort -u
+import os
+import re
+import sys
+
+root = sys.argv[1]
+pattern = re.compile(r"""\.rpc\s*(?:<[^>]*>)?\s*\(\s*(["'])(bramble\.[A-Za-z0-9_.]+)\1""")
+
+for dirpath, _dirnames, filenames in os.walk(root):
+    for filename in filenames:
+        if not filename.endswith((".ts", ".tsx")):
+            continue
+        path = os.path.join(dirpath, filename)
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            for match in pattern.finditer(handle.read()):
+                print(match.group(2))
+PY
+    )
+    if [ -n "$webapp_calls" ]; then
+        webapp_phantom=$(comm -23 <(printf '%s\n' "$webapp_calls") <(printf '%s\n' "$fw_methods"))
+        if [ -n "$webapp_phantom" ]; then
+            fail=1
+            echo "::error::methods the webapp calls via client.rpc() but $FIRMWARE_SRC does not register:" >&2
+            printf '%s\n' "$webapp_phantom" | sed 's/^/  /' >&2
         fi
     fi
 fi

@@ -46,8 +46,16 @@ jobs:
         # fallback), which made this always-run required gate depend on
         # external registries on every PR. Their exact pinned versions are
         # asserted by their own steps below.
+        #
+        # python3 is in this list because scripts/check-rpc-contract.sh needs
+        # it for the webapp call-site half of the gate. That half used to run
+        # under perl and SKIP with a warning when the interpreter was absent,
+        # so an image that dropped it would have quietly stopped enforcing the
+        # check while this job still reported success. Asserting the
+        # interpreter here and failing loud in the script are the two halves
+        # of closing that.
         run: |
-          for tool in shellcheck clang-format cppcheck actionlint ruff markdownlint-cli2; do
+          for tool in shellcheck clang-format cppcheck actionlint ruff markdownlint-cli2 python3; do
             command -v "$tool" >/dev/null || { echo "::error::$tool missing from runner image"; exit 1; }
           done
       - name: Assert clang-format matches the pinned version
@@ -83,6 +91,13 @@ jobs:
         run: bash scripts/lint/check-board-matrix.sh
       - name: ESP-IDF version pins agree
         run: bash scripts/lint/check-idf-version.sh
+      - name: Node version pins agree
+        # Same anti-drift shape as the ESP-IDF check: .nvmrc is the single
+        # source of truth for the Node major, and this fails loud when a CI
+        # pin, a Dockerfile base image or the engines floor disagrees. The
+        # shipped container image and the shipped desktop installers were
+        # built on different Node majors before this existed.
+        run: bash scripts/lint/check-node-version.sh
       - name: Required shellcheck (strict wrapper)
         run: bash scripts/lint/run-shellcheck.sh --strict
       - name: Ruff (required baseline profile)

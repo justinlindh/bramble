@@ -1,19 +1,37 @@
 # enable @claude mentions. Ported from the digits repo's claude.yml.
 name: Claude Code
 
+# Every trigger here is a way a trusted human writes "@claude" somewhere:
+#   issue_comment created            - "@claude" on an issue, or on a PR
+#                                      (GitHub delivers PR conversation
+#                                      comments as issue_comment).
+#   pull_request_review_comment      - "@claude" in a comment on a diff line.
+#     created
+#   pull_request_review submitted    - "@claude" in the review's summary body.
+#   issues opened                    - a new issue whose title or body says
+#                                      "@claude".
+# There is deliberately no `issues: assigned` type. The job's gate is
+# mention-based and the action is not configured with assignee_trigger, so an
+# assignment on its own started nothing; all it did was re-run the job for
+# every assignee change on an issue whose body already contained "@claude",
+# and with cancel-in-progress: false that duplicate ran to completion. Honest
+# assignment gating is also not expressible here: on an `assigned` event
+# github.event.issue.author_association is the ISSUE AUTHOR's association,
+# not the assigner's, and the payload carries no association for the sender,
+# so the gate could not tell a trusted assigner from an untrusted one.
 on:
   issue_comment:
     types: [created]
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened, assigned]
+    types: [opened]
   pull_request_review:
     types: [submitted]
 
 # Serialize runs per issue/PR so two @claude triggers on the same thread don't
 # race each other. Never cancel-in-progress: killing an in-flight run would
-# drop a half-posted review or abandon commits mid-push.
+# drop a half-posted review or leave the tracked comment stale.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: false
@@ -48,11 +66,30 @@ jobs:
          github.event.issue.author_association == 'MEMBER' ||
          github.event.issue.author_association == 'COLLABORATOR'))
     runs-on: ubuntu-latest
+    # A hung run must not sit on a hosted runner for the 360 minute default,
+    # and because cancel-in-progress is false it would also block every later
+    # @claude on the same thread for that long. 30 minutes is the ceiling the
+    # allowlist can actually reach: the heaviest suite it may run is
+    # bash test/run_all_tests.sh (20 minutes in quality.yml), plus a webapp or
+    # gosim leg (15 each there), and it cannot run the two long legs at all
+    # since neither idf.py nor emulator/ci/run_scenarios.sh is allowlisted.
+    # Same tier as board-build-smoke, docker-build, and webapp lint.
+    timeout-minutes: 30
     permissions:
-      contents: write
+      # These scope GITHUB_TOKEN. contents is read, not write: the allowlist
+      # below has no git push, no gh api, and no gh pr merge, and
+      # use_commit_signing is off, so nothing in this job can write a ref.
+      # checkout only needs read. issues and pull-requests stay write because
+      # the run posts inline review comments and updates its tracked comment.
+      # id-token: write is load-bearing, not boilerplate: no github_token
+      # input is set, so the action fetches a GitHub OIDC token and exchanges
+      # it for the Claude app's installation token. Remove it and the run
+      # cannot authenticate at all.
+      contents: read
       pull-requests: write
       issues: write
       id-token: write
+      # for the allowlisted gh run view
       actions: read
     steps:
       - name: Checkout repository

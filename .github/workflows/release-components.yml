@@ -99,11 +99,13 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node.js
+        # Pinned for the same reason as the installer jobs: without it this
+        # job runs semantic-release on whatever Node the runner image happens
+        # to carry, which is the drift this repo just spent a change removing.
+        # scripts/lint/check-node-version.sh gates this against .nvmrc.
         uses: actions/setup-node@v7
         with:
-          # Same Node major as every other Node job in CI, so the release
-          # toolchain does not run on whatever the runner image happens to ship.
-          node-version: 20
+          node-version: 24
 
       - name: Install release dependencies
         # npm ci against the committed root package-lock.json, not a floating
@@ -321,7 +323,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Desktop installers for the webapp release. Linux (AppImage, deb, pacman)
-  # and Windows (NSIS) cross-build in electronuserland/builder:20-wine on the
+  # and Windows (NSIS) cross-build in electronuserland/builder:24-wine on the
   # Linux runner; macOS dmgs need real Apple hardware, so they build on a
   # GitHub-hosted mac runner. All installers are UNSIGNED: there are no Apple
   # or Windows code-signing certificates, CSC_IDENTITY_AUTO_DISCOVERY stays
@@ -374,14 +376,14 @@ jobs:
       contents: read
     container:
       # electron-builder's own image: node + wine for NSIS cross-builds. Pinned
-      # to the Node 20 variant rather than the floating :wine tag, which always
-      # points at the newest Node base electron-builder publishes (Node 24 when
-      # this was pinned: :wine and :24-wine resolve to the same digest). That
-      # meant this leg silently built the renderer and electron bundles under a
-      # different Node major than the macOS leg below and than every other Node
-      # job in this repo, and would move again on the next upstream base bump.
-      # Node 20 is the repo-wide pin (.nvmrc, webapp/package.json engines).
-      image: electronuserland/builder:20-wine
+      # to the explicit Node-major variant rather than the floating :wine tag.
+      # :wine always tracks the newest Node base electron-builder publishes
+      # (today :wine and :24-wine are the same digest), so the Node this leg
+      # built under was an upstream decision that would move again on the next
+      # base bump. This tag is the job's Node pin: the image ships the runtime
+      # every step here uses, so no setup-node step is needed on top of it, and
+      # scripts/lint/check-node-version.sh gates the tag against .nvmrc.
+      image: electronuserland/builder:24-wine
       options: --user 0:0
     env:
       WEBAPP_TAG: ${{ inputs.webapp_installers_tag || needs.release.outputs.webapp_tag }}
@@ -410,8 +412,9 @@ jobs:
       # regardless, and hoisting only `build:electron` into a shared job would
       # trade a few seconds of electron-vite for a third npm ci plus an artifact
       # round trip. What the two legs must NOT do is disagree on the Node major,
-      # which is why the container above is pinned to :20-wine and setup-node on
-      # the macOS leg pins the same 20.
+      # which is why the container above is pinned to :24-wine and setup-node on
+      # the macOS leg pins the same 24, both gated against .nvmrc by
+      # scripts/lint/check-node-version.sh.
       - name: Build renderer and electron bundles
         run: |
           set -euo pipefail
@@ -503,10 +506,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          # Must stay the same major as the linux/win leg's container image tag
-          # (electronuserland/builder:20-wine): both legs build the same
-          # platform-independent renderer and electron bundles.
-          node-version: 20
+          # Same major as the linux/win leg's container image tag
+          # (electronuserland/builder:24-wine): both legs build the same
+          # platform-independent renderer and electron bundles, and
+          # scripts/lint/check-node-version.sh gates both against .nvmrc.
+          node-version: 24
 
       - name: Resolve version from tag
         id: ver

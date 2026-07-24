@@ -17,6 +17,8 @@ the full job topology and the always-report contract.
   - No internal refs (`bash scripts/lint/check-no-internal-refs.sh`)
   - No em dash (`bash scripts/lint/check-no-em-dash.sh`): enforces the CLAUDE.md ban on U+2014 across the tracked tree, excluding only the vendored `node_modules`, `managed_components`, and `simulator/engine/cJSON.c`. There are no first-party exemptions, deliberately
   - Board matrix coverage (`bash scripts/lint/check-board-matrix.sh`: the `board-build-smoke` matrix in `quality.yml` must list exactly the boards `scripts/ci-build-firmware.sh` releases)
+  - ESP-IDF version pins (`bash scripts/lint/check-idf-version.sh`: every ESP-IDF reference in the tree must match `.esp-idf-version`)
+  - Node version pins (`bash scripts/lint/check-node-version.sh`: every `actions/setup-node` pin, Node base image, `engines` floor and setup doc must match the major in `.nvmrc`, so the published container image and the desktop installers cannot drift onto different Node majors)
   - Strict shellcheck (`bash scripts/lint/run-shellcheck.sh --strict`)
   - Ruff baseline profile (`ruff check scripts --select E9,F63,F7,F82`)
   - Strict clang-format, full scope (`bash scripts/lint/run-clang-format-check.sh --strict`), pinned to the version in `.clang-format-version` (currently 14.0.6); the `Static checks` job asserts the runner's `clang-format --version` matches before running the check, and the wrapper script prints a warning if your local version differs, because unpinned clang-format versions disagree on macro and designated-initializer layout and produce unreproducible findings (issue #161)
@@ -34,7 +36,7 @@ the full job topology and the always-report contract.
   always report and both gate.
 - `Docker build (webapp)`, `(simulator)`, `(emulator)`, `(firmware-builder)` (`quality.yml`, issue #195): one context per shipped Dockerfile, each a `docker build` on the runner host, never pushed. Same step-level area-gate pattern as `Board build smoke`, with `ci_core` forcing every leg: `webapp` gates on `webapp` or `web_flasher` (the shipped webapp image bundles `web-flasher/`, so a web-flasher-only change must rebuild-verify this leg); `simulator` gates on `simulator` or `firmware`; `emulator` gates on `emulator`, `simulator`, or `firmware`; `firmware-builder` gates on `docker_firmware_builder` alone (its build context is a toolchain image that does not copy firmware source, so a firmware change must not rebuild it). Makes Dependabot's docker-ecosystem bumps self-verifying instead of merging on unrelated green checks with nothing having built the image. The emulator leg builds with `--network=host` (a `netmode: host` matrix field) so its ESP-IDF stage can reach `components-file.espressif.com`, which is reachable from the runner host but not the build's default bridge network; this is the same live-fetch model the required `Emulator suite` and the other docker legs already use, on a trusted CI runner building first-party images.
 - `Webapp checks` (one pod: typecheck, electron typecheck, unit tests, build, e2e smoke, `webapp-quality.yml`). No lint step: the webapp has no linter configured, and the former Lint step was a duplicate of the typecheck under a name that claimed otherwise.
-- `web-flasher tests` (`node --test web-flasher/`, `webapp-quality.yml`)
+- `web-flasher tests` (`node --test 'web-flasher/**/*.test.js'`, `webapp-quality.yml`)
 
 There is no clang-tidy gate. The `run-clang-tidy-advisory.sh` wrapper used to
 sit in `scripts/lint/` unreferenced by any workflow, Makefile target, or
