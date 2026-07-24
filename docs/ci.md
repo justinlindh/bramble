@@ -490,7 +490,7 @@ the typecheck alias and was removed rather than renamed, because a step named
 for a gate that does not exist is worse than no step. Adding a real linter is
 an open decision, not a rename, and this page will say so only once one
 exists. `web-flasher tests` stays separate because it runs
-`node --test web-flasher/` with no webapp install.
+`node --test 'web-flasher/**/*.test.js'` with no webapp install.
 
 ## What a docs-only (or review-bot-config) PR looks like now
 

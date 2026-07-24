@@ -51,7 +51,7 @@ Web Serial API is required. Supported in Chrome and Edge (desktop). Not supporte
 The `*.test.js` files use node:test and run in CI (the web-flasher-tests job). Locally:
 
 ```bash
-node --test web-flasher/
+node --test 'web-flasher/**/*.test.js'
 ```
 
-Use Node 20 (the CI version). Node 25 fails on a bare directory argument with MODULE_NOT_FOUND; pass explicit file paths there instead.
+Use Node 24 (the CI version, pinned by [`.nvmrc`](../.nvmrc)). Quote the glob: it is expanded by the test runner, and the older bare-directory form (`node --test web-flasher/`) resolves the directory as a module entry point and fails with MODULE_NOT_FOUND on Node 22 and newer.

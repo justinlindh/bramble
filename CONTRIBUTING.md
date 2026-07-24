@@ -71,9 +71,12 @@ naming both versions when it does not match. `scripts/lint/run-clang-format-chec
 failure, so you still get advisory signal without the exact version installed,
 but a warning means its findings may not match what CI reports.
 
-**Webapp:** Node.js 20 or newer, and npm. That is what CI builds and tests
+**Webapp:** Node.js 24 or newer, and npm. That is what CI builds and tests
 with, it is the `engines` floor in `webapp/package.json`, and the repo root
-ships an [`.nvmrc`](.nvmrc) so `nvm use` picks a matching version.
+ships an [`.nvmrc`](.nvmrc) so `nvm use` picks a matching version. `.nvmrc` is
+the single source of truth for the Node major: CI pins, the Dockerfile base
+images and the `engines` floor must all agree with it, and
+`scripts/lint/check-node-version.sh` fails the build when they do not.
 
 ```bash
 cd webapp

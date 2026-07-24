@@ -8,7 +8,7 @@
 # GitHub cache service (see docs/ci.md).
 
 # Stage 1: Build React UI
-FROM node:26-slim AS ui-build
+FROM node:24-slim AS ui-build
 WORKDIR /app/simulator/ui
 COPY simulator/ui/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \

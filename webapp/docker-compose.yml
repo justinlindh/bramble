@@ -7,7 +7,7 @@ services:
       - "8085"
 
   mock-node:
-    image: node:22-alpine
+    image: node:24-alpine
     working_dir: /app
     volumes:
       - ./mock:/app
@@ -18,7 +18,7 @@ services:
       - "3005:3005"
 
   ws-proxy:
-    image: node:22-alpine
+    image: node:24-alpine
     working_dir: /app
     volumes:
       - ./ws-proxy:/app
