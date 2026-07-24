@@ -641,13 +641,24 @@ Publishing a stable OTA release is therefore: dispatch Firmware Build on the
 the OTA index (the workflow's own verification step fails the run if the
 release is incomplete).
 
-## Dual-tree arrangement: .github is authoritative, .gitea is a frozen mirror
+## Web client build, publish, and deploy
 
-`.github/workflows/` is the source of truth for CI and runs on the self-hosted
-ARC scale set (runner label from the `RUNNER_LABEL` repo variable).
-`.gitea/workflows/` is a frozen, unmodified mirror-side copy and is not touched
-by workflow edits, so it can reference scripts that no longer exist on the
-`.github` side. Of the publish-oriented workflows, only `webapp-build-publish.yml`
-still carries Gitea API coupling (its host-deploy dispatch step) and still
-carries a `PHASE-2 PORT PENDING` header; it is gated to `workflow_dispatch`
-until a Phase 2 pass rewrites that step for GitHub natively.
+`.github/workflows/` is the only CI tree in this repo, and it runs on the
+self-hosted ARC scale set (runner label from the `RUNNER_LABEL` repo variable).
+There is no second copy of these workflows anywhere: the Gitea mirror that once
+carried a frozen `.gitea/workflows/` tree is retired, and that tree is gone.
+
+`webapp-build-publish.yml` is the one workflow that is not a check. It stages
+the web flasher, runs the webapp tests, builds the unified runtime image, pushes
+it to the registry, and then redeploys the `bramble-web-client` container on the
+`bramble-host` runner (the container-capable persistent host that carries the
+docker socket and registry reachability). It is `workflow_dispatch` only, so
+publishing the web client is always a deliberate act.
+
+Every step of it gates. The registry push needs the `REGISTRY_HOST` and
+`REGISTRY_IMAGE_REPO` repo variables plus the `REGISTRY_USERNAME` and
+`REGISTRY_PAT` secrets; without them the login step fails against the public
+placeholder default rather than pushing somewhere unintended. The redeploy fails
+the job if the new container does not come up and pass `/api/healthz` inside 60
+seconds. There is no fallback path and nothing is swallowed, so a green run means
+the image was pushed and the running container is serving it.

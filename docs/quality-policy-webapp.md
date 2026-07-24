@@ -11,9 +11,11 @@ touches its area:
 
 - `webapp/**` changes: all jobs except `web-flasher tests` run.
 - `web-flasher/**` changes: `web-flasher tests` runs.
-- Any `.gitea/workflows/**` or `.actionlint.yaml` change: every job runs,
-  regardless of area, so a changed workflow definition always gets
-  exercised.
+- Any change to `quality.yml`, `firmware-quality.yml`, `webapp-quality.yml`, or
+  the reusable `_detect-changes.yml` (the `ci_core` area): every job runs,
+  regardless of area, so a changed job definition or changed gating logic
+  always gets exercised. Editing any other workflow does not force these jobs;
+  see [ci.md](ci.md) for why the `ci_core` area is scoped that tightly.
 
 ## Required vs advisory mapping
 
