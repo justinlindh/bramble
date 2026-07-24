@@ -249,12 +249,6 @@ void display_clear(void) {
             ssd1680_engine_pixel(x, y, false);
 }
 
-void display_fill(void) {
-    for (int y = 0; y < DISPLAY_HEIGHT; y++)
-        for (int x = 0; x < DISPLAY_WIDTH; x++)
-            ssd1680_engine_pixel(x, y, true);
-}
-
 void display_hline(int x, int y, int w) {
     for (int i = 0; i < w; i++)
         display_pixel(x + i, y, true);
@@ -316,10 +310,6 @@ void display_set_backlight(uint8_t level) { (void)level; /* no backlight */ }
 
 uint8_t display_get_backlight(void) { return 255; }
 
-void display_set_contrast(uint8_t val) { (void)val; /* not applicable */ }
-
-void display_invert(bool invert) { (void)invert; /* no cheap runtime invert on e-paper */ }
-
 void display_set_rotated_180(bool rotated) { s_rotated_180 = rotated; }
 
 bool display_get_rotated_180(void) { return s_rotated_180; }
@@ -332,9 +322,5 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t* buf) {
     (void)y2;
     (void)buf;
 }
-
-int display_get_width(void) { return DISPLAY_WIDTH; }
-
-int display_get_height(void) { return DISPLAY_HEIGHT; }
 
 #endif /* ESP_PLATFORM && !CONFIG_IDF_TARGET_LINUX */

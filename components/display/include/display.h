@@ -35,9 +35,6 @@ int display_init(void);
 /** Clear the framebuffer (all pixels off). */
 void display_clear(void);
 
-/** Fill the entire display (all pixels on). */
-void display_fill(void);
-
 /**
  * Draw a string at pixel position (x, y).
  * Uses built-in 6x8 font. Clips at display boundaries.
@@ -76,12 +73,6 @@ void display_set_backlight(uint8_t level);
 /** Last level passed to display_set_backlight (255 before any call). */
 uint8_t display_get_backlight(void);
 
-/** Set display contrast (0-255). */
-void display_set_contrast(uint8_t val);
-
-/** Invert display colors. */
-void display_invert(bool invert);
-
 /**
  * Rotate display output by 180 degrees at runtime.
  * For SSD1306 this updates controller segment/COM scan mapping.
@@ -97,11 +88,5 @@ bool display_get_rotated_180(void);
  * Used by LVGL display driver.
  */
 void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t* buf);
-
-/**
- * Get display dimensions (for runtime queries).
- */
-int display_get_width(void);
-int display_get_height(void);
 
 #endif
