@@ -23,7 +23,8 @@
  *   EMU_AUTO_SEND_REPEAT     phase-1 sends (default 3), for delivery headroom
  *   EMU_AUTO_SEND_INTERVAL_MS  gap between phase-1 repeats (default 4000)
  *   EMU_AUTO_SEND2           optional phase-2 message text (distinct string)
- *   EMU_AUTO_SEND2_DELAY_MS  additional delay after phase 1 before phase 2
+ *   EMU_AUTO_SEND2_DELAY_MS  additional delay before phase 2, measured from
+ *                            phase 1's DM session existing (see autosend_task)
  *   EMU_AUTO_SEND2_REPEAT / EMU_AUTO_SEND2_INTERVAL_MS  phase-2 cadence
  *
  * Phase 2 exists for the DM-desync scenario: phase 1 establishes a DM session,
@@ -72,6 +73,7 @@ extern uint32_t emu_mesh_first_neighbor(void);
 extern int emu_mesh_drop_dm_sessions(void);
 extern int emu_mesh_dm_session_count(void);
 extern uint32_t msg_store_total_incoming(void);
+extern uint32_t msg_store_count_outgoing_delivered(void);
 
 static const char* TAG = "emu_autosend";
 
@@ -168,6 +170,42 @@ static void autosend_task(void* arg) {
         unsigned delay2 = env_uint("EMU_AUTO_SEND2_DELAY_MS", 16000);
         unsigned repeat2 = env_uint("EMU_AUTO_SEND2_REPEAT", 4);
         unsigned interval2 = env_uint("EMU_AUTO_SEND2_INTERVAL_MS", 4000);
+        /* EVENT-DRIVEN, like resolve_dest and the drop task: phase 2's real
+         * precondition is that phase 1's DM was actually DELIVERED, not that
+         * a fixed delay elapsed. A DM to a peer with no session waits in the
+         * mesh task's small awaiting-session queue until the KE handshake
+         * completes, and under channel contention (the scenario's 3s beacons
+         * carry ~650ms of airtime each, running the ether at 50-65% duty)
+         * that handshake can outlast any fixed delay. Phase 2's fixed-cadence
+         * burst then overflows the queue, "evicting oldest" discards the
+         * phase-1 payload unsent, and the desync gate's baseline ALPHA render
+         * becomes impossible no matter how long the suite waits (observed
+         * 2026-07-23, locally and on two CI runs: every flushed DM was a
+         * 7-byte BETA; ALPHA never hit the air).
+         *
+         * The predicate must be CONFIRMED DELIVERY (the receipt arriving back
+         * here), not this node's session record: mesh_send_dm allocates the
+         * session slot in HANDSHAKING state synchronously on phase 1's first
+         * send, so a session-count check is already true before the KE ever
+         * completes and gates nothing (review finding on the first version
+         * of this change). Delivery is also the very event the receiver's
+         * drop task keys on (its msg_store_total_incoming gate flips when
+         * ALPHA lands, and the receipt rides back on the same exchange), so
+         * both sides pace from the same instant: the drop fires ~1.5s after
+         * it, phase 2 delay2 (16-20s) later, keeping the first BETA on the
+         * post-drop side with seconds to spare at any starvation factor. The
+         * cap only guards a genuinely broken run, where the gate fails
+         * anyway. Broadcast phase 2 (dest 0) has no receipts and skips the
+         * wait. */
+        if (dest != 0) {
+            for (int i = 0; i < 240; i++) {
+                if (msg_store_count_outgoing_delivered() > 0)
+                    break;
+                if (i > 0 && i % 20 == 0)
+                    ESP_LOGW(TAG, "phase 2: still waiting for phase-1 delivery (%d tries)", i);
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+        }
         vTaskDelay(pdMS_TO_TICKS(delay2));
         /* Re-resolve: after a peer reboot its address is unchanged, but this also
          * recovers if the neighbor was only learned during phase 1. */
