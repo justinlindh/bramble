@@ -49,6 +49,10 @@ __pycache__/
 # Simulator artifacts
 simulator/gosim/bramble-gosim
 
+# Release toolchain install tree (root package.json pins semantic-release only;
+# package-lock.json IS committed, node_modules is not)
+/node_modules/
+
 # webapp artifacts
 webapp/node_modules/
 webapp/dist/

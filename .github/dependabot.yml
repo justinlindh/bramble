@@ -1,7 +1,8 @@
 # Dependabot configuration for Bramble.
 #
-# Covers every dependency ecosystem present in the repo: four npm lockfiles
-# (webapp/, webapp/ws-proxy/, webapp/mock/, simulator/ui/), two Go modules
+# Covers every dependency ecosystem present in the repo: five npm lockfiles
+# (the root release toolchain, webapp/, webapp/ws-proxy/, webapp/mock/,
+# simulator/ui/), two Go modules
 # (simulator/gosim/, simulator/tests/), four Dockerfiles (webapp/,
 # docker/firmware-builder/, emulator/, simulator/), and the GitHub Actions
 # workflows.
@@ -48,6 +49,29 @@ version: 2
 
 updates:
   # ---------------------------------------------------------------- npm ---
+  # The root package.json holds nothing but the semantic-release toolchain that
+  # release-components.yml and the Release config job install with npm ci. It is
+  # small and security-relevant (it runs in the job that holds the release write
+  # token), so it gets its own entry rather than riding along with the webapp.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+      time: "04:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+    groups:
+      patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
   - package-ecosystem: npm
     directory: /webapp
     schedule:

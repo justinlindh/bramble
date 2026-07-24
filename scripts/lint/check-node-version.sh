@@ -51,6 +51,12 @@ required=(
   "CONTRIBUTING.md::Node.js ${want} or newer"
   "webapp/README.md::Node.js ${want} or newer"
   "web-flasher/README.md::Use Node ${want} (the CI version"
+  # The desktop installer container leg has no setup-node step: the image tag
+  # IS its Node pin, so the sweep in section 2 cannot see it. electron-builder
+  # publishes a <major>-wine variant per Node base; the unqualified :wine tag
+  # floats onto whatever base is newest, which is how this leg ended up
+  # building the Linux and Windows installers on a Node major nobody chose.
+  ".github/workflows/release-components.yml::image: electronuserland/builder:${want}-wine"
 )
 for entry in "${required[@]}"; do
   file="${entry%%::*}"
