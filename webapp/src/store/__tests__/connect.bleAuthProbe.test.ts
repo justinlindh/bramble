@@ -81,7 +81,7 @@ describe('BLE/WiFi auth probe fails closed', () => {
 
   it('rejects a WiFi connect the same way on an auth-required node', async () => {
     baseRpc(async () => { throw new Error('-1005 Unauthorized'); });
-    await connect('wifi', { url: 'ws://10.0.0.1/ws', ip: '10.0.0.1' });
+    await connect('wifi', { url: 'ws://192.0.2.1/ws', ip: '192.0.2.1' });
     expect(useStore.getState().connectionState).not.toBe('connected');
     expect(useStore.getState().connectionError ?? '').toMatch(/auth token|authentication required/i);
   });

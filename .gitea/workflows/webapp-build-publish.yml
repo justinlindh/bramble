@@ -140,9 +140,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          api_base="${GITEA_API_BASE:-http://172.17.0.1:3001}"
-          owner="${DEPLOY_REPO_OWNER:-justinlindh}"
-          repo="${DEPLOY_REPO_NAME:-dockers}"
+          # Placeholder defaults only: the real deploy target comes from the
+          # repository vars above, and a public repo carries no private LAN
+          # address or personal repo path. An unconfigured deploy falls
+          # through to the local docker redeploy below.
+          api_base="${GITEA_API_BASE:-http://deploy.example.com:3001}"
+          owner="${DEPLOY_REPO_OWNER:-example-org}"
+          repo="${DEPLOY_REPO_NAME:-example-deploy}"
           workflow_id="${DEPLOY_WORKFLOW_ID:-deploy-bramble-web-client.yml}"
           payload="$(cat <<JSON
           {

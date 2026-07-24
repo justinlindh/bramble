@@ -59,9 +59,9 @@ describe('mergeNearby', () => {
   it('sorts exact matches first, then probable, then unknown, alphabetically within groups', () => {
     const nodes = mergeNearby(
       [
-        disc({ hostname: 'bramble-0001', ip: '10.0.0.1', name: 'Zeta' }),
-        disc({ hostname: 'bramble-beef', ip: '10.0.0.2' }),
-        disc({ hostname: 'bramble-0002', ip: '10.0.0.3', addrHex: 'AAAA0002' }),
+        disc({ hostname: 'bramble-0001', ip: '192.0.2.1', name: 'Zeta' }),
+        disc({ hostname: 'bramble-beef', ip: '192.0.2.2' }),
+        disc({ hostname: 'bramble-0002', ip: '192.0.2.3', addrHex: 'AAAA0002' }),
       ],
       [saved('DEADBEEF', 'Node A'), saved('AAAA0002', 'Node B')],
     );
