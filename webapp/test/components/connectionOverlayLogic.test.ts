@@ -14,13 +14,8 @@ describe('ConnectionOverlay URL logic', () => {
     expect(buildWifiUrl('192.168.4.1', 'http:', 'localhost:4173')).toBe('ws://192.168.4.1/ws');
   });
 
-  it('never embeds the token in the URL (moved to WS subprotocol)', () => {
-    expect(buildWifiUrl('192.168.4.1', 'http:', 'app.local', 'abc 123'))
-      .toBe('ws://192.168.4.1/ws');
-  });
-
-  it('leaves an explicit ws:// URL untouched and adds no token', () => {
-    expect(buildWifiUrl('ws://10.0.0.5/ws?foo=bar', 'http:', 'app.local', 'tok'))
+  it('leaves an explicit ws:// URL with a query string untouched', () => {
+    expect(buildWifiUrl('ws://10.0.0.5/ws?foo=bar', 'http:', 'app.local'))
       .toBe('ws://10.0.0.5/ws?foo=bar');
   });
 

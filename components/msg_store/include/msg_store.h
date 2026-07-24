@@ -177,6 +177,15 @@ int msg_store_count(void);
 uint32_t msg_store_total_incoming(void);
 
 /**
+ * Count of stored outgoing DMs whose delivery receipt has arrived
+ * (MSG_DIR_OUTGOING with MSG_STATUS_DELIVERED). Reads the ring, so unlike
+ * msg_store_total_incoming() it saturates with it; callers that poll it as a
+ * "has any DM confirmed delivery yet" edge trigger (the emulator's scripted
+ * sender in emulator/node/emu_autosend.c) are unaffected by that.
+ */
+uint32_t msg_store_count_outgoing_delivered(void);
+
+/**
  * Get message at index (0 = oldest).  Returns NULL if out of range.
  * Returned pointer is valid until next msg_store_add.
  *

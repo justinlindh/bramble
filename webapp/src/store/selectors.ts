@@ -1,25 +1,21 @@
 import { useMemo, useRef } from 'react';
-import { useStore } from './index';
+import { useStore, conversationIdForMessage } from './index';
 import type { Message } from '../types/bramble';
 
+// A message belongs to exactly one conversation, and conversationIdForMessage
+// (store/index.ts) is the single classifier that decides which. Filtering the
+// message list through it keeps the per-conversation view consistent with the
+// conversation list and unread counts, which bucket the same way. Re-deriving
+// the broadcast/channel/DM rules here used to let a channel message addressed
+// to the broadcast address (channelIndex >= 0 and to === 0xffffffff) match both
+// the 'broadcast' filter and its own 'ch:' filter, so it showed in two views;
+// routing through the classifier files it under its channel alone.
 function filterMessages(messages: Message[], id: string): Message[] {
-  return messages.filter(m => {
-    if (id === 'broadcast') return m.to === 0xffffffff;
-    if (id.startsWith('ch:')) {
-      const chIdx = parseInt(id.slice(3), 10);
-      return m.channelIndex === chIdx;
-    }
-    if (id.startsWith('dm:')) {
-      const peerAddr = parseInt(id.slice(3), 10);
-      if (m.to === 0xffffffff) return false;
-      return (
-        (m.direction === 'outgoing' && m.to === peerAddr) ||
-        (m.direction === 'incoming' && m.from === peerAddr)
-      );
-    }
-    return false;
-  });
+  return messages.filter(m => conversationIdForMessage(m) === id);
 }
+
+// Exported for tests that pin the single-bucket filtering behavior.
+export const __filterMessages = filterMessages;
 
 export function useConversation(id: string): { messages: Message[] } {
   const allMessages = useStore(s => s.messages);
