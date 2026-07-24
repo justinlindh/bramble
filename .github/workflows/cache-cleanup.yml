@@ -107,6 +107,20 @@ jobs:
             local ref="$1"
             local id size freed=0 deleted=0
 
+            # Load-bearing guard, not a sanity check. The API treats an EMPTY
+            # `ref=` query value as no filter at all and returns every cache in
+            # the repository (verified against the live API: `ref=` returns the
+            # full listing, a valid ref returns only its own entries, an
+            # unknown ref returns an empty list). So the blast radius of any
+            # future edit that let an unset pull request number reach this
+            # function is the entire cache, not one pull request's. Refuse
+            # anything that is not exactly the ref shape this workflow purges,
+            # and fail the run rather than continue.
+            if [[ ! "${ref}" =~ ^refs/pull/[0-9]+/merge$ ]]; then
+              echo "::error::refusing to purge unexpected ref '${ref}'"
+              return 1
+            fi
+
             while IFS=$'\t' read -r id size; do
               [ -n "${id:-}" ] || continue
               gh api -X DELETE "/repos/${REPO}/actions/caches/${id}" --silent
