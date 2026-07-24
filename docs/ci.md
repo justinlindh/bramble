@@ -521,7 +521,15 @@ entries are immutable once written) while still restoring the previous one.
 ccache is an accelerator, not a gate. If the runner image does not ship
 `ccache`, `scripts/ci-ccache-env.sh` logs a notice, reports `available=false`,
 and the build runs uncached; the cache and stats steps are skipped by that
-output. A missing accelerator must not fail a correctness check.
+output. The `Restore ccache` steps additionally carry
+`continue-on-error: true`: `actions/cache` can hard-fail on a cache-service
+outage or a DNS blip after its internal retries (observed 2026-07-24, a
+transient `EAI_AGAIN` failed a board leg), and a restore failure must cost a
+cold build, never a red check. This is the accelerator exception to the
+no-advisory-tier rule, not a softened check: the step produces no
+correctness signal, nothing downstream reads its outcome, so no terminal
+fail-collector step applies. A missing accelerator must not fail a
+correctness check.
 
 ## Dual-tree arrangement: .github is authoritative, .gitea is a frozen mirror
 

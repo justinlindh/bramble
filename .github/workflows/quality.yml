@@ -125,6 +125,17 @@ jobs:
         # reuse objects built by the previous compiler.
         run: bash scripts/ci-ccache-env.sh
       - name: Restore ccache
+        # continue-on-error: ccache is an accelerator, not a gate (see
+        # docs/ci.md). A cache-service outage or a DNS blip on the pod must
+        # cost a cold build, never a red check: on 2026-07-24 a transient
+        # EAI_AGAIN resolving results-receiver.actions.githubusercontent.com
+        # failed this step after its internal retries and took the whole
+        # board leg with it. The build below tolerates an empty CCACHE_DIR
+        # (plain cold compile), so nothing downstream needs this step's
+        # outcome. This is the accelerator exception to the no-advisory-tier
+        # rule, not a check being softened: no terminal step is needed
+        # because no correctness signal is produced here.
+        continue-on-error: true
         if: |
           (needs.detect.outputs.firmware == 'true' ||
            needs.detect.outputs.idf_build_scripts == 'true' ||
@@ -337,6 +348,10 @@ jobs:
         id: ccache
         run: bash scripts/ci-ccache-env.sh
       - name: Restore ccache
+        # continue-on-error for the same accelerator-not-gate reason as the
+        # board matrix's restore step above: a cache-service or DNS blip
+        # costs a cold build, never a red Emulator suite.
+        continue-on-error: true
         if: steps.ccache.outputs.available == 'true'
         uses: actions/cache@v6
         with:
