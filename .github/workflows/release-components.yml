@@ -113,9 +113,11 @@ jobs:
           # locale-independent.
           new="$(LC_ALL=C comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tail -1)"
           if [ -n "$new" ]; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-            echo "tag=$new" >> "$GITHUB_OUTPUT"
-            echo "version=${new#firmware-v}" >> "$GITHUB_OUTPUT"
+            {
+              echo "published=true"
+              echo "tag=$new"
+              echo "version=${new#firmware-v}"
+            } >> "$GITHUB_OUTPUT"
             echo "Firmware release published: $new"
           else
             echo "published=false" >> "$GITHUB_OUTPUT"
@@ -140,9 +142,11 @@ jobs:
           # check uses the ambient locale, which the burst runner does not pin.
           new="$(LC_ALL=C comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tail -1)"
           if [ -n "$new" ]; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-            echo "tag=$new" >> "$GITHUB_OUTPUT"
-            echo "version=${new#webapp-v}" >> "$GITHUB_OUTPUT"
+            {
+              echo "published=true"
+              echo "tag=$new"
+              echo "version=${new#webapp-v}"
+            } >> "$GITHUB_OUTPUT"
             echo "Webapp release published: $new"
           else
             echo "published=false" >> "$GITHUB_OUTPUT"
@@ -314,7 +318,10 @@ jobs:
           # feed files included.
           npx electron-builder --linux --win --publish never --config electron-builder.yml \
             -c.extraMetadata.version="$VER"
-          ls -lh release/ | grep -v -e '^total' -e 'unpacked'
+          # find, not `ls | grep`: portable across the GNU find on the linux/win
+          # container and the BSD find on the macos runner, and it never parses
+          # ls output. Informational listing of the installers just produced.
+          find release -maxdepth 1 -type f ! -name '*unpacked*' -exec ls -lh {} +
 
       - name: Upload installers
         uses: actions/upload-artifact@v7
@@ -399,7 +406,10 @@ jobs:
           # the mac dmgs are attached by the webapp-installers-publish job.
           npx electron-builder --mac --arm64 --x64 --publish never --config electron-builder.yml \
             -c.extraMetadata.version="$VER"
-          ls -lh release/ | grep -v -e '^total' -e 'unpacked'
+          # find, not `ls | grep`: portable across the GNU find on the linux/win
+          # container and the BSD find on the macos runner, and it never parses
+          # ls output. Informational listing of the installers just produced.
+          find release -maxdepth 1 -type f ! -name '*unpacked*' -exec ls -lh {} +
 
       - name: Upload installers
         uses: actions/upload-artifact@v7
