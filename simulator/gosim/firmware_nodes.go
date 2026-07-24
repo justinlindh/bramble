@@ -58,3 +58,32 @@ func loadFirmwareNodes(data []byte) []firmwareNodeSpec {
 	}
 	return out
 }
+
+// scenarioPHYJSON reads whether the scenario's "radio" block pins the LoRa PHY
+// (spreading factor / bandwidth). Parsed Go-side off the same bytes as
+// loadFirmwareNodes, mirroring the loadRoutingConfig convention, so the C
+// scenario loader needs no change.
+type scenarioPHYJSON struct {
+	Radio *struct {
+		SF   *int `json:"sf"`
+		BWHz *int `json:"bw_hz"`
+	} `json:"radio"`
+}
+
+// scenarioPinsPHY reports whether the scenario explicitly declared radio.sf or
+// radio.bw_hz. A scenario that pins the PHY owns it: the ether keeps exactly
+// what the author asked for and never adopts an attached firmware node's
+// reported PHY (see extConn.adoptReportedPHY). A scenario that says nothing
+// leaves the ether free to learn the real PHY from the firmware it hosts.
+// A parse failure falls open to "not pinned", the same convention as the other
+// Go-side scenario loaders.
+func scenarioPinsPHY(data []byte) bool {
+	var cfg scenarioPHYJSON
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return false
+	}
+	if cfg.Radio == nil {
+		return false
+	}
+	return cfg.Radio.SF != nil || cfg.Radio.BWHz != nil
+}

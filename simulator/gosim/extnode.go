@@ -36,10 +36,10 @@ type emuInbound struct {
 	Version int    `json:"version"` // hello: protocol version
 	Payload string `json:"payload"` // tx: base64 PHY payload
 	Freq    int    `json:"freq"`    // tx: carrier (Hz), echoed back on rx
-	SF      int    `json:"sf"`      // tx: spreading factor (advisory; broker uses scenario PHY)
-	BW      int    `json:"bw"`      // tx: bandwidth (advisory)
-	CR      int    `json:"cr"`      // tx: coding rate (advisory)
-	Power   int    `json:"power"`   // tx: dBm (advisory)
+	SF      int    `json:"sf"`      // tx: spreading factor (adopted; see adoptReportedPHY)
+	BW      int    `json:"bw"`      // tx: bandwidth (adopted; see adoptReportedPHY)
+	CR      int    `json:"cr"`      // tx: coding rate (adopted; see adoptReportedPHY)
+	Power   int    `json:"power"`   // tx: dBm (advisory: link budget stays scenario-owned)
 	Seq     int    `json:"seq"`     // fb: frame sequence
 	Kind    string `json:"kind"`    // fb: "partial" | "full"
 	FB      string `json:"fb"`      // fb: base64 packed 1bpp framebuffer (opaque)
@@ -468,6 +468,7 @@ func (ec *extConn) handleTx(msg *emuInbound) {
 	if msg.Freq != 0 {
 		s.emuFreq = msg.Freq // single-channel ether: remember the carrier for rx
 	}
+	ec.adoptReportedPHY(msg)
 	node := C.node_array_find_by_addr(&s.nodes, C.uint32_t(ec.addr))
 	if node == nil {
 		return
@@ -506,6 +507,61 @@ func (ec *extConn) handleTx(msg *emuInbound) {
 	s.scheduleBrokerAction(now+toaUs, func() {
 		ec.sendJSON(txdoneMsg{T: "txdone", ToaMs: toaMs})
 	})
+}
+
+// adoptReportedPHY points the ether's time-on-air model at the LoRa PHY the
+// attached firmware node actually configured, which it reports on every tx.
+//
+// The broker used to discard these fields as "advisory" and price every frame
+// at the C radio model's own default (SF10/125 kHz, chosen to mirror the
+// firmware's RADIO_PROFILE_LONG_RANGE table). The running firmware does not use
+// that table's SF: mesh_init_radio_config overwrites the profile's sf/bw_hz
+// with the frequency plan's defaults, and every shipped plan (US915/EU868/
+// AU915) defaults to SF9/125 kHz. Every emulated frame was therefore charged
+// about twice its true airtime (732 ms vs about 371 ms for a 60-byte beacon),
+// which is what tipped the emulator scenarios' budget-exempt short beacon
+// cadence (EMU_BEACON_INTERVAL_MS, 2.6-4.1 s) from a busy channel into an
+// oversubscribed one: a 3-node cell offered about 89% of channel capacity, so
+// under the half-duplex + any-overlap-collision model the wait for a receiver's
+// first clean beacon became a heavy-tailed lottery instead of a bounded time.
+//
+// Learning the PHY from the node rather than restating it in each scenario is
+// what keeps the two from drifting apart again: a frequency-plan or profile
+// change moves the ether with the firmware, automatically. A scenario that
+// pins radio.sf or radio.bw_hz still owns its PHY and is never overridden.
+// Adoption happens on the first tx, which is the boot beacon, so it lands
+// before any reception the scenario cares about; the emulator scenarios all set
+// an explicit "range", so the derived-range path cannot shift underneath them.
+//
+// Covers every input radio_frame_airtime_us reads: SF, bandwidth, and coding
+// rate. Reported tx power is deliberately NOT adopted, because it feeds the
+// derived-range link budget rather than airtime, and the ether's topology is
+// the scenario's to declare. Must be called with s.mu held.
+func (ec *extConn) adoptReportedPHY(msg *emuInbound) {
+	s := ec.broker.sim
+	if s.emuPHYPinned || msg.SF == 0 || msg.BW == 0 {
+		return
+	}
+	if s.emuPHYAdopted {
+		if msg.SF != s.emuPHYSF || msg.BW != s.emuPHYBWHz {
+			// Single-channel ether: one PHY for everyone. Report the split
+			// rather than let the last transmitter silently reprice the air.
+			log.Printf("emu-link: node %q reports SF%d/%d Hz but the ether is SF%d/%d Hz; "+
+				"keeping the ether PHY (nodes must share one PHY)",
+				ec.label(), msg.SF, msg.BW, s.emuPHYSF, s.emuPHYBWHz)
+		}
+		return
+	}
+	s.emuPHYAdopted = true
+	s.emuPHYSF = msg.SF
+	s.emuPHYBWHz = msg.BW
+	s.radio.sf = C.uint8_t(msg.SF)
+	s.radio.bw_hz = C.uint32_t(msg.BW)
+	if msg.CR != 0 {
+		s.radio.cr = C.uint8_t(msg.CR)
+	}
+	log.Printf("emu-link: ether PHY adopted from node %q: SF%d BW %d Hz CR 4/%d",
+		ec.label(), msg.SF, msg.BW, 4+msg.CR)
 }
 
 // handleCad answers a channel-activity-detection request. The broker models CAD
@@ -742,6 +798,9 @@ func (s *Sim) resetEmulatorForReload() {
 	s.pendingBrokerActions = nil
 	s.extConns = make(map[uint32]*extConn)
 	s.emuFreq = 0
+	s.emuPHYAdopted = false
+	s.emuPHYSF = 0
+	s.emuPHYBWHz = 0
 	if s.broker != nil {
 		s.broker.resetSlots()
 	}
