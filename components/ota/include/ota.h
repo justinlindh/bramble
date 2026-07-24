@@ -18,9 +18,6 @@ int ota_wifi_start(const char* url, bool allow_downgrade);
 /** Human-readable reason for the most recent OTA failure, or NULL. */
 const char* ota_get_last_error(void);
 
-/** Start OTA via BLE (not yet implemented). */
-int ota_ble_start(void);
-
 /** Get the label of the running OTA partition (e.g. "app0"). */
 const char* ota_get_running_partition(void);
 
