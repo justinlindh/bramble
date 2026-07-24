@@ -5,7 +5,7 @@ import {
 } from '../../store/actions';
 import {
   fetchOtaIndex, hardwareToBoard, relativizeArtifactPath, releasesForBoard,
-  compareVersions, appArtifactForBoard, type OtaArtifact, type OtaRelease,
+  findUpdate, compareVersions, appArtifactForBoard, type OtaArtifact, type OtaRelease,
 } from '../../lib/otaIndex';
 import { useStore } from '../../store';
 import { friendlyErrorFrom } from '../../lib/errors';
@@ -86,10 +86,9 @@ export function FirmwareUpdateCard({ ota, onOtaChanged, onInstallStart }: Props)
 
   const board = hardware ? hardwareToBoard(hardware) : '';
   const boardReleases = board ? releasesForBoard(releases, board) : [];
-  // boardReleases is already sorted newest-first (releasesForBoard), so the
-  // update badge is just "is the newest release strictly newer than running".
-  const newest = boardReleases[0];
-  const update = newest && compareVersions(newest.version, ota.runningVersion ?? '') > 0 ? newest : null;
+  // The update badge is just "is the newest board release strictly newer than
+  // running", which is exactly what findUpdate computes.
+  const update = findUpdate(releases, board, ota.runningVersion ?? '');
   const selectedRelease = boardReleases.find((r) => r.version === selectedVersion) ?? null;
   // Canonical bramble.bin selection (finding 1). releasesForBoard already drops
   // releases with no installable app image, so a null here is defensive.
