@@ -437,8 +437,9 @@ paths:
       operationId: sendProbe
       summary: Send a network probe
       description: >
-        Broadcasts a probe packet. Responses arrive asynchronously as
-        probe.ack notifications, followed by a probe.complete notification.
+        Broadcasts a probe packet. Takes no parameters. Responses arrive
+        asynchronously as bramble.onProbeResult notifications, followed by a
+        bramble.onProbeComplete notification.
       tags: [action]
       requestBody:
         content:

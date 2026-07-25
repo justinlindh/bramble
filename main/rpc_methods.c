@@ -691,7 +691,8 @@ static int handle_reboot(const cJSON* params, cJSON* result) {
 }
 
 /* bramble.sendProbe: no params. Broadcasts a probe (mesh_send_probe takes no
- * destination); responses arrive as probe.ack/probe.complete notifications. */
+ * destination); responses arrive as bramble.onProbeResult notifications,
+ * followed by bramble.onProbeComplete. */
 static int handle_send_probe(const cJSON* params, cJSON* result) {
     (void)params;
     uint32_t probe_id = mesh_send_probe();
@@ -734,8 +735,10 @@ static int rpc_report_persist_failure(cJSON* result, const char* tag, const char
     return rpc_rc;
 }
 
-/* bramble.setRadio: params (all optional) {"frequency_mhz":915.0, "sf":9,
- * "bw_hz":125000, "tx_power_dbm":17, "coding_rate":5} */
+/* bramble.setRadio: a params object is required, every field in it is
+ * optional (omitted fields keep their current value):
+ * {"frequency_mhz":915.0, "sf":9, "bw_hz":125000, "tx_power_dbm":17,
+ * "coding_rate":5} */
 static int handle_set_radio(const cJSON* params, cJSON* result) {
     if (!params)
         return RPC_ERR_INVALID_PARAMS;
