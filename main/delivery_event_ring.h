@@ -62,15 +62,6 @@ uint32_t delivery_event_ring_latest_seq(const delivery_event_ring_t* ring);
 size_t delivery_event_ring_list_since(const delivery_event_ring_t* ring, uint32_t since_event_seq,
                                       delivery_event_record_t* out, size_t out_max);
 
-/*
- * Serialize/deserialize the full ring state for durable persistence.
- * Returns number of bytes written/read, or 0 on error.
- */
-size_t delivery_event_ring_serialize(const delivery_event_ring_t* ring, uint8_t* out,
-                                     size_t out_len);
-size_t delivery_event_ring_deserialize(delivery_event_ring_t* ring, const uint8_t* in,
-                                       size_t in_len);
-
 #ifdef __cplusplus
 }
 #endif

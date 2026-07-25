@@ -66,11 +66,9 @@ void test_wrap_preserves_chronological_order(void) {
     }
 }
 
-void test_since_seq_filters_and_serialize_roundtrip(void) {
+void test_since_seq_filters_by_threshold(void) {
     delivery_event_ring_t ring;
-    delivery_event_ring_t restored;
     delivery_event_record_t out[DELIVERY_EVENT_RING_CAPACITY];
-    uint8_t blob[sizeof(delivery_event_ring_t)];
 
     delivery_event_ring_init(&ring);
     for (uint32_t i = 1u; i <= DELIVERY_EVENT_RING_CAPACITY; i++) {
@@ -82,22 +80,12 @@ void test_since_seq_filters_and_serialize_roundtrip(void) {
     TEST_ASSERT_EQUAL_UINT32(2u, got);
     TEST_ASSERT_EQUAL_UINT32(3u, out[0].event_seq);
     TEST_ASSERT_EQUAL_UINT32(4u, out[1].event_seq);
-
-    size_t encoded = delivery_event_ring_serialize(&ring, blob, sizeof(blob));
-    TEST_ASSERT_TRUE(encoded > 0u);
-
-    size_t decoded = delivery_event_ring_deserialize(&restored, blob, encoded);
-    TEST_ASSERT_EQUAL_UINT32(encoded, decoded);
-
-    delivery_event_record_t ev5 = make_event(99u);
-    uint32_t seq = delivery_event_ring_append(&restored, &ev5);
-    TEST_ASSERT_EQUAL_UINT32(DELIVERY_EVENT_RING_CAPACITY + 1u, seq);
 }
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_seq_monotonic_after_wrap);
     RUN_TEST(test_wrap_preserves_chronological_order);
-    RUN_TEST(test_since_seq_filters_and_serialize_roundtrip);
+    RUN_TEST(test_since_seq_filters_by_threshold);
     return UNITY_END();
 }
