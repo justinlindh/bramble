@@ -116,17 +116,6 @@ run_scenario() {
     return $?
 }
 
-# assert_screen <log> <selector...> : passes selector args straight to
-# `bramble-gosim screen-assert`. Records a failure on non-zero exit.
-assert_screen() {
-    local log="$1"; shift
-    if "$GOSIM_BIN" screen-assert -log "$log" "$@"; then
-        return 0
-    fi
-    FAILURES=$((FAILURES + 1))
-    return 1
-}
-
 # dump_diagnostics <log> <label> : post-mortem for a failed scenario, printed
 # straight into the CI step log. A scenario's gosim event log lives in a mktemp
 # file the runner throws away, so without this a pod-only failure is invisible
@@ -208,19 +197,6 @@ check_no_deaths() {
     fi
     red "FAIL: $label: node process death mid-scenario ($deaths unexpected exit(s), $joins joins for $expected nodes); deaths are hard failures, see the post-mortem"
     dump_diagnostics "$log" "$label (node death)"
-    return 1
-}
-
-# assert_log <log> <needle> <description> : the scenario log must contain needle
-# (a firmware console signature). Records a failure otherwise.
-assert_log() {
-    local log="$1" needle="$2" desc="$3"
-    if grep -qF "$needle" "$log"; then
-        green "PASS: $desc"
-        return 0
-    fi
-    red "FAIL: $desc (log has no '$needle')"
-    FAILURES=$((FAILURES + 1))
     return 1
 }
 
