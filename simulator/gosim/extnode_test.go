@@ -180,11 +180,12 @@ func TestExtNodeTxPricedAndDeliveredWithRSSI(t *testing.T) {
 	}
 }
 
-// The ether prices airtime at the PHY the attached firmware reports, not at the
-// C radio model's own default. The real node comes up on the frequency plan's
-// SF9/125 kHz, not the SF10 the radio-profile table suggests, and pricing every
-// frame at SF10 charged roughly double the true airtime, which is what pushed
-// the emulator scenarios' short beacon cadence past channel capacity.
+// The ether prices airtime at the PHY the attached firmware reports, whatever
+// the C radio model's own default is. The model's default is now the same
+// frequency-plan PHY a stock node boots on (SF9/125 kHz), so this test starts
+// the ether at SF10 to make adoption observable: that is also the concrete case
+// adoption still has to cover, a node whose PHY differs from the ether's
+// (an NVS-overridden sf/bw, or a build for another region's plan).
 func TestExtNodeAdoptsReportedPHY(t *testing.T) {
 	h := newEmuHarness()
 	defer h.close()
@@ -196,6 +197,7 @@ func TestExtNodeAdoptsReportedPHY(t *testing.T) {
 	nodeA := dialFakeNode(t, path, "A")
 	defer nodeA.close()
 
+	h.setEtherPHY(10, 125000)
 	sf10Toa := h.toaMs(60)
 	nodeA.txPHY(make([]byte, 60), 9, 125000)
 
@@ -210,10 +212,10 @@ func TestExtNodeAdoptsReportedPHY(t *testing.T) {
 	if toa := uint32(td["toa_ms"].(float64)); toa != sf9Toa {
 		t.Fatalf("txdone toa_ms = %d, want %d (priced at the reported SF9)", toa, sf9Toa)
 	}
-	// The whole point: SF9 is materially cheaper than the SF10 default, so a
-	// short beacon cadence no longer oversubscribes the emulated channel.
+	// The whole point: SF9 is materially cheaper than SF10, so a short beacon
+	// cadence no longer oversubscribes the emulated channel.
 	if sf9Toa >= sf10Toa {
-		t.Fatalf("SF9 ToA %d ms is not below the SF10 default %d ms", sf9Toa, sf10Toa)
+		t.Fatalf("SF9 ToA %d ms is not below the SF10 ToA %d ms", sf9Toa, sf10Toa)
 	}
 	// Coding rate is a ToA input too, so it is adopted alongside SF/BW.
 	if cr := int(h.sim.radio.cr); cr != 1 {
@@ -234,6 +236,7 @@ func TestExtNodeAdoptsReportedCodingRate(t *testing.T) {
 	nodeA := dialFakeNode(t, path, "A")
 	defer nodeA.close()
 
+	h.setEtherPHY(10, 125000)
 	cr45Toa := h.toaMs(60)
 	nodeA.sendRaw(map[string]any{
 		"t": "tx", "payload": base64.StdEncoding.EncodeToString(make([]byte, 60)),
@@ -255,7 +258,10 @@ func TestExtNodeAdoptsReportedCodingRate(t *testing.T) {
 func TestExtNodePinnedScenarioPHYWins(t *testing.T) {
 	h := newEmuHarness()
 	defer h.close()
+	// A scenario that pinned radio.sf: SF10, deliberately not the model default,
+	// so "the pin held" cannot be confused with "nothing happened".
 	h.sim.emuPHYPinned = true
+	h.setEtherPHY(10, 125000)
 	path := filepath.Join(t.TempDir(), "emu.sock")
 	if err := h.startBroker(path); err != nil {
 		t.Fatal(err)

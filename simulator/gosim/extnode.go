@@ -513,17 +513,22 @@ func (ec *extConn) handleTx(msg *emuInbound) {
 // attached firmware node actually configured, which it reports on every tx.
 //
 // The broker used to discard these fields as "advisory" and price every frame
-// at the C radio model's own default (SF10/125 kHz, chosen to mirror the
-// firmware's RADIO_PROFILE_LONG_RANGE table). The running firmware does not use
-// that table's SF: mesh_init_radio_config overwrites the profile's sf/bw_hz
-// with the frequency plan's defaults, and every shipped plan (US915/EU868/
-// AU915) defaults to SF9/125 kHz. Every emulated frame was therefore charged
-// about twice its true airtime (732 ms vs about 371 ms for a 60-byte beacon),
-// which is what tipped the emulator scenarios' budget-exempt short beacon
-// cadence (EMU_BEACON_INTERVAL_MS, 2.6-4.1 s) from a busy channel into an
+// at the C radio model's own default, which at the time was SF10/125 kHz, chosen
+// to mirror the firmware's RADIO_PROFILE_LONG_RANGE table. The running firmware
+// does not use that table's SF: mesh_init_radio_config overwrites the profile's
+// sf/bw_hz with the frequency plan's defaults, and every shipped plan
+// (US915/EU868/AU915) defaults to SF9/125 kHz. Every emulated frame was
+// therefore charged about twice its true airtime (731 ms vs 386 ms for a 60-byte
+// frame), which is what tipped the emulator scenarios' budget-exempt short
+// beacon cadence (EMU_BEACON_INTERVAL_MS, 2.6-4.1 s) from a busy channel into an
 // oversubscribed one: a 3-node cell offered about 89% of channel capacity, so
 // under the half-duplex + any-overlap-collision model the wait for a receiver's
 // first clean beacon became a heavy-tailed lottery instead of a bounded time.
+// The C model's own default is now the frequency plan's PHY too
+// (radio_config_init), so for a stock node adoption confirms rather than corrects
+// the price; it still matters for a node whose sf/bw/cr differ from the plan
+// default (an NVS override, another region's build, or a non-default coding
+// rate), and it is what keeps the ether following the firmware either way.
 //
 // Learning the PHY from the node rather than restating it in each scenario is
 // what keeps the two from drifting apart again: a frequency-plan or profile

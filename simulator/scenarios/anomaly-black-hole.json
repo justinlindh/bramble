@@ -1,6 +1,6 @@
 {
   "name": "anomaly-black-hole",
-  "description": "Black hole: node C relays the A-B-C-D-E line. After a confirmed baseline in both directions, C is killed and immediately rejoined WITHOUT coordinates (the rejoin must restore its original position), clearing its route table while its neighbors keep stale routes through it. Rapid DATA sent through the rebooted C is received but unforwardable, which must trigger the black_hole anomaly on C; the senders' pending acks are then fast-failed by C's no-route RERR chain.",
+  "description": "Black hole: node C relays the A-B-C-D-E line. After a confirmed baseline in both directions, C is killed and immediately rejoined WITHOUT coordinates (the rejoin must restore its original position), clearing its route table while its neighbors keep stale routes through it. Rapid DATA sent through the rebooted C is received but unforwardable, which must trigger the black_hole anomaly on C; the senders' pending acks are then fast-failed by C's no-route RERR chain. The six rapid sends are 150 ms apart, not one second, because the window in which A still believes its stale route through C is bounded by C's first RERR reaching A: at the frequency plan's real SF9 that RERR chain (and, behind it, a full rediscovery) completes inside a one-second-per-send burst, so a slower burst would only ever put one DATA into the black hole and would silently stop exercising the detector. The detector needs five receives with zero forwards inside its 10 s window, and this burst delivers exactly that.",
   "mode": "deterministic",
   "duration_ms": 120000,
   "nodes": [
@@ -65,31 +65,31 @@
       "dest": "E"
     },
     {
-      "at_ms": 63000,
+      "at_ms": 62150,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 64000,
+      "at_ms": 62300,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 65000,
+      "at_ms": 62450,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 66000,
+      "at_ms": 62600,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 67000,
+      "at_ms": 62750,
       "type": "send_message",
       "src": "A",
       "dest": "E"

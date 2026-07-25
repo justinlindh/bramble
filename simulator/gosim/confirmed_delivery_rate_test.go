@@ -71,8 +71,8 @@ func TestConfirmedDeliveryRateMatchesReceiptsHome(t *testing.T) {
 // DESTINATION REACH, not sender confirmation, and overstates Bramble's
 // actual differentiator (confirmed delivery) at scale.
 //
-// 50-node dense grid at SF7/250kHz (45-unit spacing, connects at this SF's
-// derived range; see the SF-range coupling fix, commit 30603bdc), 5
+// 50-node dense grid at SF7/250kHz (45-unit spacing with range pinned to 58
+// units: orthogonal neighbors audible, diagonal ones at 63.6 units not), 5
 // msgs/min traffic: a real, reproducible run where several messages reach
 // their destination but not every one of those receipts makes it back
 // through the loaded reverse path. (Re-tuned from 2 msgs/min when the
@@ -81,7 +81,12 @@ func TestConfirmedDeliveryRateMatchesReceiptsHome(t *testing.T) {
 // ACK retransmit ladder actually firing and destinations re-ACKing
 // duplicate DATA, 3 msgs/min recovered every lost receipt and the gap
 // closed at that load; 5 msgs/min keeps the reverse path lossy enough to
-// exercise it.)
+// exercise it.) The range is pinned rather than derived because this scenario
+// is tuned to a specific reverse-path loss pattern: 58 units is what SF7/250 kHz
+// derived to when it was tuned, and any value in [45, 63.6) gives the same
+// orthogonal-only graph, so pinning it keeps the tuning independent of the
+// derived-range calibration anchor (which tracks the frequency plan's default
+// PHY, see radio_noise_margin_db).
 func TestConfirmedDeliveryRateHonestUnderLoad(t *testing.T) {
 	scenarioJSON := generateGridScenarioJSON(t, gridScenarioParams{
 		Name:       "sf7-45u-50-confirmed-test",
@@ -89,6 +94,7 @@ func TestConfirmedDeliveryRateHonestUnderLoad(t *testing.T) {
 		Spacing:    45,
 		SF:         7,
 		BWHz:       250000,
+		Range:      58,
 		DurationS:  600,
 		MsgsPerMin: 5,
 	})
@@ -163,11 +169,14 @@ func runAndGetFinalMetrics(t *testing.T, namePrefix, scenarioJSON string) map[st
 }
 
 type gridScenarioParams struct {
-	Name       string
-	NodeCount  int
-	Spacing    float64
-	SF         int
-	BWHz       int
+	Name      string
+	NodeCount int
+	Spacing   float64
+	SF        int
+	BWHz      int
+	// Range pins radio.range (grid units) instead of letting it derive from the
+	// SF/BW link budget. Omit (0) to derive.
+	Range      float64
 	DurationS  int
 	MsgsPerMin int
 }
@@ -195,6 +204,7 @@ func generateGridScenarioJSON(t *testing.T, p gridScenarioParams) string {
 		PropagationSpeedMsPerUnit float64 `json:"propagation_speed_ms_per_unit"`
 		SF                        int     `json:"sf,omitempty"`
 		BWHz                      int     `json:"bw_hz,omitempty"`
+		Range                     float64 `json:"range,omitempty"`
 	}
 	type scenario struct {
 		Name       string  `json:"name"`
@@ -252,6 +262,7 @@ func generateGridScenarioJSON(t *testing.T, p gridScenarioParams) string {
 			PropagationSpeedMsPerUnit: 0.1,
 			SF:                        p.SF,
 			BWHz:                      p.BWHz,
+			Range:                     p.Range,
 		},
 		Events: events,
 	}

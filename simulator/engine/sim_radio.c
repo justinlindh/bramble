@@ -1,4 +1,5 @@
 #include "sim_radio.h"
+#include "freq_plan.h"
 #include "sim_emitter.h"
 #include <math.h>
 #include <string.h>
@@ -25,6 +26,15 @@
  *    Alonso, "Do LoRa Low-Power Wide-Area Networks Scale?" (MSWiM 2016) and
  *    the SX127x/SX126x co-channel rejection figures.
  *
+ * Default PHY: taken from the frequency plan, not from the radio profile
+ * table, because that is what the firmware transmits at. mesh_task.c's
+ * mesh_init_radio_config loads RADIO_PROFILE_LONG_RANGE and then overwrites
+ * its sf/bw_hz with freq_plan_get_default()->default_sf/default_bw_hz, so a
+ * real node's boot log reads "Radio config: 915.0 MHz SF9 BW125000", not the
+ * profile's SF10. Reading the plan here (see radio_config_init) keeps the two
+ * from drifting apart: change a plan's default_sf and the simulated medium
+ * follows the firmware automatically.
+ *
  * RSSI gradient: log-distance path loss,
  *     RSSI(d) = tx_power_dbm - PL(d0) - 10 n log10(d / d0)
  * with d0 = 1 grid unit (= 10 m, the simulator's position scale), PL(d0) =
@@ -41,7 +51,7 @@
  * explicitly overrides the derivation (sim_scenario.c load_radio); otherwise
  * range is recomputed from whatever sf/bw_hz/tx_power_dbm/path_loss_* the
  * scenario configured. See radio_sensitivity_dbm for the SF/BW sensitivity
- * model and its NOISE_MARGIN_DB calibration constant.
+ * model and radio_noise_margin_db for its calibration anchor.
  *
  * Not modeled, on purpose: real RF terrain/fading (range disk stands in for
  * it), external interference from other networks, inter-SF interference
@@ -57,29 +67,59 @@
 extern uint32_t bramble_calculate_airtime_us(uint16_t payload_bytes, uint8_t sf, uint32_t bw_hz,
                                              uint8_t cr);
 
+/* Default link-budget params, named so the radio_noise_margin_db derivation
+ * below provably uses the same numbers radio_config_init installs. */
+#define SIM_DEFAULT_TX_POWER_DBM 22
+#define SIM_DEFAULT_PATH_LOSS_D0_DB 52.0f
+#define SIM_DEFAULT_PATH_LOSS_EXP 2.9f
+
+/* The simulator's long-standing reception-range baseline, in grid units
+ * (1 unit = 10 m, so 1.5 km). Every legacy scenario was laid out around this
+ * disk (120-unit grid spacing so orthogonal neighbors, and only they, are
+ * audible), so it is a fixed point of the model: the derived range at the
+ * firmware's default PHY must reproduce it. radio_noise_margin_db is the
+ * constant that holds that anchor. */
+#define SIM_BASELINE_RANGE_UNITS 150.0f
+
+uint8_t radio_default_sf(void) {
+    uint8_t sf = freq_plan_get_default()->default_sf;
+    /* Guard the sensitivity table's index: every shipped plan is inside 7..12,
+     * so this only fires if a future plan is edited out of range. */
+    return (sf >= 7 && sf <= 12) ? sf : 10;
+}
+
+uint32_t radio_default_bw_hz(void) {
+    uint32_t bw = freq_plan_get_default()->default_bw_hz;
+    return bw ? bw : 125000;
+}
+
 void radio_config_init(radio_config_t* config) {
     memset(config, 0, sizeof(*config));
     config->loss_pct = 0.0f;
     config->propagation_speed_ms_per_unit = 0.1f;
 
-    /* Firmware RADIO_PROFILE_LONG_RANGE (the mesh_task default) */
-    config->sf = 10;
-    config->bw_hz = 125000;
+    /* The PHY the firmware actually transmits at: the frequency plan's
+     * defaults, which mesh_init_radio_config writes over the radio profile's
+     * sf/bw_hz (SF9/125 kHz on every shipped plan). CR and TX power still come
+     * from RADIO_PROFILE_LONG_RANGE, which the plan does not override (it only
+     * clamps power to the regulatory max, and 22 dBm is inside US915's 30). */
+    config->sf = radio_default_sf();
+    config->bw_hz = radio_default_bw_hz();
     config->cr = 1; /* 4/5 */
-    config->tx_power_dbm = 22;
+    config->tx_power_dbm = SIM_DEFAULT_TX_POWER_DBM;
 
     config->collisions_enabled = true;
     config->lbt_enabled = true;
     config->capture_db = 6.0f;
-    config->path_loss_exp = 2.9f;
-    config->path_loss_d0_db = 52.0f;
+    config->path_loss_exp = SIM_DEFAULT_PATH_LOSS_EXP;
+    config->path_loss_d0_db = SIM_DEFAULT_PATH_LOSS_D0_DB;
 
     config->duty_cycle_set = false; /* unlimited: today's behavior */
     config->duty_cycle_pct = 0;
 
-    /* Range derives from the PHY params just set (SF10/125 kHz), landing on
-     * the simulator's ~150-unit baseline; see radio_derive_range and
-     * NOISE_MARGIN_DB. Must run last: it reads sf/bw_hz/tx_power_dbm/
+    /* Range derives from the PHY params just set, landing on
+     * SIM_BASELINE_RANGE_UNITS by construction; see radio_derive_range and
+     * radio_noise_margin_db. Must run last: it reads sf/bw_hz/tx_power_dbm/
      * path_loss_* above. */
     config->range = radio_derive_range(config);
 }
@@ -95,43 +135,62 @@ static const float kSfSensitivity125kDbm[6] = {
     -137.0f, /* SF12 */
 };
 
+/* Bandwidth term of the sensitivity model: wider bandwidth admits more noise,
+ * +10*log10(bw/125000) dB relative to the 125 kHz datasheet column. */
+static float bw_noise_adj_db(uint32_t bw_hz) {
+    if (bw_hz == 0)
+        bw_hz = 125000;
+    return 10.0f * log10f((float)bw_hz / 125000.0f);
+}
+
 /*
- * NOISE_MARGIN_DB: single additive calibration constant folded into
+ * radio_noise_margin_db: single additive calibration constant folded into
  * radio_sensitivity_dbm. This simulator's path-loss model (path_loss_d0_db =
  * 52 dB, path_loss_exp = 2.9) is far lossier at short grid distances than a
- * real link budget with -132 dBm SF10 sensitivity would imply (the raw
- * budget would put the SF10/125 kHz range past 3000 grid units); the
- * simulator's own ~150-unit range was tuned for gameplay/test scale, not
- * physical realism. NOISE_MARGIN_DB folds that difference into a single
- * "noise figure + implementation margin" offset so the derived SF10/125 kHz
- * range reproduces the existing ~150-unit baseline exactly (every legacy
- * scenario was tuned around that disk), while SF/BW deltas relative to that
- * baseline now follow the real datasheet deltas.
+ * real link budget with datasheet sensitivity would imply (the raw budget
+ * would put the default PHY's range past 2000 grid units); the simulator's own
+ * ~150-unit range was tuned for gameplay/test scale, not physical realism.
+ * This margin folds that difference into a single "noise figure +
+ * implementation margin" offset so the derived range at the FIRMWARE'S DEFAULT
+ * PHY reproduces SIM_BASELINE_RANGE_UNITS exactly (every legacy scenario was
+ * laid out around that disk, and the ones that omit "range" derive it), while
+ * SF/BW deltas relative to that anchor follow the real datasheet deltas.
  *
- * Derivation, with the default params above (tx_power 22 dBm, target range
- * 150 units):
- *   margin = tx_power - path_loss_d0_db - base_sens(SF10)
+ * The anchor is computed from the frequency plan rather than hardcoded, so it
+ * tracks the default PHY instead of silently moving every unpinned scenario's
+ * topology when a plan's default_sf changes. At the shipped default
+ * (SF9/125 kHz, base sensitivity -129 dBm):
+ *   margin = tx_power - path_loss_d0_db - base_sens(SF9)
  *            - 10 * path_loss_exp * log10(150)
- *          = 22 - 52 - (-132) - 29 * log10(150)
- *          = 102 - 63.107
- *          = 38.89 dB (rounded to 38.9).
+ *          = 22 - 52 - (-129) - 29 * log10(150)
+ *          = 99 - 63.107
+ *          = 35.89 dB.
+ * It was 38.9 dB while the model's default PHY was mistakenly SF10; the 3 dB
+ * difference is exactly the SF9-to-SF10 datasheet sensitivity step, so ranges
+ * at a non-default SF/BW move by that one step and the default PHY's 150-unit
+ * baseline is unchanged.
  */
-#define NOISE_MARGIN_DB 38.9f
+static float radio_noise_margin_db(void) {
+    float base = kSfSensitivity125kDbm[radio_default_sf() - 7];
+    base += bw_noise_adj_db(radio_default_bw_hz());
+    return (float)SIM_DEFAULT_TX_POWER_DBM - SIM_DEFAULT_PATH_LOSS_D0_DB - base -
+           10.0f * SIM_DEFAULT_PATH_LOSS_EXP * log10f(SIM_BASELINE_RANGE_UNITS);
+}
 
 float radio_sensitivity_dbm(uint8_t sf, uint32_t bw_hz) {
     if (sf < 7 || sf > 12)
-        sf = 10;
+        sf = radio_default_sf();
     if (bw_hz == 0)
-        bw_hz = 125000;
+        bw_hz = radio_default_bw_hz();
     float base = kSfSensitivity125kDbm[sf - 7];
-    float bw_adj_db = 10.0f * log10f((float)bw_hz / 125000.0f);
-    return base + bw_adj_db + NOISE_MARGIN_DB;
+    return base + bw_noise_adj_db(bw_hz) + radio_noise_margin_db();
 }
 
 float radio_derive_range(const radio_config_t* config) {
-    uint8_t sf = config->sf ? config->sf : 10;
-    uint32_t bw = config->bw_hz ? config->bw_hz : 125000;
-    float path_loss_exp = config->path_loss_exp > 0.0f ? config->path_loss_exp : 2.9f;
+    uint8_t sf = config->sf ? config->sf : radio_default_sf();
+    uint32_t bw = config->bw_hz ? config->bw_hz : radio_default_bw_hz();
+    float path_loss_exp =
+        config->path_loss_exp > 0.0f ? config->path_loss_exp : SIM_DEFAULT_PATH_LOSS_EXP;
     float sensitivity = radio_sensitivity_dbm(sf, bw);
     float budget_db = (float)config->tx_power_dbm - config->path_loss_d0_db - sensitivity;
     if (budget_db <= 0.0f)
@@ -226,8 +285,8 @@ bool radio_in_interference(const radio_config_t* config, const sim_node_t* node)
 }
 
 uint32_t radio_frame_airtime_us(const radio_config_t* config, uint16_t frame_bytes) {
-    uint8_t sf = config->sf ? config->sf : 10;
-    uint32_t bw = config->bw_hz ? config->bw_hz : 125000;
+    uint8_t sf = config->sf ? config->sf : radio_default_sf();
+    uint32_t bw = config->bw_hz ? config->bw_hz : radio_default_bw_hz();
     uint8_t cr = config->cr ? config->cr : 1;
     return bramble_calculate_airtime_us(frame_bytes, sf, bw, cr);
 }
@@ -239,8 +298,8 @@ uint32_t radio_frame_airtime_ms(const radio_config_t* config, uint16_t frame_byt
 }
 
 uint64_t radio_preamble_us(const radio_config_t* config) {
-    uint8_t sf = config->sf ? config->sf : 10;
-    uint32_t bw = config->bw_hz ? config->bw_hz : 125000;
+    uint8_t sf = config->sf ? config->sf : radio_default_sf();
+    uint32_t bw = config->bw_hz ? config->bw_hz : radio_default_bw_hz();
     double t_sym_us = (double)(1u << sf) * 1e6 / (double)bw;
     /* Mirrors bramble_calculate_airtime_us: 12 programmed symbols for SF>=9,
      * 8 below, plus 4.25 sync symbols. */

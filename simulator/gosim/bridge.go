@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include -I../../components/airtime/include -I../../components/airtime -I../../components/fragment/include -I../../components/fragment -I../../components/crypto/include -I../../components/crypto -I../../components/mailbox/include -I../../components/location/include -I../../components/channel/include -I../../components/nvs_keys/include -I../../components/radio/include -I../../components/network_key/include -I../../components/security/include -I../../components/routing_auth/include -I../../components/identity/include
+#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include -I../../components/airtime/include -I../../components/airtime -I../../components/fragment/include -I../../components/fragment -I../../components/crypto/include -I../../components/crypto -I../../components/mailbox/include -I../../components/location/include -I../../components/channel/include -I../../components/nvs_keys/include -I../../components/radio/include -I../../components/freq_plan/include -I../../components/network_key/include -I../../components/security/include -I../../components/routing_auth/include -I../../components/identity/include
 #cgo LDFLAGS: -lm -lssl -lcrypto
 #include <stdlib.h>
 #include "bridge.h"

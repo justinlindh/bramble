@@ -134,7 +134,18 @@ Bramble defines two radio profiles. All nodes in a mesh must use the same profil
 | Explicit Header | Enabled | Required for variable-length packets |
 | Max Payload | 222 bytes | SX1262 limit with explicit header |
 
-**Resulting characteristics (SF10, 125kHz, CR 4/6):**
+> **What ships is SF9, not this table's SF10.** `mesh_init_radio_config`
+> (`main/mesh_task.c`) loads this profile and then overwrites its `sf`/`bw_hz`
+> with the frequency plan's defaults, and every shipped plan
+> (`components/freq_plan/freq_plan.c`: US915, EU868, AU915) sets
+> `default_sf = 9`, `default_bw_hz = 125000`. A stock node's boot log therefore
+> reads `Radio config: 915.0 MHz SF9 BW125000`. The profile table above and the
+> characteristics below describe the profile as defined; for airtime at the PHY a
+> node actually transmits on, halve them (a 60-byte frame is 386 ms at SF9 against
+> 731 ms at SF10). The mesh simulator models the plan's SF9 for exactly this
+> reason.
+
+**Resulting characteristics (SF10, 125kHz, CR 4/6, i.e. the profile as defined rather than as shipped):**
 
 - Bit rate: 3,125 bps (raw), ~2,083 bps (effective with CR)
 - 100-byte payload: ~480ms airtime
@@ -225,7 +236,7 @@ for attempt in 0..2:
 
 The combination of wide slot spacing, hardware channel sensing, and aggressive retries achieves near-100% delivery receipt rates in meshes of 5+ nodes.
 
-> **Firmware reality.** This is a design-target statement, not a measured field result. Under the honest collision-modeled simulator, delivery holds high only at small, dense scale (about 95% at 10 nodes) and collapses as a single SF10 channel saturates under offered load and node count (roughly 10 to 12% at 50 to 100 nodes, 0% at 200); see [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md). No multi-node field test has been run. Treat the delivery-receipt layering here as a reliability mechanism, not a scale guarantee.
+> **Firmware reality.** This is a design-target statement, not a measured field result. Under the honest collision-modeled simulator, re-measured 2026-07-24 at the PHY firmware transmits on (the frequency plan's SF9/125 kHz), a 10-node grid delivers 30% and larger meshes collapse as a single channel saturates under control-plane load (10% at 50 nodes, 0 to 5% at 100, 0% at 200); see [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md). No multi-node field test has been run. Treat the delivery-receipt layering here as a reliability mechanism, not a scale guarantee.
 
 ---
 
@@ -2004,8 +2015,9 @@ the scale range.
 approximately 45-unit node spacing) the firmware flood measured **75 to 100
 percent reach and 60 to 90 percent confirmed delivery at 25 to 100 nodes**.
 These are the profile and density the transport is designed for; they are not
-the shipping default (which is LongRange, SF10 / 125 kHz, section 3.2) and they
-do not replace reactive routing. (Caveat: these figures are modeled from gosim
+the shipping default (the LongRange profile of section 3.2, with the frequency
+plan's SF9 / 125 kHz in place of the profile's SF10) and they do not replace
+reactive routing. (Caveat: these figures are modeled from gosim
 sweeps. The committed scenarios and result docs fix message load at 2/min and
 this exact profile-and-node-count grid is not reproduced by a standalone
 committed result file, so treat the range as a projection, not a published
