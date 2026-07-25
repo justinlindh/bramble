@@ -851,8 +851,11 @@ export async function sendProbe(): Promise<void> {
   });
   store.setProbeCollecting(true);
 
-  /* Firmware currently emits onProbeResult but not onProbeComplete.
-   * Auto-finalize at ack-window expiry to avoid stuck Collecting state. */
+  /* Firmware emits bramble.onProbeComplete once its collection window
+   * elapses (mesh_task.c), and handleProbeComplete finalizes on it. This
+   * auto-finalize at ack-window expiry is the fallback for when that
+   * notification never arrives (dropped push, session reconnect), so the UI
+   * cannot get stuck in Collecting. */
   setTimeout(() => {
     const s = useStore.getState();
     const cur = s.probeResult;
@@ -864,10 +867,11 @@ export async function sendProbe(): Promise<void> {
   }, Math.max(1, ackWindow) * 1000 + 150);
 }
 
-// Probe push payloads (bramble.onProbeAck / onProbeComplete). Not in the
-// OpenAPI contract (they are notifications, not RPC responses), so the wire
-// shape is declared here: contract-style snake_case plus the camelCase
-// fallbacks in case a bridge normalizes keys.
+// Probe push payloads (bramble.onProbeResult / bramble.onProbeComplete). The
+// contract does declare these as OnProbeResultPayload and
+// OnProbeCompletePayload, but those schemas are strict and snake_case only,
+// so the tolerant shape is declared here: every field optional, contract-style
+// snake_case plus camelCase fallbacks in case a bridge normalizes keys.
 interface ProbeResponderWire {
   address?: string;
   responderAddr?: number;

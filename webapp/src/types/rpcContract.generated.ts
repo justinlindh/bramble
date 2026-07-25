@@ -355,7 +355,7 @@ export interface paths {
         put?: never;
         /**
          * Send a network probe
-         * @description Broadcasts a probe packet. Responses arrive asynchronously as probe.ack notifications, followed by a probe.complete notification.
+         * @description Broadcasts a probe packet. Takes no parameters. Responses arrive asynchronously as bramble.onProbeResult notifications, followed by a bramble.onProbeComplete notification.
          */
         post: operations["sendProbe"];
         delete?: never;

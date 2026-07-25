@@ -690,7 +690,9 @@ static int handle_reboot(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.sendProbe (stub): params {"dest":"HEXADDR"} */
+/* bramble.sendProbe: no params. Broadcasts a probe (mesh_send_probe takes no
+ * destination); responses arrive as bramble.onProbeResult notifications,
+ * followed by bramble.onProbeComplete. */
 static int handle_send_probe(const cJSON* params, cJSON* result) {
     (void)params;
     uint32_t probe_id = mesh_send_probe();
@@ -706,7 +708,6 @@ static int handle_send_probe(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.setRadio (stub): params {"sf":9, "bw_hz":125000, "tx_power":17, "freq_mhz":915.0} */
 /* Commits pending nvs_set_* writes (only if every prior one succeeded) and
  * closes the handle. Returns the resulting esp_err_t. Shared by the RPC
  * handlers below that accumulate esp_err_t across a chain of nvs_set_*
@@ -734,6 +735,10 @@ static int rpc_report_persist_failure(cJSON* result, const char* tag, const char
     return rpc_rc;
 }
 
+/* bramble.setRadio: a params object is required, every field in it is
+ * optional (omitted fields keep their current value):
+ * {"frequency_mhz":915.0, "sf":9, "bw_hz":125000, "tx_power_dbm":17,
+ * "coding_rate":5} */
 static int handle_set_radio(const cJSON* params, cJSON* result) {
     if (!params)
         return RPC_ERR_INVALID_PARAMS;
