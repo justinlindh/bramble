@@ -79,11 +79,14 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY simulator/ui/ .
 RUN npm run build
 
-# Stage 4: runtime (minimal). ubuntu:24.04 to match the idf-build stage's
-# base (espressif/idf:v5.4.1 is Ubuntu 24.04, glibc 2.39): the node ELF links
-# against the build stage's glibc, and a debian:bookworm runtime (glibc 2.36)
-# refuses to load it (`GLIBC_2.38' not found). libssl3t64 is noble's name for
-# the libssl.so.3 runtime the gosim cgo build links.
+# Stage 4: runtime (minimal). The constraint is a floor, not a match: the node
+# ELF is linked against the idf-build stage's glibc (espressif/idf:v5.4.1 is
+# Ubuntu 24.04, glibc 2.39), so the runtime's glibc has to be at least that.
+# A debian:bookworm runtime (glibc 2.36) is below the floor and refuses to load
+# it (`GLIBC_2.38' not found). ubuntu:26.04 ships glibc 2.43, which is above it,
+# and glibc's backward compatibility keeps the 2.39-linked ELF loadable there.
+# libssl3t64 is Ubuntu's package name for the libssl.so.3 runtime the gosim cgo
+# build links; 26.04 still ships it (OpenSSL 3.5.x, same soname).
 FROM ubuntu:26.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates libssl3t64 libbsd0 libstdc++6 \
