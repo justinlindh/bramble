@@ -5,7 +5,7 @@ import { session, LAST_NODE_ADDR_KEY } from './client';
 import { useStore, conversationIdForMessage } from '../index';
 import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
-import { formatAddrHex } from '../../utils/address';
+import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { parseAddr } from '../../lib/addr';
 import { isAndroidShell } from '../../utils/platform';
 import type { RelayHop, MessageTier, ProbeResponse, Message } from '../../types/bramble';
@@ -773,7 +773,7 @@ function maybeNotifyIncoming(msg: Message): void {
   const appVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
   if (appVisible && store.activeConversationId === conversationId) return;
 
-  const senderName = store.peerNames.get(msg.from) ?? `0x${(msg.from >>> 0).toString(16).toUpperCase()}`;
+  const senderName = store.peerNames.get(msg.from) ?? formatAddr0x(msg.from);
   const conversationTitle = conversationTitleFor(conversationId, senderName, store);
 
   const payload: NativeMessageNotification = {
