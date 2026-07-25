@@ -130,12 +130,16 @@ int send_beacon(void) {
 
 /* Low-cadence self-signed identity broadcast: 230 bytes (the relay-gated
  * frame carrying the endorsement cert, IDENTITY_ATTESTATION_SIZE) every 15
- * minutes is the design's approved airtime budget. At the shipping profiles
- * one frame is 2123.8 us (LONG_RANGE SF10/125k) or 181.9 us (MEDIUM_RANGE
- * SF7/250k), so the per-node duty at this cadence is ~0.236% and ~0.0202%
- * respectively (computed via components/radio/radio_airtime.c; the trust-anchor
- * cert grew the frame 158 -> 230, a ~40% airtime bump that stays negligible).
- * Do not raise the cadence without re-flagging that budget. */
+ * minutes is the design's approved airtime budget. One frame is 1164.3 ms at
+ * the PHY a stock node actually transmits on (the frequency plan's SF9/125k,
+ * which mesh_init_radio_config programs over RADIO_PROFILE_LONG_RANGE's SF10)
+ * or 181.9 ms on MEDIUM_RANGE (SF7/250k), so the per-node duty at this cadence
+ * is ~0.129% and ~0.0202% respectively (computed via
+ * components/radio/radio_airtime.c; the same frame is 2123.8 ms at the profile
+ * table's SF10, the figure this comment used to quote, in us by a units typo.
+ * The trust-anchor cert grew the frame 158 -> 230, a ~40% airtime bump that
+ * stays negligible). Do not raise the cadence without re-flagging that
+ * budget. */
 #define ATTESTATION_INTERVAL_MS (15u * 60u * 1000u)
 /* Short retry after a failed/denied send, so a boot-time budget denial
  * does not leave the node unattested for a full interval. */

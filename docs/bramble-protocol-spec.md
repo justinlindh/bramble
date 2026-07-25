@@ -87,7 +87,7 @@ Every data structure has a hard size cap. Every algorithm has bounded memory and
 
 ### 2.4 Conserve Airtime
 
-LoRa is slow. At SF10/125kHz, a 200-byte packet takes ~700ms to transmit. Every byte and every transmission must be justified:
+LoRa is slow. At the shipped SF9/125kHz PHY (section 3.2), a 200-byte packet takes ~1,021ms to transmit. Every byte and every transmission must be justified:
 
 - Route-based forwarding: only nodes on the path transmit (not the entire mesh).
 - Compact binary packet format: no JSON, no protobuf, no padding.
@@ -126,7 +126,7 @@ Bramble defines two radio profiles. All nodes in a mesh must use the same profil
 | Frequency | 906.875 MHz | US ISM band (902–928 MHz), center of a common sub-band |
 | Spreading Factor | SF10 | Good range (~10km LOS) with acceptable data rate. SF12 is too slow for mesh. |
 | Bandwidth | 125 kHz | Standard, best sensitivity (-137 dBm at SF10) |
-| Coding Rate | 4/6 (CR2) | Moderate FEC. 4/5 saves airtime but fails in noisy environments. 4/8 is too expensive. |
+| Coding Rate | 4/5 (CR1) | What `radio_get_profile_config` actually sets (`coding_rate = 1`, `components/radio/radio_profiles.c`, for both profiles). The lightest FEC, chosen for airtime; 4/8 is too expensive at these frame sizes. |
 | TX Power | +22 dBm (SX1262 max) | Maximum legal US power for frequency hopping systems. Configurable down. |
 | Preamble | 12 symbols | Reliable detection. Default 8 misses weak signals. |
 | Sync Word | 0x1424 | Private network sync word (not LoRaWAN 0x3444) |
@@ -139,17 +139,25 @@ Bramble defines two radio profiles. All nodes in a mesh must use the same profil
 > with the frequency plan's defaults, and every shipped plan
 > (`components/freq_plan/freq_plan.c`: US915, EU868, AU915) sets
 > `default_sf = 9`, `default_bw_hz = 125000`. A stock node's boot log therefore
-> reads `Radio config: 915.0 MHz SF9 BW125000`. The profile table above and the
-> characteristics below describe the profile as defined; for airtime at the PHY a
-> node actually transmits on, halve them (a 60-byte frame is 386 ms at SF9 against
-> 731 ms at SF10). The mesh simulator models the plan's SF9 for exactly this
+> reads `Radio config: 915.0 MHz SF9 BW125000`. The `Spreading Factor` row above
+> therefore describes the profile as defined, not as shipped; the characteristics
+> below give both. The mesh simulator models the plan's SF9 for exactly this
 > reason.
 
-**Resulting characteristics (SF10, 125kHz, CR 4/6, i.e. the profile as defined rather than as shipped):**
+**Resulting characteristics.** Airtime is computed by `bramble_calculate_airtime_us`
+(`components/radio/radio_airtime.c`, Semtech AN1200.13) at CR 4/5 with a 12-symbol
+preamble, explicit header and CRC enabled. Bit rate is the LoRa `SF * BW / 2^SF`
+raw rate, times 4/5 for the coding rate.
 
-- Bit rate: 3,125 bps (raw), ~2,083 bps (effective with CR)
-- 100-byte payload: ~480ms airtime
-- 200-byte payload: ~850ms airtime
+| Metric | Shipped (SF9 / 125 kHz) | Profile table (SF10 / 125 kHz) |
+| --- | --- | --- |
+| Raw bit rate | 2,197 bps | 1,221 bps |
+| Effective bit rate (CR 4/5) | 1,758 bps | 977 bps |
+| 60-byte frame | 386 ms | 731 ms |
+| 100-byte frame | 570 ms | 1,059 ms |
+| 200-byte frame | 1,021 ms | 1,878 ms |
+| 222-byte frame (max payload) | 1,123 ms | 2,042 ms |
+
 - Link budget: ~154 dB (sensitivity -132 dBm + 22 dBm TX)
 - Practical range: 3–8 km urban, 10–20 km rural/LOS
 
@@ -245,7 +253,7 @@ The combination of wide slot spacing, hardware channel sensing, and aggressive r
 ### 4.1 Design Constraints
 
 - Maximum LoRa payload: 222 bytes (SX1262 with explicit header)
-- Bramble header must be compact: every header byte costs ~4.3ms airtime at SF10/125kHz
+- Bramble header must be compact: every header byte costs ~4.5ms airtime at the shipped SF9/125kHz, and ~8.2ms at the profile table's SF10
 - All multi-byte integers are **big-endian** (network byte order)
 - Node addresses are 4 bytes (truncated hash of public key)
 
@@ -919,10 +927,13 @@ all certs are permanent.
 (P1) added the inline endorsement cert (`not_after + endorsement_sig`, 72
 bytes) between the self-signature and the relay-gate MAC; it had previously
 grown 144 -> 158 when the Phase 3 relay gate added `auth_hmac + seq`. At the
-15-minute cadence one 230-byte attestation costs a node roughly 0.236% duty
-cycle on LONG_RANGE (SF10/125 kHz) and roughly 0.0202% on MEDIUM (SF7/250
-kHz), negligible against the 10% regulatory budget and debited from the same
-broadcast tier as all flooded traffic.
+shipped long-range PHY (the frequency plan's SF9/125 kHz, section 3.2) a
+230-byte attestation is 1164 ms on air, so at the 15-minute cadence it costs a
+node roughly 0.129% duty cycle; on MEDIUM (SF7/250 kHz) it is 182 ms and
+roughly 0.0202%. Both are negligible against the 10% regulatory budget and are
+debited from the same broadcast tier as all flooded traffic. (Priced at the
+profile table's SF10 the same frame is 2124 ms and 0.236%, the figure this
+section used to quote before the PHY correction.)
 
 ### 4.29 Wire Version 5 (Firmware Reality)
 
@@ -2062,13 +2073,18 @@ each rather than quoting a single headline number:
   time-on-air**, i.e. on a fast radio profile. At the shipped long-range
   default (the frequency plan's SF9 / 125 kHz, which section 3.2 notes the
   firmware runs in place of the profile table's SF10) a flooded frame's
-  time-on-air (about 386 ms for a 60-byte frame) still exceeds the 50 to 300 ms
-  rebroadcast jitter (`RREQ_FWD_JITTER_MIN_MS`/`RREQ_FWD_JITTER_MAX_MS`, reused
-  by the channel-flood relay), so a node's own relay has already gone out
-  before it can overhear enough copies to cancel it, and flooding relays
-  **without** suppression. The correction from the profile table's SF10 roughly
-  halved that time-on-air (731 ms to 386 ms) without lifting it below the jitter
-  window, so the conclusion is unchanged, only by a narrower margin. This ties
+  time-on-air is about 386 ms for a 60-byte frame. Cancelling requires another
+  node's relay to be fully received before the local one fires, i.e.
+  `jitter_other + time_on_air <= jitter_self`, so a frame has to be shorter
+  than the widest possible gap between two jitter draws: 250 ms, from the 50 to
+  300 ms range (`RREQ_FWD_JITTER_MIN_MS`/`RREQ_FWD_JITTER_MAX_MS`, reused by
+  the channel-flood relay). At SF9 no realistic flood frame is: 386 ms for 60
+  bytes and 263 ms even for a 32-byte one, against 731 ms and 485 ms at the
+  retracted SF10. Not one copy can land in time, let alone the
+  `FLOOD_SUPPRESS_AFTER` = 2 that cancellation needs, so a node's own relay has
+  always gone out first and flooding relays **without** suppression. Note the
+  bound is the 250 ms spread, not the 300 ms top of the jitter range: a 32-byte
+  SF9 frame fits inside the range and still cannot suppress. This ties
   transport efficiency to matching the radio profile to a dense deployment (see
   the SF-to-density deployment guidance).
 - **Retry re-floods the same `packet_id`**, which is suppressed at every relay
@@ -2310,7 +2326,7 @@ function is_duplicate(packet_id):
 
 US ISM 902–928 MHz: No strict duty cycle requirement (unlike EU 868 MHz), but FCC Part 15.247 requires either frequency hopping or digital modulation with max 1W conducted power. Bramble uses single-channel operation at +22 dBm, which is compliant for digitally-modulated systems with ≥500 kHz bandwidth at SF ≤ 8, or with the frequency hopping variant.
 
-Regardless of legality, Bramble enforces a **self-imposed 10% airtime budget** per node to ensure mesh scalability. At SF10/125kHz, 10% duty cycle = ~360 seconds of airtime per hour, which is ~420 packets of 200 bytes or ~750 packets of 100 bytes per hour.
+Regardless of legality, Bramble enforces a **self-imposed 10% airtime budget** per node to ensure mesh scalability. A 10% duty cycle is 360 seconds of airtime per hour at any PHY; what it buys depends on the PHY. At the shipped SF9/125kHz that is ~350 packets of 200 bytes or ~630 packets of 100 bytes per hour; at the profile table's SF10 it would be ~190 and ~340 (per-frame airtime from the section 3.2 table).
 
 ### 8.2 Token Bucket Algorithm
 
@@ -2427,7 +2443,7 @@ function debit_airtime(packet_airtime_us, tier):
 function calculate_airtime_us(payload_bytes, sf, bw_hz, cr):
     // LoRa airtime calculation per Semtech AN1200.13
     
-    n_preamble = 12  // Configured preamble symbols
+    n_preamble = 12 if sf >= 9 else 8  // Configured preamble symbols
     
     // Symbol duration
     t_sym_us = (1 << sf) * 1000000 / bw_hz
@@ -2437,7 +2453,7 @@ function calculate_airtime_us(payload_bytes, sf, bw_hz, cr):
     
     // Payload symbols
     // Using explicit header, CRC enabled, low data rate optimize for SF >= 11
-    de = 1 if (sf >= 11 and bw_hz == 125000) else 0
+    de = 1 if (sf >= 11 and bw_hz <= 125000) else 0
     ih = 0  // Explicit header
     
     numerator = 8 * payload_bytes - 4 * sf + 28 + 16 - 20 * ih
@@ -2449,12 +2465,12 @@ function calculate_airtime_us(payload_bytes, sf, bw_hz, cr):
     
     return t_preamble_us + t_payload_us
 
-// Examples (SF10, 125kHz, CR 4/6 = cr=2):
-// 22 bytes (ACK):    ~290 ms = 290,000 µs
-// 36 bytes (beacon): ~400 ms = 400,000 µs
-// 100 bytes (short msg): ~480 ms = 480,000 µs
-// 200 bytes (full msg):  ~850 ms = 850,000 µs
-// 222 bytes (max):       ~920 ms = 920,000 µs
+// Examples at the shipped PHY (SF9, 125kHz, CR 4/5 = cr=1):
+// 22 bytes (ACK):        222 ms =   222,208 µs
+// 36 bytes (beacon):     284 ms =   283,648 µs
+// 100 bytes (short msg): 570 ms =   570,368 µs
+// 200 bytes (full msg): 1021 ms = 1,020,928 µs
+// 222 bytes (max):      1123 ms = 1,123,328 µs
 ```
 
 ### 8.4 Congestion Detection and Response
@@ -2961,7 +2977,7 @@ RREQ rate table          64     LRU by timestamp.
 
 ```text
 // Radio
-radio_profile        = LongRange           // SF10, 125kHz, CR 4/6
+radio_profile        = LongRange           // table SF10, 125kHz, CR 4/5; ships at SF9 (section 3.2)
 tx_power_dbm         = 22                  // Max legal
 frequency_mhz        = 906.875
 

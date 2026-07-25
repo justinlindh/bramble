@@ -1628,11 +1628,18 @@ These do not go away when section 4 empties out.
     jitter elapses, which only happens when the jitter window exceeds a frame's
     time-on-air. At the shipped long-range default (the frequency plan's
     SF9 / 125 kHz, which the firmware runs in place of the profile table's
-    SF10) a flooded frame's time-on-air (about 386 ms for a 60-byte frame) still
-    exceeds the 50 to 300 ms rebroadcast jitter, so suppression does not fire
-    and the flood relays unsuppressed. This ties transport efficiency to
-    matching the radio profile to a dense deployment (the SF-to-density
-    deployment guidance).
+    SF10) a flooded frame is about 386 ms on air for 60 bytes. Cancelling
+    requires another node's relay to be fully received before the local one
+    fires (`jitter_other + time_on_air <= jitter_self`), so a frame has to be
+    shorter than the widest gap between two draws from the 50 to 300 ms range,
+    which is 250 ms. At SF9 no realistic flood frame is: 386 ms for 60 bytes
+    and 263 ms even for 32, against 731 ms and 485 ms at the retracted SF10.
+    Not one copy lands in time, let alone the `FLOOD_SUPPRESS_AFTER` = 2 that
+    cancellation needs, so suppression does not fire and the flood relays
+    unsuppressed. The bound is the 250 ms spread, not the 300 ms top of the
+    range: a 32-byte SF9 frame fits inside the range and still cannot suppress.
+    This ties transport efficiency to matching the radio profile to a dense
+    deployment (the SF-to-density deployment guidance).
   - **Retry re-floods the same `packet_id`,** which is suppressed at every relay
     still holding the 60-second dedup key for that frame, so retry mainly helps
     the single-hop / lost-ACK case, not multi-hop propagation failures. A

@@ -24,15 +24,21 @@ import (
 // keeps the overhearing deterministic (the point here is the suppression
 // bookkeeping, not the MAC model), mirroring flood_transport_test.go.
 //
-// sf:7/bw_hz:500000 (a fast PHY) is deliberate and load-bearing: suppression
-// can only fire when an earlier relay is fully RECEIVED before a later node's
-// jitter expires, i.e. when frame airtime < the relay jitter spread. At the
-// default SF10/125kHz a ~32-byte frame is ~490ms on air, larger than the
-// 50-300ms forward-jitter window, so no node can overhear a complete relay
-// before its own fires and suppression never triggers (the storm it prevents
-// still happens). The fast PHY here shrinks airtime to ~20ms so the mechanism
-// is exercised; range is pinned to 150 explicitly so the cluster stays fully
-// connected regardless of the SF-derived link budget.
+// sf:7/bw_hz:500000 (a fast PHY) is deliberate and load-bearing. Suppression
+// needs FLOOD_SUPPRESS_AFTER (2) other copies fully RECEIVED before a node's
+// own jitter expires: jitter_other + airtime <= jitter_self. Forward jitter is
+// uniform over 50-300ms, so the widest gap between two draws is 250ms, and any
+// frame longer than that cannot be overheard complete no matter how the draws
+// fall. At the shipped default PHY (the frequency plan's SF9/125kHz, which
+// mesh_init_radio_config programs over RADIO_PROFILE_LONG_RANGE's SF10) a
+// ~32-byte frame is 263ms, and a 60-byte one 386ms, both past 250ms, so not
+// one copy lands in time and suppression never triggers (the storm it prevents
+// still happens). Note the bound is the 250ms SPREAD, not the 300ms top of the
+// range: at 263ms the frame fits inside the range and still cannot suppress,
+// which is why comparing airtime to the window alone is the wrong test. The
+// fast PHY here drops a frame to ~18ms so two copies land well inside the
+// spread and the mechanism is exercised; range is pinned to 150 explicitly so
+// the cluster stays fully connected regardless of the SF-derived link budget.
 func floodClusterScenario() string {
 	return `{
 		"name": "flood-suppression-cluster",
