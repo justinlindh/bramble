@@ -106,21 +106,31 @@ void test_slot_distribution_no_collision_for_typical_mesh(void) {
     TEST_ASSERT_TRUE(collision_count < 500);
 }
 
+/* The retry paths in mesh_reliability.c read the scale once via
+ * mesh_broadcast_receipt_retry_scale and apply (raw * num) / den to each delay
+ * they compute, so exercise that num/den mapping and the same arithmetic here. */
 void test_retry_delay_scaling_from_airtime_utilization(void) {
     const uint32_t raw_base = 500u;
+    uint32_t num = 1u;
+    uint32_t den = 1u;
 
-    TEST_ASSERT_EQUAL_UINT32(
-        raw_base / 2u, mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS));
-    TEST_ASSERT_EQUAL_UINT32(
-        raw_base, mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 2u));
-    TEST_ASSERT_EQUAL_UINT32(
-        raw_base * 2u, mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 5u));
+    mesh_broadcast_receipt_retry_scale(RECEIPT_BUDGET_MAX_MS, &num, &den);
+    TEST_ASSERT_EQUAL_UINT32(raw_base / 2u, (raw_base * num) / den);
+
+    mesh_broadcast_receipt_retry_scale(RECEIPT_BUDGET_MAX_MS / 2u, &num, &den);
+    TEST_ASSERT_EQUAL_UINT32(raw_base, (raw_base * num) / den);
+
+    mesh_broadcast_receipt_retry_scale(RECEIPT_BUDGET_MAX_MS / 5u, &num, &den);
+    TEST_ASSERT_EQUAL_UINT32(raw_base * 2u, (raw_base * num) / den);
 }
 
 void test_retry_delay_scaling_integer_math_bounds(void) {
-    uint32_t raw_delay = 7999u;
-    uint32_t scaled = mesh_broadcast_receipt_scale_delay_ms(raw_delay, RECEIPT_BUDGET_MAX_MS / 10u);
-    TEST_ASSERT_EQUAL_UINT32(15998u, scaled);
+    const uint32_t raw_delay = 7999u;
+    uint32_t num = 1u;
+    uint32_t den = 1u;
+
+    mesh_broadcast_receipt_retry_scale(RECEIPT_BUDGET_MAX_MS / 10u, &num, &den);
+    TEST_ASSERT_EQUAL_UINT32(15998u, (raw_delay * num) / den);
 }
 
 void test_build_delivery_receipt_targets_original_sender_with_expected_fields(void) {

@@ -46,10 +46,6 @@ uint8_t mesh_broadcast_receipt_retry_count(void);
 void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms, uint32_t* scale_num,
                                         uint32_t* scale_den);
 
-/* Scale an arbitrary delay value by current receipt airtime utilization. */
-uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
-                                               uint32_t receipt_budget_remaining_ms);
-
 /*
  * seq (ws 1.3b): the 48-bit control-plane origin sequence, drawn by the
  * CALLER via control_seq_next (mesh_beacon.c) and written into the struct
