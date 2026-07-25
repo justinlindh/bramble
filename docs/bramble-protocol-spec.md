@@ -2069,7 +2069,7 @@ each rather than quoting a single headline number:
 
 **Accepted residuals and limitations (documented, not papered over):**
 
-- **Suppression only fires when the jitter window exceeds a frame's
+- **Suppression only fires when the jitter spread exceeds a frame's
   time-on-air**, i.e. on a fast radio profile. At the shipped long-range
   default (the frequency plan's SF9 / 125 kHz, which section 3.2 notes the
   firmware runs in place of the profile table's SF10) a flooded frame's

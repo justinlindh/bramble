@@ -1625,7 +1625,7 @@ These do not go away when section 4 empties out.
   properties in section 3 hold whenever the toggle is on.
   - **Suppression only fires on a fast radio profile.** Cancelling a pending
     relay requires overhearing enough other copies before the local relay's
-    jitter elapses, which only happens when the jitter window exceeds a frame's
+    jitter elapses, which only happens when the jitter spread exceeds a frame's
     time-on-air. At the shipped long-range default (the frequency plan's
     SF9 / 125 kHz, which the firmware runs in place of the profile table's
     SF10) a flooded frame is about 386 ms on air for 60 bytes. Cancelling
