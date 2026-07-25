@@ -2059,12 +2059,18 @@ each rather than quoting a single headline number:
 **Accepted residuals and limitations (documented, not papered over):**
 
 - **Suppression only fires when the jitter window exceeds a frame's
-  time-on-air**, i.e. on a fast radio profile. At the long-range default
-  (SF10 / 125 kHz) a frame's air time exceeds the rebroadcast jitter, so a
-  node's own relay has already gone out before it can overhear enough copies to
-  cancel it, and flooding relays **without** suppression. This ties transport
-  efficiency to matching the radio profile to a dense deployment (see the
-  SF-to-density deployment guidance).
+  time-on-air**, i.e. on a fast radio profile. At the shipped long-range
+  default (the frequency plan's SF9 / 125 kHz, which section 3.2 notes the
+  firmware runs in place of the profile table's SF10) a flooded frame's
+  time-on-air (about 386 ms for a 60-byte frame) still exceeds the 50 to 300 ms
+  rebroadcast jitter (`RREQ_FWD_JITTER_MIN_MS`/`RREQ_FWD_JITTER_MAX_MS`, reused
+  by the channel-flood relay), so a node's own relay has already gone out
+  before it can overhear enough copies to cancel it, and flooding relays
+  **without** suppression. The correction from the profile table's SF10 roughly
+  halved that time-on-air (731 ms to 386 ms) without lifting it below the jitter
+  window, so the conclusion is unchanged, only by a narrower margin. This ties
+  transport efficiency to matching the radio profile to a dense deployment (see
+  the SF-to-density deployment guidance).
 - **Retry re-floods the same `packet_id`**, which is suppressed at every relay
   still holding the 60-second dedup key for that frame. Retry therefore mainly
   helps the single-hop / lost-ACK case, not multi-hop propagation failures; a

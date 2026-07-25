@@ -1626,10 +1626,13 @@ These do not go away when section 4 empties out.
   - **Suppression only fires on a fast radio profile.** Cancelling a pending
     relay requires overhearing enough other copies before the local relay's
     jitter elapses, which only happens when the jitter window exceeds a frame's
-    time-on-air. At the long-range default (SF10 / 125 kHz) air time exceeds
-    jitter, so suppression does not fire and the flood relays unsuppressed. This
-    ties transport efficiency to matching the radio profile to a dense
-    deployment (the SF-to-density deployment guidance).
+    time-on-air. At the shipped long-range default (the frequency plan's
+    SF9 / 125 kHz, which the firmware runs in place of the profile table's
+    SF10) a flooded frame's time-on-air (about 386 ms for a 60-byte frame) still
+    exceeds the 50 to 300 ms rebroadcast jitter, so suppression does not fire
+    and the flood relays unsuppressed. This ties transport efficiency to
+    matching the radio profile to a dense deployment (the SF-to-density
+    deployment guidance).
   - **Retry re-floods the same `packet_id`,** which is suppressed at every relay
     still holding the 60-second dedup key for that frame, so retry mainly helps
     the single-hop / lost-ACK case, not multi-hop propagation failures. A
