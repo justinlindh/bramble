@@ -442,6 +442,41 @@ static void on_rx(const uint8_t* data, uint8_t len, const radio_rx_info_t* info)
 
 static void on_tx_done(void) { ESP_LOGD(TAG, "TX complete"); }
 
+/* Confirm a data message that was just handed to the message store: ACK a
+ * unicast and record the delivery (Task 6 / GAP A) so the sender's retransmit
+ * after a lost ACK is re-ACKed at mesh_process_rx_packet's dedup gate rather
+ * than silently dropped, keyed like s_flood_dedup (packet_id ^ src_addr); or,
+ * for a broadcast, queue a delivery receipt when policy calls for one. The
+ * single-packet and fragment-reassembly delivery paths share this and differ
+ * only in the packet_id used for the broadcast receipt: a reassembled message
+ * reports its first-received fragment's id.
+ *
+ * peer_addr and wire_src_addr are deliberately SEPARATE parameters and must
+ * not be collapsed into one. peer_addr is the sender as the delivered payload
+ * reports it (channel_msg_info_t.src_addr), which is what the ACK and the
+ * delivery receipt are addressed to. wire_src_addr is the src_addr read off
+ * the still-plaintext wire prefix at BRAMBLE_DATA_SRC_ADDR_OFFSET, and it is
+ * the ONLY correct input to the s_delivered_dedup key: the consumer of that
+ * key (mesh_process_rx_packet's duplicate-DATA re-ACK branch) recomputes it
+ * from the wire the same way, because a duplicate is never decrypted there.
+ * The two are equal for a DM (handle_data assigns info.src_addr = src_addr)
+ * but NOT structurally equal for a channel message, whose info.src_addr comes
+ * out of the decrypted inner plaintext (channel_msg.c) while the AEAD AAD
+ * binds only the wire value (SEC-M2). Keying the record on the payload value
+ * would leave a mismatched entry the re-ACK gate can never hit, quietly
+ * restoring the lost-ACK-is-terminal failure GAP A exists to prevent. */
+static void confirm_data_delivery(msg_direction_t dir, uint32_t peer_addr, uint32_t wire_src_addr,
+                                  uint32_t dest_addr, uint32_t ack_packet_id,
+                                  uint32_t receipt_packet_id, int16_t rssi) {
+    if (dir == MSG_DIR_INCOMING) {
+        send_ack(peer_addr, ack_packet_id, rssi);
+        dedup_check_and_add(&s_delivered_dedup, ack_packet_id ^ wire_src_addr, now_ms());
+    } else if (mesh_should_emit_broadcast_delivery_receipt(dest_addr,
+                                                           (uint8_t)neighbor_count(&s_neighbors))) {
+        queue_broadcast_delivery_receipt(peer_addr, receipt_packet_id);
+    }
+}
+
 static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     /* Data packet layout (wire v4): header(12) + src_addr(4) + prev_hop(4) +
      * nonce(12) + ciphertext(N) + tag(16). prev_hop is relay-mutable/
@@ -890,23 +925,10 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
                             cJSON_Delete(params);
                         }
 
-                        /* Send ACK/receipt: use first-received fragment's packet_id for broadcasts
-                         */
-                        if (dir == MSG_DIR_INCOMING) {
-                            send_ack(info.src_addr, rx_hdr.packet_id, rssi);
-                            /* Task 6 (GAP A): record this delivery so a later
-                             * duplicate of THIS fragment (same packet_id,
-                             * the sender's retransmit after a lost ACK) is
-                             * recognized at mesh_process_rx_packet's dedup
-                             * gate and re-ACKed instead of silently dropped.
-                             * Keyed like s_flood_dedup (packet_id ^
-                             * src_addr). */
-                            dedup_check_and_add(&s_delivered_dedup, rx_hdr.packet_id ^ src_addr,
-                                                now_ms());
-                        } else if (mesh_should_emit_broadcast_delivery_receipt(
-                                       rx_hdr.dest_addr, (uint8_t)neighbor_count(&s_neighbors))) {
-                            queue_broadcast_delivery_receipt(info.src_addr, first_frag_pkt_id);
-                        }
+                        /* Reassembled message: the broadcast receipt reports the
+                         * first-received fragment's packet_id. */
+                        confirm_data_delivery(dir, info.src_addr, src_addr, rx_hdr.dest_addr,
+                                              rx_hdr.packet_id, first_frag_pkt_id, rssi);
 
                         /* Print to stdout */
                         printf("\n[MSG from %08" PRIX32 "] %s\n", info.src_addr, text);
@@ -988,19 +1010,9 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             cJSON_Delete(params);
         }
 
-        /* Send ACK for unicast messages (not broadcasts) */
-        if (dir == MSG_DIR_INCOMING) {
-            send_ack(info.src_addr, rx_hdr.packet_id, rssi);
-            /* Task 6 (GAP A): record this delivery so a later duplicate
-             * (same packet_id, the sender's retransmit after a lost ACK) is
-             * recognized at mesh_process_rx_packet's dedup gate and
-             * re-ACKed instead of silently dropped. Keyed like
-             * s_flood_dedup (packet_id ^ src_addr). */
-            dedup_check_and_add(&s_delivered_dedup, rx_hdr.packet_id ^ src_addr, now_ms());
-        } else if (mesh_should_emit_broadcast_delivery_receipt(
-                       rx_hdr.dest_addr, (uint8_t)neighbor_count(&s_neighbors))) {
-            queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
-        }
+        /* Single packet: ACK and receipt are keyed on the packet's own id. */
+        confirm_data_delivery(dir, info.src_addr, src_addr, rx_hdr.dest_addr, rx_hdr.packet_id,
+                              rx_hdr.packet_id, rssi);
 
         /* Also print to stdout for CLI users */
         printf("\n[MSG from %08" PRIX32 "] %s\n", info.src_addr, text);
