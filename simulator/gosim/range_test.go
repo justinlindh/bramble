@@ -54,8 +54,8 @@ func TestDefaultPHYIsFrequencyPlanDefault(t *testing.T) {
 // TestDefaultPHYFrameAirtime prices a frame at the default PHY and checks it
 // against the firmware's own ToA function at the plan's SF, the number the
 // whole channel model (offered load, collisions, LBT) is built on. At SF10 a
-// 60-byte frame was charged about 732 ms; the firmware's real SF9 is about half
-// that, and every published offered-load figure moved with it.
+// 60-byte frame was charged 731 ms; at the firmware's real SF9 it is 386 ms, and
+// every published offered-load figure moved with it.
 func TestDefaultPHYFrameAirtime(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()
