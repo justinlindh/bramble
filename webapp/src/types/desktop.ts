@@ -96,7 +96,13 @@ export type BrambleAndroidNativeApi = {
 
 /** One incoming message the shell should raise a native notification for. */
 export type NativeMessageNotification = {
-  /** Stable per-conversation key, e.g. "dm:DEADBEEF", "ch:0", "broadcast". */
+  /**
+   * Stable per-conversation key, e.g. "dm:3735928559", "ch:0", "broadcast".
+   * The DM suffix is the peer address in DECIMAL (the JS number the store
+   * keys on), not hex: `conversationIdForMessage` builds it as `dm:${addr}`.
+   * Treat it as an opaque key and echo it back verbatim (clearConversation,
+   * brambleOpenConversation) rather than parsing it.
+   */
   conversationId: string;
   /** Conversation display name (peer or channel) shown as the notification title. */
   conversationTitle: string;
