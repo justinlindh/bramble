@@ -396,10 +396,11 @@ jobs:
         run: |
           cd simulator/gosim
           go build -o bramble-gosim .
-      - name: Build the UI
+      - name: Build and test the UI
         run: |
           cd simulator/ui
           npm ci
+          npm test
           npm run build
       - name: Run headless scenario suite
         # Real-time multi-node scenarios, run sequentially inside the script.
