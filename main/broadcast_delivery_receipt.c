@@ -78,15 +78,6 @@ void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms, ui
     }
 }
 
-uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
-                                               uint32_t receipt_budget_remaining_ms) {
-    uint32_t scale_num = 1u;
-    uint32_t scale_den = 1u;
-
-    mesh_broadcast_receipt_retry_scale(receipt_budget_remaining_ms, &scale_num, &scale_den);
-    return (raw_delay_ms * scale_num) / scale_den;
-}
-
 esp_err_t mesh_build_broadcast_delivery_receipt_packet(
     uint32_t local_addr, uint32_t receipt_packet_id, uint32_t original_src_addr,
     uint32_t original_packet_id, uint8_t hop_limit, uint64_t seq, uint8_t* buf, size_t buf_len,
