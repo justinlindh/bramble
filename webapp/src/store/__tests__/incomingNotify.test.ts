@@ -86,6 +86,24 @@ describe('incoming message native notification', () => {
     expect(useStore.getState().peerNames.get(0xaabbcc04)).toBe('Northside');
   });
 
+  // The only user-visible surface of the DM/sender label consolidation: with
+  // no stored name and no fromName, the sender falls back to formatAddr0x,
+  // which zero-pads to eight hex digits like every other address in the UI.
+  // 0xBEEF is chosen because the unpadded form ("0xBEEF") differs from the
+  // padded one, so this fails if the fallback regresses to a raw toString(16).
+  it('falls back to the zero-padded hex address when the sender has no name', async () => {
+    useStore.setState({ peerNames: new Map() } as any);
+    await deliver({ from: '0000BEEF', to: 'AA11', text: 'who dis', msgId: 'm8' });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(onMessage.mock.calls[0][0]);
+    expect(payload).toMatchObject({
+      conversationId: 'dm:48879',
+      sender: '0x0000BEEF',
+      conversationTitle: '0x0000BEEF',
+      text: 'who dis',
+    });
+  });
+
   it('is a no-op outside the Android shell', async () => {
     vi.stubGlobal('brambleAndroid', undefined);
     await deliver({ from: 'DEADBEEF', to: 'AA11', text: 'web', msgId: 'm6' });

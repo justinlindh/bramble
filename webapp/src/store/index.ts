@@ -22,7 +22,7 @@ import type {
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 import type { SavedDevice } from '../lib/deviceBook';
-import { formatAddrHex } from '../utils/address';
+import { formatAddrHex, formatAddr0x } from '../utils/address';
 
 const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
 const ACTIVE_TAB_KEY = 'bramble-active-tab';
@@ -128,7 +128,7 @@ function formatAddr(id: string, peerNames?: Map<number, string>, config?: Brambl
     const addr = Number(id.slice(3));
     const name = peerNames?.get(addr);
     if (name) return name;
-    return `0x${addr.toString(16).toUpperCase()}`;
+    return formatAddr0x(addr);
   }
   return id;
 }
@@ -370,7 +370,7 @@ export const useStore = create<AppState & Actions>((set) => ({
     const dmKey = `dm:${addr}`;
     const conv = convs.get(dmKey);
     if (conv) {
-      convs.set(dmKey, { ...conv, label: name || `0x${addr.toString(16).toUpperCase()}` });
+      convs.set(dmKey, { ...conv, label: name || formatAddr0x(addr) });
     }
     return { peerNames: names, conversations: convs };
   }),
