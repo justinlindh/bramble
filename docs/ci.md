@@ -148,7 +148,6 @@ changed. When in doubt, run the real checks rather than silently skip them.
 | `coverage_tooling` | `scripts/ci/check_coverage.py`, `scripts/ci/host_coverage.py`, `scripts/ci/run-host-coverage.sh`, `ci/coverage-baseline.json` |
 | `size_tooling` | `scripts/ci/check-firmware-size.sh`, `scripts/ci/check_size.py`, `scripts/ci/extract_firmware_sizes.py`, `ci/size-baseline.json` |
 | `ci_core` | a job-defining gating workflow: `quality.yml`, `firmware-quality.yml`, `webapp-quality.yml`, or `_detect-changes.yml` (forces every heavy job) |
-| `docs` | `docs/`, `README.md` |
 
 `firmware` is the compiled-firmware source set shared by every firmware BUILD
 job (host tests, gosim, emulator, board build): the C under `main/` +

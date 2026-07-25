@@ -51,9 +51,6 @@ on:
       ci_core:
         description: a JOB-DEFINING gating workflow (quality.yml, firmware-quality.yml, webapp-quality.yml, _detect-changes.yml) touched (forces every heavy job so a changed job definition is exercised)
         value: ${{ jobs.detect.outputs.ci_core }}
-      docs:
-        description: docs/ or README.md touched
-        value: ${{ jobs.detect.outputs.docs }}
 
 permissions:
   contents: read
@@ -81,7 +78,6 @@ jobs:
       coverage_tooling: ${{ steps.detect.outputs.coverage_tooling }}
       size_tooling: ${{ steps.detect.outputs.size_tooling }}
       ci_core: ${{ steps.detect.outputs.ci_core }}
-      docs: ${{ steps.detect.outputs.docs }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -232,7 +228,6 @@ jobs:
           # review-bot-config or markdown edit from running the full emulator /
           # board / docker / host / gosim suite.
           ci_core=$(area_changed '^\.github/workflows/(quality|firmware-quality|webapp-quality|_detect-changes)\.yml$')
-          docs=$(area_changed '^docs/|^README\.md$')
 
           {
             echo "firmware=${firmware}"
@@ -248,8 +243,7 @@ jobs:
             echo "coverage_tooling=${coverage_tooling}"
             echo "size_tooling=${size_tooling}"
             echo "ci_core=${ci_core}"
-            echo "docs=${docs}"
           } >> "$GITHUB_OUTPUT"
 
           echo "Resolved diff range: ${diff_range:-<unresolved>}"
-          echo "firmware=${firmware} host_test=${host_test} simulator=${simulator} emulator=${emulator} webapp=${webapp} web_flasher=${web_flasher} api=${api} idf_build_scripts=${idf_build_scripts} release_config=${release_config} docker_firmware_builder=${docker_firmware_builder} coverage_tooling=${coverage_tooling} size_tooling=${size_tooling} ci_core=${ci_core} docs=${docs}"
+          echo "firmware=${firmware} host_test=${host_test} simulator=${simulator} emulator=${emulator} webapp=${webapp} web_flasher=${web_flasher} api=${api} idf_build_scripts=${idf_build_scripts} release_config=${release_config} docker_firmware_builder=${docker_firmware_builder} coverage_tooling=${coverage_tooling} size_tooling=${size_tooling} ci_core=${ci_core}"
