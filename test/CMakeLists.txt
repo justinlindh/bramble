@@ -1375,7 +1375,7 @@ target_include_directories(test_msg_store_spiffs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
 
-# Delivery event ring persistence tests
+# Delivery event ring tests
 add_executable(test_delivery_event_ring
     test_delivery_event_ring.c
     unity/unity.c
