@@ -58,15 +58,22 @@ The shared LoRa medium is modeled in `engine/sim_radio.c`:
 
 - **Real time-on-air.** Every frame occupies the channel for its actual LoRa
   ToA at the configured SF/BW/CR, computed by the firmware's own
-  `bramble_calculate_airtime_us` (Semtech AN1200.13). The default PHY mirrors
-  the firmware's `RADIO_PROFILE_LONG_RANGE`: SF10, 125 kHz, CR 4/5, 22 dBm.
-  That default is only the starting point for an emulator scenario: a real
-  firmware node reports the PHY it actually configured on every `tx`, and the
-  broker adopts it (`extConn.adoptReportedPHY`) unless the scenario pinned
-  `radio.sf`/`radio.bw_hz` itself. The running firmware overwrites the profile's
-  SF with the frequency plan's default (SF9/125 kHz on every shipped plan), so
-  without that adoption the ether charged roughly twice the true airtime and the
-  emulator scenarios' short beacon cadence oversubscribed the channel.
+  `bramble_calculate_airtime_us` (Semtech AN1200.13). The default PHY is the one
+  the firmware actually transmits at: `sf`/`bw_hz` from the frequency plan
+  (`freq_plan_get_default`, SF9/125 kHz on every shipped plan), with CR 4/5 and
+  22 dBm from `RADIO_PROFILE_LONG_RANGE`. The plan is what matters because
+  `mesh_init_radio_config` loads the profile and then overwrites its `sf`/`bw_hz`
+  with the plan's, which is why a real node's boot log reads
+  `Radio config: 915.0 MHz SF9 BW125000`. The model read the profile's SF10
+  instead until 2026-07-24, charging roughly twice the true airtime for every
+  frame (731 ms against 386 ms for a 60-byte frame), so every offered-load and
+  channel-utilization number produced before then was inflated: see
+  `../docs/results/simulation-2026-07-honest-baseline.md`.
+  For an emulator scenario the plan default is only the starting point: a real
+  firmware node reports the PHY it configured on every `tx`, and the broker
+  adopts it (`extConn.adoptReportedPHY`) unless the scenario pinned
+  `radio.sf`/`radio.bw_hz` itself, which covers a node whose PHY differs from the
+  plan default (an NVS override, or a build for another region).
 - **Collisions.** Two packets overlapping in time at a receiver, both audible
   there (within the range disk), destroy each other.
 - **Capture effect.** The packet at least 6 dB stronger survives an overlap if
@@ -90,10 +97,16 @@ The shared LoRa medium is modeled in `engine/sim_radio.c`:
   `radio_sensitivity_dbm(sf, bw_hz)`, the SX127x/SX126x datasheet sensitivity
   (SF7 -123 dBm ... SF12 -137 dBm at 125 kHz, worsening by
   `10*log10(bw/125000)` dB at wider bandwidth) plus a calibration constant
-  (`NOISE_MARGIN_DB` in `sim_radio.c`) chosen so the firmware's default PHY
-  (SF10/125 kHz) reproduces the simulator's long-standing ~150-unit baseline
-  range under the default path-loss params. Higher SF has more link budget
-  and longer range; wider bandwidth raises the noise floor and shortens it.
+  (`radio_noise_margin_db` in `sim_radio.c`) anchored so the firmware's default
+  PHY reproduces the simulator's long-standing ~150-unit baseline range under the
+  default path-loss params. The anchor is computed from the frequency plan rather
+  than hardcoded, so correcting the modeled SF changed airtime without moving the
+  range of any scenario that lets range derive: at SF9 the margin is 35.9 dB
+  where the SF10-anchored value was 38.9 dB, exactly the datasheet step between
+  those two SFs. Ranges at a non-default SF/BW therefore all moved by that one
+  step (x1.269): SF10/125 kHz derives 190 units where it used to derive 150, and
+  SF7/250 kHz 73 where it used to derive 58. Higher SF has more link budget and
+  longer range; wider bandwidth raises the noise floor and shortens it.
   A scenario's `radio.range` field, if present, overrides the derivation
   (an escape hatch for topology tests that want range decoupled from
   SF/BW); otherwise range is recomputed from whatever `sf`/`bw_hz`/

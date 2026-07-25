@@ -15,10 +15,13 @@ seed=42 fallback), exactly as if the scenario file had never mentioned
 them. This is what makes --legacy reproduce the old files byte-for-byte
 (modulo "range": the old generator hardcoded "range": 150; this one omits it
 so range derives from the sf/bw link budget instead of being a fixed disk
-decoupled from them -- at the default PHY, SF10/125 kHz, that derivation
-still lands at ~150 units, so --legacy's runtime behavior is unchanged even
-though the emitted JSON no longer has the literal field). Pass --range to
-force the old fixed-disk field back on.
+decoupled from them -- at the default PHY the derivation lands at ~150 units
+by construction, since the sensitivity model's calibration anchor is defined
+as "the frequency plan's default PHY derives the 150-unit baseline"
+(radio_noise_margin_db in sim_radio.c), so --legacy's runtime behavior is
+unchanged even though the emitted JSON no longer has the literal field, and
+stays unchanged if a plan's default SF moves. Pass --range to force the old
+fixed-disk field back on.
 
 Legacy mapping (--legacy {10,50,100,200}), matching the deleted
 generate-adaptive-scenarios.py's behavior:
@@ -191,7 +194,8 @@ def parse_args(argv):
                   help="RNG seed for random-topology placement and the sim's own stochastic RNG; "
                        "omitted from the scenario file (sim defaults to 42) unless given")
     p.add_argument("--sf", type=int, choices=range(7, 13), default=None,
-                  help="LoRa spreading factor; omitted (sim default SF10) unless given")
+                  help="LoRa spreading factor; omitted (sim uses the frequency plan's "
+                       "default, SF9) unless given")
     p.add_argument("--bw", type=int, choices=[125000, 250000], default=None,
                   help="LoRa bandwidth Hz; omitted (sim default 125000) unless given")
     p.add_argument("--range", type=float, default=None,

@@ -1,5 +1,29 @@
 # Simulation results: scale scenarios under the collision model (June 2026)
 
+> **Historical record, not current numbers (caveat added 2026-07-24).** Every
+> figure in this document was produced with the simulated medium priced at
+> SF10/125 kHz. That is `RADIO_PROFILE_LONG_RANGE`'s spreading factor, but it is
+> not what firmware transmits: `mesh_init_radio_config` overwrites the profile's
+> `sf`/`bw_hz` with the frequency plan's defaults, and every shipped plan is
+> SF9/125 kHz, so a stock node's boot log reads `SF9 BW125000`. Frames here were
+> therefore charged about 1.9x their true time-on-air (a 30-byte RREQ is 243 ms at
+> SF9, not the 485 ms quoted below; a 48-byte beacon 325 ms, not 608 ms), and
+> every airtime, offered-load and erlang figure below is inflated by roughly that
+> factor. The simulator was corrected on 2026-07-24; the re-measured scale numbers
+> are in `simulation-2026-07-honest-baseline.md`, which already supersedes this
+> document for planning.
+>
+> These runs are **not re-runnable at the corrected PHY**, which is why they carry
+> a caveat instead of an update. Columns A, B and C below each require a protocol
+> code state that no longer exists in the tree: the bridge's hop-limit-32
+> override, the pre-fix discovery semantics (same query_id on retry, no
+> rebroadcast jitter), and the since-deleted `route_metric.c`. The committed
+> scenarios that do still exist have also moved for unrelated reasons, so their
+> published rows do not reproduce at current `main` at either PHY (the 10-node
+> cluster row below reads 18/20; the same scenario measures 0/20 today, at both
+> SF10 and SF9). Read this document for its mechanism analysis, which the July
+> baseline confirmed, and not for its numbers.
+
 The simulator now models the shared LoRa medium: real time-on-air, collisions,
 the capture effect, half-duplex radios, and listen-before-talk. This document
 reports the 10/50/100/200-node scale scenarios under that model, next to the
@@ -10,8 +34,8 @@ this document replaces them.
 Headline: **the scale scenarios collapse under contention.** End-to-end
 message delivery is 25% at 10 nodes and 0 to 10% at 50/100/200 nodes. Every
 message that obtains a route is delivered; route discovery is the part that
-fails, because discovery floods of ~0.5 s frames at the firmware's default
-SF10 profile compete with beacon traffic that already saturates the channel
+fails, because discovery floods of ~0.5 s frames at the SF10 profile these
+runs modeled compete with beacon traffic that already saturates the channel
 at 100+ nodes. The old 100%-delivery numbers were an artifact of a medium
 that allowed unlimited simultaneous transmissions.
 
@@ -22,8 +46,11 @@ Implemented in `simulator/engine/sim_radio.c` (full description in
 
 - **Time-on-air:** every frame occupies the medium for its real LoRa ToA,
   computed by the firmware's own `bramble_calculate_airtime_us`
-  (Semtech AN1200.13). Default PHY mirrors the firmware's
-  `RADIO_PROFILE_LONG_RANGE`: SF10, 125 kHz, CR 4/5, 22 dBm.
+  (Semtech AN1200.13). The PHY used for these runs was
+  `RADIO_PROFILE_LONG_RANGE`'s: SF10, 125 kHz, CR 4/5, 22 dBm. See the caveat at
+  the top: firmware transmits at the frequency plan's SF9, so this was the wrong
+  half of the profile-then-plan sequence and everything downstream of ToA is
+  inflated.
 - **Collisions:** two packets overlapping in time at a receiver, both audible
   there, destroy each other unless capture applies.
 - **Capture effect:** a packet at least 6 dB stronger survives an overlap if
@@ -192,8 +219,9 @@ geometry would see some capture benefit.
 
 ## What these results do and do not say
 
-They say: the current protocol, at the firmware's default SF10 long-range
-profile, with its current discovery behavior (no rebroadcast jitter, fixed
+They say: the current protocol, at the SF10 long-range profile these runs
+modeled (firmware's real default is the frequency plan's SF9, see the caveat
+at the top), with its current discovery behavior (no rebroadcast jitter, fixed
 beacon sizes, single shared channel), does not scale to dense single-channel
 meshes. The "route-based forwarding scales O(path_length)" argument is about
 data traffic and holds up in these runs (routed messages all delivered); it

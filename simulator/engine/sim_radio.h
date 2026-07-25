@@ -57,8 +57,11 @@ typedef struct radio_config {
     int zone_count;
 
     /* LoRa PHY parameters used for time-on-air and the RSSI gradient.
-     * Defaults mirror the firmware's RADIO_PROFILE_LONG_RANGE
-     * (components/radio/radio_esp.c): SF10, 125 kHz, CR 4/5, 22 dBm. */
+     * Defaults are the PHY the firmware actually transmits at: sf/bw_hz from
+     * the frequency plan (freq_plan_get_default, SF9/125 kHz on every shipped
+     * plan, which mesh_init_radio_config writes over the radio profile's
+     * values), CR 4/5 and 22 dBm from RADIO_PROFILE_LONG_RANGE, which the plan
+     * leaves alone. See radio_config_init and radio_default_sf. */
     uint8_t sf;
     uint32_t bw_hz;
     uint8_t cr; /* 1..4 => 4/5..4/8 */
@@ -90,6 +93,19 @@ typedef struct radio_config {
 #define SIM_LBT_BACKOFF_MAX_MS 300u
 
 void radio_config_init(radio_config_t* config);
+
+/*
+ * radio_default_sf / radio_default_bw_hz: the LoRa PHY the firmware actually
+ * transmits at, read from the compile-time frequency plan
+ * (freq_plan_get_default). mesh_task.c's mesh_init_radio_config loads
+ * RADIO_PROFILE_LONG_RANGE and then overwrites its sf/bw_hz with these, so the
+ * plan, not the profile table, is what a real node's boot log reports
+ * ("Radio config: 915.0 MHz SF9 BW125000"). Every default and fallback in the
+ * radio model goes through these two functions so the simulated medium cannot
+ * drift away from the firmware's PHY again.
+ */
+uint8_t radio_default_sf(void);
+uint32_t radio_default_bw_hz(void);
 float radio_distance(const sim_node_t* a, const sim_node_t* b);
 int8_t radio_compute_rssi(const radio_config_t* config, float distance);
 
@@ -97,12 +113,14 @@ int8_t radio_compute_rssi(const radio_config_t* config, float distance);
  * radio_sensitivity_dbm: LoRa receiver sensitivity for spreading factor sf at
  * bandwidth bw_hz, dBm. Datasheet SX127x/SX126x values at 125 kHz (SF7 -123
  * ... SF12 -137), adjusted for bandwidth (+10*log10(bw/125000) dB: wider
- * bandwidth admits more noise) plus NOISE_MARGIN_DB, a single additive
- * calibration constant (see sim_radio.c) chosen so the derived range at the
- * firmware's default PHY (SF10/125 kHz) reproduces the simulator's
- * long-standing ~150-unit baseline range under the default link-budget
- * params. sf outside 7..12 or bw_hz == 0 fall back to the SF10/125 kHz
- * default, mirroring radio_frame_airtime_us's fallback convention.
+ * bandwidth admits more noise) plus a single additive calibration constant
+ * (radio_noise_margin_db in sim_radio.c), anchored so the derived range at the
+ * firmware's default PHY (radio_default_sf/radio_default_bw_hz, SF9/125 kHz on
+ * every shipped frequency plan) reproduces the simulator's long-standing
+ * ~150-unit baseline range under the default link-budget params. Because the
+ * anchor follows the plan's PHY, a plan change moves airtime without moving
+ * any unpinned scenario's topology. sf outside 7..12 or bw_hz == 0 fall back to
+ * that default PHY, mirroring radio_frame_airtime_us's fallback convention.
  */
 float radio_sensitivity_dbm(uint8_t sf, uint32_t bw_hz);
 

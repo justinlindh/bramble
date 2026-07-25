@@ -77,6 +77,16 @@ func (h *emuHarness) toaMs(n int) uint32 {
 	return uint32(C.radio_frame_airtime_ms(&h.sim.radio, C.uint16_t(n)))
 }
 
+// setEtherPHY forces the ether's PHY, standing in for a scenario that pinned
+// radio.sf/radio.bw_hz. Tests use it to start from a PHY that is deliberately
+// NOT the model's default, so adopting (or refusing to adopt) a firmware node's
+// reported PHY is observable as a change rather than coinciding with the
+// default.
+func (h *emuHarness) setEtherPHY(sf int, bwHz int) {
+	h.sim.radio.sf = C.uint8_t(sf)
+	h.sim.radio.bw_hz = C.uint32_t(bwHz)
+}
+
 // close tears the broker down and restores the process stdout.
 func (h *emuHarness) close() {
 	if h.sim.broker != nil {

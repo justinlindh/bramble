@@ -10,6 +10,12 @@
 #define NVS_STUBS_ENABLE 1
 #include "../../test/stubs/esp_stubs.c"
 
+/* Frequency plan: a pure static table with no ESP-IDF dependencies, included
+ * ahead of the simulator modules because sim_radio.c reads the plan's
+ * default_sf/default_bw_hz for its PHY defaults (the same values
+ * mesh_init_radio_config programs into a real node's radio). */
+#include "../../components/freq_plan/freq_plan.c"
+
 /* Simulator modules */
 #include "../engine/sim_event.c"
 #include "../engine/sim_random.c"

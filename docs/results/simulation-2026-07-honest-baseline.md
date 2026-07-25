@@ -15,7 +15,9 @@ The June numbers were produced by a sim with parallel implementations and missin
 
 **Metric correction:** the old headline `delivery_rate` divides delivered messages by *total packets of every type on the air* (19 delivered / 203 packets = 9.4% at 10 nodes), which is not a delivery figure. The honest end-to-end number is `message_delivery_rate` = delivered / (delivered + dropped + undelivered), added in this branch. All figures below use it. (In all 12 runs the terminal states sum to exactly the 20 scripted messages.)
 
-## Baseline results (firmware defaults: SF10/125 kHz, fixed 60 s beacons, duty off)
+## Baseline results as published in July (SF10/125 kHz, fixed 60 s beacons, duty off)
+
+**Superseded, and the PHY label was wrong.** These runs were priced at SF10/125 kHz, which is not the firmware default: `mesh_init_radio_config` overwrites `RADIO_PROFILE_LONG_RANGE`'s SF with the frequency plan's, and every shipped plan defaults to SF9/125 kHz, so a stock node's boot log reads `SF9 BW125000`. Every frame in the table below was therefore charged about 1.9x its true time-on-air, which inflates the offered-load, control-share and airtime columns directly. The re-run at the corrected PHY is the section below, dated 2026-07-24; the table here is kept as the historical record of what was published, not as a current number.
 
 Grid topology, 120-unit spacing (each node hears ~4 neighbors), 20 scripted messages over 600 s, 3 seeds per node count.
 
@@ -28,9 +30,35 @@ Grid topology, 120-unit spacing (each node hears ~4 neighbors), 20 scripted mess
 
 Seeds verified to drive the RNG (distinct event timelines); at n=10 all three seeds converge to identical aggregates (small, dense, well-connected topology), so n=10 effectively contributes one observation, not three. Runs cost 0.13-0.24 s wall-clock each; parameter sweeps are cheap.
 
+## Re-run at the corrected PHY (2026-07-24)
+
+The simulator now prices airtime at the frequency plan's SF9/125 kHz, the PHY a stock node actually transmits at, instead of the radio-profile table's SF10. Same generator, same topologies, same three seeds: `generate.py --legacy N --seed S` for N in {10,50,100,200} and S in {1,2,3}, 12 runs per column. Both columns were measured at the same commit, so the SF10 column isolates the PHY change rather than mixing it with everything else that landed since July. The SF10 column also does not reproduce the July table above (30% against 95% at n=10), because the protocol code moved underneath it: the largest single step is documented in the Phase 1 addendum below, where removing gosim's beacon-derived route-install de-masked the confirmation-return bug and took n=10 from 95% to 40%.
+
+| Nodes | Message delivery | Confirmed delivery | Offered load (erlangs) | Control share of ToA | RREQ ToA (s/600s) | Beacon ToA (s/600s) | Mean latency |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 10, SF10 (wrong PHY) | 30% | 25-30% | 0.42 | 84.7% | 118 | 65 | 1.22 s |
+| 10, **SF9 (corrected)** | **30%** | **30%** | **0.21** | **91.5%** | **61** | **37** | **0.63 s** |
+| 50, SF10 | 5-10% | 0-5% | 1.70 | 97.6-99.2% | 674-679 | 323 | 2.0-4.9 s |
+| 50, **SF9** | **10%** | **10%** | **0.91** | **97.3-97.8%** | **338-349** | **182** | **1.04-1.21 s** |
+| 100, SF10 | 0-5% | 0-5% | 2.39 | 96.8-98.1% | 692-719 | 645 | 2.0 s |
+| 100, **SF9** | **0-5%** | **0-5%** | **1.28** | **94.6-95.5%** | **332-345** | **363** | **1.04 s** |
+| 200, SF10 | 0% | 0% | 3.55 | 100% | 830-845 | 1289 | n/a |
+| 200, **SF9** | **0%** | **0%** | **1.94** | **100%** | **433-440** | **726** | **n/a** |
+
+What the correction does and does not change:
+
+1. **Airtime, offered load and latency all fall by about 1.85x**, the ToA ratio between SF10 and SF9 for these frame sizes (a 60-byte frame is 731 ms at SF10 and 386 ms at SF9). Every airtime-derived figure this document ever published was inflated by roughly that factor. The direction is the kinder one: the modeled channel was more congested than a real one.
+2. **The collapse survives the correction, and the knee stays between 10 and 50 nodes.** Delivery is unchanged at 10, 100 and 200 nodes and moves from 5-10% to a steady 10% at 50. Halving every frame's cost does not fix a control plane whose failure mode is flood dynamics rather than a marginal capacity shortfall.
+3. **Finding 1's ">1.0 erlang at 50 nodes" no longer holds and must be restated.** At the corrected PHY, 50 nodes offer 0.91 erlang: at the edge of a single channel's capacity rather than over it. Saturation past 1.0 erlang now begins at 100 nodes (1.28) and is severe at 200 (1.94). Delivery at 50 nodes is still 10%, so being nominally under capacity does not rescue it.
+4. **Control share of ToA gets WORSE at 10 nodes, 84.7% to 91.5%, and that is not a regression.** Absolute control airtime halved (RREQ 118 s to 61 s, beacons 65 s to 37 s). The share rose because the data plane's airtime fell further still (DATA 17.0 s to 3.5 s, receipts 21.4 s to 7.0 s at n=10 seed 1): a less congested channel needs far fewer ACK retransmissions to deliver the same messages. Any statement of the form "control traffic is N% of airtime" is a ratio of two numbers that both moved.
+5. **Findings 2, 3 and 4 stand.** Zero budget denials and zero RREQ rate-limit denials in all 24 runs, both PHYs: the shipped admission control still cannot see global channel saturation. RREQ still dominates beacons at 50 and 100 nodes (343 s against 182 s at n=50) and beacons still dominate outright at 200 (726 s against 436 s).
+6. **The 15-minute-cadence feasibility math in "What this baseline commits us to" is now conservative.** The 50-node beacon floor at 60 s cadence measures 0.30 erlang, not 0.54, so the headroom that argument depends on is larger than stated, not smaller.
+
 ## Findings
 
-1. **The collapse is confirmed, with the firmware's real machinery running.** A single SF10 channel saturates (>1.0 erlang offered) at 50 nodes and beyond; delivery collapses from 95% at 10 nodes to ~12% at 50 and 0% at 200. The honest sim does not soften the June conclusion; it hardens it.
+The five findings below were written against the July table, i.e. at the SF10 model. Read them with the delta list in the re-run section above: item 3 there retracts finding 1's erlang figure, item 4 restates finding 4's airtime shares, and the rest survive.
+
+1. **The collapse is confirmed, with the firmware's real machinery running.** A single SF10 channel saturates (>1.0 erlang offered) at 50 nodes and beyond; delivery collapses from 95% at 10 nodes to ~12% at 50 and 0% at 200. The honest sim does not soften the June conclusion; it hardens it. (*Erlang figure retracted 2026-07-24: it was measured at SF10 rather than the plan's SF9. At the corrected PHY, 50 nodes offer 0.91 erlang and saturation past 1.0 begins at 100. The collapse itself stands.*)
 2. **The firmware's own throttles never fire at this profile.** Across all 12 runs: zero budget denials in any lane, zero RREQ origination or forward rate-limit denials. The budget profiles are calibrated to LOCAL neighbor density (~4 in this grid, which selects the most generous 400% "micro mesh" profile) while the failure is GLOBAL channel saturation. The shipped admission control does not and cannot see this collapse; that is the core calibration gap for Phase 2.
 3. **Discovery, not beacons, is the largest airtime consumer at 50-100 nodes once traffic flows.** At n=50, RREQ flooding burns ~680 s of ToA against ~321 s of beacons over a 600 s run (RREQ alone is ~1.13 erlangs; ~1,400 RREQ transmissions for 20 message attempts, roughly 70 per attempt, because failed discoveries retrigger full expanding-ring refloods into an already saturated channel). Beacons are the load FLOOR (0.54 erlang at 50 nodes, saturating on their own before any traffic); the discovery storm is the AMPLIFIER. Both levers are required: beacon cadence work alone will not rescue 50 nodes under load, and discovery-cost work alone starts from an already-saturated floor.
 4. **At 200 nodes beacons dominate outright** (1,287 s vs 821 s RREQ) and nothing else matters: the medium is 3.5x oversubscribed by control traffic and no data is ever sent. (The 200-node scenario also spans 11-17 grid hops, beyond the 8-hop ceiling; it remains out of scope for the program bar.)
@@ -70,4 +98,4 @@ The Phase 1 delivery-core plan the internal design plan found that the numbers a
 
 **Caveat on the flood numbers.** gosim's aggregate `delivered`/`dropped`/`message_delivery_rate` metrics cannot credit a broadcast as delivered (the bookkeeping structure they read from is inherently unicast-shaped); every one of the 10 added broadcasts in these runs lands in `undelivered` by construction, even on the 10-node runs where a dedicated gosim scenario (`TestPhase1ChannelFloodReachesFarNode`, a 5-node line) separately proves the flood reaches a node 4 hops from the sender. Read the unicast delivery collapse above from the `delivered`/`dropped` columns of the SAME scripted unicast messages, isolated from the flood traffic layered on top, not from the aggregate rate.
 
-Methodology: every number above comes from the gosim scenario runner (`simulator/gosim/`, scenarios in `simulator/gosim/scenarios/`); re-run any scenario JSON with the harness there to reproduce.
+Methodology: every number above comes from the gosim scenario runner (`simulator/gosim/`), driven with the scenario JSON that `simulator/scenarios/generate.py --legacy` emits for the scale runs, or the committed files in `simulator/scenarios/` for the named ones; re-run any scenario JSON with the commands under "Reproduction" to reproduce.

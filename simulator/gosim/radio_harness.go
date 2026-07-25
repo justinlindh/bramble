@@ -3,6 +3,7 @@ package main
 /*
 #include <stdlib.h>
 #include "bridge.h"
+#include "freq_plan.h"
 */
 import "C"
 import (
@@ -247,6 +248,22 @@ func (h *radioHarness) disableCollisions() {
 
 func (h *radioHarness) disableLBT() {
 	h.radio.lbt_enabled = C.bool(false)
+}
+
+// phy reads the (sf, bw_hz) the harness's radio config is currently set to,
+// so a test can check what radio_config_init installed as the default.
+func (h *radioHarness) phy() (sf int, bwHz int) {
+	return int(h.radio.sf), int(h.radio.bw_hz)
+}
+
+// planDefaultPHY reads the compile-time frequency plan's default PHY straight
+// from freq_plan_get_default, the same table mesh_task.c's
+// mesh_init_radio_config programs into a real node's radio. Read here
+// independently of sim_radio.c so a test can assert the two agree rather than
+// asking the radio model to confirm itself.
+func planDefaultPHY() (sf int, bwHz int) {
+	plan := C.freq_plan_get_default()
+	return int(plan.default_sf), int(plan.default_bw_hz)
 }
 
 func (h *radioHarness) setPHY(sf int, bwHz int, cr int) {

@@ -18,12 +18,18 @@ func TestDutyCycleCapForcesBeaconThrottling(t *testing.T) {
 	const addr = 0x000000FA
 	h.addNode(addr, 0, 0)
 	n := h.activateNode(addr)
-	h.applyDutyCap(n, 1) // 1% duty cycle: tight enough that beacons cannot sustain 60s cadence
+	// 1% duty cycle: tighter than the 60 s beacon cadence can sustain. A
+	// 54-byte beacon is 365.6 ms at the frequency plan's SF9, so 60 beacons an
+	// hour offer ~21.9 s (0.61% of the hour) against apply_profile's cap/2 =
+	// 18 s window target. The overrun is steady but modest, so the denial only
+	// arrives once the bucket's initial full fill has drained: it lands around
+	// attempt 21 here, which is why the loops below run 40 attempts and not 20.
+	h.applyDutyCap(n, 1)
 	h.forceBeaconDue(n, 0)
 
 	now := uint64(0)
 	denied := false
-	for i := 0; i < 20 && !denied; i++ {
+	for i := 0; i < 40 && !denied; i++ {
 		h.tick(n, now)
 		if h.budgetDeniedBroadcast(n) > 0 {
 			denied = true
@@ -36,7 +42,7 @@ func TestDutyCycleCapForcesBeaconThrottling(t *testing.T) {
 	}
 
 	if !denied {
-		t.Fatalf("expected budget_denied[BROADCAST] > 0 within 20 beacon attempts under a 1%% " +
+		t.Fatalf("expected budget_denied[BROADCAST] > 0 within 40 beacon attempts under a 1%% " +
 			"duty cap, got 0: the cap should have throttled beacons well before this many attempts")
 	}
 }
@@ -56,7 +62,8 @@ func TestDutyCycleCapAbsentAllowsNormalBeaconing(t *testing.T) {
 	h.forceBeaconDue(n, 0)
 
 	now := uint64(0)
-	for i := 0; i < 20; i++ {
+	// Same attempt count as the capped tests, so the contrast is like for like.
+	for i := 0; i < 40; i++ {
 		h.tick(n, now)
 		next := h.nextBeaconDue(n)
 		if next <= now {
@@ -121,7 +128,7 @@ func TestDutyCycleCapScenarioSchemaAppliesThroughBridge(t *testing.T) {
 
 	now := uint64(0)
 	denied := false
-	for i := 0; i < 20 && !denied; i++ {
+	for i := 0; i < 40 && !denied; i++ {
 		h.tick(n, now)
 		if h.budgetDeniedBroadcast(n) > 0 {
 			denied = true

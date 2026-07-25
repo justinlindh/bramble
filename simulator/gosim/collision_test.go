@@ -3,10 +3,14 @@ package main
 import "testing"
 
 // The collision-model tests below drive sim_radio directly through the
-// radioHarness (radio_harness.go). Default PHY mirrors the firmware's
-// long-range profile: SF10, 125 kHz, CR 4/5, 22 dBm. At those settings a
-// 32-byte frame has a time-on-air of 485.376 ms and the preamble
-// (12 + 4.25 symbols at 8.192 ms/symbol) lasts 133.12 ms.
+// radioHarness (radio_harness.go). The default PHY is the one the firmware
+// transmits at: the frequency plan's SF9/125 kHz (see radio_config_init), with
+// CR 4/5 and 22 dBm from RADIO_PROFILE_LONG_RANGE. At those settings a 32-byte
+// frame has a time-on-air of 263.168 ms and the preamble (12 + 4.25 symbols at
+// 4.096 ms/symbol) lasts 66.56 ms. Tests that care about where a transmission
+// falls relative to the preamble derive the offset from h.preambleUs() rather
+// than hardcoding a millisecond figure, so they keep testing the behavior they
+// name if the plan's PHY changes.
 
 const (
 	addrRx = 0x000000C0
@@ -43,6 +47,11 @@ func outcomeOf(t *testing.T, results []rxResult, src uint32) int {
 func TestTimeOnAirMatchesSemtechFormula(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()
+
+	// Pinned to SF10, deliberately NOT the default PHY, so this stays a test of
+	// the formula's parameterization; the default PHY's own ToA is asserted by
+	// TestDefaultPHYFrameAirtime.
+	h.setPHY(10, 125000, 1)
 
 	// SF10, BW 125 kHz, CR 4/5, explicit header, CRC on, 12-symbol preamble:
 	// t_sym = 2^10/125000 = 8.192 ms
@@ -135,10 +144,10 @@ func TestCaptureStrongerLateWithinPreambleSurvives(t *testing.T) {
 	h := newTriangle(20, 100)
 	defer h.free()
 
-	// B (weak) first; A (strong) starts 100 ms in, still inside B's
-	// 133.12 ms preamble: the receiver re-syncs to A.
+	// B (weak) first; A (strong) starts three quarters of the way into B's
+	// preamble, still inside it: the receiver re-syncs to A.
 	h.transmit(addrB, addrRx, frameBytes, 0)
-	h.transmit(addrA, addrRx, frameBytes, 100000)
+	h.transmit(addrA, addrRx, frameBytes, h.preambleUs()*3/4)
 
 	res := h.receptions()
 	if got := outcomeOf(t, res, addrA); got != rxOutcomeCaptured {
@@ -153,10 +162,11 @@ func TestCaptureStrongerLateAfterPreambleBothLost(t *testing.T) {
 	h := newTriangle(20, 100)
 	defer h.free()
 
-	// A (strong) starts 200 ms in, past B's preamble: the receiver is locked
-	// onto B's payload, cannot re-sync, and B is trampled. Both lost.
+	// A (strong) starts 50 ms past the end of B's preamble (and well inside
+	// B's payload): the receiver is locked onto B's payload, cannot re-sync,
+	// and B is trampled. Both lost.
 	h.transmit(addrB, addrRx, frameBytes, 0)
-	h.transmit(addrA, addrRx, frameBytes, 200000)
+	h.transmit(addrA, addrRx, frameBytes, h.preambleUs()+50000)
 
 	res := h.receptions()
 	if got := outcomeOf(t, res, addrA); got != rxOutcomeCollision {
