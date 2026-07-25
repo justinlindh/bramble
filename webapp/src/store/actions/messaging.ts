@@ -899,14 +899,12 @@ interface ProbeCompleteWire {
 
 export function handleProbeAck(params: unknown): void {
   const raw = params as ProbeAckWire;
-  const parsedAddr = typeof raw.address === 'string'
-    ? parseInt(raw.address.replace(/^0x/i, ''), 16)
-    : (raw.responderAddr ?? 0);
+  const parsedAddr = parseAddr(raw.address ?? raw.responderAddr);
 
   const roundsTotal = Math.max(1, Number(raw.rounds_total ?? raw.roundsTotal ?? (raw.seen_rounds ? 3 : 1)));
   const seenRounds = Math.max(1, Math.min(roundsTotal, raw.seen_rounds ?? raw.seenRounds ?? 1));
   const ack: ProbeResponse = {
-    responderAddr: Number.isFinite(parsedAddr) ? parsedAddr : 0,
+    responderAddr: parsedAddr,
     hopCount: raw.hops ?? raw.hopCount ?? 0,
     rssi: raw.rssi ?? 0,
     snr: raw.snr ?? 0,
@@ -952,12 +950,10 @@ export function handleProbeComplete(params: unknown): void {
 
   let responses = prev.responses;
   for (const r of responders) {
-    const addr = typeof r.address === 'string'
-      ? parseInt(r.address.replace(/^0x/i, ''), 16)
-      : (r.responderAddr ?? 0);
+    const addr = parseAddr(r.address ?? r.responderAddr);
     const seenRounds = Math.max(1, Math.min(roundsTotal, Number(r.seen_rounds ?? r.seenRounds ?? 1)));
     responses = upsertProbeResponse(responses, {
-      responderAddr: Number.isFinite(addr) ? addr : 0,
+      responderAddr: addr,
       hopCount: r.hops ?? r.hopCount ?? 0,
       rssi: r.rssi ?? 0,
       snr: r.snr ?? 0,
