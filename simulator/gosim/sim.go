@@ -820,10 +820,21 @@ func (s *Sim) cmdLoad(cmd Command) {
 	//   - "unanchored" (trust-anchor campaign P2 red-team): boots without a fleet
 	//     anchor and TOFU-pins until a provision_anchor event hardens it;
 	//     defaults to anchored (the harness default).
+	// Trust overrides, applied to each listed node AFTER join (join defaults
+	// every node to the trusted state: provisioned, endorsed, and anchored).
+	// Each entry flips one trust bit for the nodes the scenario names under its
+	// flag key and announces it; see the loadNodeFlagIDs notes above for what
+	// each override models.
 	trustFlags := loadNodeFlagIDs(scenarioData, "unprovisioned", "unendorsed", "unanchored")
-	unprovisioned := trustFlags["unprovisioned"]
-	unendorsed := trustFlags["unendorsed"]
-	unanchored := trustFlags["unanchored"]
+	trustOverrides := []struct {
+		nodes     map[string]bool
+		mark      func(int)
+		eventType string
+	}{
+		{trustFlags["unprovisioned"], nodeMarkUnprovisioned, "node_unprovisioned"},
+		{trustFlags["unendorsed"], nodeMarkUnendorsed, "node_unendorsed"},
+		{trustFlags["unanchored"], nodeMarkUnanchored, "node_unanchored"},
+	}
 
 	// Broadcast node_joined for each initial node
 	count := nodeCount(&s.nodes)
@@ -832,6 +843,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		if node == nil {
 			continue
 		}
+		nodeID := C.GoString(&node.id[0])
 		nodeActivate(node)
 		s.applyDutyCycleCap(node)
 		anomalyInit(&s.anomaly[i])
@@ -844,37 +856,14 @@ func (s *Sim) cmdLoad(cmd Command) {
 		C.bridge_handle_node_join_ext(C.int(i), C.uint32_t(node.addr),
 			node.x, node.y, C.uint64_t(0))
 
-		// Apply the unprovisioned override AFTER join (join defaults the node
-		// to provisioned). An unprovisioned node is inert for the whole run.
-		if unprovisioned[C.GoString(&node.id[0])] {
-			nodeMarkUnprovisioned(i)
-			s.emitJSON(map[string]interface{}{
-				"type": "node_unprovisioned", "timestamp_us": 0,
-				"node": C.GoString(&node.id[0]),
-			})
-		}
-
-		// Trust-anchor campaign (P2): apply the unendorsed override AFTER join
-		// (join defaults the node to endorsed). An unendorsed node attests with
-		// no fleet-anchor cert for the whole run, so anchored receivers never
-		// pin it.
-		if unendorsed[C.GoString(&node.id[0])] {
-			nodeMarkUnendorsed(i)
-			s.emitJSON(map[string]interface{}{
-				"type": "node_unendorsed", "timestamp_us": 0,
-				"node": C.GoString(&node.id[0]),
-			})
-		}
-
-		// Trust-anchor campaign (P2 red-team): apply the unanchored override
-		// AFTER join (join anchors the node to the fleet anchor). An unanchored
-		// node TOFU-pins until a provision_anchor event hardens it.
-		if unanchored[C.GoString(&node.id[0])] {
-			nodeMarkUnanchored(i)
-			s.emitJSON(map[string]interface{}{
-				"type": "node_unanchored", "timestamp_us": 0,
-				"node": C.GoString(&node.id[0]),
-			})
+		for _, ov := range trustOverrides {
+			if ov.nodes[nodeID] {
+				ov.mark(i)
+				s.emitJSON(map[string]interface{}{
+					"type": ov.eventType, "timestamp_us": 0,
+					"node": nodeID,
+				})
+			}
 		}
 
 		// Schedule initial tick (staggered by 100ms per node)
@@ -883,7 +872,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 
 		s.emitJSON(map[string]interface{}{
 			"type": "node_joined", "timestamp_us": 0,
-			"node": C.GoString(&node.id[0]),
+			"node": nodeID,
 			"addr": fmt.Sprintf("0x%08X", node.addr),
 			"x":    node.x, "y": node.y,
 		})
