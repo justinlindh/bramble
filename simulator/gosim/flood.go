@@ -351,7 +351,7 @@ func (s *Sim) handleGenerateMessageFlood(evt *C.sim_event_t) {
 	C.metrics_record_message_sent(&s.metrics)
 	if s.floodTransmit(node, frame, C.uint8_t(C.PKT_TYPE_DATA), ts) {
 		fl.dataTx++
-		s.emitJSON(map[string]interface{}{
+		s.emitJSON(map[string]any{
 			"type": "flood_sent", "timestamp_us": ts, "node": nodeID,
 			"dest": fmt.Sprintf("0x%08X", destAddr), "packet_id": fmt.Sprintf("0x%08X", packetID),
 		})
@@ -431,7 +431,7 @@ func (s *Sim) floodOnDataReached(rx *C.sim_node_t, f floodFrame, ts uint64) {
 	fl.reachedLatUs = append(fl.reachedLatUs, ts-o.sentUs)
 
 	rxAddr := uint32(rx.addr)
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "flood_reached", "timestamp_us": ts,
 		"node": C.GoString(&rx.id[0]), "packet_id": fmt.Sprintf("0x%08X", f.packetID),
 	})
@@ -463,7 +463,7 @@ func (s *Sim) floodOnAckReached(rx *C.sim_node_t, f floodFrame, ts uint64) {
 	fl.confirmedCount++
 	fl.confirmedLatUs = append(fl.confirmedLatUs, ts-o.sentUs)
 
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "flood_confirmed", "timestamp_us": ts,
 		"node": C.GoString(&rx.id[0]), "packet_id": fmt.Sprintf("0x%08X", f.corrID),
 	})

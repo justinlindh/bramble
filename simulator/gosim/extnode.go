@@ -425,7 +425,7 @@ func (ec *extConn) handleHello(msg *emuInbound) {
 	}
 	ec.addr = slot.addr
 	s.extConns[ec.addr] = ec
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "node_joined", "timestamp_us": s.simTime,
 		"node": ec.label(), "addr": fmt.Sprintf("0x%08X", ec.addr),
 		"x": slot.x, "y": slot.y, "kind": "firmware",
@@ -496,7 +496,7 @@ func (ec *extConn) handleTx(msg *emuInbound) {
 	// decodes them), so the C engine emits no message_* event for them the way it
 	// does for sim_node harness traffic. This is the greppable "node X keyed the
 	// channel" signal that a scenario or smoke test keys off.
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "emu_tx", "node": ec.label(), "addr": fmt.Sprintf("0x%08X", ec.addr),
 		"len": n, "toa_ms": toaMs,
 	})
@@ -585,7 +585,7 @@ func (ec *extConn) handleCad() {
 // renders e-paper physics); only the latest frame per node is kept.
 func (ec *extConn) handleFB(msg *emuInbound) {
 	s := ec.broker.sim
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "device_fb", "node": ec.label(), "addr": fmt.Sprintf("0x%08X", ec.addr),
 		"seq": msg.Seq, "kind": msg.Kind, "fb": msg.FB, "busy_ms": msg.BusyMs,
 		"w": msg.FBW, "h": msg.FBH,
@@ -595,7 +595,7 @@ func (ec *extConn) handleFB(msg *emuInbound) {
 // handleInd forwards an indicator (LED / buzzer / vibra) state change to the UI.
 func (ec *extConn) handleInd(msg *emuInbound) {
 	s := ec.broker.sim
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "device_ind", "node": ec.label(), "addr": fmt.Sprintf("0x%08X", ec.addr),
 		"led": msg.LED, "buzzer_hz": msg.Buzzer, "vibra": msg.Vibra,
 	})
@@ -614,7 +614,7 @@ func (ec *extConn) handleGpsGate(msg *emuInbound) {
 		s.scheduleNMEAFeed(ec, ec.gpsGen)
 	}
 	s.mu.Unlock()
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "device_gpsgate", "node": ec.label(), "on": msg.On,
 	})
 }
@@ -650,7 +650,7 @@ func (ec *extConn) handleLog(msg *emuInbound) {
 // sendJSON marshals v and enqueues it as one line on the send channel. Drops
 // the message if the channel is full (a wedged node must not stall the broker)
 // or the connection is closed.
-func (ec *extConn) sendJSON(v interface{}) {
+func (ec *extConn) sendJSON(v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return
@@ -745,7 +745,7 @@ func (s *Sim) deliverToExternalIfTarget(evt *C.sim_event_t) bool {
 	// Deterministic PHY-delivery event: this external node's radio actually
 	// received a frame (survived the collision/capture model). Headless scenarios
 	// assert channel delivery on this without decoding the opaque payload.
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "emu_rx", "node": ec.label(), "addr": fmt.Sprintf("0x%08X", ec.addr),
 		"len": n, "rssi": int(pkt.rssi),
 	})
@@ -781,7 +781,7 @@ func (s *Sim) channelBusyFor(addr uint32) bool {
 // emitConsole forwards one firmware console line to UI subscribers (and, in
 // headless mode, to stdout) tagged with the originating node.
 func (s *Sim) emitConsole(node, line string) {
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "console", "node": node, "line": line,
 	})
 }
