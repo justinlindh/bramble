@@ -277,11 +277,11 @@ func (h *radioHarness) lbtBackoffs() uint64 {
 }
 
 func (h *radioHarness) frameAirtimeUs(frameBytes int) uint32 {
-	return radioFrameAirtimeUs(h.radio, frameBytes)
+	return uint32(C.radio_frame_airtime_us(h.radio, C.uint16_t(frameBytes)))
 }
 
 func (h *radioHarness) preambleUs() uint64 {
-	return radioPreambleUs(h.radio)
+	return uint64(C.radio_preamble_us(h.radio))
 }
 
 func (h *radioHarness) rssiAt(distance float32) int {

@@ -155,14 +155,6 @@ const (
 	rxOutcomeCaptured   = int(C.RADIO_RX_CAPTURED)
 )
 
-func radioFrameAirtimeUs(config *C.radio_config_t, frameBytes int) uint32 {
-	return uint32(C.radio_frame_airtime_us(config, C.uint16_t(frameBytes)))
-}
-
-func radioPreambleUs(config *C.radio_config_t) uint64 {
-	return uint64(C.radio_preamble_us(config))
-}
-
 // --- Metrics ---
 
 func metricsInit(m *C.metrics_state_t) {
