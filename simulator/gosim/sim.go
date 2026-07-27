@@ -1346,6 +1346,19 @@ func dup2Stdout(origStdout int) { syscall.Dup2(origStdout, 1) }
 // release the saved original stdout after restoring it).
 func closeFd(fd int) { syscall.Close(fd) }
 
+// emitRaw fans a ready-to-send line (already newline-terminated) out to the
+// websocket broadcast callback and, when running headless, additionally to the
+// saved real stdout: the pipe redirect steals the normal one, so headless runs
+// write JSON to origStdout directly.
+func (s *Sim) emitRaw(data []byte) {
+	if s.broadcast != nil {
+		s.broadcast(data)
+	}
+	if s.headless {
+		syscall.Write(s.origStdout, data)
+	}
+}
+
 // emitJSON marshals and broadcasts a JSON event.
 func (s *Sim) emitJSON(v interface{}) {
 	data, err := json.Marshal(v)
@@ -1353,13 +1366,7 @@ func (s *Sim) emitJSON(v interface{}) {
 		return
 	}
 	data = append(data, '\n')
-	if s.broadcast != nil {
-		s.broadcast(data)
-	}
-	if s.headless {
-		// Write to original stdout (not the pipe-redirected one)
-		syscall.Write(s.origStdout, data)
-	}
+	s.emitRaw(data)
 }
 
 // readPipe reads JSON lines from the pipe (C stdout output) and broadcasts them.
@@ -1382,21 +1389,11 @@ func (s *Sim) readPipe() {
 		out := make([]byte, len(line)+1)
 		copy(out, line)
 		out[len(line)] = '\n'
-		if s.broadcast != nil {
-			s.broadcast(out)
-		}
-		if s.headless {
-			syscall.Write(s.origStdout, out)
-		}
+		s.emitRaw(out)
 
 		if delivery, ok := websocket.BuildBroadcastDeliveryNotification(line, s.broadcastTelemetryMode); ok {
 			delivery = append(delivery, '\n')
-			if s.broadcast != nil {
-				s.broadcast(delivery)
-			}
-			if s.headless {
-				syscall.Write(s.origStdout, delivery)
-			}
+			s.emitRaw(delivery)
 		}
 	}
 }
