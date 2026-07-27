@@ -80,7 +80,12 @@ suites), `scripts/`, `docs/`, `api/openapi.yaml` (the RPC contract).
 - PR bodies follow `.github/PULL_REQUEST_TEMPLATE.md` (What and why /
   Changes / Validation with real command output / Release impact), written
   as unwrapped prose: one paragraph per line, because the GitHub renderer
-  treats every newline as a line break.
+  treats every newline as a line break. The complement matters just as much:
+  put a BLANK line between every paragraph, heading, and list, because
+  adjacent single-line paragraphs fuse into one unreadable wall (a single
+  newline renders as a soft break, not a paragraph break). Prefer a bullet
+  list over a multi-clause paragraph for the Changes section; a paragraph
+  that needs three semicolons is a list.
 - PR bodies are written for a human reviewer, not as a log. Keep them
   concise and describe the CURRENT state of the change, not the history of
   how it got there. No running monologue, no per-iteration narration, no
