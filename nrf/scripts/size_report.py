@@ -2,10 +2,10 @@
 """RAM/flash budget gate for the Bramble nRF52840 target (P0 exit gate).
 
 Sums every ELF section placed in RAM (0x20000000 window: .data, .bss, any
-.heap/.stack the linker script emits) plus the MSP stack reserved by the nrfx
-linker script (__StackLimit..__StackTop, which lives at the top of RAM and is
-not a section), compares the total against the budget, and fails the build
-when over. Prints the top .bss symbols so shrink work has a target list.
+.heap the linker script emits) plus the MSP stack reserved by the nrfx linker
+script (__StackLimit..__StackTop), compares the total against the budget, and
+fails the build when over. Prints the top .bss symbols so shrink work has a
+target list.
 
 Usage: size_report.py ELF [--budget-kb 200] [--json PATH]
 """
@@ -28,57 +28,28 @@ def run(tool, *args):
     ).stdout
 
 
-def ram_sections(elf):
-    sections = {}
+def parse_sections(elf):
+    """One `size -A` invocation parsed into (name, size, addr) rows."""
+    rows = []
     for line in run("size", "-A", "-x", elf).splitlines():
         m = re.match(r"^(\S+)\s+(0x[0-9a-f]+|\d+)\s+(0x[0-9a-f]+|\d+)$", line.strip())
-        if not m:
-            continue
-        name, size, addr = m.group(1), int(m.group(2), 0), int(m.group(3), 0)
-        if RAM_BASE <= addr < RAM_BASE + RAM_SIZE and size > 0:
-            sections[name] = size
-    return sections
+        if m:
+            rows.append((m.group(1), int(m.group(2), 0), int(m.group(3), 0)))
+    return rows
 
 
-def flash_usage(elf):
-    total = 0
-    for line in run("size", "-A", "-x", elf).splitlines():
-        m = re.match(r"^(\S+)\s+(0x[0-9a-f]+|\d+)\s+(0x[0-9a-f]+|\d+)$", line.strip())
-        if not m:
-            continue
-        addr, size = int(m.group(3), 0), int(m.group(2), 0)
-        if addr < RAM_BASE and size > 0 and addr >= 0:
-            name = m.group(1)
-            if name not in (".comment", ".debug_info", ".ARM.attributes") and not name.startswith(
-                ".debug"
-            ):
-                total += size
-    return total
-
-
-def msp_stack(elf):
-    syms = {}
-    for line in run("nm", elf).splitlines():
+def parse_symbols(elf):
+    """One `nm -S` invocation: (addr, size, kind, name) rows. Symbols without
+    a size field (linker absolutes like __StackTop) get size 0."""
+    rows = []
+    for line in run("nm", "-S", elf).splitlines():
         parts = line.split()
-        if len(parts) == 3 and parts[2] in ("__StackTop", "__StackLimit"):
-            syms[parts[2]] = int(parts[0], 16)
-    if "__StackTop" in syms and "__StackLimit" in syms:
-        return syms["__StackTop"] - syms["__StackLimit"]
-    return 0
-
-
-def top_bss_symbols(elf):
-    out = []
-    for line in run("nm", "-S", "--size-sort", "--reverse-sort", elf).splitlines():
-        parts = line.split()
-        if len(parts) == 4 and parts[2].lower() in ("b", "d"):
-            size = int(parts[1], 16)
-            if size > RAM_SIZE:
-                continue  # linker bookkeeping absolutes, not real objects
-            out.append((size, parts[2], parts[3]))
-        if len(out) >= TOP_SYMBOLS:
-            break
-    return out
+        if len(parts) == 4:
+            rows.append((int(parts[0], 16), int(parts[1], 16), parts[2], parts[3]))
+        elif len(parts) == 3:
+            rows.append((int(parts[0], 16), 0, parts[1], parts[2]))
+    rows.sort(key=lambda r: -r[1])
+    return rows
 
 
 def main():
@@ -88,15 +59,27 @@ def main():
     ap.add_argument("--json")
     args = ap.parse_args()
 
-    sections = ram_sections(args.elf)
-    stack = msp_stack(args.elf)
+    rows = parse_sections(args.elf)
+    sections = {
+        name: size for name, size, addr in rows if RAM_BASE <= addr < RAM_BASE + RAM_SIZE and size
+    }
+    flash = sum(
+        size
+        for name, size, addr in rows
+        if addr < RAM_BASE and size and not name.startswith(".debug")
+        and name not in (".comment", ".ARM.attributes")
+    )
+
+    symbols = parse_symbols(args.elf)
+    stack_syms = {name: addr for addr, _size, _k, name in symbols if name in ("__StackTop", "__StackLimit")}
+    stack = stack_syms.get("__StackTop", 0) - stack_syms.get("__StackLimit", 0)
     # .stack_dummy is the nrfx linker's placeholder for the same region the
     # __StackLimit/__StackTop symbols describe; keep exactly one accounting.
     if ".stack_dummy" in sections and stack > 0:
         del sections[".stack_dummy"]
+
     ram_total = sum(sections.values()) + stack
     budget = args.budget_kb * 1024
-    flash = flash_usage(args.elf)
 
     print("=== bramble-nrf memory report ===")
     for name, size in sorted(sections.items(), key=lambda kv: -kv[1]):
@@ -106,8 +89,13 @@ def main():
     print(f"  RAM budget {budget:>8} bytes (gate)")
     print(f"  Flash      {flash:>8} / {FLASH_SIZE} bytes ({100 * flash / FLASH_SIZE:.1f}%)")
     print(f"  Top {TOP_SYMBOLS} static symbols:")
-    for size, kind, name in top_bss_symbols(args.elf):
-        print(f"    {size:>8} {kind} {name}")
+    shown = 0
+    for _addr, size, kind, name in symbols:
+        if kind.lower() in ("b", "d") and size <= RAM_SIZE:
+            print(f"    {size:>8} {kind} {name}")
+            shown += 1
+            if shown >= TOP_SYMBOLS:
+                break
 
     if args.json:
         with open(args.json, "w") as f:

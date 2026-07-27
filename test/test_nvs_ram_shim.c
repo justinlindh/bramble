@@ -8,11 +8,15 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "identity_store.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "unity.h"
 
-#define PIN_STORE_BLOB_SIZE 2466
+// The pool-capacity tests exercise the real largest persisted blob, derived
+// from the identity pin table's own sizing macro so capacity growth there
+// keeps these tests honest automatically.
+#define PIN_STORE_BLOB_SIZE IDENTITY_STORE_BLOB_MAX
 
 void setUp(void) { TEST_ASSERT_EQUAL(ESP_OK, nvs_flash_erase()); }
 

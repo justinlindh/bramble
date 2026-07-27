@@ -35,10 +35,6 @@ void console_write(const char* buf, size_t len) {
     (void)nrfx_uarte_tx(&s_uarte, (const uint8_t*)buf, len, 0);
 }
 
-__attribute__((weak)) uint32_t bramble_log_timestamp_ms(void) { return 0; }
-
-unsigned int esp_log_timestamp(void) { return bramble_log_timestamp_ms(); }
-
 void bramble_log_write(char level, const char* tag, const char* fmt, ...) {
     char line[192];
     int n = snprintf(line, sizeof(line), "%c (%lu) %s: ", level,

@@ -17,9 +17,11 @@ LittleFS lands in P2). Not a supported device.
 ## Build
 
 Needs `arm-none-eabi-gcc`, CMake >= 3.24, Ninja, Python 3. Dependencies
-(nrfx v3.9.0, CMSIS_6 v6.1.0, FreeRTOS-Kernel V11.1.0, mbedtls 3.6.2,
-Monocypher 4.0.2, cJSON 1.7.18) are FetchContent-pinned and cached in
-`build/_deps`.
+(nrfx, CMSIS, FreeRTOS-Kernel, mbedtls, Monocypher, cJSON) are
+FetchContent-pinned in `nrf/CMakeLists.txt` and
+`components/crypto/crypto_deps.cmake` (the crypto pins are shared with the
+host test build so both compile the exact same library versions and mbedtls
+config), cached in `build/_deps`.
 
 ```sh
 cmake -S nrf -B nrf/build -G Ninja \

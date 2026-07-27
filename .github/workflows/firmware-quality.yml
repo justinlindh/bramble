@@ -91,6 +91,11 @@ jobs:
         run: bash scripts/lint/check-board-matrix.sh
       - name: ESP-IDF version pins agree
         run: bash scripts/lint/check-idf-version.sh
+      - name: nRF sdkconfig shim matches Kconfig defaults
+        # Same anti-drift shape: the nRF target hand-carries a few Kconfig
+        # values (nrf/shim/include/sdkconfig.h); a Kconfig default bump that
+        # forgets the shim would silently fork behavior between fleets.
+        run: bash scripts/lint/check-nrf-sdkconfig-shim.sh
       - name: Node version pins agree
         # Same anti-drift shape as the ESP-IDF check: .nvmrc is the single
         # source of truth for the Node major, and this fails loud when a CI

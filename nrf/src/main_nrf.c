@@ -100,8 +100,6 @@ static void task_heartbeat(void* arg) {
     }
 }
 
-size_t heap_free_probe(void) { return xPortGetFreeHeapSize(); }
-
 static void task_boot(void* arg) {
     (void)arg;
     crypto_self_check();

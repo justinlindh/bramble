@@ -6,11 +6,10 @@
 #include <stddef.h>
 #include <string.h>
 
-#ifdef ESP_PLATFORM
+/* Every build resolves esp_err.h by include path: the real header on
+ * ESP-IDF, test/stubs/esp_err.h on host builds, nrf/shim/include/esp_err.h
+ * on the nRF52840 target. */
 #include "esp_err.h"
-#else
-#include "esp_stubs.h"
-#endif
 
 /* Protocol version.
  * was 4; DM forward-secrecy flag day: DM/LOCATION session payloads now carry a

@@ -16,6 +16,3 @@ void bramble_log_write(char level, const char* tag, const char* fmt, ...)
 #define ESP_LOGI(tag, fmt, ...) bramble_log_write('I', tag, fmt, ##__VA_ARGS__)
 #define ESP_LOGD(tag, fmt, ...) bramble_log_write('D', tag, fmt, ##__VA_ARGS__)
 #define ESP_LOGV(tag, fmt, ...) ((void)0)
-
-// Some components use the ESP_LOG_LEVEL forms or esp_log_timestamp directly.
-unsigned int esp_log_timestamp(void);
