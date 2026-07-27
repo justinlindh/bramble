@@ -2720,7 +2720,8 @@ static int handle_get_audio_status(const cJSON* params, cJSON* result) {
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
 /* Standard base64 alphabet, padded. Self-contained (no mbedtls dep), same
- * approach as display_virt.c's fb_to_b64, but chunk-oriented: each call
+ * approach as the display backends' fb_base64_encode
+ * (components/display/include/fb_base64.h), but chunk-oriented: each call
  * encodes an independent, self-contained base64 string (its own padding),
  * so a caller can decode chunks one at a time and concatenate the raw
  * bytes without needing to track bit alignment across chunks. */

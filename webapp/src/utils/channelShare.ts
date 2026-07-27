@@ -55,11 +55,11 @@ export type ParseResult<T> =
   | { ok: false; error: string };
 
 /**
- * Shared prefix-check + query decode for the ParseResult-style share parsers.
- * Fails with `notValidError` when the prefix is wrong and with a generic
- * "Malformed share string." if URLSearchParams construction throws, leaving
- * each caller to validate its own fields. Mirrors anchorShare.ts's paramsFor,
- * adapted to carry a distinct not-a-share message.
+ * Shared prefix-check + query decode for every share parser. Fails with
+ * `notValidError` when the prefix is wrong and with a generic "Malformed share
+ * string." if URLSearchParams construction throws, leaving each caller to
+ * validate its own fields. The channel, node, and network-key codecs consume
+ * the ParseResult directly; anchorShare.ts adapts it down to its nullish API.
  */
 export function parseShareParams(
   input: string,

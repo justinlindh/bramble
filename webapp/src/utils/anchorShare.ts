@@ -12,6 +12,8 @@
  * Each parse is strict (exact hex lengths) and returns null on any malformed
  * input, so callers can branch on a single nullish check.
  */
+import { parseShareParams } from './channelShare';
+
 const ANCHOR_PREFIX = 'bramble://anchor/v1?';
 const IDENT_PREFIX = 'bramble://ident/v1?';
 const ENDORSE_PREFIX = 'bramble://endorse/v1?';
@@ -19,14 +21,12 @@ const HEX64 = /^[0-9a-fA-F]{64}$/;
 const HEX16 = /^[0-9a-fA-F]{16}$/;
 const HEX128 = /^[0-9a-fA-F]{128}$/;
 
+// These codecs report malformed input as null rather than the ParseResult
+// error strings the channel/network-key codecs surface, so adapt the shared
+// prefix-check + query decode down to a nullish result.
 function paramsFor(input: string, prefix: string): URLSearchParams | null {
-  const s = input.trim();
-  if (!s.startsWith(prefix)) return null;
-  try {
-    return new URLSearchParams(s.slice(prefix.length));
-  } catch {
-    return null;
-  }
+  const parsed = parseShareParams(input, prefix, '');
+  return parsed.ok ? parsed.data : null;
 }
 
 function hexParam(params: URLSearchParams, key: string, re: RegExp): string | null {
