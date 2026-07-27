@@ -319,9 +319,7 @@ function normalizeReplayDeliveryEvent(raw: DeliveryReplayEventWire): DeliveryEve
     eventId,
     messageId,
     packetId: packetId || undefined,
-    conversationKey: `msg:${messageId}`,
     ts,
-    nodeAddr: currentNodeAddrHex(),
     eventType,
     payload,
   };
@@ -524,13 +522,10 @@ function applyBroadcastDelivery(event: BroadcastDeliveryNotification): void {
     deliveredAtMs: event.deliveredAtMs ?? Date.now(),
   };
 
-  const message = useStore.getState().messages.find(m => m.id === msgId);
   deliveryEventStore.upsertDeliveryEvent({
     eventId: `broadcast:${event.broadcastId}:${recipient.addr}`,
     messageId: msgId,
-    conversationKey: message ? conversationIdForMessage(message) : 'broadcast',
     ts: recipient.deliveredAtMs,
-    nodeAddr: currentNodeAddrHex(),
     eventType: 'broadcast_delivery',
     payload: recipient,
   }).catch(() => {});
@@ -690,14 +685,11 @@ export function handleAck(params: unknown): void {
     const newStatus = status === 'delivered' ? 'delivered' : 'failed';
     const nowTs = Date.now();
 
-    const message = useStore.getState().messages.find(m => m.id === msgId);
     deliveryEventStore.upsertDeliveryEvent({
       eventId: `ack:${packetId}:${newStatus}`,
       messageId: msgId,
       packetId,
-      conversationKey: message ? conversationIdForMessage(message) : `dm:${msgId}`,
       ts: nowTs,
-      nodeAddr: currentNodeAddrHex(),
       eventType: 'ack',
       payload: { status: newStatus, relayPath },
     }).catch(() => {});
