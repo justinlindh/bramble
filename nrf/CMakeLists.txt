@@ -23,7 +23,20 @@ FetchContent_Declare(cmsis6
   GIT_SHALLOW TRUE
   SOURCE_SUBDIR cmake-noop
 )
+FetchContent_Declare(freertos_kernel
+  GIT_REPOSITORY https://github.com/FreeRTOS/FreeRTOS-Kernel.git
+  GIT_TAG V11.1.0
+  GIT_SHALLOW TRUE
+)
 FetchContent_MakeAvailable(nrfx cmsis6)
+
+# FreeRTOS-Kernel's own CMake wants a freertos_config interface target
+# providing FreeRTOSConfig.h.
+add_library(freertos_config INTERFACE)
+target_include_directories(freertos_config INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/config)
+set(FREERTOS_PORT GCC_ARM_CM4F CACHE STRING "" FORCE)
+set(FREERTOS_HEAP 4 CACHE STRING "" FORCE)
+FetchContent_MakeAvailable(freertos_kernel)
 
 # nrfx as an explicit-source static library. Sources are listed one by one on
 # purpose: the enable set in config/nrfx_config.h and this list must agree.
@@ -63,7 +76,7 @@ target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_CONSOLE_UART=${BRAMBLE_CONSOLE_UART}
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
 )
-target_link_libraries(bramble-nrf PRIVATE nrfx_lib)
+target_link_libraries(bramble-nrf PRIVATE nrfx_lib freertos_kernel)
 target_link_options(bramble-nrf PRIVATE
   -T${nrfx_SOURCE_DIR}/mdk/nrf52840_xxaa.ld
   -L${nrfx_SOURCE_DIR}/mdk
