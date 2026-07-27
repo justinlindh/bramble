@@ -120,7 +120,7 @@ export function pickLatestWebappRelease(releases: GithubRelease[]): WebappReleas
       best = {
         tag,
         version,
-        htmlUrl: r.html_url ?? releaseHtmlUrl(GITHUB_OWNER, GITHUB_REPO, tag),
+        htmlUrl: r.html_url ?? releaseHtmlUrl(tag),
       };
     }
   }
@@ -135,13 +135,13 @@ export function pickLatestWebappRelease(releases: GithubRelease[]): WebappReleas
  * the github provider's "newest release in the repo" guess, which would land
  * on a firmware release that has no desktop feed.
  */
-export function feedBaseUrl(owner: string, repo: string, tag: string): string {
-  return `https://github.com/${owner}/${repo}/releases/download/${tag}/`;
+export function feedBaseUrl(tag: string): string {
+  return `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${tag}/`;
 }
 
 /** Human-facing GitHub release page for the manual/open-in-browser path. */
-export function releaseHtmlUrl(owner: string, repo: string, tag: string): string {
-  return `https://github.com/${owner}/${repo}/releases/tag/${tag}`;
+export function releaseHtmlUrl(tag: string): string {
+  return `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/${tag}`;
 }
 
 /**
@@ -181,7 +181,7 @@ export function decideUpdate(params: {
       kind: 'in-app',
       version: latest.version,
       tag: latest.tag,
-      feedUrl: feedBaseUrl(GITHUB_OWNER, GITHUB_REPO, latest.tag),
+      feedUrl: feedBaseUrl(latest.tag),
     };
   }
   return { kind: 'manual', version: latest.version, releaseUrl: latest.htmlUrl };

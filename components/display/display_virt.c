@@ -19,6 +19,7 @@
 #include "ssd1680_engine.h"
 #include "emu_link.h"
 #include "cJSON.h"
+#include "fb_base64.h"
 
 #include <stdint.h>
 
@@ -26,40 +27,8 @@ static bool s_initialized = false;
 static bool s_rotated_180 = false;
 static uint32_t s_seq = 0; /* monotonically increasing, first frame = 1 */
 
-/* ── base64 (standard alphabet, padded) ──────────────────────────────── */
-
-static const char b64_tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
 #define FB_B64_LEN (((SSD1680_FB_SIZE + 2) / 3) * 4)
 static char s_b64[FB_B64_LEN + 1];
-
-static void fb_to_b64(const uint8_t* in) {
-    char* out = s_b64;
-    int len = SSD1680_FB_SIZE;
-    while (len >= 3) {
-        uint32_t v = (uint32_t)(in[0] << 16) | (uint32_t)(in[1] << 8) | in[2];
-        *out++ = b64_tab[(v >> 18) & 0x3F];
-        *out++ = b64_tab[(v >> 12) & 0x3F];
-        *out++ = b64_tab[(v >> 6) & 0x3F];
-        *out++ = b64_tab[v & 0x3F];
-        in += 3;
-        len -= 3;
-    }
-    if (len == 1) { /* 3904 % 3 == 1: this branch is the live one */
-        uint32_t v = (uint32_t)(in[0] << 16);
-        *out++ = b64_tab[(v >> 18) & 0x3F];
-        *out++ = b64_tab[(v >> 12) & 0x3F];
-        *out++ = '=';
-        *out++ = '=';
-    } else if (len == 2) {
-        uint32_t v = (uint32_t)(in[0] << 16) | (uint32_t)(in[1] << 8);
-        *out++ = b64_tab[(v >> 18) & 0x3F];
-        *out++ = b64_tab[(v >> 12) & 0x3F];
-        *out++ = b64_tab[(v >> 6) & 0x3F];
-        *out++ = '=';
-    }
-    *out = '\0';
-}
 
 /* ── public API ──────────────────────────────────────────────────────── */
 
@@ -85,7 +54,7 @@ void display_flush(void) {
     (void)ops; /* the broker gets the resolved fb, not the SPI stream */
     (void)n_ops;
 
-    fb_to_b64(ssd1680_engine_fb());
+    fb_base64_encode(ssd1680_engine_fb(), SSD1680_FB_SIZE, s_b64);
 
     cJSON* msg = cJSON_CreateObject();
     if (!msg)

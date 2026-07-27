@@ -23,6 +23,7 @@ import type {
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 import type { SavedDevice } from '../lib/deviceBook';
 import { formatAddrHex, formatAddr0x } from '../utils/address';
+import { DEFAULT_CAPABILITIES } from '../lib/connectionMode';
 
 const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
 const ACTIVE_TAB_KEY = 'bramble-active-tab';
@@ -186,11 +187,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   connectionState: 'disconnected',
   connectionError: undefined,
   transport: null,
-  connectionCapabilities: {
-    mode: 'hosted',
-    localLanAllowed: false,
-    localLanReason: 'LAN direct connect is unavailable in hosted mode. Use USB or Bluetooth.',
-  },
+  connectionCapabilities: DEFAULT_CAPABILITIES,
   config: null,
   status: null,
   airtime: null,
