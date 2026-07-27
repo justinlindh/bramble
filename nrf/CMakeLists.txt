@@ -204,6 +204,7 @@ target_link_options(bramble-nrf PRIVATE
 
 add_custom_command(TARGET bramble-nrf POST_BUILD
   COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:bramble-nrf> bramble-nrf.hex
-  COMMAND ${CMAKE_SIZE} $<TARGET_FILE:bramble-nrf>
-  COMMENT "Generating bramble-nrf.hex"
+  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/size_report.py
+          $<TARGET_FILE:bramble-nrf> --json size-report.json
+  COMMENT "Generating bramble-nrf.hex and enforcing the RAM budget"
 )
