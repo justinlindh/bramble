@@ -22,6 +22,7 @@
 #include "font_6x8.h"
 #include "emu_link.h"
 #include "cJSON.h"
+#include "fb_base64.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -41,41 +42,8 @@ static uint8_t s_fb[OLED_FB_SIZE];
 static uint8_t s_sent_fb[OLED_FB_SIZE];
 static bool s_ever_sent = false;
 
-/* ── base64 (standard alphabet, padded) ──────────────────────────────── */
-
-static const char b64_tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
 #define FB_B64_LEN (((OLED_FB_SIZE + 2) / 3) * 4)
 static char s_b64[FB_B64_LEN + 1];
-
-static void fb_to_b64(const uint8_t* in) {
-    char* out = s_b64;
-    int len = OLED_FB_SIZE;
-    while (len >= 3) {
-        uint32_t v = (uint32_t)(in[0] << 16) | (uint32_t)(in[1] << 8) | in[2];
-        *out++ = b64_tab[(v >> 18) & 0x3F];
-        *out++ = b64_tab[(v >> 12) & 0x3F];
-        *out++ = b64_tab[(v >> 6) & 0x3F];
-        *out++ = b64_tab[v & 0x3F];
-        in += 3;
-        len -= 3;
-    }
-    /* OLED_FB_SIZE (1024) % 3 == 1: the len==1 tail is the live branch. */
-    if (len == 1) {
-        uint32_t v = (uint32_t)(in[0] << 16);
-        *out++ = b64_tab[(v >> 18) & 0x3F];
-        *out++ = b64_tab[(v >> 12) & 0x3F];
-        *out++ = '=';
-        *out++ = '=';
-    } else if (len == 2) {
-        uint32_t v = (uint32_t)(in[0] << 16) | (uint32_t)(in[1] << 8);
-        *out++ = b64_tab[(v >> 18) & 0x3F];
-        *out++ = b64_tab[(v >> 12) & 0x3F];
-        *out++ = b64_tab[(v >> 6) & 0x3F];
-        *out++ = '=';
-    }
-    *out = '\0';
-}
 
 /* ── public API ──────────────────────────────────────────────────────── */
 
@@ -101,7 +69,7 @@ void display_flush(void) {
     if (s_ever_sent && memcmp(s_fb, s_sent_fb, OLED_FB_SIZE) == 0)
         return;
 
-    fb_to_b64(s_fb);
+    fb_base64_encode(s_fb, OLED_FB_SIZE, s_b64);
     memcpy(s_sent_fb, s_fb, OLED_FB_SIZE);
     s_ever_sent = true;
 
