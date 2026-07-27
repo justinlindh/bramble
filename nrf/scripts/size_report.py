@@ -63,12 +63,11 @@ def main():
     sections = {
         name: size for name, size, addr in rows if RAM_BASE <= addr < RAM_BASE + RAM_SIZE and size
     }
-    flash = sum(
-        size
-        for name, size, addr in rows
-        if addr < RAM_BASE and size and not name.startswith(".debug")
-        and name not in (".comment", ".ARM.attributes")
-    )
+    # Flash from Berkeley text+data: summing System V rows by address both
+    # misses .data's load image (its VMA is RAM but its initializers live in
+    # flash) and risks counting non-allocated sections on some toolchains.
+    berkeley = run("size", args.elf).splitlines()[-1].split()
+    flash = int(berkeley[0]) + int(berkeley[1])
 
     symbols = parse_symbols(args.elf)
     stack_syms = {name: addr for addr, _size, _k, name in symbols if name in ("__StackTop", "__StackLimit")}

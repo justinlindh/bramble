@@ -74,7 +74,7 @@ and fails it over budget):
 | libc heap (.heap) | 16,388 | nrfx startup default, newlib only |
 | MSP stack | 16,384 | nrfx startup default |
 | RAM total | 150,464 / 262,144 | 57.4%, 54,336 under the 200KB gate |
-| Flash | 43,592 / 1,048,576 | 4.2% |
+| Flash | 43,704 / 1,048,576 | 4.2%, Berkeley text+data (includes .data load image) |
 
 These measurements supersede the scoping spike's 190-230KB estimate. Largest
 static objects: `ucHeap` 48K, `s_dm_table` 44K (the DM session table, the
