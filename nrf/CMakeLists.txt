@@ -196,11 +196,28 @@ target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
 )
 target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519)
+# Flash layout: `swd` (default) links at 0x0 for the dev kit; `uf2` links at
+# 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
+# bramble-nrf.uf2 for drag-and-drop flashing.
+set(BRAMBLE_NRF_LAYOUT swd CACHE STRING "Flash layout: swd or uf2")
+if(BRAMBLE_NRF_LAYOUT STREQUAL "uf2")
+  set(BRAMBLE_LD ${CMAKE_CURRENT_SOURCE_DIR}/ld/nrf52840_s140_app.ld)
+else()
+  set(BRAMBLE_LD ${nrfx_SOURCE_DIR}/mdk/nrf52840_xxaa.ld)
+endif()
 target_link_options(bramble-nrf PRIVATE
-  -T${nrfx_SOURCE_DIR}/mdk/nrf52840_xxaa.ld
+  -T${BRAMBLE_LD}
   -L${nrfx_SOURCE_DIR}/mdk
   -Wl,-Map=bramble-nrf.map
 )
+if(BRAMBLE_NRF_LAYOUT STREQUAL "uf2")
+  add_custom_command(TARGET bramble-nrf POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:bramble-nrf> bramble-nrf.bin
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/make_uf2.py bramble-nrf.bin
+            --base 0x26000 -o bramble-nrf.uf2
+    COMMENT "Packaging bramble-nrf.uf2 (base 0x26000, family 0xADA52840)"
+  )
+endif()
 
 add_custom_command(TARGET bramble-nrf POST_BUILD
   COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:bramble-nrf> bramble-nrf.hex
