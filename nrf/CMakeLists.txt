@@ -30,7 +30,13 @@ FetchContent_Declare(cjson
   URL https://github.com/DaveGamble/cJSON/archive/refs/tags/v1.7.18.tar.gz
   SOURCE_SUBDIR cmake-noop
 )
-FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson)
+# Semtech LR11xx driver (Clear BSD). v3.0.0; do not pin below v2.7.0 (an
+# lr11xx_hal_read pointer-conversion fix lives there).
+FetchContent_Declare(swdr001
+  URL https://github.com/Lora-net/SWDR001/archive/refs/tags/v3.0.0.tar.gz
+  SOURCE_SUBDIR cmake-noop
+)
+FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson swdr001)
 bramble_crypto_deps_exclude_tls()
 bramble_add_monocypher_ed25519(monocypher_ed25519)
 
@@ -49,6 +55,8 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/mdk/gcc_startup_nrf52840.S
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_uarte.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_rng.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
 )
 target_include_directories(nrfx_lib PUBLIC
@@ -137,10 +145,20 @@ target_include_directories(bramble_core BEFORE PUBLIC
 target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/radio)
 target_link_libraries(bramble_core PUBLIC freertos_kernel)
 
+# SWDR001: only the command areas the radio backend uses; the HAL under
+# nrf/src implements its 6-function contract on nrfx SPIM2.
+add_library(swdr001_lib STATIC
+  ${swdr001_SOURCE_DIR}/src/lr11xx_system.c
+  ${swdr001_SOURCE_DIR}/src/lr11xx_radio.c
+  ${swdr001_SOURCE_DIR}/src/lr11xx_regmem.c
+)
+target_include_directories(swdr001_lib PUBLIC ${swdr001_SOURCE_DIR}/src)
+
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
   src/radio_null.c
+  src/lr11xx_hal_nrf.c
   shim/console_uart.c
   shim/esp_timer_freertos.c
   shim/esp_random_nrf.c
@@ -161,7 +179,7 @@ target_compile_definitions(bramble-nrf PRIVATE BRAMBLE_PLATFORM_NRF)
 target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
 )
-target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519)
+target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519 swdr001_lib)
 # Flash layout: `swd` (default) links at 0x0 for the dev kit; `uf2` links at
 # 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
 # bramble-nrf.uf2 for drag-and-drop flashing.

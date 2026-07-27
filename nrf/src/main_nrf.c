@@ -7,8 +7,11 @@
 
 #include <string.h>
 
+#include <lr11xx_system.h>
+
 #include "app_init.h"
 #include "console.h"
+#include "lr11xx_hal_nrf.h"
 #include "crypto.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -100,9 +103,24 @@ static void task_heartbeat(void* arg) {
     }
 }
 
+// SPI-alive gate for the LR1110: reset the chip and read its version over
+// the new HAL. Expect hw nonzero, type 0x01 (LR1110), fw 0x03xx.
+static void lr1110_version_smoke(void) {
+    const void* ctx = lr11xx_hal_nrf_init();
+    configASSERT(ctx != NULL);
+    lr11xx_system_reset(ctx);
+    lr11xx_system_version_t v;
+    if (lr11xx_system_get_version(ctx, &v) == LR11XX_STATUS_OK) {
+        ESP_LOGI(TAG, "LR1110 alive: hw 0x%02x type 0x%02x fw 0x%04x", v.hw, v.type, v.fw);
+    } else {
+        ESP_LOGE(TAG, "LR1110 version read FAILED (SPI/BUSY wiring or HAL bug)");
+    }
+}
+
 static void task_boot(void* arg) {
     (void)arg;
     crypto_self_check();
+    lr1110_version_smoke();
     app_init_stack();
     vTaskDelete(NULL);
 }

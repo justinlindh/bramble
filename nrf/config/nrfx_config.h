@@ -10,6 +10,12 @@
 #define NRFX_UARTE_ENABLED 1
 #define NRFX_UARTE0_ENABLED 1
 #define NRFX_RNG_ENABLED 1
+// LR1110: SPI transport on SPIM2 (8MHz ceiling dodges the SPIM3 anomaly-198
+// question entirely) and the DIO IRQ line via GPIOTE.
+#define NRFX_SPIM_ENABLED 1
+#define NRFX_SPIM2_ENABLED 1
+#define NRFX_GPIOTE_ENABLED 1
+#define NRFX_GPIOTE0_ENABLED 1
 
 #include "nrfx_config_nrf52840.h"
 
