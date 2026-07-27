@@ -660,6 +660,42 @@ func (s *Sim) handleInterferenceEnd(evt *C.sim_event_t) {
 	radioClearInterference(&s.radio, int(idata.zone_index))
 }
 
+// putSharedMetrics fills the counter and rate fields the periodic "metrics"
+// tick and the terminal "final_metrics" event report identically into m. Both
+// events used to inline these 20 key/value pairs verbatim, so a change to one
+// (a renamed counter, a different divisor) had to be mirrored in the other or
+// the two payloads would silently drift, exactly the hazard the surrounding
+// comments warn about. The fields that legitimately differ between the two
+// events (messages_sent/delivered/dropped, which the final event ties to the
+// same terminal-state locals its rate math uses) are set by each caller.
+func (s *Sim) putSharedMetrics(m map[string]interface{}) {
+	m["total_packets"] = uint64(s.metrics.total_packets)
+	m["retried"] = uint64(s.metrics.messages_retried)
+	m["delivered_on_retry"] = uint64(s.metrics.messages_delivered_retry)
+	m["dedup_dropped"] = uint64(s.metrics.dedup_dropped)
+	m["airtime_deferred"] = uint64(s.metrics.airtime_deferred)
+	m["fragments_sent"] = uint64(s.metrics.fragments_sent)
+	m["fragments_reassembled"] = uint64(s.metrics.fragments_reassembled)
+	m["reassembly_timeout"] = uint64(s.metrics.reassembly_timeout)
+	m["crypto_encrypted"] = uint64(s.metrics.crypto_encrypted)
+	m["crypto_decrypted"] = uint64(s.metrics.crypto_decrypted)
+	m["crypto_auth_failed"] = uint64(s.metrics.crypto_auth_failed)
+	m["collisions"] = uint64(s.metrics.collisions)
+	m["half_duplex_drops"] = uint64(s.metrics.half_duplex_drops)
+	m["capture_wins"] = uint64(s.metrics.capture_wins)
+	m["lbt_backoffs"] = uint64(s.metrics.lbt_backoffs)
+	m["receptions_ok"] = uint64(s.metrics.receptions_ok)
+	m["channel_log_overflow"] = uint64(s.radio.channel.overflow_drops)
+	m["airtime_total_ms"] = uint64(s.metrics.airtime_total_us) / 1000
+	m["avg_latency_ms"] = metricsAvgLatencyMs(&s.metrics)
+	// delivery_rate divides delivered by total_packets (every frame of every
+	// type on the air, beacons included), which is NOT a message delivery
+	// figure and understates end-to-end delivery by an order of magnitude in
+	// control-heavy runs. Kept under its old name for continuity; the honest
+	// number is message_delivery_rate on the final_metrics event.
+	m["delivery_rate"] = metricsDeliveryRate(&s.metrics)
+}
+
 func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 	ts := getEventTimestamp(evt)
 
@@ -674,34 +710,16 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 	}
 	metricsUpdateActiveNodes(&s.metrics, active)
 
-	s.emitJSON(map[string]interface{}{
-		"type":                  "metrics",
-		"timestamp_us":          ts,
-		"active_nodes":          active,
-		"total_packets":         uint64(s.metrics.total_packets),
-		"messages_sent":         uint64(s.metrics.messages_sent),
-		"delivered":             uint64(s.metrics.delivered_packets),
-		"dropped":               uint64(s.metrics.dropped_packets),
-		"retried":               uint64(s.metrics.messages_retried),
-		"delivered_on_retry":    uint64(s.metrics.messages_delivered_retry),
-		"dedup_dropped":         uint64(s.metrics.dedup_dropped),
-		"airtime_deferred":      uint64(s.metrics.airtime_deferred),
-		"fragments_sent":        uint64(s.metrics.fragments_sent),
-		"fragments_reassembled": uint64(s.metrics.fragments_reassembled),
-		"reassembly_timeout":    uint64(s.metrics.reassembly_timeout),
-		"crypto_encrypted":      uint64(s.metrics.crypto_encrypted),
-		"crypto_decrypted":      uint64(s.metrics.crypto_decrypted),
-		"crypto_auth_failed":    uint64(s.metrics.crypto_auth_failed),
-		"collisions":            uint64(s.metrics.collisions),
-		"half_duplex_drops":     uint64(s.metrics.half_duplex_drops),
-		"capture_wins":          uint64(s.metrics.capture_wins),
-		"lbt_backoffs":          uint64(s.metrics.lbt_backoffs),
-		"receptions_ok":         uint64(s.metrics.receptions_ok),
-		"channel_log_overflow":  uint64(s.radio.channel.overflow_drops),
-		"airtime_total_ms":      uint64(s.metrics.airtime_total_us) / 1000,
-		"avg_latency_ms":        metricsAvgLatencyMs(&s.metrics),
-		"delivery_rate":         metricsDeliveryRate(&s.metrics),
-	})
+	metrics := map[string]interface{}{
+		"type":          "metrics",
+		"timestamp_us":  ts,
+		"active_nodes":  active,
+		"messages_sent": uint64(s.metrics.messages_sent),
+		"delivered":     uint64(s.metrics.delivered_packets),
+		"dropped":       uint64(s.metrics.dropped_packets),
+	}
+	s.putSharedMetrics(metrics)
+	s.emitJSON(metrics)
 
 	// Check black holes
 	for i := 0; i < count; i++ {
@@ -1199,23 +1217,12 @@ func (s *Sim) complete() {
 		"channel_util_pct": channelUtilPct,
 	})
 
-	s.emitJSON(map[string]interface{}{
-		"type":                  "final_metrics",
-		"total_packets":         uint64(s.metrics.total_packets),
-		"messages_sent":         sent,
-		"delivered":             delivered,
-		"dropped":               dropped,
-		"undelivered":           undelivered,
-		"retried":               uint64(s.metrics.messages_retried),
-		"delivered_on_retry":    uint64(s.metrics.messages_delivered_retry),
-		"dedup_dropped":         uint64(s.metrics.dedup_dropped),
-		"airtime_deferred":      uint64(s.metrics.airtime_deferred),
-		"fragments_sent":        uint64(s.metrics.fragments_sent),
-		"fragments_reassembled": uint64(s.metrics.fragments_reassembled),
-		"reassembly_timeout":    uint64(s.metrics.reassembly_timeout),
-		"crypto_encrypted":      uint64(s.metrics.crypto_encrypted),
-		"crypto_decrypted":      uint64(s.metrics.crypto_decrypted),
-		"crypto_auth_failed":    uint64(s.metrics.crypto_auth_failed),
+	finalMetrics := map[string]interface{}{
+		"type":          "final_metrics",
+		"messages_sent": sent,
+		"delivered":     delivered,
+		"dropped":       dropped,
+		"undelivered":   undelivered,
 		// beacons_sent/rreqs_sent/rreps_sent (and every per-type count/ToA
 		// bucket below) count SUCCESSFUL transmissions only, i.e. post the
 		// Task 1 airtime-budget gate and Task 2 RREQ rate limiters: a
@@ -1227,23 +1234,9 @@ func (s *Sim) complete() {
 		"beacons_sent":         uint64(s.metrics.beacons_sent),
 		"rreqs_sent":           uint64(s.metrics.rreqs_sent),
 		"rreps_sent":           uint64(s.metrics.rreps_sent),
-		"collisions":           uint64(s.metrics.collisions),
-		"half_duplex_drops":    uint64(s.metrics.half_duplex_drops),
-		"capture_wins":         uint64(s.metrics.capture_wins),
-		"lbt_backoffs":         uint64(s.metrics.lbt_backoffs),
-		"receptions_ok":        uint64(s.metrics.receptions_ok),
-		"channel_log_overflow": uint64(s.radio.channel.overflow_drops),
-		"airtime_total_ms":     uint64(s.metrics.airtime_total_us) / 1000,
 		"airtime_ms_by_type":   airtimeMsByType,
 		"offered_load_erlangs": offeredLoadErlangs,
 		"channel_util_pct":     channelUtilPct,
-		"avg_latency_ms":       metricsAvgLatencyMs(&s.metrics),
-		// delivery_rate divides delivered by total_packets (every frame of
-		// every type on the air, beacons included), which is NOT a message
-		// delivery figure and understates end-to-end delivery by an order of
-		// magnitude in control-heavy runs. Kept under its old name for
-		// continuity; use message_delivery_rate for the honest number.
-		"delivery_rate": metricsDeliveryRate(&s.metrics),
 		// message_delivery_rate is the end-to-end scripted-message outcome:
 		// delivered / all scripted messages that reached a terminal state
 		// (delivered + dropped + undelivered). THE delivery number for
@@ -1273,7 +1266,9 @@ func (s *Sim) complete() {
 		"budget_denied_by_tier": budgetDeniedByTier,
 		"rreq_rate_denied":      rreqRateDenied,
 		"rreq_fwd_denied":       rreqFwdDenied,
-	})
+	}
+	s.putSharedMetrics(finalMetrics)
+	s.emitJSON(finalMetrics)
 
 	// Phase 2 Task 0 (flood-comparison baseline): flood mode's own delivery
 	// bars. message_delivery_rate above is 0/0 in flood runs (flood.go never
