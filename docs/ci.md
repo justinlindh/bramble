@@ -186,6 +186,10 @@ carried `scripts/`, editing a ratchet rode along on every firmware change; with
 `firmware` narrowed, these areas re-run exactly the jobs whose steps execute the
 ratchet (host tests, gosim, and the webapp job for coverage; the board build for
 size) so a ratchet-script-only or baseline-only change still self-verifies.
+`nrf` is the bare-metal nRF52840 target tree (`nrf/`): its build job compiles
+`components/` sources directly, so it fires on `firmware` too, but a
+`nrf/`-only change (its shims, configs, or scripts) runs just that job plus the
+always-on bundle.
 
 ### The safety rule: job-defining workflow edits force everything
 
@@ -280,6 +284,7 @@ signal) naming the mismatch and pointing at this file.
 | `Host tests` | `firmware`, `host_test`, `coverage_tooling`, or `ci_core` | yes |
 | `Parser fuzzing` | `firmware`, `host_test`, or `ci_core` | yes |
 | `Release config` | `release_config` or `ci_core` | yes |
+| `nRF52840 build` | `firmware`, `nrf`, or `ci_core` | yes |
 | `gosim integration` | `firmware`, `simulator`, `coverage_tooling`, or `ci_core` | yes |
 | `Board build smoke (heltec-v3)` (+ `tdeck-plus`, `heltec-v4`, `bramble-pager`), step-gated | `firmware`, `idf_build_scripts`, `size_tooling`, or `ci_core` | yes |
 | `Emulator suite` | `firmware`, `simulator`, `emulator`, `idf_build_scripts`, or `ci_core` | yes |

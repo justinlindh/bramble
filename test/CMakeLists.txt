@@ -3,6 +3,20 @@ project(bramble_tests C)
 
 set(CMAKE_C_STANDARD 11)
 
+# Dependencies for the nRF-backend crypto suites (test_*_nrf_backend): the
+# same mbedtls + Monocypher pins (and the device's minimal mbedtls config)
+# the nRF52840 target links, via the shared fragment, so the host proves
+# wire-compat for the exact library the device ships. Fetched BEFORE the
+# global -Werror/ASan flags below on purpose: third-party code is not held
+# to this repo's warning wall, and the tests (not the libraries) are what
+# ASan needs to instrument. FETCHCONTENT_BASE_DIR is shared so the ASan and
+# coverage build trees download and populate these once, not twice.
+set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build-deps)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_deps.cmake)
+bramble_crypto_deps_declare()
+FetchContent_MakeAvailable(mbedtls monocypher)
+bramble_crypto_deps_exclude_tls()
+
 # Coverage build (BRAMBLE_COVERAGE=ON) swaps AddressSanitizer for gcov
 # instrumentation: the coverage run only needs each binary to execute so gcov
 # emits .gcda data, and running without ASan avoids the leak-detector's ptrace
@@ -550,6 +564,23 @@ target_include_directories(test_reliability PRIVATE
 )
 
 # RERR ACK fast-fail tests
+# nRF target RAM-backed NVS shim tests. The shim lives in nrf/shim/ but is
+# pure C, so it runs under the host suite like any component.
+add_executable(test_nvs_ram_shim
+    test_nvs_ram_shim.c
+    ../nrf/shim/nvs_ram.c
+    unity/unity.c
+)
+# BEFORE: the shim's nvs.h/esp_err.h must shadow test/stubs' versions.
+target_include_directories(test_nvs_ram_shim BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+)
+# identity_store.h supplies IDENTITY_STORE_BLOB_MAX for the capacity tests.
+target_include_directories(test_nvs_ram_shim PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+
 add_executable(test_rerr_ack_fastfail
     test_rerr_ack_fastfail.c
     unity/unity.c
@@ -861,6 +892,36 @@ target_include_directories(test_ed25519 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 target_link_libraries(test_ed25519 ssl crypto)
+
+# nRF-backend crypto suites: the SAME test sources as test_crypto,
+# test_crypto_vectors, and test_ed25519, rebuilt against the nRF52840
+# backend (crypto_esp.c under BRAMBLE_PLATFORM_NRF: mbedtls + Monocypher
+# Ed25519 via the provider seam). Passing the identical RFC 8032 / NIST /
+# RFC 7748 / RFC 4231 vectors on both backends is the wire-compatibility
+# proof for the port.
+bramble_add_monocypher_ed25519(monocypher_ed25519_host)
+
+foreach(crypto_suite crypto crypto_vectors ed25519)
+    add_executable(test_${crypto_suite}_nrf_backend
+        test_${crypto_suite}.c
+        unity/unity.c
+        ../components/crypto/crypto_entropy.c
+        stubs/esp_random_host.c
+    )
+    target_compile_definitions(test_${crypto_suite}_nrf_backend PRIVATE
+        BRAMBLE_TEST_NRF_BACKEND
+        BRAMBLE_PLATFORM_NRF
+    )
+    # BEFORE: the nrf shim's esp_random.h/esp_err.h must shadow test/stubs'.
+    target_include_directories(test_${crypto_suite}_nrf_backend BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    )
+    target_link_libraries(test_${crypto_suite}_nrf_backend
+        mbedcrypto
+        monocypher_ed25519_host
+    )
+endforeach()
 
 # Identity attestation frame: wire layout + canonical signed message +
 # tamper-fails-verify (per-node identity Phase 2)
