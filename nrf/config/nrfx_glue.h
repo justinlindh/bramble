@@ -13,18 +13,18 @@ extern "C" {
 // Bind peripheral IRQ handlers to the MDK startup vector names at link time.
 #include <soc/nrfx_irqs.h>
 
-#define NRFX_ASSERT(expression)                                                \
-    do {                                                                       \
-        if (!(expression)) {                                                   \
-            __disable_irq();                                                   \
-            for (;;) {                                                         \
-            }                                                                  \
-        }                                                                      \
+#define NRFX_ASSERT(expression)                                                                    \
+    do {                                                                                           \
+        if (!(expression)) {                                                                       \
+            __disable_irq();                                                                       \
+            for (;;) {                                                                             \
+            }                                                                                      \
+        }                                                                                          \
     } while (0)
 
 #define NRFX_STATIC_ASSERT(expression) _Static_assert(expression, "nrfx static assert")
 
-#define NRFX_IRQ_PRIORITY_SET(irq_number, priority)                            \
+#define NRFX_IRQ_PRIORITY_SET(irq_number, priority)                                                \
     NVIC_SetPriority((IRQn_Type)(irq_number), (priority))
 #define NRFX_IRQ_ENABLE(irq_number) NVIC_EnableIRQ((IRQn_Type)(irq_number))
 #define NRFX_IRQ_IS_ENABLED(irq_number) (0 != NVIC_GetEnableIRQ((IRQn_Type)(irq_number)))
@@ -35,12 +35,12 @@ extern "C" {
 
 // PRIMASK save/restore pair; the unbalanced braces are closed by EXIT, which
 // is how the nrfx glue contract expects scoped critical sections to work.
-#define NRFX_CRITICAL_SECTION_ENTER()                                          \
-    {                                                                          \
-        uint32_t nrfx_crit_primask = __get_PRIMASK();                          \
+#define NRFX_CRITICAL_SECTION_ENTER()                                                              \
+    {                                                                                              \
+        uint32_t nrfx_crit_primask = __get_PRIMASK();                                              \
         __disable_irq();
-#define NRFX_CRITICAL_SECTION_EXIT()                                           \
-        __set_PRIMASK(nrfx_crit_primask);                                      \
+#define NRFX_CRITICAL_SECTION_EXIT()                                                               \
+    __set_PRIMASK(nrfx_crit_primask);                                                              \
     }
 
 #define NRFX_DELAY_DWT_BASED 0
@@ -54,11 +54,11 @@ extern "C" {
 #define NRFX_ATOMIC_FETCH_XOR(p_data, value) __atomic_fetch_xor(p_data, value, __ATOMIC_SEQ_CST)
 #define NRFX_ATOMIC_FETCH_ADD(p_data, value) __atomic_fetch_add(p_data, value, __ATOMIC_SEQ_CST)
 #define NRFX_ATOMIC_FETCH_SUB(p_data, value) __atomic_fetch_sub(p_data, value, __ATOMIC_SEQ_CST)
-#define NRFX_ATOMIC_CAS(p_data, old_value, new_value)                          \
-    __extension__({                                                            \
-        typeof(*(p_data)) nrfx_cas_expected = (old_value);                     \
-        __atomic_compare_exchange_n(p_data, &nrfx_cas_expected, (new_value),   \
-                                    false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); \
+#define NRFX_ATOMIC_CAS(p_data, old_value, new_value)                                              \
+    __extension__({                                                                                \
+        typeof(*(p_data)) nrfx_cas_expected = (old_value);                                         \
+        __atomic_compare_exchange_n(p_data, &nrfx_cas_expected, (new_value), false,                \
+                                    __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);                           \
     })
 #define NRFX_CLZ(value) __builtin_clz(value)
 #define NRFX_CTZ(value) __builtin_ctz(value)

@@ -5,16 +5,19 @@
 #pragma once
 
 // LEDs and button
-#define BOARD_PIN_LED1 13        // P0.13, user LED
-#define BOARD_PIN_LED2 14        // P0.14
-#define BOARD_PIN_BUTTON 23      // P0.23
+#define BOARD_PIN_LED1 13   // P0.13, user LED
+#define BOARD_PIN_LED2 14   // P0.14
+#define BOARD_PIN_BUTTON 23 // P0.23
 
-// UARTs. Which pair reaches the on-board CH340 USB bridge is determined
-// empirically in the console bring-up (see nrf/README.md).
-#define BOARD_PIN_UART1_TX 24    // P0.24
-#define BOARD_PIN_UART1_RX 22    // P0.22
-#define BOARD_PIN_UART2_TX 8     // P0.08
-#define BOARD_PIN_UART2_RX 6     // P0.06
+// UARTs. UART1 reaches the on-board CH340 USB bridge: determined on the
+// bench 2026-07-27 by flashing each pair and capturing the banner on the
+// CH340 host port (UART2 was silent, UART1 printed).
+#define BOARD_PIN_UART1_TX 24 // P0.24, console TX to CH340
+#define BOARD_PIN_UART1_RX 22 // P0.22, console RX from CH340
+#define BOARD_PIN_UART2_TX 8  // P0.08
+#define BOARD_PIN_UART2_RX 6  // P0.06
+#define BOARD_PIN_CONSOLE_TX BOARD_PIN_UART1_TX
+#define BOARD_PIN_CONSOLE_RX BOARD_PIN_UART1_RX
 
 // LR1110 radio bus (P1 phase; unused in P0)
 #define BOARD_PIN_LORA_SCK (32 + 13)   // P1.13
@@ -27,4 +30,4 @@
 #define BOARD_PIN_GNSS_ANT (32 + 5)    // P1.05, LR1110 GNSS antenna enable
 
 // Peripheral power
-#define BOARD_PIN_3V3_EN 7       // P0.07, sensor rail enable
+#define BOARD_PIN_3V3_EN 7 // P0.07, sensor rail enable

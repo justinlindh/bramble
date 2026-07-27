@@ -8,18 +8,22 @@ project(bramble-nrf C ASM)
 
 include(FetchContent)
 
+# SOURCE_SUBDIR points at a directory without a CMakeLists.txt on purpose:
+# these are source drops built by explicit file lists below, not
+# add_subdirectory projects.
 FetchContent_Declare(nrfx
   GIT_REPOSITORY https://github.com/NordicSemiconductor/nrfx.git
   GIT_TAG v3.9.0
   GIT_SHALLOW TRUE
+  SOURCE_SUBDIR cmake-noop
 )
 FetchContent_Declare(cmsis6
   GIT_REPOSITORY https://github.com/ARM-software/CMSIS_6.git
   GIT_TAG v6.1.0
   GIT_SHALLOW TRUE
+  SOURCE_SUBDIR cmake-noop
 )
-FetchContent_Populate(nrfx)
-FetchContent_Populate(cmsis6)
+FetchContent_MakeAvailable(nrfx cmsis6)
 
 # nrfx as an explicit-source static library. Sources are listed one by one on
 # purpose: the enable set in config/nrfx_config.h and this list must agree.
@@ -42,8 +46,23 @@ target_include_directories(nrfx_lib PUBLIC
 )
 target_compile_definitions(nrfx_lib PUBLIC NRF52840_XXAA)
 
-add_executable(bramble-nrf src/main_nrf.c)
-target_include_directories(bramble-nrf PRIVATE boards)
+execute_process(
+  COMMAND git describe --always --dirty
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  OUTPUT_VARIABLE BRAMBLE_GIT_DESCRIBE
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+
+add_executable(bramble-nrf
+  src/main_nrf.c
+  shim/console_uart.c
+)
+target_include_directories(bramble-nrf PRIVATE boards shim/include)
+target_compile_definitions(bramble-nrf PRIVATE
+  BRAMBLE_CONSOLE_UART=${BRAMBLE_CONSOLE_UART}
+  BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
+)
 target_link_libraries(bramble-nrf PRIVATE nrfx_lib)
 target_link_options(bramble-nrf PRIVATE
   -T${nrfx_SOURCE_DIR}/mdk/nrf52840_xxaa.ld
