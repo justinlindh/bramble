@@ -27,7 +27,11 @@ extern uint32_t SystemCoreClock;
 #define configSUPPORT_STATIC_ALLOCATION 1
 #define configKERNEL_PROVIDED_STATIC_MEMORY 1
 #define configSUPPORT_DYNAMIC_ALLOCATION 1
-#define configTOTAL_HEAP_SIZE ((size_t)(48 * 1024))
+// 96K, not 48K: mesh_task_start heap-allocates the DM session table
+// (44,160 bytes) and the delivery event ring (28,692 bytes); both fell back
+// to a too-small heap and silently disabled the mesh before this was sized
+// for them.
+#define configTOTAL_HEAP_SIZE ((size_t)(96 * 1024))
 #define configUSE_MALLOC_FAILED_HOOK 1
 #define configCHECK_FOR_STACK_OVERFLOW 2
 
