@@ -7,6 +7,7 @@
 
 #include <string.h>
 
+#include "app_init.h"
 #include "console.h"
 #include "crypto.h"
 #include "esp_log.h"
@@ -99,9 +100,12 @@ static void task_heartbeat(void* arg) {
     }
 }
 
-static void task_selfcheck(void* arg) {
+size_t heap_free_probe(void) { return xPortGetFreeHeapSize(); }
+
+static void task_boot(void* arg) {
     (void)arg;
     crypto_self_check();
+    app_init_stack();
     vTaskDelete(NULL);
 }
 
@@ -113,7 +117,7 @@ int main(void) {
 
     // Crypto runs in a task (2KB stack): mbedtls ECP wants more stack than
     // the pre-scheduler main stack guarantees once P1 shrinks it.
-    BaseType_t ok = xTaskCreate(task_selfcheck, "selfcheck", 2048, NULL, 3, NULL);
+    BaseType_t ok = xTaskCreate(task_boot, "boot", 2048, NULL, 3, NULL);
     configASSERT(ok == pdPASS);
     ok = xTaskCreate(task_blink, "blink", 256, NULL, 1, NULL);
     configASSERT(ok == pdPASS);

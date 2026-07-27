@@ -4,6 +4,10 @@
 
 #include <stdarg.h>
 
+// IDF's esp_log.h transitively provides sdkconfig.h; components rely on that
+// (rpc_dispatcher.c reads CONFIG_ values with no direct include).
+#include "sdkconfig.h"
+
 void bramble_log_write(char level, const char* tag, const char* fmt, ...)
     __attribute__((format(printf, 3, 4)));
 

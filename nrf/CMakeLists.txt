@@ -41,7 +41,11 @@ FetchContent_Declare(monocypher
   URL https://github.com/LoupVaillant/Monocypher/archive/refs/tags/4.0.2.tar.gz
   SOURCE_SUBDIR cmake-noop
 )
-FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher)
+FetchContent_Declare(cjson
+  URL https://github.com/DaveGamble/cJSON/archive/refs/tags/v1.7.18.tar.gz
+  SOURCE_SUBDIR cmake-noop
+)
+FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson)
 # Only mbedcrypto is consumed; skip building the TLS and X.509 libraries.
 set_target_properties(mbedtls mbedx509 PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
@@ -102,8 +106,76 @@ execute_process(
   ERROR_QUIET
 )
 
+# The portable Bramble stack: every component the seam map classifies as
+# pure-C or shallow-coupled (shimmed), by explicit file list so the build is
+# the inventory. Files needing real ESP peripherals do not belong here.
+set(BRAMBLE_COMPONENTS ${CMAKE_CURRENT_SOURCE_DIR}/../components)
+add_library(bramble_core STATIC
+  ${BRAMBLE_COMPONENTS}/packet/packet.c
+  ${BRAMBLE_COMPONENTS}/routing/routing.c
+  ${BRAMBLE_COMPONENTS}/routing/discovery.c
+  ${BRAMBLE_COMPONENTS}/routing/beacon.c
+  ${BRAMBLE_COMPONENTS}/routing/forwarding.c
+  ${BRAMBLE_COMPONENTS}/routing/channel_flood.c
+  ${BRAMBLE_COMPONENTS}/routing_auth/routing_auth.c
+  ${BRAMBLE_COMPONENTS}/dedup/dedup.c
+  ${BRAMBLE_COMPONENTS}/dm_session/dm_session.c
+  ${BRAMBLE_COMPONENTS}/fragment/fragment.c
+  ${BRAMBLE_COMPONENTS}/replay_window/replay_window.c
+  ${BRAMBLE_COMPONENTS}/replay_window/replay_deferred.c
+  ${BRAMBLE_COMPONENTS}/security/security.c
+  ${BRAMBLE_COMPONENTS}/security/dummy_traffic.c
+  ${BRAMBLE_COMPONENTS}/timesync/timesync.c
+  ${BRAMBLE_COMPONENTS}/airtime/airtime_budget.c
+  ${BRAMBLE_COMPONENTS}/freq_plan/freq_plan.c
+  ${BRAMBLE_COMPONENTS}/mailbox/mailbox.c
+  ${BRAMBLE_COMPONENTS}/nonce_counter/nonce_counter.c
+  ${BRAMBLE_COMPONENTS}/bramble_probe/bramble_probe.c
+  ${BRAMBLE_COMPONENTS}/channel/channel_key.c
+  ${BRAMBLE_COMPONENTS}/channel/channel_msg.c
+  ${BRAMBLE_COMPONENTS}/channel/public_channel.c
+  ${BRAMBLE_COMPONENTS}/channel/channel_storage.c
+  ${BRAMBLE_COMPONENTS}/identity/identity.c
+  ${BRAMBLE_COMPONENTS}/identity/identity_store.c
+  ${BRAMBLE_COMPONENTS}/location/location.c
+  ${BRAMBLE_COMPONENTS}/network_key/network_key.c
+  ${BRAMBLE_COMPONENTS}/msg_store/msg_store.c
+  ${BRAMBLE_COMPONENTS}/reliability/reliability.c
+  ${BRAMBLE_COMPONENTS}/rpc/rpc_dispatcher.c
+  ${BRAMBLE_COMPONENTS}/rpc/rpc_auth.c
+  ${BRAMBLE_COMPONENTS}/traffic_debug/traffic_debug.c
+  ${BRAMBLE_COMPONENTS}/ui/ui_manager.c
+  ${BRAMBLE_COMPONENTS}/ui/ui_format.c
+  ${BRAMBLE_COMPONENTS}/ui/sas_format.c
+  ${BRAMBLE_COMPONENTS}/radio/radio_airtime.c
+  ${BRAMBLE_COMPONENTS}/radio/radio_profiles.c
+  ${BRAMBLE_COMPONENTS}/radio/tx_gate.c
+  ${BRAMBLE_COMPONENTS}/gps/nmea_parser.c
+  ${BRAMBLE_COMPONENTS}/battery/battery_pct.c
+  ${BRAMBLE_COMPONENTS}/indicators/alerts.c
+  ${cjson_SOURCE_DIR}/cJSON.c
+)
+target_include_directories(bramble_core PUBLIC ${cjson_SOURCE_DIR})
+foreach(comp packet routing routing_auth dedup dm_session fragment replay_window
+        security timesync airtime freq_plan mailbox nonce_counter bramble_probe
+        channel identity location network_key msg_store reliability rpc
+        traffic_debug ui radio gps battery indicators crypto nvs_keys
+        board_config)
+  target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/${comp}/include)
+endforeach()
+target_include_directories(bramble_core BEFORE PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/shim/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/boards
+)
+# radio_internal.h (the tx_gate-only transmit primitive) lives outside
+# include/ on purpose; radio_null.c implements it.
+target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/radio)
+target_link_libraries(bramble_core PUBLIC freertos_kernel)
+
 add_executable(bramble-nrf
   src/main_nrf.c
+  src/app_init.c
+  src/radio_null.c
   shim/console_uart.c
   shim/esp_timer_freertos.c
   shim/esp_random_nrf.c
@@ -123,7 +195,7 @@ target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_CONSOLE_UART=${BRAMBLE_CONSOLE_UART}
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
 )
-target_link_libraries(bramble-nrf PRIVATE nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519)
+target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519)
 target_link_options(bramble-nrf PRIVATE
   -T${nrfx_SOURCE_DIR}/mdk/nrf52840_xxaa.ld
   -L${nrfx_SOURCE_DIR}/mdk
