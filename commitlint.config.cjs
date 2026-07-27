@@ -63,6 +63,7 @@ module.exports = {
         'msg_store',
         'network_key',
         'nodes',
+        'nrf',
         'ota',
         'packet',
         'pager',
