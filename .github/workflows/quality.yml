@@ -250,18 +250,27 @@ jobs:
       needs.detect.outputs.firmware == 'true' ||
       needs.detect.outputs.nrf == 'true' ||
       needs.detect.outputs.ci_core == 'true'
-    # Hosted runner on purpose: the self-hosted pod image does not carry the
-    # ARM embedded toolchain, and this job's apt install + dependency cache
-    # is cheaper than widening that image for one job.
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - name: Install ARM embedded toolchain
+      - name: Assert baked ARM toolchain matches the pin
+        # arm-none-eabi-gcc + newlib-nano are baked into the runner image
+        # (image 1.3.0), the same Noble distro package this job used to
+        # apt-get install per run on ubuntu-latest, so the compiler the job
+        # builds with does not change. ninja, ccache and cmake were already
+        # baked. Per the bramble#222 bake contract the job asserts the pin
+        # instead of installing and fails loud on image drift.
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q gcc-arm-none-eabi ninja-build ccache
-          arm-none-eabi-gcc --version | head -1
+          command -v arm-none-eabi-gcc >/dev/null || { echo "::error::arm-none-eabi-gcc missing from runner image (bramble#222 bake contract, image 1.3.0)"; exit 1; }
+          want="13.2.1"
+          got="$(arm-none-eabi-gcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          if [[ "$got" != "$want" ]]; then
+            echo "::error::arm-none-eabi-gcc version mismatch: runner image has ${got:-unknown}, pinned version is ${want}. Bump ARM_GCC_VERSION in the private runner-image definition or this pin so they agree."
+            exit 1
+          fi
+          ninja --version
+          ccache --version | head -1
       - name: Restore pinned dependency sources
         uses: actions/cache@v4
         with:
