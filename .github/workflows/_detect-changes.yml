@@ -48,6 +48,9 @@ on:
       size_tooling:
         description: the firmware-size ratchet scripts or ci/size-baseline.json touched (re-runs the board-build size gate)
         value: ${{ jobs.detect.outputs.size_tooling }}
+      nrf:
+        description: nrf/ (the bare-metal nRF52840 target tree) touched
+        value: ${{ jobs.detect.outputs.nrf }}
       ci_core:
         description: a JOB-DEFINING gating workflow (quality.yml, firmware-quality.yml, webapp-quality.yml, _detect-changes.yml) touched (forces every heavy job so a changed job definition is exercised)
         value: ${{ jobs.detect.outputs.ci_core }}
@@ -77,6 +80,7 @@ jobs:
       docker_firmware_builder: ${{ steps.detect.outputs.docker_firmware_builder }}
       coverage_tooling: ${{ steps.detect.outputs.coverage_tooling }}
       size_tooling: ${{ steps.detect.outputs.size_tooling }}
+      nrf: ${{ steps.detect.outputs.nrf }}
       ci_core: ${{ steps.detect.outputs.ci_core }}
     steps:
       - uses: actions/checkout@v7
@@ -214,6 +218,11 @@ jobs:
           # webapp job; the size ratchet runs inside the board build.
           coverage_tooling=$(area_changed '^scripts/ci/(check_coverage\.py|host_coverage\.py|run-host-coverage\.sh)$|^ci/coverage-baseline\.json$')
           size_tooling=$(area_changed '^scripts/ci/(check-firmware-size\.sh|check_size\.py|extract_firmware_sizes\.py)$|^ci/size-baseline\.json$')
+          # nrf is the bare-metal nRF52840 target tree. Its build also compiles
+          # components/ sources directly, but that dependency is expressed in
+          # the nRF build job's `if:` (which also fires on the firmware area),
+          # not by widening this area.
+          nrf=$(area_changed '^nrf/')
           # ci_core is the force-everything trigger, but scoped to ONLY the
           # workflows that DEFINE the heavy build/test jobs: quality.yml,
           # firmware-quality.yml, webapp-quality.yml, and the reusable
@@ -242,8 +251,9 @@ jobs:
             echo "docker_firmware_builder=${docker_firmware_builder}"
             echo "coverage_tooling=${coverage_tooling}"
             echo "size_tooling=${size_tooling}"
+            echo "nrf=${nrf}"
             echo "ci_core=${ci_core}"
           } >> "$GITHUB_OUTPUT"
 
           echo "Resolved diff range: ${diff_range:-<unresolved>}"
-          echo "firmware=${firmware} host_test=${host_test} simulator=${simulator} emulator=${emulator} webapp=${webapp} web_flasher=${web_flasher} api=${api} idf_build_scripts=${idf_build_scripts} release_config=${release_config} docker_firmware_builder=${docker_firmware_builder} coverage_tooling=${coverage_tooling} size_tooling=${size_tooling} ci_core=${ci_core}"
+          echo "firmware=${firmware} host_test=${host_test} simulator=${simulator} emulator=${emulator} webapp=${webapp} web_flasher=${web_flasher} api=${api} idf_build_scripts=${idf_build_scripts} release_config=${release_config} docker_firmware_builder=${docker_firmware_builder} coverage_tooling=${coverage_tooling} size_tooling=${size_tooling} nrf=${nrf} ci_core=${ci_core}"

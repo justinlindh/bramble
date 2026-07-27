@@ -230,6 +230,48 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  nrf-build:
+    name: nRF52840 build
+    # Builds the bare-metal nRF52840 target (nrf/, bare FreeRTOS + nrfx, no
+    # ESP-IDF) with arm-none-eabi-gcc. The build itself enforces the RAM
+    # budget gate (nrf/scripts/size_report.py runs post-link and fails over
+    # budget). Compiles components/ sources directly, so the firmware area
+    # re-runs it too.
+    needs: detect
+    if: |
+      needs.detect.outputs.firmware == 'true' ||
+      needs.detect.outputs.nrf == 'true' ||
+      needs.detect.outputs.ci_core == 'true'
+    # Hosted runner on purpose: the self-hosted pod image does not carry the
+    # ARM embedded toolchain, and this job's apt install + dependency cache
+    # is cheaper than widening that image for one job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ARM embedded toolchain
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-arm-none-eabi ninja-build
+          arm-none-eabi-gcc --version | head -1
+      - name: Restore pinned dependency sources
+        uses: actions/cache@v4
+        with:
+          path: nrf/build/_deps
+          key: nrf-deps-${{ hashFiles('nrf/CMakeLists.txt') }}
+      - name: Configure and build (includes the RAM budget gate)
+        run: |
+          cmake -S nrf -B nrf/build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake \
+            -DCMAKE_BUILD_TYPE=MinSizeRel
+          cmake --build nrf/build
+      - name: Upload memory report
+        uses: actions/upload-artifact@v7
+        with:
+          name: nrf-size-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: nrf/build/size-report.json
+          retention-days: 14
+
   release-config:
     name: Release config
     # The per-component semantic-release configs (.releaserc.<component>.cjs)
