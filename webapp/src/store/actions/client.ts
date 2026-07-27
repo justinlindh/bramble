@@ -8,7 +8,3 @@ import { BrambleClient } from '../../transport';
 export const session: { client: BrambleClient | null } = { client: null };
 
 export const LAST_NODE_ADDR_KEY = 'bramble:last-node-addr';
-
-export function getClient(): BrambleClient | null {
-  return session.client;
-}
