@@ -17,6 +17,13 @@ module.exports = {
     // routinely exceed the stock 100-char line limit; do not gate on them.
     'body-max-line-length': [0, 'always', Infinity],
     'footer-max-line-length': [0, 'always', Infinity],
+    // No case gating on subjects. The release machinery (squash-expander +
+    // semantic-release) parses type(scope) from squash-body bullets and never
+    // reads capitalization, and commitlint's case detector disagrees with
+    // itself across versions for subjects starting with an all-caps token
+    // ("UF2 ...", "UART ...", "FreeRTOS ..."), which are common and correct
+    // in embedded prose. The rule cost a branch rebuild for zero signal.
+    'subject-case': [0],
     // Scope is optional (empty allowed) but, when present, must be known.
     'scope-enum': [
       2,
