@@ -11,8 +11,8 @@ a small bench mesh; scale numbers come from simulation and are published
 honestly. Repo map: `components/` + `main/` (ESP-IDF C firmware), `webapp/`
 (TypeScript/React client + Electron), `simulator/gosim/` (Go mesh simulator
 running the real firmware logic), `emulator/` (firmware built for the linux
-target), `test/` (host test suites), `scripts/`, `docs/`, `api/openapi.yaml`
-(the RPC contract).
+target), `nrf/` (bare-metal nRF52840 target, P0 bring-up), `test/` (host test
+suites), `scripts/`, `docs/`, `api/openapi.yaml` (the RPC contract).
 
 ## Hard rules
 
