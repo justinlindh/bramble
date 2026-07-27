@@ -28,7 +28,42 @@ FetchContent_Declare(freertos_kernel
   GIT_TAG V11.1.0
   GIT_SHALLOW TRUE
 )
-FetchContent_MakeAvailable(nrfx cmsis6)
+# Same pinned crypto stack the host nRF-backend test suites verify against
+# (test/CMakeLists.txt); mbedtls builds with the minimal Bramble config.
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/config/mbedtls_config_bramble.h" CACHE STRING "" FORCE)
+FetchContent_Declare(mbedtls
+  URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
+)
+FetchContent_Declare(monocypher
+  URL https://github.com/LoupVaillant/Monocypher/archive/refs/tags/4.0.2.tar.gz
+  SOURCE_SUBDIR cmake-noop
+)
+FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher)
+# Only mbedcrypto is consumed; skip building the TLS and X.509 libraries.
+set_target_properties(mbedtls mbedx509 PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
+# Monocypher's ed25519 unit exports names colliding with crypto.h; build it
+# (and only it) under mono_ed25519_* renames. See
+# components/crypto/ed25519_monocypher.h.
+add_library(monocypher_ed25519 STATIC
+  ${monocypher_SOURCE_DIR}/src/monocypher.c
+  ${monocypher_SOURCE_DIR}/src/optional/monocypher-ed25519.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/ed25519_monocypher.c
+)
+target_include_directories(monocypher_ed25519 PUBLIC
+  ${monocypher_SOURCE_DIR}/src
+  ${monocypher_SOURCE_DIR}/src/optional
+  ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_compile_definitions(monocypher_ed25519 PRIVATE
+  BRAMBLE_PLATFORM_NRF
+  crypto_ed25519_key_pair=mono_ed25519_key_pair
+  crypto_ed25519_sign=mono_ed25519_sign
+  crypto_ed25519_check=mono_ed25519_check
+)
 
 # FreeRTOS-Kernel's own CMake wants a freertos_config interface target
 # providing FreeRTOSConfig.h.
@@ -74,7 +109,9 @@ add_executable(bramble-nrf
   shim/esp_random_nrf.c
   shim/esp_system_nrf.c
   shim/nvs_ram.c
+  shim/mbedtls_platform_freertos.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_esp.c
 )
 target_include_directories(bramble-nrf PRIVATE
   boards
@@ -86,7 +123,7 @@ target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_CONSOLE_UART=${BRAMBLE_CONSOLE_UART}
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
 )
-target_link_libraries(bramble-nrf PRIVATE nrfx_lib freertos_kernel)
+target_link_libraries(bramble-nrf PRIVATE nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519)
 target_link_options(bramble-nrf PRIVATE
   -T${nrfx_SOURCE_DIR}/mdk/nrf52840_xxaa.ld
   -L${nrfx_SOURCE_DIR}/mdk

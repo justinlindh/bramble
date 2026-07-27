@@ -3,6 +3,28 @@ project(bramble_tests C)
 
 set(CMAKE_C_STANDARD 11)
 
+# Dependencies for the nRF-backend crypto suites (test_*_nrf_backend): the
+# same mbedtls + Monocypher the nRF52840 target links, fetched as pinned
+# release archives so the host proves wire-compat for the exact library the
+# device ships. Fetched BEFORE the global -Werror/ASan flags below on
+# purpose: third-party code is not held to this repo's warning wall, and the
+# tests (not the libraries) are what ASan needs to instrument.
+include(FetchContent)
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+# mbedtls's own -Werror trips new-GCC warnings in its TLS code; we only
+# consume mbedcrypto, so soften its warning wall and skip the TLS/X.509 libs.
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(mbedtls
+    URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
+)
+FetchContent_MakeAvailable(mbedtls)
+set_target_properties(mbedtls mbedx509 PROPERTIES EXCLUDE_FROM_ALL TRUE)
+FetchContent_Declare(monocypher
+    URL https://github.com/LoupVaillant/Monocypher/archive/refs/tags/4.0.2.tar.gz
+)
+FetchContent_Populate(monocypher)
+
 # Coverage build (BRAMBLE_COVERAGE=ON) swaps AddressSanitizer for gcov
 # instrumentation: the coverage run only needs each binary to execute so gcov
 # emits .gcda data, and running without ASan avoids the leak-detector's ptrace
@@ -873,6 +895,53 @@ target_include_directories(test_ed25519 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 target_link_libraries(test_ed25519 ssl crypto)
+
+# nRF-backend crypto suites: the SAME test sources as test_crypto,
+# test_crypto_vectors, and test_ed25519, rebuilt against the nRF52840
+# backend (crypto_esp.c under BRAMBLE_PLATFORM_NRF: mbedtls + Monocypher
+# Ed25519). Passing the identical RFC 8032 / NIST / RFC 7748 / RFC 4231
+# vectors on both backends is the wire-compatibility proof for the port.
+# Monocypher's ed25519 unit exports names that collide with crypto.h, so its
+# objects (and only its objects) build under mono_ed25519_* renames; see
+# components/crypto/ed25519_monocypher.h.
+add_library(monocypher_ed25519_host STATIC
+    ${monocypher_SOURCE_DIR}/src/monocypher.c
+    ${monocypher_SOURCE_DIR}/src/optional/monocypher-ed25519.c
+    ../components/crypto/ed25519_monocypher.c
+)
+target_include_directories(monocypher_ed25519_host PUBLIC
+    ${monocypher_SOURCE_DIR}/src
+    ${monocypher_SOURCE_DIR}/src/optional
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_compile_definitions(monocypher_ed25519_host PRIVATE
+    BRAMBLE_PLATFORM_NRF
+    crypto_ed25519_key_pair=mono_ed25519_key_pair
+    crypto_ed25519_sign=mono_ed25519_sign
+    crypto_ed25519_check=mono_ed25519_check
+)
+
+foreach(crypto_suite crypto crypto_vectors ed25519)
+    add_executable(test_${crypto_suite}_nrf_backend
+        test_${crypto_suite}.c
+        unity/unity.c
+        ../components/crypto/crypto_entropy.c
+        stubs/esp_random_host.c
+    )
+    target_compile_definitions(test_${crypto_suite}_nrf_backend PRIVATE
+        BRAMBLE_TEST_NRF_BACKEND
+        BRAMBLE_PLATFORM_NRF
+    )
+    # BEFORE: the nrf shim's esp_random.h/esp_err.h must shadow test/stubs'.
+    target_include_directories(test_${crypto_suite}_nrf_backend BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    )
+    target_link_libraries(test_${crypto_suite}_nrf_backend
+        mbedcrypto
+        monocypher_ed25519_host
+    )
+endforeach()
 
 # Identity attestation frame: wire layout + canonical signed message +
 # tamper-fails-verify (per-node identity Phase 2)
