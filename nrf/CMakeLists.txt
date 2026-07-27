@@ -70,8 +70,18 @@ execute_process(
 add_executable(bramble-nrf
   src/main_nrf.c
   shim/console_uart.c
+  shim/esp_timer_freertos.c
+  shim/esp_random_nrf.c
+  shim/esp_system_nrf.c
+  shim/nvs_ram.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
 )
-target_include_directories(bramble-nrf PRIVATE boards shim/include)
+target_include_directories(bramble-nrf PRIVATE
+  boards
+  shim/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_compile_definitions(bramble-nrf PRIVATE BRAMBLE_PLATFORM_NRF)
 target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_CONSOLE_UART=${BRAMBLE_CONSOLE_UART}
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"

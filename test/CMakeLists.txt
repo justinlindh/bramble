@@ -550,6 +550,18 @@ target_include_directories(test_reliability PRIVATE
 )
 
 # RERR ACK fast-fail tests
+# nRF target RAM-backed NVS shim tests. The shim lives in nrf/shim/ but is
+# pure C, so it runs under the host suite like any component.
+add_executable(test_nvs_ram_shim
+    test_nvs_ram_shim.c
+    ../nrf/shim/nvs_ram.c
+    unity/unity.c
+)
+# BEFORE: the shim's nvs.h/esp_err.h must shadow test/stubs' versions.
+target_include_directories(test_nvs_ram_shim BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+)
+
 add_executable(test_rerr_ack_fastfail
     test_rerr_ack_fastfail.c
     unity/unity.c

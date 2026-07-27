@@ -7,6 +7,8 @@
 
 #include "console.h"
 #include "esp_log.h"
+#include "esp_random.h"
+#include "esp_timer.h"
 #include "wio_wm1110_devkit.h"
 
 #ifndef BRAMBLE_GIT_DESCRIBE
@@ -54,13 +56,16 @@ static void task_heartbeat(void* arg) {
     (void)arg;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(5000));
-        ESP_LOGI(TAG, "heartbeat: uptime %lu ms, free heap %u bytes",
-                 (unsigned long)bramble_log_timestamp_ms(), (unsigned)xPortGetFreeHeapSize());
+        // newlib-nano printf has no %lld; keep 32-bit formats on this target.
+        ESP_LOGI(TAG, "heartbeat: uptime %lu ms, timer %lu us, rng %08lx, free heap %u bytes",
+                 (unsigned long)bramble_log_timestamp_ms(), (unsigned long)esp_timer_get_time(),
+                 (unsigned long)esp_random(), (unsigned)xPortGetFreeHeapSize());
     }
 }
 
 int main(void) {
     console_init();
+    esp_random_nrf_init();
     ESP_LOGI(TAG, "Bramble nRF52840 P0 %s booted", BRAMBLE_GIT_DESCRIBE);
 
     BaseType_t ok = xTaskCreate(task_blink, "blink", 256, NULL, 1, NULL);
