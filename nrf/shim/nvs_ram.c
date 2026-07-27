@@ -3,7 +3,7 @@
 //
 // Design: a fixed entry table plus one shared byte pool with a bump
 // allocator. Overwrites that fit rewrite in place; growing overwrites leak
-// the old pool bytes (tracked in s_pool_dead). That is acceptable for the
+// the old pool bytes. That is acceptable for the
 // firmware's write pattern (few, small, mostly-stable keys) and keeps the
 // code trivially auditable. Capacity bounds are sized from real payloads;
 // see nvs.h and test/test_nvs_ram_shim.c.
@@ -54,7 +54,6 @@ static uint8_t s_ns_count;
 static nvs_ram_entry_t s_entries[NVS_RAM_MAX_ENTRIES];
 static uint8_t s_pool[NVS_RAM_POOL_SIZE];
 static uint16_t s_pool_used;
-static uint16_t s_pool_dead;
 
 // Iterator handles are indices+1 into s_entries, filtered by namespace/type.
 struct nvs_opaque_iterator_t {
@@ -95,7 +94,6 @@ esp_err_t nvs_flash_erase(void) {
     memset(s_namespaces, 0, sizeof(s_namespaces));
     s_ns_count = 0;
     s_pool_used = 0;
-    s_pool_dead = 0;
     lock_give();
     return ESP_OK;
 }
@@ -153,7 +151,6 @@ static esp_err_t set_value(nvs_handle_t handle, const char* key, nvs_type_t type
     nvs_ram_entry_t* e = entry_find(ns_idx, key);
     if (e != NULL && e->len >= len) {
         // Rewrite in place; shrinking leaks the tail into dead bytes.
-        s_pool_dead += (uint16_t)(e->len - len);
         e->type = (uint8_t)type;
         e->len = (uint16_t)len;
         memcpy(&s_pool[e->off], value, len);
@@ -179,10 +176,9 @@ static esp_err_t set_value(nvs_handle_t handle, const char* key, nvs_type_t type
         e->ns_idx = ns_idx;
         strncpy(e->key, key, NVS_RAM_NAME_MAX - 1);
         e->key[NVS_RAM_NAME_MAX - 1] = '\0';
-    } else {
-        // Growing overwrite: the old allocation becomes dead pool bytes.
-        s_pool_dead += e->len;
     }
+    // A growing overwrite simply strands the old allocation in the pool (see
+    // the design comment at the top of this file).
     e->type = (uint8_t)type;
     e->len = (uint16_t)len;
     e->off = s_pool_used;
@@ -276,7 +272,6 @@ esp_err_t nvs_erase_key(nvs_handle_t handle, const char* key) {
         lock_give();
         return ESP_ERR_NVS_NOT_FOUND;
     }
-    s_pool_dead += e->len;
     memset(e, 0, sizeof(*e));
     lock_give();
     return ESP_OK;
@@ -291,7 +286,6 @@ esp_err_t nvs_erase_all(nvs_handle_t handle) {
     lock_take();
     for (int i = 0; i < NVS_RAM_MAX_ENTRIES; i++) {
         if (s_entries[i].used && s_entries[i].ns_idx == ns_idx) {
-            s_pool_dead += s_entries[i].len;
             memset(&s_entries[i], 0, sizeof(s_entries[i]));
         }
     }

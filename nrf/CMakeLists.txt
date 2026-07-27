@@ -12,62 +12,27 @@ include(FetchContent)
 # these are source drops built by explicit file lists below, not
 # add_subdirectory projects.
 FetchContent_Declare(nrfx
-  GIT_REPOSITORY https://github.com/NordicSemiconductor/nrfx.git
-  GIT_TAG v3.9.0
-  GIT_SHALLOW TRUE
+  URL https://github.com/NordicSemiconductor/nrfx/archive/refs/tags/v3.9.0.tar.gz
   SOURCE_SUBDIR cmake-noop
 )
 FetchContent_Declare(cmsis6
-  GIT_REPOSITORY https://github.com/ARM-software/CMSIS_6.git
-  GIT_TAG v6.1.0
-  GIT_SHALLOW TRUE
+  URL https://github.com/ARM-software/CMSIS_6/archive/refs/tags/v6.1.0.tar.gz
   SOURCE_SUBDIR cmake-noop
 )
 FetchContent_Declare(freertos_kernel
-  GIT_REPOSITORY https://github.com/FreeRTOS/FreeRTOS-Kernel.git
-  GIT_TAG V11.1.0
-  GIT_SHALLOW TRUE
+  URL https://github.com/FreeRTOS/FreeRTOS-Kernel/archive/refs/tags/V11.1.0.tar.gz
 )
-# Same pinned crypto stack the host nRF-backend test suites verify against
-# (test/CMakeLists.txt); mbedtls builds with the minimal Bramble config.
-set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
-set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
-set(MBEDTLS_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/config/mbedtls_config_bramble.h" CACHE STRING "" FORCE)
-FetchContent_Declare(mbedtls
-  URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
-)
-FetchContent_Declare(monocypher
-  URL https://github.com/LoupVaillant/Monocypher/archive/refs/tags/4.0.2.tar.gz
-  SOURCE_SUBDIR cmake-noop
-)
+# Crypto deps and the Monocypher rename contract are shared with the host
+# test build via one fragment; see components/crypto/crypto_deps.cmake.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_deps.cmake)
+bramble_crypto_deps_declare()
 FetchContent_Declare(cjson
   URL https://github.com/DaveGamble/cJSON/archive/refs/tags/v1.7.18.tar.gz
   SOURCE_SUBDIR cmake-noop
 )
 FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson)
-# Only mbedcrypto is consumed; skip building the TLS and X.509 libraries.
-set_target_properties(mbedtls mbedx509 PROPERTIES EXCLUDE_FROM_ALL TRUE)
-
-# Monocypher's ed25519 unit exports names colliding with crypto.h; build it
-# (and only it) under mono_ed25519_* renames. See
-# components/crypto/ed25519_monocypher.h.
-add_library(monocypher_ed25519 STATIC
-  ${monocypher_SOURCE_DIR}/src/monocypher.c
-  ${monocypher_SOURCE_DIR}/src/optional/monocypher-ed25519.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/ed25519_monocypher.c
-)
-target_include_directories(monocypher_ed25519 PUBLIC
-  ${monocypher_SOURCE_DIR}/src
-  ${monocypher_SOURCE_DIR}/src/optional
-  ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
-)
-target_compile_definitions(monocypher_ed25519 PRIVATE
-  BRAMBLE_PLATFORM_NRF
-  crypto_ed25519_key_pair=mono_ed25519_key_pair
-  crypto_ed25519_sign=mono_ed25519_sign
-  crypto_ed25519_check=mono_ed25519_check
-)
+bramble_crypto_deps_exclude_tls()
+bramble_add_monocypher_ed25519(monocypher_ed25519)
 
 # FreeRTOS-Kernel's own CMake wants a freertos_config interface target
 # providing FreeRTOSConfig.h.
@@ -179,7 +144,6 @@ add_executable(bramble-nrf
   shim/console_uart.c
   shim/esp_timer_freertos.c
   shim/esp_random_nrf.c
-  shim/esp_system_nrf.c
   shim/nvs_ram.c
   shim/mbedtls_platform_freertos.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
@@ -192,7 +156,6 @@ target_include_directories(bramble-nrf PRIVATE
 )
 target_compile_definitions(bramble-nrf PRIVATE BRAMBLE_PLATFORM_NRF)
 target_compile_definitions(bramble-nrf PRIVATE
-  BRAMBLE_CONSOLE_UART=${BRAMBLE_CONSOLE_UART}
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
 )
 target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519)
@@ -200,6 +163,9 @@ target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel 
 # 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
 # bramble-nrf.uf2 for drag-and-drop flashing.
 set(BRAMBLE_NRF_LAYOUT swd CACHE STRING "Flash layout: swd or uf2")
+# App base under the T1000-E's Adafruit UF2 bootloader (must match
+# ld/nrf52840_s140_app.ld FLASH ORIGIN).
+set(BRAMBLE_UF2_BASE 0x26000)
 if(BRAMBLE_NRF_LAYOUT STREQUAL "uf2")
   set(BRAMBLE_LD ${CMAKE_CURRENT_SOURCE_DIR}/ld/nrf52840_s140_app.ld)
 else()
@@ -214,8 +180,8 @@ if(BRAMBLE_NRF_LAYOUT STREQUAL "uf2")
   add_custom_command(TARGET bramble-nrf POST_BUILD
     COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:bramble-nrf> bramble-nrf.bin
     COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/make_uf2.py bramble-nrf.bin
-            --base 0x26000 -o bramble-nrf.uf2
-    COMMENT "Packaging bramble-nrf.uf2 (base 0x26000, family 0xADA52840)"
+            --base ${BRAMBLE_UF2_BASE} -o bramble-nrf.uf2
+    COMMENT "Packaging bramble-nrf.uf2 (base ${BRAMBLE_UF2_BASE}, family 0xADA52840)"
   )
 endif()
 

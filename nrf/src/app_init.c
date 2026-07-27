@@ -5,7 +5,7 @@
 // on real silicon. No mesh_task yet: that arrives with the radio in P1.
 #include "app_init.h"
 
-#include <string.h>
+#include <FreeRTOS.h>
 
 #include "crypto.h"
 #include "dm_session.h"
@@ -63,8 +63,5 @@ void app_init_stack(void) {
              (unsigned)cfg.frequency_mhz, (unsigned)((uint32_t)(cfg.frequency_mhz * 100) % 100),
              cfg.sf);
 
-    ESP_LOGI(TAG, "stack up: free heap %u bytes", (unsigned)heap_free_probe());
+    ESP_LOGI(TAG, "stack up: free heap %u bytes", (unsigned)xPortGetFreeHeapSize());
 }
-
-// Small indirection so app_init.c does not include FreeRTOS headers directly.
-__attribute__((weak)) size_t heap_free_probe(void) { return 0; }

@@ -38,6 +38,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Restore crypto dependency sources
+        # The ASan and coverage build trees share one FetchContent download
+        # dir (test/build-deps, set in test/CMakeLists.txt), cached so the
+        # pinned mbedtls/Monocypher archives are not re-fetched every run.
+        uses: actions/cache@v4
+        with:
+          path: test/build-deps
+          key: host-test-deps-${{ hashFiles('components/crypto/crypto_deps.cmake') }}
       - name: Assert host test deps are pre-baked on the runner
         run: |
           for tool in cmake make gcc g++; do
@@ -252,19 +260,29 @@ jobs:
       - name: Install ARM embedded toolchain
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q gcc-arm-none-eabi ninja-build
+          sudo apt-get install -y -q gcc-arm-none-eabi ninja-build ccache
           arm-none-eabi-gcc --version | head -1
       - name: Restore pinned dependency sources
         uses: actions/cache@v4
         with:
           path: nrf/build/_deps
-          key: nrf-deps-${{ hashFiles('nrf/CMakeLists.txt') }}
+          key: nrf-deps-${{ hashFiles('nrf/CMakeLists.txt', 'components/crypto/crypto_deps.cmake') }}
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: nrf-ccache-${{ github.sha }}
+          restore-keys: nrf-ccache-
       - name: Configure and build (includes the RAM budget gate)
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: |
           cmake -S nrf -B nrf/build -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake \
-            -DCMAKE_BUILD_TYPE=MinSizeRel
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_ASM_COMPILER_LAUNCHER=ccache
           cmake --build nrf/build
+          ccache -s | head -6
       - name: Upload memory report
         uses: actions/upload-artifact@v7
         with:

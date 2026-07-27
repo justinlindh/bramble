@@ -3,11 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-#ifdef UNIT_TEST
-#include "esp_stubs.h"
-#else
+/* Resolved by include path per build; see packet.h. */
 #include "esp_err.h"
-#endif
 
 #ifdef __cplusplus
 extern "C" {

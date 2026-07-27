@@ -19,14 +19,7 @@
  * only differs for attacker-chosen keys and is documented in the phase report.
  */
 #include "unity.h"
-/* Backend selection: the default build pins the host (OpenSSL) backend; the
- * _nrf_backend build of this same file pins the nRF52840 backend
- * (crypto_esp.c: mbedtls + Monocypher Ed25519) to identical vectors. */
-#ifdef BRAMBLE_TEST_NRF_BACKEND
-#include "../components/crypto/crypto_esp.c"
-#else
-#include "../components/crypto/crypto_host.c"
-#endif
+#include "crypto_backend_under_test.h"
 
 void setUp(void) {}
 void tearDown(void) {}

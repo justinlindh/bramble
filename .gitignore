@@ -29,6 +29,7 @@ sdkconfig.*
 !sdkconfig.defaults*
 sdkconfig.old
 !test/stubs/sdkconfig.h
+!nrf/shim/include/sdkconfig.h
 
 # Dependency/build management
 managed_components/
