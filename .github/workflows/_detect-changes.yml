@@ -66,7 +66,10 @@ jobs:
   detect:
     name: Detect changed areas
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    timeout-minutes: 5
+    # 10, not 5: the job is a full-history checkout plus one git diff, and
+    # the checkout alone has been observed at 4m49s on loaded pods; a 5m
+    # ceiling turned pod slowness into a red gate twice on one PR.
+    timeout-minutes: 10
     outputs:
       firmware: ${{ steps.detect.outputs.firmware }}
       host_test: ${{ steps.detect.outputs.host_test }}
