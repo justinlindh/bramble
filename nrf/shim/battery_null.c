@@ -4,3 +4,5 @@
 #include "battery.h"
 
 uint32_t battery_read_mv(void) { return 4000; }
+
+uint8_t battery_read_pct(void) { return battery_mv_to_pct(battery_read_mv()); }

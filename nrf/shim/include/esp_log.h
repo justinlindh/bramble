@@ -16,3 +16,9 @@ void bramble_log_write(char level, const char* tag, const char* fmt, ...)
 #define ESP_LOGI(tag, fmt, ...) bramble_log_write('I', tag, fmt, ##__VA_ARGS__)
 #define ESP_LOGD(tag, fmt, ...) bramble_log_write('D', tag, fmt, ##__VA_ARGS__)
 #define ESP_LOGV(tag, fmt, ...) ((void)0)
+
+// IDF's EARLY variants exist for pre-scheduler/ISR contexts; the blocking
+// UART writer here is safe in the contexts the mesh uses them (timer task).
+#define ESP_EARLY_LOGE ESP_LOGE
+#define ESP_EARLY_LOGW ESP_LOGW
+#define ESP_EARLY_LOGI ESP_LOGI

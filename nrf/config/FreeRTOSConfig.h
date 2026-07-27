@@ -55,6 +55,7 @@ extern uint32_t SystemCoreClock;
 #define INCLUDE_xTaskGetCurrentTaskHandle 1
 #define INCLUDE_uxTaskGetStackHighWaterMark 1
 #define INCLUDE_xTimerPendFunctionCall 1
+#define INCLUDE_xSemaphoreGetMutexHolder 1
 
 // nRF52840 NVIC has 3 priority bits (values 0..7, shifted into bits 7:5).
 // Kernel runs at the lowest priority; ISRs using FreeRTOS APIs must be
