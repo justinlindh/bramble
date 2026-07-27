@@ -123,6 +123,8 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/radio/radio_airtime.c
   ${BRAMBLE_COMPONENTS}/radio/radio_profiles.c
   ${BRAMBLE_COMPONENTS}/radio/tx_gate.c
+  ${BRAMBLE_COMPONENTS}/radio/tx_gate_esp.c
+  ${BRAMBLE_COMPONENTS}/radio/phy_passthrough.c
   ${BRAMBLE_COMPONENTS}/gps/nmea_parser.c
   ${BRAMBLE_COMPONENTS}/battery/battery_pct.c
   ${BRAMBLE_COMPONENTS}/indicators/alerts.c
@@ -157,7 +159,7 @@ target_include_directories(swdr001_lib PUBLIC ${swdr001_SOURCE_DIR}/src)
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
-  src/radio_null.c
+  src/radio_lr1110.c
   src/lr11xx_hal_nrf.c
   shim/console_uart.c
   shim/esp_timer_freertos.c

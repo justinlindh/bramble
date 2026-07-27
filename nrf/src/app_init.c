@@ -13,8 +13,10 @@
 #include "identity.h"
 #include "msg_store.h"
 #include "network_key.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "radio.h"
+#include "radio_internal.h"
 #include "routing.h"
 #include "ui.h"
 
@@ -62,6 +64,18 @@ void app_init_stack(void) {
     ESP_LOGI(TAG, "radio_init: %d (profile LR %u.%02u MHz sf%u)", radio_init(&cfg),
              (unsigned)cfg.frequency_mhz, (unsigned)((uint32_t)(cfg.frequency_mhz * 100) % 100),
              cfg.sf);
+
+    // P1 Task 3 bench smoke, replaced by the real mesh loop in Task 4: one
+    // raw 20-byte frame through the full TX path proves TX_DONE plumbing,
+    // then a CAD check proves the CAD IRQ path.
+    uint8_t test_frame[20] = {0xB7, 'b', 'r', 'a', 'm', 'b', 'l', 'e', '-', 'p',
+                              '1',  '-', 't', 'x', '-', 's', 'm', 'o', 'k', 'e'};
+    int64_t t0 = esp_timer_get_time();
+    int tx_rc = radio_transmit_raw(test_frame, sizeof(test_frame));
+    ESP_LOGI(TAG, "test TX rc %d in %lu ms", tx_rc,
+             (unsigned long)((esp_timer_get_time() - t0) / 1000));
+    bool busy = radio_cad_check();
+    ESP_LOGI(TAG, "CAD check: channel %s", busy ? "busy" : "clear");
 
     ESP_LOGI(TAG, "stack up: free heap %u bytes", (unsigned)xPortGetFreeHeapSize());
 }
