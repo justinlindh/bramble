@@ -292,17 +292,7 @@ func (h *radioHarness) rssiAt(distance float32) int {
 // when destAddr != 0xFFFFFFFF. Calls must be made in chronological order
 // (the channel log assumes time-ordered inserts, as the event loop provides).
 func (h *radioHarness) transmit(srcAddr, destAddr uint32, frameBytes int, nowUs uint64) {
-	src := C.node_array_find_by_addr(h.nodes, C.uint32_t(srcAddr))
-	if src == nil {
-		panic("radioHarness: unknown src node")
-	}
-	var pkt C.outbound_packet_t
-	pkt.len = C.uint16_t(frameBytes)
-	pkt.is_broadcast = C.bool(destAddr == 0xFFFFFFFF)
-	pkt.dest_addr = C.uint32_t(destAddr)
-	pkt.pkt_type = C.PKT_TYPE_DATA
-	C.sim_radio_broadcast(src, &pkt, h.nodes, h.radio, h.rng, h.events, h.metrics,
-		C.uint64_t(nowUs))
+	h.transmitTyped(srcAddr, destAddr, frameBytes, byte(C.PKT_TYPE_DATA), nowUs)
 }
 
 // transmitTyped is transmit with a caller-chosen wire packet type, so tests
