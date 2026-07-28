@@ -155,7 +155,7 @@ func TestScenarioPathTraceMovementRuns(t *testing.T) {
 	}
 	var moves []move
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if json.Unmarshal([]byte(line), &evt) != nil {
 			continue
 		}

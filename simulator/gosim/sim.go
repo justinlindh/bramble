@@ -610,7 +610,7 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	C.free(unsafe.Pointer(cid))
 	eventQueuePush(&s.events, &tick)
 
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "node_joined", "timestamp_us": ts,
 		"node": nodeID, "addr": fmt.Sprintf("0x%08X", uint32(node.addr)),
 		"x": node.x, "y": node.y,
@@ -627,7 +627,7 @@ func (s *Sim) handleNodeLeave(evt *C.sim_event_t) {
 		nodeDeactivate(node)
 	}
 
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "node_left", "timestamp_us": ts, "node": nodeID,
 	})
 
@@ -644,7 +644,7 @@ func (s *Sim) handleNodeMove(evt *C.sim_event_t) {
 		nodeMove(node, float32(nd.x), float32(nd.y))
 	}
 
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "node_moved", "timestamp_us": ts,
 		"node": nodeID, "x": nd.x, "y": nd.y,
 	})
@@ -668,7 +668,7 @@ func (s *Sim) handleInterferenceEnd(evt *C.sim_event_t) {
 // comments warn about. The fields that legitimately differ between the two
 // events (messages_sent/delivered/dropped, which the final event ties to the
 // same terminal-state locals its rate math uses) are set by each caller.
-func (s *Sim) putSharedMetrics(m map[string]interface{}) {
+func (s *Sim) putSharedMetrics(m map[string]any) {
 	m["total_packets"] = uint64(s.metrics.total_packets)
 	m["retried"] = uint64(s.metrics.messages_retried)
 	m["delivered_on_retry"] = uint64(s.metrics.messages_delivered_retry)
@@ -710,7 +710,7 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 	}
 	metricsUpdateActiveNodes(&s.metrics, active)
 
-	metrics := map[string]interface{}{
+	metrics := map[string]any{
 		"type":          "metrics",
 		"timestamp_us":  ts,
 		"active_nodes":  active,
@@ -824,7 +824,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 	s.state = StateLoaded
 
 	// Broadcast sim_reset
-	s.emitJSON(map[string]interface{}{"type": "sim_reset"})
+	s.emitJSON(map[string]any{"type": "sim_reset"})
 
 	// Optional per-node trust-state flags, read Go-side like
 	// flood_transport/intermediate_rrep (no C-side sim_scenario change) in a
@@ -877,7 +877,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		for _, ov := range trustOverrides {
 			if ov.nodes[nodeID] {
 				ov.mark(i)
-				s.emitJSON(map[string]interface{}{
+				s.emitJSON(map[string]any{
 					"type": ov.eventType, "timestamp_us": 0,
 					"node": nodeID,
 				})
@@ -888,7 +888,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		tick := C.bridge_make_tick_event(C.uint64_t(uint64(i)*100000), &node.id[0], 0)
 		eventQueuePush(&s.events, &tick)
 
-		s.emitJSON(map[string]interface{}{
+		s.emitJSON(map[string]any{
 			"type": "node_joined", "timestamp_us": 0,
 			"node": nodeID,
 			"addr": fmt.Sprintf("0x%08X", node.addr),
@@ -900,7 +900,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// Note: metrics ticks are pre-scheduled by scenario_load_file, no manual scheduling needed
 
 	// Broadcast config + sim_ready
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type":        "config",
 		"radio_range": s.radio._range,
 		"duration_us": s.duration,
@@ -909,7 +909,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		"bw_hz":       uint32(s.radio.bw_hz),
 		"cr":          uint8(s.radio.cr),
 	})
-	s.emitJSON(map[string]interface{}{"type": "sim_ready"})
+	s.emitJSON(map[string]any{"type": "sim_ready"})
 
 	// Task 7: if this scenario declares firmware nodes (or --emu-listen opened
 	// the socket), bring up the emu-link broker and the process supervisor and
@@ -934,7 +934,7 @@ func (s *Sim) cmdPlay() {
 	s.simAtStart = s.simTime
 	s.state = StateRunning
 
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "sim_state", "state": "running",
 	})
 }
@@ -948,7 +948,7 @@ func (s *Sim) cmdPause() {
 	s.simTime = s.simAtStart + uint64(float64(elapsed.Microseconds())*s.speed)
 	s.state = StatePaused
 
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "sim_state", "state": "paused",
 	})
 }
@@ -969,7 +969,7 @@ func (s *Sim) cmdSpeed(cmd Command) {
 	if s.speed <= 0 {
 		s.speed = 1.0
 	}
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "speed_changed", "speed": s.speed,
 	})
 }
@@ -1029,7 +1029,7 @@ func (s *Sim) cmdAddNode(cmd Command) {
 	C.free(unsafe.Pointer(cid))
 	eventQueuePush(&s.events, &tick)
 
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "node_joined", "timestamp_us": s.simTime,
 		// node.addr: derived from the node's Ed25519 identity key at
 		// node_array_add (Phase 4 rebind), not the sequential fallback.
@@ -1045,7 +1045,7 @@ func (s *Sim) cmdRemoveNode(cmd Command) {
 	}
 	nodeDeactivate(node)
 
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "node_left", "timestamp_us": s.simTime, "node": cmd.NodeID,
 	})
 
@@ -1080,7 +1080,7 @@ func (s *Sim) cmdMoveNode(cmd Command) {
 	}
 	nodeMove(node, cmd.X, cmd.Y)
 
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type": "node_moved", "timestamp_us": s.simTime,
 		"node": cmd.NodeID, "x": cmd.X, "y": cmd.Y,
 	})
@@ -1206,7 +1206,7 @@ func (s *Sim) complete() {
 		"receipt":   budgetDeniedReceipt,
 	}
 
-	s.emitJSON(map[string]interface{}{
+	s.emitJSON(map[string]any{
 		"type":             "airtime_distribution",
 		"per_node_ms":      perNodeMs,
 		"min_ms":           pct(0),
@@ -1217,7 +1217,7 @@ func (s *Sim) complete() {
 		"channel_util_pct": channelUtilPct,
 	})
 
-	finalMetrics := map[string]interface{}{
+	finalMetrics := map[string]any{
 		"type":          "final_metrics",
 		"messages_sent": sent,
 		"delivered":     delivered,
@@ -1285,7 +1285,7 @@ func (s *Sim) complete() {
 			reachedRate = float64(fl.reachedCount) / float64(fl.totalScripted)
 			confirmedRate = float64(fl.confirmedCount) / float64(fl.totalScripted)
 		}
-		s.emitJSON(map[string]interface{}{
+		s.emitJSON(map[string]any{
 			"type":                           "flood_final_metrics",
 			"flood_hop_limit":                fl.hopLimit,
 			"flood_total_scripted":           fl.totalScripted,
@@ -1302,7 +1302,7 @@ func (s *Sim) complete() {
 		})
 	}
 
-	s.emitJSON(map[string]interface{}{"type": "sim_ended"})
+	s.emitJSON(map[string]any{"type": "sim_ended"})
 }
 
 // messageDeliveryRate is delivered / (delivered + dropped + undelivered):
@@ -1355,7 +1355,7 @@ func (s *Sim) emitRaw(data []byte) {
 }
 
 // emitJSON marshals and broadcasts a JSON event.
-func (s *Sim) emitJSON(v interface{}) {
+func (s *Sim) emitJSON(v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return
@@ -1443,7 +1443,7 @@ func RunHeadless(scenarioPath string) error {
 			// Count remaining generate_message events as dropped
 			if evt._type == C.EVT_GENERATE_MESSAGE {
 				C.metrics_record_packet_dropped(&sim.metrics)
-				sim.emitJSON(map[string]interface{}{
+				sim.emitJSON(map[string]any{
 					"type": "message_dropped", "timestamp_us": sim.duration,
 					"reason": "sim_ended",
 				})
@@ -1452,7 +1452,7 @@ func RunHeadless(scenarioPath string) error {
 			for eventQueuePop(&sim.events, &evt) {
 				if evt._type == C.EVT_GENERATE_MESSAGE {
 					C.metrics_record_packet_dropped(&sim.metrics)
-					sim.emitJSON(map[string]interface{}{
+					sim.emitJSON(map[string]any{
 						"type": "message_dropped", "timestamp_us": sim.duration,
 						"reason": "sim_ended",
 					})

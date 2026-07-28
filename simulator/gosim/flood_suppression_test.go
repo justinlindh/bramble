@@ -84,7 +84,7 @@ func TestFloodSuppressionCancelsRedundantRelay(t *testing.T) {
 	suppressed := 0
 	deliveredNodes := map[string]bool{}
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
@@ -170,7 +170,7 @@ func TestFloodModelAlsoSuppresses(t *testing.T) {
 
 	var canceled float64 = -1
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}

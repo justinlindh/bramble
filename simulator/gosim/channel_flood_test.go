@@ -66,7 +66,7 @@ func TestPhase1ChannelFloodReachesFarNode(t *testing.T) {
 	var packetIDHex string
 	delivered := map[string]bool{}
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
