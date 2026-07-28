@@ -14,7 +14,10 @@ set(CMAKE_C_STANDARD 11)
 set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build-deps)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_deps.cmake)
 bramble_crypto_deps_declare()
-FetchContent_MakeAvailable(mbedtls monocypher)
+FetchContent_Declare(littlefs
+    URL https://github.com/littlefs-project/littlefs/archive/refs/tags/v2.11.3.tar.gz
+)
+FetchContent_MakeAvailable(mbedtls monocypher littlefs)
 bramble_crypto_deps_exclude_tls()
 
 # Coverage build (BRAMBLE_COVERAGE=ON) swaps AddressSanitizer for gcov
@@ -42,6 +45,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${OPENSSL_ROOT}/include
 )
 
@@ -577,6 +581,74 @@ target_include_directories(test_nvs_ram_shim BEFORE PRIVATE
 )
 # identity_store.h supplies IDENTITY_STORE_BLOB_MAX for the capacity tests.
 target_include_directories(test_nvs_ram_shim PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+
+# Flash-backed NVS shim: the SAME contract suite as test_nvs_ram_shim, run
+# against nvs_lfs.c on littlefs's RAM block device (the NVMC driver itself is
+# bench-verified). Proves the P2 storage swap preserves every documented
+# semantic: type mismatch, length queries, iterators, error codes.
+add_executable(test_nvs_lfs_shim
+    test_nvs_ram_shim.c
+    ../nrf/shim/nvs_lfs.c
+    stubs/lfs_nvmc_rambd.c
+    stubs/nrf_log_host_stub.c
+    ${littlefs_SOURCE_DIR}/lfs.c
+    ${littlefs_SOURCE_DIR}/lfs_util.c
+    ${littlefs_SOURCE_DIR}/bd/lfs_rambd.c
+    unity/unity.c
+)
+target_compile_definitions(test_nvs_lfs_shim PRIVATE
+    BRAMBLE_TEST_NVS_LFS
+    BRAMBLE_LFS_BASE=0
+    BRAMBLE_LFS_SIZE=0x2D000
+    LFS_NO_MALLOC
+)
+target_include_directories(test_nvs_lfs_shim BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src
+    ${littlefs_SOURCE_DIR}
+)
+target_include_directories(test_nvs_lfs_shim PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+
+# The nRF message-store backend, run for real against littlefs's RAM block
+# device: recovery invariants (count from file size, torn-record truncation,
+# corrupt-header recreate), the streaming rollover, and clear. The ESP SPIFFS
+# variant's host test can only assert its stubs fail; this one executes the
+# actual persistence code the nRF exit gate ships.
+add_executable(test_msg_store_lfs
+    test_msg_store_lfs.c
+    ../components/msg_store/msg_store_lfs.c
+    ../nrf/shim/nvs_lfs.c
+    stubs/lfs_nvmc_rambd.c
+    stubs/nrf_log_host_stub.c
+    ${littlefs_SOURCE_DIR}/lfs.c
+    ${littlefs_SOURCE_DIR}/lfs_util.c
+    ${littlefs_SOURCE_DIR}/bd/lfs_rambd.c
+    unity/unity.c
+)
+# BRAMBLE_PLATFORM_NRF goes on the backend source alone: it is the guard
+# that compiles msg_store_lfs.c's body in, but nvs_lfs.c keys its RTOS-vs-
+# host lock branch on the same macro and must build the host branch here.
+set_source_files_properties(../components/msg_store/msg_store_lfs.c PROPERTIES
+    COMPILE_DEFINITIONS BRAMBLE_PLATFORM_NRF)
+target_compile_definitions(test_msg_store_lfs PRIVATE
+    BRAMBLE_TEST_NVS_LFS
+    BRAMBLE_LFS_BASE=0
+    BRAMBLE_LFS_SIZE=0x2D000
+    LFS_NO_MALLOC
+)
+target_include_directories(test_msg_store_lfs BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src
+    ${littlefs_SOURCE_DIR}
+)
+target_include_directories(test_msg_store_lfs PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
@@ -1660,6 +1732,7 @@ add_executable(test_ws_server
     stubs/ws/esp_http_server_fake.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_origin.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_auth_credential.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_token.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
 )

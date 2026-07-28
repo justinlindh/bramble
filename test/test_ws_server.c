@@ -218,7 +218,10 @@ void setUp(void) {
     s_client_count = 0;
     s_server_running = false;
     s_server = NULL;
-    s_token_unavailable = false;
+    /* The token provider is its own unit now (main/rpc_token.c, shared with
+     * the BLE transport), so reset its state the way production does: a
+     * successful load with the good token. */
+    ws_server_load_token();
     s_notify_burst_count = 0;
     s_notify_last_send_us = 0;
     s_notify_drops = 0;
@@ -432,8 +435,11 @@ void test_token_unavailable_fails_closed(void) {
     s_server_running = false;
     ws_server_load_token();
 
-    TEST_ASSERT_TRUE(s_token_unavailable);
+    /* Fail-closed, observable through the provider's public contract: auth
+     * is NOT disabled (that is the opt-out state) and nothing matches. */
     TEST_ASSERT_FALSE(ws_server_auth_disabled());
+    TEST_ASSERT_FALSE(ws_token_matches(""));
+    TEST_ASSERT_FALSE(ws_token_matches(GOOD_TOKEN));
 
     /* No credentials: admitted on the allowlist only. */
     TEST_ASSERT_EQUAL(ESP_OK, handshake_unauth(50));
@@ -455,7 +461,6 @@ void test_explicit_auth_optout_opens_access_but_keeps_origin_check(void) {
     ws_server_load_token();
 
     TEST_ASSERT_TRUE(ws_server_auth_disabled());
-    TEST_ASSERT_FALSE(s_token_unavailable);
 
     TEST_ASSERT_EQUAL(ESP_OK, handshake_unauth(53));
     TEST_ASSERT_TRUE(client_is_authed(53));
