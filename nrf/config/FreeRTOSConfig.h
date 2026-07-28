@@ -11,7 +11,10 @@ extern uint32_t SystemCoreClock;
 #define configUSE_TICKLESS_IDLE 0 // P3 power work turns this on
 #define configCPU_CLOCK_HZ (SystemCoreClock)
 #define configTICK_RATE_HZ ((TickType_t)1000)
-#define configMAX_PRIORITIES 8
+/* 9, not 8: NimBLE's port creates its link-layer task at
+ * configMAX_PRIORITIES-1, which must sit ABOVE the FreeRTOS timer task
+ * (7) and the mesh task (5) to keep radio events on time. */
+#define configMAX_PRIORITIES 9
 #define configMINIMAL_STACK_SIZE 128
 #define configMAX_TASK_NAME_LEN 12
 #define configUSE_16_BIT_TICKS 0
@@ -39,7 +42,7 @@ extern uint32_t SystemCoreClock;
 #define configUSE_TICK_HOOK 0
 
 #define configUSE_TIMERS 1
-#define configTIMER_TASK_PRIORITY (configMAX_PRIORITIES - 1)
+#define configTIMER_TASK_PRIORITY (configMAX_PRIORITIES - 2)
 #define configTIMER_QUEUE_LENGTH 16
 // The esp_timer shim runs its callbacks on the timer task, so it gets a
 // real stack (in words).
@@ -52,6 +55,7 @@ extern uint32_t SystemCoreClock;
 #define INCLUDE_vTaskDelay 1
 #define INCLUDE_vTaskDelayUntil 1
 #define INCLUDE_xTaskGetSchedulerState 1
+#define INCLUDE_pcTaskGetTaskName 1
 #define INCLUDE_xTaskGetCurrentTaskHandle 1
 #define INCLUDE_uxTaskGetStackHighWaterMark 1
 #define INCLUDE_xTimerPendFunctionCall 1

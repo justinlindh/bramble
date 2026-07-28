@@ -32,6 +32,24 @@ FetchContent_Declare(cjson
 )
 # Semtech LR11xx driver (Clear BSD). v3.0.0; do not pin below v2.7.0 (an
 # lr11xx_hal_read pointer-conversion fix lives there).
+# Apache NimBLE, host + controller, no SoftDevice. The ISR-safe critical
+# section patch is required: upstream's uses vPortEnterCritical, which the
+# Cortex-M FreeRTOS port asserts on when the link layer calls it from its
+# RADIO/RTC0 ISRs.
+FetchContent_Declare(nimble
+  GIT_REPOSITORY https://github.com/apache/mynewt-nimble.git
+  GIT_TAG nimble_1_10_0_tag
+  GIT_SHALLOW TRUE
+  # Idempotent but not silent: if the patch is already applied (CMake re-runs
+  # this step on every reconfigure) the reverse-check short-circuits;
+  # otherwise it must apply cleanly or the build fails. Never `|| true`: a
+  # patch that quietly fails to apply produces a build that asserts inside
+  # the link layer's first interrupt, which is miserable to debug.
+  PATCH_COMMAND git apply --reverse --check --ignore-whitespace
+                ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-isr-safe-critical.patch ||
+                git apply --ignore-whitespace
+                ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-isr-safe-critical.patch
+)
 FetchContent_Declare(littlefs
   URL https://github.com/littlefs-project/littlefs/archive/refs/tags/v2.11.3.tar.gz
   SOURCE_SUBDIR cmake-noop
@@ -40,7 +58,7 @@ FetchContent_Declare(swdr001
   URL https://github.com/Lora-net/SWDR001/archive/refs/tags/v3.0.0.tar.gz
   SOURCE_SUBDIR cmake-noop
 )
-FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson swdr001 littlefs)
+FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson swdr001 littlefs nimble)
 bramble_crypto_deps_exclude_tls()
 bramble_add_monocypher_ed25519(monocypher_ed25519)
 
@@ -204,12 +222,71 @@ target_include_directories(swdr001_lib PUBLIC ${swdr001_SOURCE_DIR}/src)
 set(BRAMBLE_LFS_BASE 0xC0000)
 set(BRAMBLE_LFS_SIZE 0x2D000) # 180KB, ends at 0xED000
 
+
+# NimBLE: sources hand-listed because the upstream porting Makefiles still
+# reference paths that moved (nimble/drivers/nrf52 is now nrf5x, and the RAM
+# transport was replaced by the unified transport).
+file(GLOB NIMBLE_HOST_SRC ${nimble_SOURCE_DIR}/nimble/host/src/*.c)
+file(GLOB NIMBLE_CTRL_SRC ${nimble_SOURCE_DIR}/nimble/controller/src/*.c)
+file(GLOB NIMBLE_PORTING_SRC ${nimble_SOURCE_DIR}/porting/nimble/src/*.c)
+add_library(nimble_lib STATIC
+  ${NIMBLE_HOST_SRC}
+  ${NIMBLE_CTRL_SRC}
+  ${NIMBLE_PORTING_SRC}
+  ${nimble_SOURCE_DIR}/nimble/host/services/gap/src/ble_svc_gap.c
+  ${nimble_SOURCE_DIR}/nimble/host/services/gatt/src/ble_svc_gatt.c
+  ${nimble_SOURCE_DIR}/nimble/host/store/config/src/ble_store_config.c
+  ${nimble_SOURCE_DIR}/nimble/host/util/src/addr.c
+  ${nimble_SOURCE_DIR}/nimble/transport/src/transport.c
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src/ble_hw.c
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src/ble_phy.c
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src/nrf52/phy.c
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src/ble_phy_trace.c
+  ${nimble_SOURCE_DIR}/porting/npl/freertos/src/npl_os_freertos.c
+  ${nimble_SOURCE_DIR}/porting/npl/freertos/src/nimble_port_freertos.c
+)
+target_include_directories(nimble_lib PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/config/nimble
+  ${nimble_SOURCE_DIR}/nimble/include
+  ${nimble_SOURCE_DIR}/nimble/host/include
+  ${nimble_SOURCE_DIR}/nimble/host/services/gap/include
+  ${nimble_SOURCE_DIR}/nimble/host/services/gatt/include
+  ${nimble_SOURCE_DIR}/nimble/host/store/config/include
+  ${nimble_SOURCE_DIR}/nimble/host/util/include
+  ${nimble_SOURCE_DIR}/nimble/controller/include
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/include
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src
+  ${nimble_SOURCE_DIR}/nimble/transport/include
+  ${nimble_SOURCE_DIR}/porting/nimble/include
+  ${nimble_SOURCE_DIR}/porting/npl/freertos/include
+)
+# NIMBLE_CFG_CONTROLLER selects the combined host+controller build. It is a
+# command-line flag in the upstream Makefiles (which this build does not use,
+# because they still reference moved paths), and without it nimble_port_init
+# silently skips ble_ll_init and the controller is simply absent.
+#
+# FREERTOS makes the link layer place its RADIO interrupt at priority 5
+# instead of 0. Priority 0 is numerically above configMAX_SYSCALL_INTERRUPT_
+# PRIORITY, so the ISR's FromISR calls trip FreeRTOS's interrupt-priority
+# assert; upstream already accounts for this, the flag just has to be set.
+target_compile_definitions(nimble_lib PUBLIC NIMBLE_CFG_CONTROLLER=1 FREERTOS=1)
+target_link_libraries(nimble_lib PUBLIC nrfx_lib freertos_kernel)
+# Third-party code is not held to this repo's warning wall.
+target_compile_options(nimble_lib PRIVATE -Wno-unused-parameter -Wno-sign-compare
+                                          -Wno-implicit-fallthrough -Wno-unused-but-set-variable
+                                          -include ${CMAKE_CURRENT_SOURCE_DIR}/config/nimble/bramble_nimble_decls.h)
+target_link_libraries(nimble_lib PUBLIC mbedcrypto)
+
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
   src/radio_lr1110.c
   src/lr11xx_hal_nrf.c
   src/lfs_nvmc.c
+  src/nimble_glue.c
+  src/ble_host.c
+  ${BRAMBLE_COMPONENTS}/ble/ble_server.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_token.c
   src/nrf_provision.c
   shim/console_uart.c
   shim/esp_timer_freertos.c
@@ -226,6 +303,7 @@ add_executable(bramble-nrf
 target_include_directories(bramble-nrf PRIVATE
   boards
   src
+  ${BRAMBLE_COMPONENTS}/ble/include
   shim/include
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
@@ -241,7 +319,7 @@ if(DEFINED BRAMBLE_NRF_DEV_NETKEY)
   target_compile_definitions(bramble-nrf PRIVATE
     BRAMBLE_NRF_DEV_NETKEY="${BRAMBLE_NRF_DEV_NETKEY}")
 endif()
-target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519 swdr001_lib littlefs_lib m)
+target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519 swdr001_lib littlefs_lib nimble_lib m)
 # Flash layout: `swd` (default) links at 0x0 for the dev kit; `uf2` links at
 # 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
 # bramble-nrf.uf2 for drag-and-drop flashing.

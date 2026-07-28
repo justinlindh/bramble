@@ -20,7 +20,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+/* ESP-IDF's HCI shim: on that platform nimble_port_init() also brings up the
+ * ESP controller through it. Bare-metal builds link NimBLE's own nRF52
+ * controller instead, so there is no HCI transport to initialize (and no
+ * symbol from this header is used anywhere in the file). */
+#ifdef ESP_PLATFORM
 #include "esp_nimble_hci.h"
+#endif
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
@@ -511,8 +517,14 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
 static void ble_host_task(void* param) {
     (void)param;
     ESP_LOGI(TAG, "NimBLE host task started");
-    nimble_port_run(); /* blocks until nimble_port_stop() */
+    nimble_port_run(); /* blocks until the stack is stopped */
+#ifdef ESP_PLATFORM
     nimble_port_freertos_deinit();
+#else
+    /* Upstream NimBLE has no freertos_deinit; the port's own task function
+     * returns only at shutdown, so end the task explicitly. */
+    vTaskDelete(NULL);
+#endif
 }
 
 static void on_sync(void) {
@@ -562,11 +574,19 @@ int ble_server_init(void) {
      * size it for their worst case plus interrupt frames, not the average. */
     xTaskCreate(ble_rpc_task, "ble_rpc", 16384, NULL, 5, NULL);
 
+#ifdef ESP_PLATFORM
+    /* On ESP-IDF this also starts the Bluetooth controller and can fail. */
     int rc = nimble_port_init();
     if (rc != 0) {
         ESP_LOGE(TAG, "nimble_port_init failed: %d", rc);
         return -1;
     }
+#else
+    /* Upstream initializes host plus the built-in controller and returns
+     * void; failures assert inside the stack. */
+    nimble_port_init();
+    int rc = 0;
+#endif
 
     /* Configure NimBLE host */
     ble_hs_cfg.reset_cb = on_reset;
@@ -640,11 +660,17 @@ int ble_server_start(void) {
 }
 
 void ble_server_stop(void) {
+#ifdef ESP_PLATFORM
     int rc = nimble_port_stop();
     if (rc == 0) {
         nimble_port_deinit();
-        ESP_LOGI(TAG, "BLE server stopped");
     }
+#else
+    /* Upstream NimBLE exposes no stop/deinit in the porting layer; this
+     * target never tears the stack down (there is no Wi-Fi mode to switch
+     * to), so the honest thing is to say so rather than pretend. */
+    ESP_LOGW(TAG, "ble_server_stop is not supported on this platform");
+#endif
 }
 
 bool ble_server_connected(void) { return s_conn_handle != BLE_HS_CONN_HANDLE_NONE; }

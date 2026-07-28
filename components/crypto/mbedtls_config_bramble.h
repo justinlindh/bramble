@@ -10,6 +10,10 @@
 #define MBEDTLS_AES_C
 #define MBEDTLS_GCM_C
 #define MBEDTLS_CIPHER_C
+// The BLE link layer's crypto (nimble/controller/src/ble_ll_crypto.c) uses
+// AES-CMAC; harmless for the ESP fleet and the host suites, which simply do
+// not call it.
+#define MBEDTLS_CMAC_C
 #define MBEDTLS_MD_C
 #define MBEDTLS_SHA256_C
 #define MBEDTLS_HKDF_C

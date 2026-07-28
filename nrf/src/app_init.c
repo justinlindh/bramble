@@ -9,6 +9,7 @@
 
 #include "esp_log.h"
 #include "identity.h"
+#include "ble_host.h"
 #include "mesh_task.h"
 #include "msg_store.h"
 #include "nvs.h"
@@ -39,5 +40,11 @@ void app_init_stack(void) {
     msg_store_init_with_persistence();
 
     mesh_task_start(&s_identity);
+
+    /* BLE last: the mesh owns the node's identity and RPC state, and the
+     * transport should not accept a connection before they exist. */
+    if (ble_host_start() != 0) {
+        ESP_LOGE(TAG, "BLE did not start; the node is mesh-only this boot");
+    }
     ESP_LOGI(TAG, "mesh_task_start returned; free heap %u bytes", (unsigned)xPortGetFreeHeapSize());
 }
