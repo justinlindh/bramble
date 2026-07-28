@@ -1660,6 +1660,7 @@ add_executable(test_ws_server
     stubs/ws/esp_http_server_fake.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_origin.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_auth_credential.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_token.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
 )

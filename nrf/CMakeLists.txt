@@ -193,6 +193,7 @@ add_executable(bramble-nrf
   shim/esp_system_nrf.c
   shim/gps_null.c
   shim/battery_null.c
+  shim/esp_app_desc_nrf.c
   shim/nvs_ram.c
   shim/mbedtls_platform_freertos.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
