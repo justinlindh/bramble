@@ -61,6 +61,16 @@ void lr11xx_hal_nrf_request_reinit(void) { s_needs_reinit = true; }
 // hard-resets the chip and latches needs_reinit (caller must abort, not
 // retry: the chip is back at POR defaults).
 static bool wait_busy_low(void) {
+    // Typical BUSY windows are well under 100us: spin briefly before
+    // yielding so an equal-priority peer (the mesh task) cannot stretch
+    // every SPI command by a scheduler timeslice. Only genuinely long chip
+    // operations (calibration) reach the yield loop.
+    for (int i = 0; i < 2000; i++) {
+        if (!nrf_gpio_pin_read(BOARD_PIN_LORA_BUSY)) {
+            s_busy_stuck_count = 0;
+            return true;
+        }
+    }
     TickType_t start = xTaskGetTickCount();
     while (nrf_gpio_pin_read(BOARD_PIN_LORA_BUSY)) {
         if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(LR_BUSY_TIMEOUT_MS)) {

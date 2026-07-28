@@ -94,15 +94,6 @@ static void traffic_event_notify(const traffic_event_t* evt, void* ctx);
  * plaintext[256]. Raised from 8192 to 10240 for comfortable headroom (Task 4;
  * Task 3 stack-headroom concern); the DM_MAX_SKIP 32->16 cut leaves extra margin. */
 #define MESH_TASK_STACK 10240
-
-/* ESP-IDF's xTaskCreate takes the stack size in BYTES; upstream
- * FreeRTOS-Kernel (the nRF target) takes WORDS. The stack constants in this
- * file are bytes; convert at the call sites. */
-#ifdef BRAMBLE_PLATFORM_NRF
-#define MESH_STACK_DEPTH(bytes) ((bytes) / sizeof(StackType_t))
-#else
-#define MESH_STACK_DEPTH(bytes) (bytes)
-#endif
 #define MESH_TASK_PRIORITY 5
 
 #define RECEIPT_QUEUE_CAPACITY 8
@@ -2475,8 +2466,8 @@ void mesh_task_start(bramble_identity_t* identity) {
     }
     /* M7 offload: low priority so the occasional handshake never preempts
      * the mesh RX task; small stack, the only work here is periodic X25519. */
-    xTaskCreate(handshake_worker_task, "dm_hs_worker", MESH_STACK_DEPTH(DM_HANDSHAKE_WORKER_STACK),
-                NULL, DM_HANDSHAKE_WORKER_PRIORITY, NULL);
+    xTaskCreate(handshake_worker_task, "dm_hs_worker", DM_HANDSHAKE_WORKER_STACK, NULL,
+                DM_HANDSHAKE_WORKER_PRIORITY, NULL);
 
     /* Loads a provisioned network key from NVS if one has been set. If none
      * has, the node stays UNPROVISIONED and inert: network_key_get() fails
@@ -2700,18 +2691,12 @@ void mesh_task_start(bramble_identity_t* identity) {
     }
 
     /* Pin to CPU1: leave CPU0 for UI/display */
-#if defined(CONFIG_IDF_TARGET_LINUX)
+#ifdef CONFIG_IDF_TARGET_LINUX
     /* The POSIX simulation has a single core; pinning to CPU1 trips the
      * kernel's core-count assert. */
     xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_TASK_STACK, NULL, MESH_TASK_PRIORITY, NULL,
                             tskNO_AFFINITY);
     ESP_LOGI(TAG, "Mesh task created (no core affinity: single-core simulator)");
-#elif defined(BRAMBLE_PLATFORM_NRF)
-    /* Single-core Cortex-M4; upstream FreeRTOS-Kernel has no
-     * xTaskCreatePinnedToCore. */
-    xTaskCreate(mesh_task, "mesh", MESH_STACK_DEPTH(MESH_TASK_STACK), NULL, MESH_TASK_PRIORITY,
-                NULL);
-    ESP_LOGI(TAG, "Mesh task created (single-core target)");
 #else
     xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_TASK_STACK, NULL, MESH_TASK_PRIORITY, NULL, 1);
     ESP_LOGI(TAG, "Mesh task created (pinned to CPU1)");

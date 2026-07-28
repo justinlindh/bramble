@@ -113,25 +113,21 @@ static uint8_t cad_det_peak_for(uint8_t sf) {
     return peaks[sf - 5];
 }
 
-static int configure_radio(const radio_config_t* cfg) {
-    if (lr11xx_radio_set_pkt_type(s_lr, LR11XX_RADIO_PKT_TYPE_LORA) != LR11XX_STATUS_OK)
-        return -1;
-
-    if (lr11xx_radio_set_rf_freq(s_lr, (uint32_t)(cfg->frequency_mhz * 1e6f)) != LR11XX_STATUS_OK)
-        return -1;
-
-    /* PA: low-power PA/VREG up to +14dBm, high-power PA/VBAT above (the
-     * bench runs +14). Values are the Seeed shield table rows. */
+/* PA selection per the Seeed shield table: low-power PA/VREG up to +14dBm,
+ * high-power PA/VBAT above, one authoritative copy for boot config and
+ * runtime power changes alike (the SX1262 backend has the same shape in
+ * sx1262_set_pa_config). */
+static int set_pa(int8_t power) {
     lr11xx_radio_pa_cfg_t pa;
     int8_t chip_power;
-    if (cfg->tx_power <= 14) {
+    if (power <= 14) {
         pa = (lr11xx_radio_pa_cfg_t){
             .pa_sel = LR11XX_RADIO_PA_SEL_LP,
             .pa_reg_supply = LR11XX_RADIO_PA_REG_SUPPLY_VREG,
             .pa_duty_cycle = 0x04,
             .pa_hp_sel = 0x00,
         };
-        chip_power = cfg->tx_power;
+        chip_power = power;
     } else {
         pa = (lr11xx_radio_pa_cfg_t){
             .pa_sel = LR11XX_RADIO_PA_SEL_HP,
@@ -139,11 +135,23 @@ static int configure_radio(const radio_config_t* cfg) {
             .pa_duty_cycle = 0x04,
             .pa_hp_sel = 0x07,
         };
-        chip_power = cfg->tx_power > 22 ? 22 : cfg->tx_power;
+        chip_power = power > 22 ? 22 : power;
     }
     if (lr11xx_radio_set_pa_cfg(s_lr, &pa) != LR11XX_STATUS_OK)
         return -1;
-    if (lr11xx_radio_set_tx_params(s_lr, chip_power, LR11XX_RADIO_RAMP_48_US) != LR11XX_STATUS_OK)
+    return lr11xx_radio_set_tx_params(s_lr, chip_power, LR11XX_RADIO_RAMP_48_US) == LR11XX_STATUS_OK
+               ? 0
+               : -1;
+}
+
+static int configure_radio(const radio_config_t* cfg) {
+    if (lr11xx_radio_set_pkt_type(s_lr, LR11XX_RADIO_PKT_TYPE_LORA) != LR11XX_STATUS_OK)
+        return -1;
+
+    if (lr11xx_radio_set_rf_freq(s_lr, (uint32_t)(cfg->frequency_mhz * 1e6f)) != LR11XX_STATUS_OK)
+        return -1;
+
+    if (set_pa(cfg->tx_power) != 0)
         return -1;
 
     lr11xx_radio_mod_params_lora_t mod = {
@@ -180,7 +188,7 @@ static int configure_radio(const radio_config_t* cfg) {
         return -1;
 
     lr11xx_radio_cad_params_t cad = {
-        .cad_symb_nb = 1u << BRAMBLE_CAD_SYMBOL_NUM_REG, /* reg 2 = 4 symbols */
+        .cad_symb_nb = BRAMBLE_CAD_SYMBOL_COUNT,
         .cad_detect_peak = cad_det_peak_for(cfg->sf),
         .cad_detect_min = 10,
         .cad_exit_mode = LR11XX_RADIO_CAD_EXIT_MODE_STANDBYRC,
@@ -262,6 +270,12 @@ static void radio_handle_rx_done(uint8_t* buf, size_t buf_size) {
 
     if (have_frame && s_rx_cb) {
         s_rx_cb(buf, info.len, &info);
+        static bool logged_hwm;
+        if (!logged_hwm) {
+            logged_hwm = true;
+            ESP_LOGD(TAG, "radio task stack high-water: %u words free",
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        }
     }
 }
 
@@ -350,6 +364,11 @@ void radio_get_config(radio_config_t* config) { memcpy(config, &s_config, sizeof
  * radio_reconfigure after the HAL's hard reset, which re-runs this). */
 static int lr1110_system_init(void) {
     lr11xx_hal_nrf_hard_reset();
+
+    lr11xx_system_version_t ver = {0};
+    if (lr11xx_system_get_version(s_lr, &ver) == LR11XX_STATUS_OK) {
+        ESP_LOGI(TAG, "LR1110 hw 0x%02x type 0x%02x fw 0x%04x", ver.hw, ver.type, ver.fw);
+    }
 
     if (lr11xx_system_set_reg_mode(s_lr, LR11XX_SYSTEM_REG_MODE_DCDC) != LR11XX_STATUS_OK)
         return -1;
@@ -621,28 +640,8 @@ bool radio_cad_check(void) {
 }
 
 void radio_set_tx_power(int8_t power) {
-    radio_config_t cfg = s_config;
-    cfg.tx_power = power;
     s_config.tx_power = power;
-    /* PA config + tx params are part of configure_radio's PA block; redo just
-     * those two commands via a scoped reconfigure of the PA. */
-    lr11xx_radio_pa_cfg_t pa;
-    int8_t chip_power;
-    if (power <= 14) {
-        pa = (lr11xx_radio_pa_cfg_t){.pa_sel = LR11XX_RADIO_PA_SEL_LP,
-                                     .pa_reg_supply = LR11XX_RADIO_PA_REG_SUPPLY_VREG,
-                                     .pa_duty_cycle = 0x04,
-                                     .pa_hp_sel = 0x00};
-        chip_power = power;
-    } else {
-        pa = (lr11xx_radio_pa_cfg_t){.pa_sel = LR11XX_RADIO_PA_SEL_HP,
-                                     .pa_reg_supply = LR11XX_RADIO_PA_REG_SUPPLY_VBAT,
-                                     .pa_duty_cycle = 0x04,
-                                     .pa_hp_sel = 0x07};
-        chip_power = power > 22 ? 22 : power;
-    }
-    if (lr11xx_radio_set_pa_cfg(s_lr, &pa) != LR11XX_STATUS_OK ||
-        lr11xx_radio_set_tx_params(s_lr, chip_power, LR11XX_RADIO_RAMP_48_US) != LR11XX_STATUS_OK) {
+    if (set_pa(power) != 0) {
         ESP_LOGE(TAG, "radio_set_tx_power(%d) failed, power unchanged on chip", power);
     }
 }

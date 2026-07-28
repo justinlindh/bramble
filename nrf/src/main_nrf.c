@@ -1,5 +1,6 @@
-// Bramble nRF52840 target entry point. P0 bring-up: FreeRTOS scheduler with
-// blink and heartbeat tasks over the bench-verified UART console.
+// Bramble nRF52840 target entry point: console, RNG, crypto self-check,
+// blink/heartbeat tasks, then the boot task hands the node to the mesh
+// (app_init_stack -> mesh_task_start).
 #include <FreeRTOS.h>
 #include <task.h>
 
@@ -7,11 +8,8 @@
 
 #include <string.h>
 
-#include <lr11xx_system.h>
-
 #include "app_init.h"
 #include "console.h"
-#include "lr11xx_hal_nrf.h"
 #include "crypto.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -65,22 +63,24 @@ static void crypto_self_check(void) {
     configASSERT(crypto_sha256((const uint8_t*)"abc", 3, hash) == 0);
     configASSERT(memcmp(hash, sha_abc, sizeof(hash)) == 0);
 
-    bramble_identity_t id;
-    int64_t t0 = esp_timer_get_time();
-    configASSERT(crypto_generate_identity(&id) == 0);
-    int64_t t1 = esp_timer_get_time();
+    // Deterministic keypair: the point is executing the Ed25519 provider on
+    // this silicon each boot, not benchmarking keygen (the real, entropy-gated
+    // generation runs on first boot via identity_generate_and_save).
+    static const uint8_t seed[32] = {0xB7};
+    uint8_t pub[BRAMBLE_ED25519_PUBKEY_SIZE];
+    uint8_t priv[BRAMBLE_ED25519_SECKEY_SIZE];
+    configASSERT(crypto_ed25519_keypair_from_seed(seed, pub, priv) == 0);
 
     uint8_t sig[BRAMBLE_ED25519_SIG_SIZE];
-    configASSERT(crypto_ed25519_sign(id.ed25519_private_key, (const uint8_t*)"bench", 5, sig) == 0);
-    configASSERT(crypto_ed25519_verify(id.ed25519_public_key, (const uint8_t*)"bench", 5, sig));
+    int64_t t0 = esp_timer_get_time();
+    configASSERT(crypto_ed25519_sign(priv, (const uint8_t*)"bench", 5, sig) == 0);
+    configASSERT(crypto_ed25519_verify(pub, (const uint8_t*)"bench", 5, sig));
     sig[0] ^= 1;
-    configASSERT(!crypto_ed25519_verify(id.ed25519_public_key, (const uint8_t*)"bench", 5, sig));
-    int64_t t2 = esp_timer_get_time();
+    configASSERT(!crypto_ed25519_verify(pub, (const uint8_t*)"bench", 5, sig));
+    int64_t t1 = esp_timer_get_time();
 
-    ESP_LOGI(TAG, "crypto self-check ok: addr %08lx, keygen %lu ms, sign+2xverify %lu ms",
-             (unsigned long)id.address, (unsigned long)((t1 - t0) / 1000),
-             (unsigned long)((t2 - t1) / 1000));
-    crypto_secure_wipe(&id, sizeof(id));
+    ESP_LOGI(TAG, "crypto self-check ok: sign+2xverify %lu ms", (unsigned long)((t1 - t0) / 1000));
+    crypto_secure_wipe(priv, sizeof(priv));
 }
 
 static void task_blink(void* arg) {
@@ -103,24 +103,9 @@ static void task_heartbeat(void* arg) {
     }
 }
 
-// SPI-alive gate for the LR1110: reset the chip and read its version over
-// the new HAL. Expect hw nonzero, type 0x01 (LR1110), fw 0x03xx.
-static void lr1110_version_smoke(void) {
-    const void* ctx = lr11xx_hal_nrf_init();
-    configASSERT(ctx != NULL);
-    lr11xx_system_reset(ctx);
-    lr11xx_system_version_t v;
-    if (lr11xx_system_get_version(ctx, &v) == LR11XX_STATUS_OK) {
-        ESP_LOGI(TAG, "LR1110 alive: hw 0x%02x type 0x%02x fw 0x%04x", v.hw, v.type, v.fw);
-    } else {
-        ESP_LOGE(TAG, "LR1110 version read FAILED (SPI/BUSY wiring or HAL bug)");
-    }
-}
-
 static void task_boot(void* arg) {
     (void)arg;
     crypto_self_check();
-    lr1110_version_smoke();
     app_init_stack();
     vTaskDelete(NULL);
 }

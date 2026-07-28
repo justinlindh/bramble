@@ -54,7 +54,6 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/mdk/system_nrf52840.c
   ${nrfx_SOURCE_DIR}/mdk/gcc_startup_nrf52840.S
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_uarte.c
-  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_rng.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
@@ -167,7 +166,7 @@ target_include_directories(bramble_core BEFORE PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/boards
 )
 # radio_internal.h (the tx_gate-only transmit primitive) lives outside
-# include/ on purpose; radio_null.c implements it.
+# include/ on purpose; radio_lr1110.c implements it.
 target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/radio)
 target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../main)
 target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF)

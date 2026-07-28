@@ -72,10 +72,6 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t timer, uint64_t timeout_us) {
     return timer_start(timer, timeout_us, pdFALSE);
 }
 
-esp_err_t esp_timer_start_periodic(esp_timer_handle_t timer, uint64_t period_us) {
-    return timer_start(timer, period_us, pdTRUE);
-}
-
 esp_err_t esp_timer_stop(esp_timer_handle_t timer) {
     if (timer == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -84,15 +80,4 @@ esp_err_t esp_timer_stop(esp_timer_handle_t timer) {
         return ESP_ERR_INVALID_STATE;
     }
     return (xTimerStop(timer->handle, portMAX_DELAY) == pdPASS) ? ESP_OK : ESP_FAIL;
-}
-
-esp_err_t esp_timer_delete(esp_timer_handle_t timer) {
-    if (timer == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (xTimerDelete(timer->handle, portMAX_DELAY) != pdPASS) {
-        return ESP_FAIL;
-    }
-    vPortFree(timer);
-    return ESP_OK;
 }

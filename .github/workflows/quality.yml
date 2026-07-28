@@ -276,6 +276,10 @@ jobs:
         with:
           path: nrf/build/_deps
           key: nrf-deps-${{ hashFiles('nrf/CMakeLists.txt', 'components/crypto/crypto_deps.cmake') }}
+          # The key hashes the whole CMakeLists, which changes for many
+          # non-dependency reasons; the fallback restore lets FetchContent
+          # re-verify stamps and fetch only what actually moved.
+          restore-keys: nrf-deps-
       - name: Restore compiler cache
         uses: actions/cache@v4
         with:
