@@ -740,10 +740,7 @@ size_t mesh_delivery_events_list_since(uint32_t since_event_seq, delivery_event_
     return count;
 }
 
-uint32_t mesh_get_last_broadcast_id(void) {
-    (void)s_last_broadcast_frag_msg_id;
-    return s_last_broadcast_id;
-}
+uint32_t mesh_get_last_broadcast_id(void) { return s_last_broadcast_id; }
 
 void mesh_set_broadcast_telemetry_mode(broadcast_telemetry_mode_t mode) {
     if (mode < BROADCAST_TELEMETRY_OFF || mode > BROADCAST_TELEMETRY_PATH_SAMPLED) {
