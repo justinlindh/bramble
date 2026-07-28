@@ -239,7 +239,6 @@ extern bool s_channel_has_psk[MAX_CHANNELS];
 extern int s_num_channels;
 extern int s_default_channel_idx;
 extern uint32_t s_last_broadcast_id;
-extern uint16_t s_last_broadcast_frag_msg_id;
 extern uint32_t s_recent_broadcast_ids[RECENT_BROADCAST_RING_SIZE];
 extern int s_recent_broadcast_idx;
 extern broadcast_telemetry_mode_t s_broadcast_telemetry_mode;

@@ -326,7 +326,6 @@ bool s_channel_has_psk[MAX_CHANNELS];
 int s_num_channels = 0;
 int s_default_channel_idx = 0; /* unicast default, public broadcast stays channel 0 */
 uint32_t s_last_broadcast_id = 0;
-uint16_t s_last_broadcast_frag_msg_id = 0;
 uint32_t s_recent_broadcast_ids[RECENT_BROADCAST_RING_SIZE];
 int s_recent_broadcast_idx = 0;
 broadcast_telemetry_mode_t s_broadcast_telemetry_mode = BROADCAST_TELEMETRY_RECIPIENT_ONLY;
@@ -2087,8 +2086,6 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
 
         ESP_LOGI(TAG, "Sending broadcast message as %d fragments (msg_id=%04X)", num_frags, msg_id);
 
-        s_last_broadcast_frag_msg_id = 0;
-
         /* A receipt for a fragmented broadcast correlates on the FIRST fragment's
          * packet_id (that is the id recorded in s_last_broadcast_id), so the store
          * row has to be filed under that same id to be reachable. */
@@ -2100,7 +2097,6 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
                 send_data_packet(0xFFFFFFFF, frags[i].data, frags[i].len, &s_channels[0], 0x01);
             if (i == 0 && pkt_id != 0) {
                 s_last_broadcast_id = pkt_id;
-                s_last_broadcast_frag_msg_id = msg_id;
                 first_pkt_id = pkt_id;
             }
             if (pkt_id == 0) {
@@ -2129,7 +2125,6 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
     uint32_t pkt_id = send_data_packet(0xFFFFFFFF, data, len, &s_channels[0], 0x01);
     if (pkt_id != 0) {
         s_last_broadcast_id = pkt_id;
-        s_last_broadcast_frag_msg_id = 0;
         recent_broadcast_record(pkt_id);
         /* File the row under the packet_id we just transmitted, not 0. A row with
          * packet_id 0 is untrackable by construction: a delivery receipt is matched
@@ -2182,10 +2177,6 @@ static uint32_t mesh_send_channel_uid(int channel_idx, uint32_t dest_addr, const
 
         ESP_LOGI(TAG, "Sending channel message as %d fragments (msg_id=%04X)", num_frags, msg_id);
 
-        if (dest_addr == 0xFFFFFFFFu) {
-            s_last_broadcast_frag_msg_id = 0;
-        }
-
         uint32_t first_pkt_id = 0;
         /* Send each fragment with pacing */
         for (int i = 0; i < num_frags; i++) {
@@ -2198,7 +2189,6 @@ static uint32_t mesh_send_channel_uid(int channel_idx, uint32_t dest_addr, const
                     first_pkt_id = pkt_id;
                     if (dest_addr == 0xFFFFFFFFu) {
                         s_last_broadcast_id = pkt_id;
-                        s_last_broadcast_frag_msg_id = msg_id;
                     }
                 }
                 if (dest_addr == 0xFFFFFFFFu) {
@@ -2234,7 +2224,6 @@ static uint32_t mesh_send_channel_uid(int channel_idx, uint32_t dest_addr, const
     if (pkt_id != 0) {
         if (dest_addr == 0xFFFFFFFFu) {
             s_last_broadcast_id = pkt_id;
-            s_last_broadcast_frag_msg_id = 0;
             recent_broadcast_record(pkt_id);
         }
         msg_store_add_channel(dest_addr,
