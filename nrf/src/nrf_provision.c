@@ -1,9 +1,12 @@
 // Dev-only bench provisioning for the nRF52840 target, the compile-time
-// analogue of the emulator's EMU_NETWORK_KEY env seeding (emu_provision.c):
-// until P2 lands an RPC transport there is no runtime provisioning path, so
-// the bench key enters via a local -DBRAMBLE_NRF_DEV_NETKEY=<64 hex>
-// configure argument. The KEY VALUE is never committed anywhere; without the
-// define this function compiles to a no-op and the node stays INERT.
+// analogue of the emulator's EMU_NETWORK_KEY env seeding (emu_provision.c).
+// The REAL provisioning path is bramble.setNetworkKey over the encrypted BLE
+// link (the P2 exit gate runs it end to end from an erased device); this
+// define is bench convenience only, so a freshly flashed dev kit joins the
+// mesh without a pairing round-trip. It enters via a local
+// -DBRAMBLE_NRF_DEV_NETKEY=<64 hex> configure argument. The KEY VALUE is
+// never committed anywhere; without the define this function compiles to a
+// no-op and the node stays INERT until provisioned over BLE.
 #include "esp_log.h"
 #include "network_key.h"
 

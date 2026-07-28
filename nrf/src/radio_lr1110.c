@@ -167,6 +167,20 @@ static int set_pa(int8_t power) {
                : -1;
 }
 
+/* The RX-shaped packet params: pld_len wide open. Both configure_radio and
+ * radio_start_rx apply these; see radio_start_rx for why the latter must. */
+static lr11xx_radio_pkt_params_lora_t rx_pkt_params(const radio_config_t* cfg) {
+    lr11xx_radio_pkt_params_lora_t pkt = {
+        .preamble_len_in_symb = cfg->preamble,
+        .header_type =
+            cfg->explicit_header ? LR11XX_RADIO_LORA_PKT_EXPLICIT : LR11XX_RADIO_LORA_PKT_IMPLICIT,
+        .pld_len_in_bytes = 255, /* max payload for RX */
+        .crc = cfg->crc ? LR11XX_RADIO_LORA_CRC_ON : LR11XX_RADIO_LORA_CRC_OFF,
+        .iq = LR11XX_RADIO_LORA_IQ_STANDARD,
+    };
+    return pkt;
+}
+
 static int configure_radio(const radio_config_t* cfg) {
     if (lr11xx_radio_set_pkt_type(s_lr, LR11XX_RADIO_PKT_TYPE_LORA) != LR11XX_STATUS_OK)
         return -1;
@@ -186,14 +200,7 @@ static int configure_radio(const radio_config_t* cfg) {
     if (lr11xx_radio_set_lora_mod_params(s_lr, &mod) != LR11XX_STATUS_OK)
         return -1;
 
-    lr11xx_radio_pkt_params_lora_t pkt = {
-        .preamble_len_in_symb = cfg->preamble,
-        .header_type =
-            cfg->explicit_header ? LR11XX_RADIO_LORA_PKT_EXPLICIT : LR11XX_RADIO_LORA_PKT_IMPLICIT,
-        .pld_len_in_bytes = 255, /* max payload for RX */
-        .crc = cfg->crc ? LR11XX_RADIO_LORA_CRC_ON : LR11XX_RADIO_LORA_CRC_OFF,
-        .iq = LR11XX_RADIO_LORA_IQ_STANDARD,
-    };
+    lr11xx_radio_pkt_params_lora_t pkt = rx_pkt_params(cfg);
     if (lr11xx_radio_set_lora_pkt_params(s_lr, &pkt) != LR11XX_STATUS_OK)
         return -1;
 
@@ -379,6 +386,7 @@ int radio_reconfigure(const radio_config_t* config) {
 }
 
 void radio_get_config(radio_config_t* config) { memcpy(config, &s_config, sizeof(*config)); }
+
 
 /* Full LR1110 system bring-up: the board-level sequence that has no SX1262
  * equivalent lives here rather than in configure_radio so reconfigure stays
@@ -586,6 +594,21 @@ void radio_start_rx(void) {
     int rc = radio_standby();
     if (rc == 0) {
         rc = clear_all_irq();
+    }
+    if (rc == 0) {
+        /* Restore the RX packet params before every RX entry. Each transmit
+         * rewrites pld_len_in_bytes for its own payload, and unlike the
+         * SX1262 (which ignores the field in explicit-header RX, so the ESP
+         * driver never needed this), the LR1110 applies it as a maximum
+         * accepted length in RX. Found the hard way on the bench: after a
+         * 54-byte beacon TX the radio sat in RX reporting CHIP_MODE_RX and
+         * never raised so much as a preamble IRQ again, because every bench
+         * beacon carries a name and is longer than 54 bytes. The failure
+         * hid for the first minute of every boot because the boot sequence
+         * ends with a 230-byte attestation TX, which left the cap wide
+         * enough for everything until the next small transmit. */
+        lr11xx_radio_pkt_params_lora_t pkt = rx_pkt_params(&s_config);
+        rc = lr11xx_radio_set_lora_pkt_params(s_lr, &pkt) == LR11XX_STATUS_OK ? 0 : -1;
     }
     if (rc == 0) {
         /* 0xFFFFFF RTC steps = continuous RX per the LR1110 command set. */

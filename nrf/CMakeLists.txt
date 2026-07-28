@@ -218,6 +218,7 @@ target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../ma
 # costs only how far back the timeline goes. 128 keeps a useful window and
 # returns 21KB to the heap that pairing needs for its P-256 keypair.
 target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF
+                                               CONFIG_BRAMBLE_BOARD_WM1110
                                                DELIVERY_EVENT_RING_CAPACITY=128u)
 target_link_libraries(bramble_core PUBLIC freertos_kernel littlefs_lib)
 
