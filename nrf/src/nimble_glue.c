@@ -72,10 +72,8 @@ void npl_freertos_hw_set_isr(int irqn, void (*addr)(void)) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  HFXO refcount                                                      */
+/*  High-frequency crystal                                             */
 /* ------------------------------------------------------------------ */
-
-static volatile int s_hfxo_refs;
 
 /* The radio needs the crystal's accuracy: a caller that proceeds on the
  * internal RC oscillator transmits slightly off-frequency and misses tight
@@ -90,31 +88,32 @@ static volatile int s_hfxo_refs;
  * task stopped entirely within seconds). Keeping HFXO on costs idle current,
  * which is P3's problem to solve with a proper power model, not something to
  * buy here with a busy-wait in an interrupt.
+ *
+ * There is deliberately no refcount. Nothing stops the crystal, so a count
+ * would have no reader, and maintaining one meant masking interrupts inside
+ * a function the link layer calls from its ISR on every radio event. Both
+ * register writes below are idempotent, so two contexts repeating them race
+ * harmlessly.
+ *
+ * Honest caveat for whoever owns the power model (P3): leaving HFXO on costs
+ * roughly 460uA continuously, and the "we would have to spin in an ISR"
+ * argument does not actually justify keeping it that way. NimBLE's rfclk
+ * management requests the clock BLE_LL_RFMGMT_ENABLE_TIME (1500us) ahead of
+ * a radio event, which is over four times the ~360us startup, so a real
+ * release path would have time to start it without any spin. That work needs
+ * a power model and bench measurement, which is why it is not being done
+ * here, but the reason to revisit is stronger than this comment first
+ * implied.
  */
 void nrf52_clock_hfxo_request(void) {
-    uint32_t primask;
-    __asm volatile("mrs %0, primask" : "=r"(primask));
-    __asm volatile("cpsid i" ::: "memory");
-    if (s_hfxo_refs++ == 0 && !nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
+    if (!nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
         nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
         nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTART);
-    }
-    if ((primask & 1u) == 0u) {
-        __asm volatile("cpsie i" ::: "memory");
     }
 }
 
 void nrf52_clock_hfxo_release(void) {
-    uint32_t primask;
-    __asm volatile("mrs %0, primask" : "=r"(primask));
-    __asm volatile("cpsid i" ::: "memory");
-    if (s_hfxo_refs > 0) {
-        s_hfxo_refs--;
-    }
     /* Deliberately does NOT stop the crystal; see the request path. */
-    if ((primask & 1u) == 0u) {
-        __asm volatile("cpsie i" ::: "memory");
-    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -122,17 +121,25 @@ void nrf52_clock_hfxo_release(void) {
 /* ------------------------------------------------------------------ */
 
 bool nimble_glue_start_lfclk(void) {
-    if (nrf_clock_lf_is_running(NRF_CLOCK)) {
-        return nrf_clock_lf_actv_src_get(NRF_CLOCK) == NRF_CLOCK_LFCLK_XTAL;
-    }
-
-    /* Start the high-frequency crystal here, in task context, so the link
-     * layer never has to wait for it from an interrupt. */
+    /* The high-frequency crystal goes first, and above the low-frequency
+     * early return below rather than after it. Waiting for HFXO is only safe
+     * in task context, and this is the one place that runs there; if the
+     * low-frequency clock happens to be up already (a reset that leaves CLOCK
+     * configured), returning early would leave the crystal to
+     * nrf52_clock_hfxo_request, which the radio ISR calls and which
+     * deliberately does not wait. The first radio events would then run on
+     * the RC oscillator, which is exactly the "visible in every scan, never
+     * connectable" failure described above.
+     */
     if (!nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
         nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
         nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTART);
         while (!nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
         }
+    }
+
+    if (nrf_clock_lf_is_running(NRF_CLOCK)) {
+        return nrf_clock_lf_actv_src_get(NRF_CLOCK) == NRF_CLOCK_LFCLK_XTAL;
     }
 
     nrf_clock_lf_src_set(NRF_CLOCK, NRF_CLOCK_LFCLK_XTAL);

@@ -32,10 +32,15 @@ FetchContent_Declare(cjson
 )
 # Semtech LR11xx driver (Clear BSD). v3.0.0; do not pin below v2.7.0 (an
 # lr11xx_hal_read pointer-conversion fix lives there).
-# Apache NimBLE, host + controller, no SoftDevice. The ISR-safe critical
-# section patch is required: upstream's uses vPortEnterCritical, which the
-# Cortex-M FreeRTOS port asserts on when the link layer calls it from its
-# RADIO/RTC0 ISRs.
+# Apache NimBLE, host + controller, no SoftDevice. Two patches are required.
+# The ISR-safe critical section, because upstream's uses vPortEnterCritical,
+# which the Cortex-M FreeRTOS port asserts on when the link layer calls it
+# from its RADIO/RTC0 ISRs. And the duplicate-PDU tolerance during encryption
+# start, without which a retransmitted plaintext control PDU makes the
+# controller terminate the link with 0x3D; see that patch for the full story.
+set(NIMBLE_PATCHES
+  ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-isr-safe-critical.patch
+  ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-dup-pdu-during-enc-start.patch)
 FetchContent_Declare(nimble
   GIT_REPOSITORY https://github.com/apache/mynewt-nimble.git
   GIT_TAG nimble_1_10_0_tag
@@ -45,10 +50,14 @@ FetchContent_Declare(nimble
   # otherwise it must apply cleanly or the build fails. Never `|| true`: a
   # patch that quietly fails to apply produces a build that asserts inside
   # the link layer's first interrupt, which is miserable to debug.
-  PATCH_COMMAND git apply --reverse --check --ignore-whitespace
-                ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-isr-safe-critical.patch ||
-                git apply --ignore-whitespace
-                ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-isr-safe-critical.patch
+  #
+  # One list, used for both the check and the apply: git apply is
+  # all-or-nothing across the files it is given, so the set must be identical
+  # on both sides. Naming it once is what keeps them that way; adding a patch
+  # to only one list would give a reverse-check that never short-circuits and
+  # therefore a re-apply failure on every reconfigure.
+  PATCH_COMMAND git apply --reverse --check --ignore-whitespace ${NIMBLE_PATCHES} ||
+                git apply --ignore-whitespace ${NIMBLE_PATCHES}
 )
 FetchContent_Declare(littlefs
   URL https://github.com/littlefs-project/littlefs/archive/refs/tags/v2.11.3.tar.gz
@@ -258,7 +267,6 @@ add_library(nimble_lib STATIC
   ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src/nrf52/phy.c
   ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src/ble_phy_trace.c
   ${nimble_SOURCE_DIR}/porting/npl/freertos/src/npl_os_freertos.c
-  ${nimble_SOURCE_DIR}/porting/npl/freertos/src/nimble_port_freertos.c
 )
 target_include_directories(nimble_lib PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/config/nimble
@@ -303,6 +311,10 @@ add_executable(bramble-nrf
   src/lfs_nvmc.c
   src/nimble_glue.c
   src/ble_store_nvs.c
+  # Replaces upstream's porting/npl/freertos/src/nimble_port_freertos.c,
+  # which is deliberately absent from nimble_lib above: the BLE task
+  # priorities and stacks are this port's to choose.
+  src/nimble_port_freertos.c
   src/ble_host.c
   ${BRAMBLE_COMPONENTS}/ble/ble_server.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_token.c

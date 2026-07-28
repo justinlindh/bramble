@@ -79,12 +79,10 @@ void* _calloc_r(struct _reent* r, size_t n, size_t size) {
         r->_errno = ENOMEM;
         return NULL;
     }
-    void* p = alloc_with_header(total);
-    if (p == NULL) {
-        r->_errno = ENOMEM;
-        return NULL;
+    void* p = _malloc_r(r, total);
+    if (p != NULL) {
+        memset(p, 0, total);
     }
-    memset(p, 0, total);
     return p;
 }
 

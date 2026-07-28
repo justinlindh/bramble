@@ -5,6 +5,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <FreeRTOS.h>
@@ -22,29 +23,33 @@ extern "C" {
 #define MALLOC_CAP_8BIT (1 << 3)
 #define MALLOC_CAP_DMA (1 << 4)
 
+/*
+ * These go through malloc/calloc/free rather than pvPortMalloc directly, even
+ * though shim/malloc_freertos.c routes those to the same FreeRTOS pool. The
+ * point is that there must be exactly ONE pointer convention on this target:
+ * malloc_freertos.c prefixes every block with a size header, so a raw
+ * pvPortMalloc pointer handed to free() would be freed eight bytes off and
+ * silently corrupt the heap. ESP-IDF lets callers mix the two families
+ * freely, and shared code does: msg_store.c allocates with heap_caps_calloc,
+ * rpc_methods.c allocates with heap_caps_malloc and frees with free(). Going
+ * through malloc here makes every one of those pairings correct by
+ * construction instead of by inspection.
+ */
 static inline void* heap_caps_malloc(size_t size, int caps) {
     if (caps & MALLOC_CAP_SPIRAM) {
         return NULL; // no PSRAM on nRF52840; callers fall back
     }
-    return pvPortMalloc(size);
+    return malloc(size);
 }
 
 static inline void* heap_caps_calloc(size_t n, size_t size, int caps) {
     if (caps & MALLOC_CAP_SPIRAM) {
         return NULL;
     }
-    size_t total = n * size;
-    if (size != 0 && total / size != n) {
-        return NULL; // multiplication overflow
-    }
-    void* p = pvPortMalloc(total);
-    if (p != NULL) {
-        memset(p, 0, total);
-    }
-    return p;
+    return calloc(n, size);
 }
 
-static inline void heap_caps_free(void* ptr) { vPortFree(ptr); }
+static inline void heap_caps_free(void* ptr) { free(ptr); }
 
 static inline size_t heap_caps_get_free_size(int caps) {
     (void)caps;

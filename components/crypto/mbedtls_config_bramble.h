@@ -1,9 +1,17 @@
-// Minimal mbedtls configuration for the Bramble nRF52840 target: exactly the
-// modules crypto_esp.c uses (AES-256-GCM, SHA-256, HMAC/HKDF, X25519 via
-// ECP), tuned for RAM over speed (ROM AES tables, small ECP window). The
-// host nRF-backend test suites build against mbedtls's default config; this
-// minimal set is validated by the target build plus the boot-time init path,
-// which executes keygen, DH, GCM, and hashing on the bench.
+// Minimal mbedtls configuration for the Bramble nRF52840 target, tuned for
+// RAM over speed (ROM AES tables, small ECP window). ESP-IDF does not use
+// this file at all; crypto_deps.cmake points only the nRF target build and
+// the host test build at it, so the host suites compile the exact feature set
+// the device ships.
+//
+// It has three tenants, and knowing which is which is what tells a later
+// reader whether an option is dead:
+//   1. the mesh's own crypto (AES-256-GCM, SHA-256, HMAC/HKDF, X25519)
+//   2. the platform RNG (CTR-DRBG behind esp_random; see
+//      nrf/shim/esp_random_nrf.c) which would be needed with BLE absent
+//   3. NimBLE's LE Secure Connections pairing (secp256r1 and AES-CMAC)
+// An mbedtls config is per-library, not per-consumer, and nimble_lib links
+// the same mbedcrypto, so there is no finer seam available than this file.
 #pragma once
 
 // Core modules

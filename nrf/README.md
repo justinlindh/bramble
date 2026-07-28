@@ -37,7 +37,8 @@ cmake --build nrf/build
 ```
 
 Every build ends with `scripts/size_report.py`, which prints the memory
-report and fails the build if RAM demand exceeds the 200KB budget.
+report and fails the build on any of three limits: total RAM over
+252KB, static (non-heap) RAM over 100KB, or the heap below its 144KB floor.
 
 Flash layouts: the default `swd` layout links at 0x0 for the dev kit. For
 the T1000-E's stock Adafruit UF2 bootloader, configure with
@@ -88,7 +89,7 @@ and fails it over budget):
 | .data | 112 | |
 | libc heap (.heap) | 16,388 | nrfx startup default, newlib only |
 | MSP stack | 16,384 | nrfx startup default |
-| RAM total | 150,464 / 262,144 | 57.4%, 54,336 under the 200KB gate |
+| RAM total | 150,464 / 262,144 | 57.4% (figure predates the P2 heap unification) |
 | Flash | 43,704 / 1,048,576 | 4.2%, Berkeley text+data (includes .data load image) |
 
 These measurements supersede the scoping spike's 190-230KB estimate. Largest
@@ -106,7 +107,8 @@ verifies 103ms.
 ## Measured (P1, full mesh image)
 
 Measured 2026-07-27 on the P1 exit-gate image (LR1110 radio + full mesh
-loop): RAM 195,936 / 262,144 bytes (74.7%, 8,864 under the 200KB gate) with
+loop): RAM 195,936 / 262,144 bytes (74.7%; figure predates the P2 heap
+unification, which moved plain malloc into ucHeap and made the total honest) with
 the FreeRTOS heap at 96KB and the MSP stack/libc heap tuned to 8KB/4KB;
 flash 151,912 bytes (14.5%). On-air: first beacon TX 230 bytes; 10 beacons
 per 10-minute soak at the adaptive interval; LR1110 TCXO runs at 1.6V/164

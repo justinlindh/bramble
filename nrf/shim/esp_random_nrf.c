@@ -33,6 +33,18 @@
 static const char* TAG = "esp_random";
 
 static mbedtls_ctr_drbg_context s_drbg;
+
+/*
+ * Small vending pool. mbedtls_ctr_drbg_random does a full generate plus a
+ * seed-material update on every call, about four AES-256 blocks and a key
+ * schedule, so a bare esp_random() spends roughly 87us to produce four bytes.
+ * That is a per-packet path: the TX gate, beacon jitter, reliability and the
+ * AEAD nonce all draw from it. Refilling 64 bytes at a time amortises one
+ * DRBG call over sixteen draws.
+ */
+#define RNG_POOL_SIZE 64
+static uint8_t s_pool[RNG_POOL_SIZE];
+static size_t s_pool_used = RNG_POOL_SIZE; /* empty until first refill */
 static bool s_ready;
 static bool s_hw_owned;
 static SemaphoreHandle_t s_lock;
@@ -106,11 +118,45 @@ void esp_fill_random(void* buf, size_t len) {
     if (locked) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
     }
-    int rc = mbedtls_ctr_drbg_random(&s_drbg, buf, len);
+    int rc = 0;
+    uint8_t* out = buf;
+    size_t left = len;
+
+    /* Serve small requests from the pool; anything larger than it goes
+     * straight to the DRBG, chunked because the DRBG refuses more than
+     * MBEDTLS_CTR_DRBG_MAX_REQUEST (1024) in one call. Callers see
+     * esp_fill_random's contract, not mbedtls's: a caller asking for more
+     * must get random bytes, not a silent buffer of zeros. */
+    while (left > 0 && left <= RNG_POOL_SIZE && rc == 0) {
+        if (s_pool_used == RNG_POOL_SIZE) {
+            rc = mbedtls_ctr_drbg_random(&s_drbg, s_pool, sizeof(s_pool));
+            if (rc != 0) {
+                break;
+            }
+            s_pool_used = 0;
+        }
+        size_t avail = RNG_POOL_SIZE - s_pool_used;
+        size_t take = left < avail ? left : avail;
+        memcpy(out, s_pool + s_pool_used, take);
+        /* Zero as we go: spent bytes must not linger in RAM. */
+        memset(s_pool + s_pool_used, 0, take);
+        s_pool_used += take;
+        out += take;
+        left -= take;
+    }
+    while (left > 0 && rc == 0) {
+        size_t take = left > MBEDTLS_CTR_DRBG_MAX_REQUEST ? MBEDTLS_CTR_DRBG_MAX_REQUEST : left;
+        rc = mbedtls_ctr_drbg_random(&s_drbg, out, take);
+        out += take;
+        left -= take;
+    }
     if (locked) {
         xSemaphoreGive(s_lock);
     }
     if (rc != 0) {
+        /* Fail closed and say so: silently handing back zeros is how a dead
+         * RNG becomes a predictable key nobody noticed. */
+        ESP_LOGE(TAG, "DRBG draw of %u bytes failed (%d)", (unsigned)len, rc);
         memset(buf, 0, len);
     }
 }

@@ -22,6 +22,7 @@ static nrfx_uarte_t s_uarte = NRFX_UARTE_INSTANCE(0);
 static bool s_ready;
 static SemaphoreHandle_t s_lock;
 static StaticSemaphore_t s_lock_buf;
+static volatile uint32_t s_dropped;
 
 void console_init(void) {
     s_lock = xSemaphoreCreateMutexStatic(&s_lock_buf);
@@ -45,12 +46,35 @@ void console_write(const char* buf, size_t len) {
      * lose whole lines and truncate each other mid-word. That turns the
      * console into an unreliable witness exactly when it matters most: while
      * chasing a BLE pairing failure, the lines that named the failure were
-     * the ones being dropped. Serialize instead.
+     * the ones being dropped.
+     *
+     * The lock is taken with a zero timeout on purpose. nrfx's blocking mode
+     * is a per-byte busy-wait, not DMA-with-wait, so a transfer holds the CPU
+     * for 87us per byte: 5ms for a typical line and 17ms for a full one.
+     * Waiting for the lock would make a second task spin out the first line
+     * AND its own, and since the BLE host task outranks the mesh and radio
+     * tasks, that is milliseconds of denial handed straight to the code with
+     * radio deadlines. Dropping instead keeps the old non-blocking behaviour
+     * while still fixing the corruption, because a whole line is lost rather
+     * than two lines interleaved mid-word. Drops are counted and reported so
+     * the console never lies about having lost something.
      */
-    bool locked = s_lock != NULL && !xPortIsInsideInterrupt() &&
-                  xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED;
-    if (locked) {
-        xSemaphoreTake(s_lock, portMAX_DELAY);
+    /* s_ready implies the mutex exists: console_init creates it before the
+     * driver init that sets the flag, and the guard above returns otherwise. */
+    bool locked =
+        !xPortIsInsideInterrupt() && xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED;
+    if (locked && xSemaphoreTake(s_lock, 0) != pdTRUE) {
+        s_dropped++;
+        return;
+    }
+    if (locked && s_dropped > 0) {
+        char note[48];
+        int n = snprintf(note, sizeof(note), "W (----) console: %lu lines dropped\r\n",
+                         (unsigned long)s_dropped);
+        s_dropped = 0;
+        if (n > 0) {
+            (void)nrfx_uarte_tx(&s_uarte, (const uint8_t*)note, (size_t)n, 0);
+        }
     }
     // EasyDMA requires a RAM source; callers pass stack or static buffers,
     // both of which are RAM on this target.

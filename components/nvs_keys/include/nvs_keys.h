@@ -27,7 +27,7 @@
 #define NVS_NS_NONCE "bramble_nonce"        /**< AEAD nonce counter ceiling */
 #define NVS_NS_NETKEY "bramble_netkey"      /**< Control-plane network key (PART 3, staged) */
 #define NVS_NS_REPLAY "bramble_rp"          /**< Per-sender replay high-water marks */
-#define NVS_NS_BLE_BOND "bramble_ble"       /**< BLE bonds (nRF only; ESP uses esp-nimble's own NVS store) */
+#define NVS_NS_BLE_BOND "bramble_ble"       /**< BLE bonds (nRF only) */
 
 /* ── Frequently-used NVS keys (NVS_NS_BRAMBLE namespace) ────────────────── */
 #define NVS_KEY_NODE_NAME "node_name"
@@ -70,6 +70,14 @@
 
 /* ── NVS_NS_NETKEY keys ──────────────────────────────────────────────────── */
 #define NVS_KEY_NETKEY "key"
+
+/* ── NVS_NS_BLE_BOND keys (nRF only) ─────────────────────────────────────── */
+/* NimBLE's three bond records, one blob each: our and the peer's security
+ * material and the peer's CCCD subscriptions. See nrf/src/ble_store_nvs.c.
+ * Names must be <= 15 chars. */
+#define BLE_KEY_OUR_SECS "our_secs"
+#define BLE_KEY_PEER_SECS "peer_secs"
+#define BLE_KEY_CCCDS "cccds"
 
 /* ── NVS_NS_REPLAY keys ──────────────────────────────────────────────────── */
 /* Serialized per-sender replay high-water marks, one blob per window, so a
