@@ -92,7 +92,5 @@ func (h *emuHarness) close() {
 	if h.sim.broker != nil {
 		h.sim.broker.Stop()
 	}
-	h.sim.pipeW.Close()
-	dup2Stdout(h.sim.origStdout)
-	closeFd(h.sim.origStdout)
+	h.sim.restoreStdout(0)
 }

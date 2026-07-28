@@ -888,6 +888,7 @@ func (s *Sim) runRealtimeHeadless() error {
 		select {
 		case <-s.stopCh:
 			s.shutdownEmulator()
+			s.restoreStdout(0)
 			return nil
 		case <-ticker.C:
 		}
@@ -905,9 +906,7 @@ func (s *Sim) runRealtimeHeadless() error {
 	s.shutdownEmulator()
 
 	// Flush the C-stdout pipe, mirroring RunHeadless's teardown.
-	s.pipeW.Close()
-	dup2Stdout(s.origStdout)
-	time.Sleep(100 * time.Millisecond)
+	s.restoreStdout(100 * time.Millisecond)
 	return nil
 }
 
