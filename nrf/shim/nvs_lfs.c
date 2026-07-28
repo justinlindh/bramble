@@ -22,6 +22,7 @@
 #include "lfs.h"
 #include "lfs_nvmc.h"
 #include "nvs_flash.h"
+#include "nvs_lfs_mount.h"
 
 static const char* TAG = "nvs_lfs";
 
@@ -96,6 +97,8 @@ static void scan_namespaces(void) {
     }
     lfs_dir_close(&s_lfs, &dir);
 }
+
+lfs_t* nvs_lfs_handle(void) { return s_mounted ? &s_lfs : NULL; }
 
 esp_err_t nvs_flash_init(void) {
     lock_init();

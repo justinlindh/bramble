@@ -122,6 +122,7 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/location/location.c
   ${BRAMBLE_COMPONENTS}/network_key/network_key.c
   ${BRAMBLE_COMPONENTS}/msg_store/msg_store.c
+  ${BRAMBLE_COMPONENTS}/msg_store/msg_store_lfs.c
   ${BRAMBLE_COMPONENTS}/reliability/reliability.c
   ${BRAMBLE_COMPONENTS}/rpc/rpc_dispatcher.c
   ${BRAMBLE_COMPONENTS}/rpc/rpc_auth.c
@@ -173,9 +174,10 @@ target_include_directories(bramble_core BEFORE PUBLIC
 # radio_internal.h (the tx_gate-only transmit primitive) lives outside
 # include/ on purpose; radio_lr1110.c implements it.
 target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/radio)
-target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../main)
+target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../main
+  ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF)
-target_link_libraries(bramble_core PUBLIC freertos_kernel)
+target_link_libraries(bramble_core PUBLIC freertos_kernel littlefs_lib)
 
 add_library(littlefs_lib STATIC
   ${littlefs_SOURCE_DIR}/lfs.c

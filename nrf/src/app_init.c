@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "identity.h"
 #include "mesh_task.h"
+#include "msg_store.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -32,6 +33,10 @@ void app_init_stack(void) {
         }
         ESP_LOGI(TAG, "identity generated: addr %08lx", (unsigned long)s_identity.address);
     }
+
+    /* Restores persisted messages before the mesh starts, matching the ESP
+     * boot order (main.c calls this before mesh_task_start). */
+    msg_store_init_with_persistence();
 
     mesh_task_start(&s_identity);
     ESP_LOGI(TAG, "mesh_task_start returned; free heap %u bytes", (unsigned)xPortGetFreeHeapSize());
