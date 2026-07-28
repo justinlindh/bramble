@@ -1,0 +1,36 @@
+diff --git a/porting/npl/freertos/include/nimble/nimble_npl_os.h b/porting/npl/freertos/include/nimble/nimble_npl_os.h
+index 44d216c..6c3492a 100644
+--- a/porting/npl/freertos/include/nimble/nimble_npl_os.h
++++ b/porting/npl/freertos/include/nimble/nimble_npl_os.h
+@@ -283,18 +283,28 @@ ble_npl_hw_set_isr(int irqn, void (*addr)(void))
+ static inline uint32_t
+ ble_npl_hw_enter_critical(void)
+ {
+-    vPortEnterCritical();
++    /* Bramble: save/restore PRIMASK instead of vPortEnterCritical, which
++     * asserts when called from an interrupt. The link layer calls this from
++     * its RADIO and RTC0 ISRs, so the FreeRTOS critical-section API is not
++     * usable here. s_critical_nesting is kept because npl_os_freertos.c
++     * reads it to decide whether it may block. */
++    uint32_t primask;
++    __asm volatile ("mrs %0, primask" : "=r" (primask));
++    __asm volatile ("cpsid i" ::: "memory");
+     s_critical_nesting++;
+-    return 0;
++    return primask;
+ }
+ 
+ static inline void
+ ble_npl_hw_exit_critical(uint32_t ctx)
+ {
++    /* Bramble: see ble_npl_hw_enter_critical. */
+     if (s_critical_nesting > 0) {
+         s_critical_nesting--;
+     }
+-    vPortExitCritical();
++    if ((ctx & 1u) == 0u) {
++        __asm volatile ("cpsie i" ::: "memory");
++    }
+ }
+ 
+ static inline bool

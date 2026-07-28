@@ -9,7 +9,11 @@
 #include <stdbool.h>
 #include <string.h>
 
-#ifdef ESP_PLATFORM
+#include <stdio.h>
+
+#include "bramble_storage.h"
+
+#ifdef BRAMBLE_HAS_NVS
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -234,4 +238,4 @@ void channel_storage_clear(void) {
     s_has_data = false;
 }
 
-#endif /* ESP_PLATFORM */
+#endif /* BRAMBLE_HAS_NVS */
