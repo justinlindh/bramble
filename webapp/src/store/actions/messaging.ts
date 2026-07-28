@@ -893,22 +893,28 @@ interface ProbeCompleteWire {
   responders?: ProbeResponderWire[];
 }
 
-export function handleProbeAck(params: unknown): void {
-  const raw = params as ProbeAckWire;
-  const parsedAddr = parseAddr(raw.address ?? raw.responderAddr);
-
-  const roundsTotal = Math.max(1, Number(raw.rounds_total ?? raw.roundsTotal ?? (raw.seen_rounds ? 3 : 1)));
-  const seenRounds = Math.max(1, Math.min(roundsTotal, raw.seen_rounds ?? raw.seenRounds ?? 1));
-  const ack: ProbeResponse = {
-    responderAddr: parsedAddr,
-    hopCount: raw.hops ?? raw.hopCount ?? 0,
-    rssi: raw.rssi ?? 0,
-    snr: raw.snr ?? 0,
-    pathLen: raw.hops ?? raw.pathLen ?? 0,
-    latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
+// Map a tolerant responder payload to a ProbeResponse. Shared by the per-ack
+// (handleProbeAck) and batch (handleProbeComplete) paths, which otherwise drift
+// apart on the field fallbacks and the seenRounds/confidence math.
+function normalizeProbeResponder(r: ProbeResponderWire, roundsTotal: number): ProbeResponse {
+  const seenRounds = Math.max(1, Math.min(roundsTotal, Number(r.seen_rounds ?? r.seenRounds ?? 1)));
+  return {
+    responderAddr: parseAddr(r.address ?? r.responderAddr),
+    hopCount: r.hops ?? r.hopCount ?? 0,
+    rssi: r.rssi ?? 0,
+    snr: r.snr ?? 0,
+    pathLen: r.hops ?? r.pathLen ?? 0,
+    latencyMs: r.latency_ms ?? r.latencyMs ?? 0,
     seenRounds,
     confidence: seenRounds / roundsTotal,
   };
+}
+
+export function handleProbeAck(params: unknown): void {
+  const raw = params as ProbeAckWire;
+
+  const roundsTotal = Math.max(1, Number(raw.rounds_total ?? raw.roundsTotal ?? (raw.seen_rounds ? 3 : 1)));
+  const ack = normalizeProbeResponder(raw, roundsTotal);
   const probeId = typeof raw.probeId === 'string'
     ? parseInt(raw.probeId, 16)
     : typeof raw.probe_id === 'string'
@@ -946,18 +952,7 @@ export function handleProbeComplete(params: unknown): void {
 
   let responses = prev.responses;
   for (const r of responders) {
-    const addr = parseAddr(r.address ?? r.responderAddr);
-    const seenRounds = Math.max(1, Math.min(roundsTotal, Number(r.seen_rounds ?? r.seenRounds ?? 1)));
-    responses = upsertProbeResponse(responses, {
-      responderAddr: addr,
-      hopCount: r.hops ?? r.hopCount ?? 0,
-      rssi: r.rssi ?? 0,
-      snr: r.snr ?? 0,
-      pathLen: r.hops ?? r.pathLen ?? 0,
-      latencyMs: r.latency_ms ?? r.latencyMs ?? 0,
-      seenRounds,
-      confidence: seenRounds / roundsTotal,
-    });
+    responses = upsertProbeResponse(responses, normalizeProbeResponder(r, roundsTotal));
   }
 
   store.setProbeResult({ ...prev, responses, complete: true });
