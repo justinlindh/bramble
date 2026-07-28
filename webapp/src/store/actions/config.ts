@@ -167,29 +167,6 @@ export async function setLocationConfig(config: Partial<LocationConfig>): Promis
   await loadPeerLocations().catch(() => {});
 }
 
-export async function setLocationContact(
-  addr: number,
-  tier: LocationTier,
-  intervalSec?: number,
-  distanceTriggerM?: number
-): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  // Firmware expects address as a hex string, not a numeric addr.
-  const params: Record<string, unknown> = { address: formatAddrHex(addr), tier };
-  if (intervalSec !== undefined) params.intervalSec = intervalSec;
-  if (distanceTriggerM !== undefined) params.distanceTriggerM = distanceTriggerM;
-  const result = await session.client.rpc('bramble.setLocationContact', params);
-  assertOk(result, 'Failed to set location contact');
-  await loadConfig();
-}
-
-export async function removeLocationContact(addr: number): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.removeLocationContact', { address: formatAddrHex(addr) });
-  assertOk(result, 'Failed to remove location contact');
-  await loadConfig();
-}
-
 export async function shareLocationOnce(addr: number, tier?: LocationTier): Promise<void> {
   if (!session.client) throw new Error('Not connected');
   const params: Record<string, unknown> = { address: formatAddrHex(addr) };

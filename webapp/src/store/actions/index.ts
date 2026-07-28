@@ -39,8 +39,6 @@ export {
   setMailbox,
   setDefaultChannel,
   setLocationConfig,
-  setLocationContact,
-  removeLocationContact,
   shareLocationOnce,
 } from './config';
 export {
