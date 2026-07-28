@@ -77,31 +77,30 @@ void npl_freertos_hw_set_isr(int irqn, void (*addr)(void)) {
 
 static volatile int s_hfxo_refs;
 
-/* Blocks until the crystal is actually running, which is the whole point:
- * the radio needs HFXO accuracy, and a caller that proceeds on the internal
- * RC oscillator transmits slightly off-frequency and misses tight receive
- * windows. Advertising survives that (the peer's receiver is forgiving);
- * catching a CONNECT_IND 150us after an advertisement does not, which is
- * exactly the symptom this cost: visible in scans, never connectable.
- * Startup is ~360us typical, so the bounded spin is short even when called
- * from the link layer's ISR context. */
+/* The radio needs the crystal's accuracy: a caller that proceeds on the
+ * internal RC oscillator transmits slightly off-frequency and misses tight
+ * receive windows (advertising survives that, catching a CONNECT_IND 150us
+ * after an advertisement does not, which reads as "visible in every scan,
+ * never connectable").
+ *
+ * So the crystal is started once, at BLE bring-up, and left running: this
+ * function is called from the link layer's ISR on every radio event, and
+ * spinning there for the ~360us startup starves every task in the system
+ * (measured: the mesh stopped draining its receive queue and the heartbeat
+ * task stopped entirely within seconds). Keeping HFXO on costs idle current,
+ * which is P3's problem to solve with a proper power model, not something to
+ * buy here with a busy-wait in an interrupt.
+ */
 void nrf52_clock_hfxo_request(void) {
     uint32_t primask;
     __asm volatile("mrs %0, primask" : "=r"(primask));
     __asm volatile("cpsid i" ::: "memory");
-    if (s_hfxo_refs++ == 0) {
+    if (s_hfxo_refs++ == 0 && !nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
         nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
         nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTART);
     }
     if ((primask & 1u) == 0u) {
         __asm volatile("cpsie i" ::: "memory");
-    }
-    /* ~2ms worth of polling at 64MHz: far beyond the typical startup, and a
-     * bound rather than a hang if the crystal is absent. */
-    for (int i = 0; i < 200000; i++) {
-        if (nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
-            return;
-        }
     }
 }
 
@@ -109,9 +108,10 @@ void nrf52_clock_hfxo_release(void) {
     uint32_t primask;
     __asm volatile("mrs %0, primask" : "=r"(primask));
     __asm volatile("cpsid i" ::: "memory");
-    if (s_hfxo_refs > 0 && --s_hfxo_refs == 0) {
-        nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTOP);
+    if (s_hfxo_refs > 0) {
+        s_hfxo_refs--;
     }
+    /* Deliberately does NOT stop the crystal; see the request path. */
     if ((primask & 1u) == 0u) {
         __asm volatile("cpsie i" ::: "memory");
     }
@@ -124,6 +124,15 @@ void nrf52_clock_hfxo_release(void) {
 bool nimble_glue_start_lfclk(void) {
     if (nrf_clock_lf_is_running(NRF_CLOCK)) {
         return nrf_clock_lf_actv_src_get(NRF_CLOCK) == NRF_CLOCK_LFCLK_XTAL;
+    }
+
+    /* Start the high-frequency crystal here, in task context, so the link
+     * layer never has to wait for it from an interrupt. */
+    if (!nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
+        nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
+        nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTART);
+        while (!nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
+        }
     }
 
     nrf_clock_lf_src_set(NRF_CLOCK, NRF_CLOCK_LFCLK_XTAL);

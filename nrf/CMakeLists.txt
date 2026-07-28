@@ -96,7 +96,10 @@ target_compile_definitions(nrfx_lib PUBLIC NRF52840_XXAA)
 # bootstraps, ISRs are shallow, and newlib allocates little (printf buffers);
 # the mesh runs on FreeRTOS task stacks and ucHeap. Sized when the mesh
 # statics first pushed the RAM gate over budget.
-target_compile_definitions(nrfx_lib PRIVATE __STACK_SIZE=8192 __HEAP_SIZE=4096)
+# __HEAP_SIZE=0: newlib's sbrk heap is dead weight now that
+# shim/malloc_freertos.c serves malloc from the FreeRTOS pool, and reserving
+# a second region would just take RAM away from the one heap that is used.
+target_compile_definitions(nrfx_lib PRIVATE __STACK_SIZE=8192 __HEAP_SIZE=0)
 
 execute_process(
   COMMAND git describe --always --dirty
@@ -199,7 +202,14 @@ target_include_directories(bramble_core BEFORE PUBLIC
 target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/radio)
 target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../main
   ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF)
+# PUBLIC so every translation unit that sees delivery_event_ring.h agrees on
+# the struct size. 512 records (28KB) is an ESP-with-PSRAM figure; this chip
+# has 256KB in total and no PSRAM to spill into, and the ring holds local
+# delivery history for the UI rather than any protocol state, so depth here
+# costs only how far back the timeline goes. 128 keeps a useful window and
+# returns 21KB to the heap that pairing needs for its P-256 keypair.
+target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF
+                                               DELIVERY_EVENT_RING_CAPACITY=128u)
 target_link_libraries(bramble_core PUBLIC freertos_kernel littlefs_lib)
 
 add_library(littlefs_lib STATIC
@@ -257,6 +267,9 @@ target_include_directories(nimble_lib PUBLIC
   ${nimble_SOURCE_DIR}/nimble/host/services/gap/include
   ${nimble_SOURCE_DIR}/nimble/host/services/gatt/include
   ${nimble_SOURCE_DIR}/nimble/host/store/config/include
+  # src/ too: ble_store_nvs.c implements the persistence hooks declared in
+  # the store's private header, so both sides share one declaration.
+  ${nimble_SOURCE_DIR}/nimble/host/store/config/src
   ${nimble_SOURCE_DIR}/nimble/host/util/include
   ${nimble_SOURCE_DIR}/nimble/controller/include
   ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/include
@@ -289,6 +302,7 @@ add_executable(bramble-nrf
   src/lr11xx_hal_nrf.c
   src/lfs_nvmc.c
   src/nimble_glue.c
+  src/ble_store_nvs.c
   src/ble_host.c
   ${BRAMBLE_COMPONENTS}/ble/ble_server.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_token.c
@@ -304,6 +318,7 @@ add_executable(bramble-nrf
   shim/rpc_platform_stubs.c
   shim/nvs_lfs.c
   shim/mbedtls_platform_freertos.c
+  shim/malloc_freertos.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_esp.c
 )
@@ -322,6 +337,7 @@ target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
   BRAMBLE_LFS_BASE=${BRAMBLE_LFS_BASE}
   BRAMBLE_LFS_SIZE=${BRAMBLE_LFS_SIZE}
+  $<$<BOOL:${BRAMBLE_LOG_DEBUG}>:BRAMBLE_LOG_DEBUG>
 )
 # Dev-only bench network key (64 hex chars), passed locally at configure
 # time and NEVER committed; see nrf/src/nrf_provision.c and nrf/README.md.

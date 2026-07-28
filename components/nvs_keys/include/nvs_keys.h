@@ -27,6 +27,7 @@
 #define NVS_NS_NONCE "bramble_nonce"        /**< AEAD nonce counter ceiling */
 #define NVS_NS_NETKEY "bramble_netkey"      /**< Control-plane network key (PART 3, staged) */
 #define NVS_NS_REPLAY "bramble_rp"          /**< Per-sender replay high-water marks */
+#define NVS_NS_BLE_BOND "bramble_ble"       /**< BLE bonds (nRF only; ESP uses esp-nimble's own NVS store) */
 
 /* ── Frequently-used NVS keys (NVS_NS_BRAMBLE namespace) ────────────────── */
 #define NVS_KEY_NODE_NAME "node_name"

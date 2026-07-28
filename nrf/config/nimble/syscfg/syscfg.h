@@ -6,6 +6,15 @@
  * one connection, ATT MTU 517 so a 512-byte RPC frame fits one notification,
  * a larger msys pool for those frames, and BLE_LL_SCA matched to whichever
  * low-frequency clock main_nrf.c actually starts.
+ *
+ * The security manager is enabled here to match the fleet: ble_server.c sets
+ * sm_sc/sm_bonding at runtime and marks the RPC characteristics WRITE_ENC,
+ * but those runtime settings are inert unless BLE_SM_SC is compiled in. With
+ * the upstream default of 0 the node advertised and connected, then dropped
+ * every client with an authentication failure the moment it asked for
+ * encryption. BLE_SM_LEGACY stays 0 on purpose: legacy Just Works is
+ * recoverable from a sniffed pairing, and allowing it would silently
+ * downgrade LE Secure Connections (see ble_server.c and issue #73).
  */
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
@@ -818,12 +827,23 @@
 #define MYNEWT_VAL_FLOAT_USER (0)
 #endif
 
+/* Bramble: 12 blocks of 292 is the ESP fleet's pool (ESP-IDF's NimBLE
+ * defaults), carrying the same RPC traffic there. Widening the blocks below
+ * without narrowing the count would have cost 3.2KB of a 1.7KB margin. */
 #ifndef MYNEWT_VAL_MSYS_1_BLOCK_COUNT
-#define MYNEWT_VAL_MSYS_1_BLOCK_COUNT (16)
+#define MYNEWT_VAL_MSYS_1_BLOCK_COUNT (12)
 #endif
 
+/* Bramble: 88 (the upstream value) is too small for LE Secure Connections.
+ * ble_sm_cmd_get builds each command with os_mbuf_extend, which fails unless
+ * the whole command fits ONE block, and the pairing public-key command is 65
+ * bytes of payload before mbuf and L2CAP headers. With 88-byte blocks every
+ * pairing died at the public-key exchange with BLE_HS_ENOMEM, reported to
+ * the client as an encryption failure. 292 is the value NimBLE's own ports
+ * (including ESP-IDF's) use for SC-capable builds. ATT payloads are chained
+ * rather than extended, so this bound is about SM, not the RPC frame size. */
 #ifndef MYNEWT_VAL_MSYS_1_BLOCK_SIZE
-#define MYNEWT_VAL_MSYS_1_BLOCK_SIZE (88)
+#define MYNEWT_VAL_MSYS_1_BLOCK_SIZE (292)
 #endif
 
 #ifndef MYNEWT_VAL_MSYS_1_SANITY_MIN_COUNT
@@ -1328,8 +1348,15 @@
 #define MYNEWT_VAL_BLE_LL_CFG_FEAT_LE_CSA2 (1)
 #endif
 
+/* Bramble: link-layer encryption, which the upstream file leaves off. The
+ * host half of pairing works without it, which makes its absence hard to
+ * read from the outside: the full SMP exchange completed, both sides agreed
+ * on an LTK, and then the central dropped the link with an authentication
+ * failure. The controller had simply never been built to encrypt, so it
+ * never raised the LTK request that answers the central's LL_ENC_REQ. Every
+ * WRITE_ENC characteristic in ble_server.c depends on this. */
 #ifndef MYNEWT_VAL_BLE_LL_CFG_FEAT_LE_ENCRYPTION
-#define MYNEWT_VAL_BLE_LL_CFG_FEAT_LE_ENCRYPTION (0)
+#define MYNEWT_VAL_BLE_LL_CFG_FEAT_LE_ENCRYPTION (1)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_LL_CFG_FEAT_LE_PING
@@ -1965,7 +1992,7 @@
 #endif
 
 #ifndef MYNEWT_VAL_BLE_SM_BONDING
-#define MYNEWT_VAL_BLE_SM_BONDING (0)
+#define MYNEWT_VAL_BLE_SM_BONDING (1)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_SM_CSIS_SIRK
@@ -2001,11 +2028,11 @@
 #endif
 
 #ifndef MYNEWT_VAL_BLE_SM_OUR_KEY_DIST
-#define MYNEWT_VAL_BLE_SM_OUR_KEY_DIST (0)
+#define MYNEWT_VAL_BLE_SM_OUR_KEY_DIST (3)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_SM_SC
-#define MYNEWT_VAL_BLE_SM_SC (0)
+#define MYNEWT_VAL_BLE_SM_SC (1)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_SM_SC_DEBUG_KEYS
@@ -2017,11 +2044,22 @@
 #endif
 
 #ifndef MYNEWT_VAL_BLE_SM_THEIR_KEY_DIST
-#define MYNEWT_VAL_BLE_SM_THEIR_KEY_DIST (0)
+#define MYNEWT_VAL_BLE_SM_THEIR_KEY_DIST (3)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_STORE_MAX_BONDS
 #define MYNEWT_VAL_BLE_STORE_MAX_BONDS (3)
+#endif
+
+/* Bramble: persist bonds across reboots, matching the ESP fleet's
+ * CONFIG_BT_NIMBLE_NVS_PERSIST=y. The upstream backend for this
+ * (ble_store_config_conf.c) is a mynewt conf-subsystem client and is not in
+ * the build; nrf/src/ble_store_nvs.c implements the same four hooks over the
+ * LittleFS-backed NVS shim instead. Without persistence the node forgets
+ * every LTK on reset while the phone keeps its half, and reconnects fail
+ * until the user manually forgets the device. */
+#ifndef MYNEWT_VAL_BLE_STORE_CONFIG_PERSIST
+#define MYNEWT_VAL_BLE_STORE_CONFIG_PERSIST (1)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_STORE_MAX_CCCDS

@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <FreeRTOS.h>
+#include <semphr.h>
+#include <task.h>
+
 #include <nrfx_uarte.h>
 
 #include "esp_log.h"
@@ -16,8 +20,12 @@
 
 static nrfx_uarte_t s_uarte = NRFX_UARTE_INSTANCE(0);
 static bool s_ready;
+static SemaphoreHandle_t s_lock;
+static StaticSemaphore_t s_lock_buf;
 
 void console_init(void) {
+    s_lock = xSemaphoreCreateMutexStatic(&s_lock_buf);
+
     nrfx_uarte_config_t cfg = NRFX_UARTE_DEFAULT_CONFIG(CONSOLE_TX_PIN, CONSOLE_RX_PIN);
     cfg.baudrate = NRF_UARTE_BAUDRATE_115200;
     // No event handler: the driver runs in blocking mode.
@@ -30,9 +38,26 @@ void console_write(const char* buf, size_t len) {
     if (!s_ready || len == 0) {
         return;
     }
+
+    /*
+     * One UARTE, many callers. nrfx_uarte_tx returns BUSY rather than queuing
+     * when a transfer is already in flight, so concurrent loggers silently
+     * lose whole lines and truncate each other mid-word. That turns the
+     * console into an unreliable witness exactly when it matters most: while
+     * chasing a BLE pairing failure, the lines that named the failure were
+     * the ones being dropped. Serialize instead.
+     */
+    bool locked = s_lock != NULL && !xPortIsInsideInterrupt() &&
+                  xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED;
+    if (locked) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+    }
     // EasyDMA requires a RAM source; callers pass stack or static buffers,
     // both of which are RAM on this target.
     (void)nrfx_uarte_tx(&s_uarte, (const uint8_t*)buf, len, 0);
+    if (locked) {
+        xSemaphoreGive(s_lock);
+    }
 }
 
 void bramble_log_write(char level, const char* tag, const char* fmt, ...) {

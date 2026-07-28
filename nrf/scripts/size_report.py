@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RAM/flash budget gate for the Bramble nRF52840 target (P0 exit gate).
+"""RAM/flash budget gate for the Bramble nRF52840 target.
 
 Sums every ELF section placed in RAM (0x20000000 window: .data, .bss, any
 .heap the linker script emits) plus the MSP stack reserved by the nrfx linker
@@ -7,7 +7,20 @@ script (__StackLimit..__StackTop), compares the total against the budget, and
 fails the build when over. Prints the top .bss symbols so shrink work has a
 target list.
 
-Usage: size_report.py ELF [--budget-kb 200] [--json PATH]
+The total covers the whole chip because the heap is a section: ucHeap is the
+target's only pool (shim/malloc_freertos.c routes newlib's malloc to it), so
+every allocation is inside a number this script can see. That was not true
+before: plain calloc used to come from newlib's separate sbrk heap, which is
+not a section and which the stock unbounded _sbrk let run past the end of
+RAM, so this gate cheerfully reported 77% of a chip that was already ~14KB
+over. Anything that reintroduces a second allocator reintroduces the blind
+spot.
+
+Because ucHeap dominates the total, being under budget means the image fits,
+not that the heap has room to work in. Runtime headroom is a separate
+question, answered by the free-heap figure in the boot log and heartbeats.
+
+Usage: size_report.py ELF [--budget-kb 252] [--json PATH]
 """
 
 import argparse
@@ -55,7 +68,10 @@ def parse_symbols(elf):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("elf")
-    ap.add_argument("--budget-kb", type=int, default=200)
+    # 252KB of the 256KB: the heap is inside this total now, so the gate is
+    # "the image fits the chip with a margin" rather than "static data stays
+    # small enough to leave room for a heap".
+    ap.add_argument("--budget-kb", type=int, default=252)
     ap.add_argument("--json")
     args = ap.parse_args()
 
@@ -113,8 +129,8 @@ def main():
     if ram_total > budget:
         print(
             f"FAIL: RAM demand {ram_total} exceeds budget {budget} "
-            f"(over by {ram_total - budget} bytes). Shrink before proceeding; "
-            "do not raise the budget (P1/P2 still need the slack).",
+            f"(over by {ram_total - budget} bytes). Shrink a tenant; raising "
+            "the budget spends margin the chip does not have.",
             file=sys.stderr,
         )
         return 1

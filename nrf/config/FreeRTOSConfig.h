@@ -30,11 +30,18 @@ extern uint32_t SystemCoreClock;
 #define configSUPPORT_STATIC_ALLOCATION 1
 #define configKERNEL_PROVIDED_STATIC_MEMORY 1
 #define configSUPPORT_DYNAMIC_ALLOCATION 1
-// 96K, not 48K: mesh_task_start heap-allocates the DM session table
-// (44,160 bytes) and the delivery event ring (28,692 bytes); both fell back
-// to a too-small heap and silently disabled the mesh before this was sized
-// for them.
-#define configTOTAL_HEAP_SIZE ((size_t)(96 * 1024))
+// This is the ONLY heap on the target: shim/malloc_freertos.c routes newlib's
+// malloc/calloc here too, so it must cover both the heap_caps_* callers and
+// the plain-calloc ones. The large tenants are mesh_task_start's DM session
+// table (44,160 bytes) and delivery event ring (28,692 bytes), which have no
+// PSRAM to fall back to here, plus task stacks, the message store, and
+// mbedtls (including the P-256 keypair each BLE pairing builds).
+//
+// The size is what is left of the 256KB after static data and the 8KB
+// interrupt stack, less a small unallocated margin. Raising it further means
+// taking RAM the linker has already committed elsewhere, so grow the budget
+// gate and this together or not at all.
+#define configTOTAL_HEAP_SIZE ((size_t)(152 * 1024))
 #define configUSE_MALLOC_FAILED_HOOK 1
 #define configCHECK_FOR_STACK_OVERFLOW 2
 

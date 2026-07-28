@@ -13,6 +13,8 @@
 
 #include "nimble_glue.h"
 
+void ble_store_nvs_start_writer(void);
+
 static const char* TAG = "ble_host";
 
 int ble_host_start(void) {
@@ -30,6 +32,7 @@ int ble_host_start(void) {
         ESP_LOGE(TAG, "ble_server_start failed (%d)", rc);
         return rc;
     }
+    ble_store_nvs_start_writer();
     ESP_LOGI(TAG, "BLE up; free heap %u bytes", (unsigned)xPortGetFreeHeapSize());
     return 0;
 }

@@ -516,6 +516,20 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
 
 static void ble_host_task(void* param) {
     (void)param;
+#ifndef ESP_PLATFORM
+    /*
+     * Upstream's nimble_port_freertos_init hardcodes this task at
+     * tskIDLE_PRIORITY + 1, which is below every Bramble task including the
+     * mesh and radio tasks. esp-nimble does not: it runs the host well above
+     * application work, and the pairing path needs that, because the SM state
+     * machine advances on this task and LE Secure Connections puts ~1s of
+     * P-256 work on it. Starved at priority 1 the exchange outran the link
+     * supervision timeout and every pairing died with the peer disconnecting.
+     * Above the mesh (5), below the FreeRTOS timer (7) and the link layer
+     * (8), which must stay the highest priority thing on the chip.
+     */
+    vTaskPrioritySet(NULL, 6);
+#endif
     ESP_LOGI(TAG, "NimBLE host task started");
     nimble_port_run(); /* blocks until the stack is stopped */
 #ifdef ESP_PLATFORM
