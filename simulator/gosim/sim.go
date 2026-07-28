@@ -207,6 +207,7 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 		return nil, fmt.Errorf("dup stdout: %w", err)
 	}
 	if err := syscall.Dup2(int(w.Fd()), 1); err != nil {
+		syscall.Close(s.origStdout)
 		r.Close()
 		w.Close()
 		return nil, fmt.Errorf("dup2: %w", err)
@@ -1427,6 +1428,7 @@ func RunHeadless(scenarioPath string) error {
 	sim.mu.Unlock()
 
 	if sim.State() != StateLoaded {
+		sim.restoreStdout(0)
 		return fmt.Errorf("failed to load scenario")
 	}
 

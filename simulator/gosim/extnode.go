@@ -888,6 +888,7 @@ func (s *Sim) runRealtimeHeadless() error {
 		select {
 		case <-s.stopCh:
 			s.shutdownEmulator()
+			s.restoreStdout(0)
 			return nil
 		case <-ticker.C:
 		}

@@ -245,6 +245,7 @@ func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
 	sim.mu.Unlock()
 
 	if sim.State() != StateLoaded {
+		sim.restoreStdout(0)
 		return nil, fmt.Errorf("runScenarioHeadless: failed to load scenario %s", scenarioPath)
 	}
 
