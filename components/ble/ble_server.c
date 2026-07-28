@@ -20,7 +20,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+/* ESP-IDF's HCI shim: on that platform nimble_port_init() also brings up the
+ * ESP controller through it. Bare-metal builds link NimBLE's own nRF52
+ * controller instead, so there is no HCI transport to initialize (and no
+ * symbol from this header is used anywhere in the file). */
+#ifdef ESP_PLATFORM
 #include "esp_nimble_hci.h"
+#endif
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
@@ -146,10 +152,26 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
         if (n > max_chunk)
             n = max_chunk;
 
-        struct os_mbuf* om = NULL;
-        /* Bounded retry: the msys pool refills as the stack drains queued
-         * notifications; dropping a chunk would corrupt the JSON stream. */
-        for (int attempt = 0; attempt < 10 && om == NULL; attempt++) {
+        /*
+         * Bounded retry covering BOTH the allocation and the send. The msys
+         * pool refills as the stack drains queued notifications, and an
+         * ENOMEM out of notify_custom means the same "momentarily empty" as a
+         * NULL allocation: a 253-byte chunk needs two 292-byte blocks, so a
+         * response of a few chunks can outrun a 12-block pool and then
+         * recover a few milliseconds later. Retrying the send matters as much
+         * as retrying the alloc, because giving up mid-response truncates the
+         * JSON stream, which is the corruption the chunking exists to avoid.
+         * Observed on the nRF bench: an 895-byte getNeighbors reply died at
+         * 759/896 with rc=6.
+         *
+         * Each attempt must build a fresh mbuf: ble_att_clt_tx_notify
+         * consumes the one it is given on every path, failures included.
+         * Only ENOMEM is worth retrying; ENOTCONN and friends will not
+         * improve with time.
+         */
+        int rc = BLE_HS_ENOMEM;
+        for (int attempt = 0; attempt < 25 && rc == BLE_HS_ENOMEM; attempt++) {
+            struct os_mbuf* om;
             if (off + n <= len) {
                 om = ble_hs_mbuf_from_flat(json + off, n);
             } else if (off < len) {
@@ -164,17 +186,16 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
             }
             if (om == NULL) {
                 vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
+            rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
+            if (rc == BLE_HS_ENOMEM) {
+                vTaskDelay(pdMS_TO_TICKS(20));
             }
         }
-        if (om == NULL) {
-            ESP_LOGW(TAG, "Notify chunk alloc failed at %u/%u; dropping rest", (unsigned)off,
-                     (unsigned)total);
-            return;
-        }
-
-        int rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
         if (rc != 0) {
-            ESP_LOGW(TAG, "Notify chunk failed: %d at %u/%u", rc, (unsigned)off, (unsigned)total);
+            ESP_LOGW(TAG, "Notify chunk failed: %d at %u/%u; dropping rest", rc, (unsigned)off,
+                     (unsigned)total);
             return;
         }
         off += n;
@@ -511,8 +532,14 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
 static void ble_host_task(void* param) {
     (void)param;
     ESP_LOGI(TAG, "NimBLE host task started");
-    nimble_port_run(); /* blocks until nimble_port_stop() */
+    nimble_port_run(); /* blocks until the stack is stopped */
+#ifdef ESP_PLATFORM
     nimble_port_freertos_deinit();
+#else
+    /* Upstream NimBLE has no freertos_deinit; the port's own task function
+     * returns only at shutdown, so end the task explicitly. */
+    vTaskDelete(NULL);
+#endif
 }
 
 static void on_sync(void) {
@@ -562,11 +589,19 @@ int ble_server_init(void) {
      * size it for their worst case plus interrupt frames, not the average. */
     xTaskCreate(ble_rpc_task, "ble_rpc", 16384, NULL, 5, NULL);
 
+#ifdef ESP_PLATFORM
+    /* On ESP-IDF this also starts the Bluetooth controller and can fail. */
     int rc = nimble_port_init();
     if (rc != 0) {
         ESP_LOGE(TAG, "nimble_port_init failed: %d", rc);
         return -1;
     }
+#else
+    /* Upstream initializes host plus the built-in controller and returns
+     * void; failures assert inside the stack. */
+    nimble_port_init();
+    int rc = 0;
+#endif
 
     /* Configure NimBLE host */
     ble_hs_cfg.reset_cb = on_reset;
@@ -640,11 +675,17 @@ int ble_server_start(void) {
 }
 
 void ble_server_stop(void) {
+#ifdef ESP_PLATFORM
     int rc = nimble_port_stop();
     if (rc == 0) {
         nimble_port_deinit();
-        ESP_LOGI(TAG, "BLE server stopped");
     }
+#else
+    /* Upstream NimBLE exposes no stop/deinit in the porting layer; this
+     * target never tears the stack down (there is no Wi-Fi mode to switch
+     * to), so the honest thing is to say so rather than pretend. */
+    ESP_LOGW(TAG, "ble_server_stop is not supported on this platform");
+#endif
 }
 
 bool ble_server_connected(void) { return s_conn_handle != BLE_HS_CONN_HANDLE_NONE; }
