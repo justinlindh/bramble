@@ -959,11 +959,19 @@ export function handleProbeComplete(params: unknown): void {
   store.setProbeCollecting(false);
 }
 
-export function __resetBroadcastTelemetryForTests(): void {
+// Clears every module-level correlation singleton (the packet/broadcast id
+// maps, the pending broadcast telemetry, and the sent-status timers). Shared by
+// the test-reset entry points so a new correlation map only has to be added
+// here, not in each of them.
+function resetCorrelationState(): void {
   packetIdToMsgId.clear();
   broadcastIdToMsgId.clear();
   pendingBroadcastTelemetry.clear();
   clearAllSentStatusTimers();
+}
+
+export function __resetBroadcastTelemetryForTests(): void {
+  resetCorrelationState();
 }
 
 // Test isolation: actions.ts holds several module-level singletons (the
@@ -973,10 +981,7 @@ export function __resetBroadcastTelemetryForTests(): void {
 // this from test/setup.ts's afterEach.
 export function __resetActionsForTests(): void {
   session.client = null;
-  packetIdToMsgId.clear();
-  broadcastIdToMsgId.clear();
-  pendingBroadcastTelemetry.clear();
-  clearAllSentStatusTimers();
+  resetCorrelationState();
 }
 
 export function __normalizeReplayDeliveryEventForTests(raw: DeliveryReplayEventWire): DeliveryEventRecord | null {
@@ -984,10 +989,7 @@ export function __normalizeReplayDeliveryEventForTests(raw: DeliveryReplayEventW
 }
 
 export function __clearDeliveryEventSyncStateForTests(nodeAddr?: string): void {
-  packetIdToMsgId.clear();
-  broadcastIdToMsgId.clear();
-  pendingBroadcastTelemetry.clear();
-  clearAllSentStatusTimers();
+  resetCorrelationState();
 
   try {
     if (nodeAddr) {

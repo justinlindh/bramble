@@ -2,6 +2,10 @@
 
 #include <stdbool.h>
 
+/* Max token length incl. NUL, shared by the provider (rpc_token.c) and the
+ * transports' scratch buffers. */
+#define WS_AUTH_TOKEN_MAX 128
+
 void ws_server_load_token(void);
 const char* ws_server_get_token(void);
 
@@ -10,6 +14,12 @@ const char* ws_server_get_token(void);
  * is NOT open access; that state fails closed. Shared by the BLE transport
  * so both network transports apply the same policy. */
 bool ws_server_auth_disabled(void);
+/* Constant-time comparison against the live token; false when the token is
+ * unavailable (fail closed). */
+bool ws_token_matches(const char* candidate);
+/* True while a first-boot mint is deferred on the entropy gate; callers
+ * retry ws_server_load_token() lazily. */
+bool ws_token_pending_entropy(void);
 
 /* (Re)load the extra allowed WS origins from NVS, and read the cached
  * comma-separated list. Same-origin connections are always allowed; this

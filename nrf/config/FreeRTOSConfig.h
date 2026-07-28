@@ -11,7 +11,10 @@ extern uint32_t SystemCoreClock;
 #define configUSE_TICKLESS_IDLE 0 // P3 power work turns this on
 #define configCPU_CLOCK_HZ (SystemCoreClock)
 #define configTICK_RATE_HZ ((TickType_t)1000)
-#define configMAX_PRIORITIES 8
+/* 9, not 8: NimBLE's port creates its link-layer task at
+ * configMAX_PRIORITIES-1, which must sit ABOVE the FreeRTOS timer task
+ * (7) and the mesh task (5) to keep radio events on time. */
+#define configMAX_PRIORITIES 9
 #define configMINIMAL_STACK_SIZE 128
 #define configMAX_TASK_NAME_LEN 12
 #define configUSE_16_BIT_TICKS 0
@@ -27,11 +30,18 @@ extern uint32_t SystemCoreClock;
 #define configSUPPORT_STATIC_ALLOCATION 1
 #define configKERNEL_PROVIDED_STATIC_MEMORY 1
 #define configSUPPORT_DYNAMIC_ALLOCATION 1
-// 96K, not 48K: mesh_task_start heap-allocates the DM session table
-// (44,160 bytes) and the delivery event ring (28,692 bytes); both fell back
-// to a too-small heap and silently disabled the mesh before this was sized
-// for them.
-#define configTOTAL_HEAP_SIZE ((size_t)(96 * 1024))
+// This is the ONLY heap on the target: shim/malloc_freertos.c routes newlib's
+// malloc/calloc here too, so it must cover both the heap_caps_* callers and
+// the plain-calloc ones. The large tenants are mesh_task_start's DM session
+// table (44,160 bytes) and delivery event ring (28,692 bytes), which have no
+// PSRAM to fall back to here, plus task stacks, the message store, and
+// mbedtls (including the P-256 keypair each BLE pairing builds).
+//
+// The size is what is left of the 256KB after static data and the 8KB
+// interrupt stack, less a small unallocated margin. Raising it further means
+// taking RAM the linker has already committed elsewhere, so grow the budget
+// gate and this together or not at all.
+#define configTOTAL_HEAP_SIZE ((size_t)(152 * 1024))
 #define configUSE_MALLOC_FAILED_HOOK 1
 #define configCHECK_FOR_STACK_OVERFLOW 2
 
@@ -39,7 +49,7 @@ extern uint32_t SystemCoreClock;
 #define configUSE_TICK_HOOK 0
 
 #define configUSE_TIMERS 1
-#define configTIMER_TASK_PRIORITY (configMAX_PRIORITIES - 1)
+#define configTIMER_TASK_PRIORITY (configMAX_PRIORITIES - 2)
 #define configTIMER_QUEUE_LENGTH 16
 // The esp_timer shim runs its callbacks on the timer task, so it gets a
 // real stack (in words).
@@ -52,7 +62,9 @@ extern uint32_t SystemCoreClock;
 #define INCLUDE_vTaskDelay 1
 #define INCLUDE_vTaskDelayUntil 1
 #define INCLUDE_xTaskGetSchedulerState 1
+#define INCLUDE_pcTaskGetTaskName 1
 #define INCLUDE_xTaskGetCurrentTaskHandle 1
+#define INCLUDE_xTaskGetHandle 1
 #define INCLUDE_uxTaskGetStackHighWaterMark 1
 #define INCLUDE_xTimerPendFunctionCall 1
 #define INCLUDE_xSemaphoreGetMutexHolder 1
