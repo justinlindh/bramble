@@ -12,6 +12,9 @@
 #include "ble_host.h"
 #include "mesh_task.h"
 #include "msg_store.h"
+#include "rpc_dispatcher.h"
+#include "rpc_methods.h"
+#include "ws_server.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -39,10 +42,20 @@ void app_init_stack(void) {
      * boot order (main.c calls this before mesh_task_start). */
     msg_store_init_with_persistence();
 
+    /* The dispatcher and its method table must exist before any transport
+     * registers, because rpc_init() clears both tables. */
+    rpc_init();
+    rpc_methods_init(&s_identity);
+
     mesh_task_start(&s_identity);
 
     /* BLE last: the mesh owns the node's identity and RPC state, and the
      * transport should not accept a connection before they exist. */
+    /* Mints or loads the per-device RPC auth token. The entropy gate is
+     * already open here (the hardware RNG opened it at boot), so unlike the
+     * ESP boot path this cannot be deferred. */
+    ws_server_load_token();
+
     if (ble_host_start() != 0) {
         ESP_LOGE(TAG, "BLE did not start; the node is mesh-only this boot");
     }

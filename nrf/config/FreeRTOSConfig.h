@@ -57,6 +57,7 @@ extern uint32_t SystemCoreClock;
 #define INCLUDE_xTaskGetSchedulerState 1
 #define INCLUDE_pcTaskGetTaskName 1
 #define INCLUDE_xTaskGetCurrentTaskHandle 1
+#define INCLUDE_xTaskGetHandle 1
 #define INCLUDE_uxTaskGetStackHighWaterMark 1
 #define INCLUDE_xTimerPendFunctionCall 1
 #define INCLUDE_xSemaphoreGetMutexHolder 1

@@ -77,6 +77,14 @@ void npl_freertos_hw_set_isr(int irqn, void (*addr)(void)) {
 
 static volatile int s_hfxo_refs;
 
+/* Blocks until the crystal is actually running, which is the whole point:
+ * the radio needs HFXO accuracy, and a caller that proceeds on the internal
+ * RC oscillator transmits slightly off-frequency and misses tight receive
+ * windows. Advertising survives that (the peer's receiver is forgiving);
+ * catching a CONNECT_IND 150us after an advertisement does not, which is
+ * exactly the symptom this cost: visible in scans, never connectable.
+ * Startup is ~360us typical, so the bounded spin is short even when called
+ * from the link layer's ISR context. */
 void nrf52_clock_hfxo_request(void) {
     uint32_t primask;
     __asm volatile("mrs %0, primask" : "=r"(primask));
@@ -87,6 +95,13 @@ void nrf52_clock_hfxo_request(void) {
     }
     if ((primask & 1u) == 0u) {
         __asm volatile("cpsie i" ::: "memory");
+    }
+    /* ~2ms worth of polling at 64MHz: far beyond the typical startup, and a
+     * bound rather than a hang if the crystal is absent. */
+    for (int i = 0; i < 200000; i++) {
+        if (nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
+            return;
+        }
     }
 }
 

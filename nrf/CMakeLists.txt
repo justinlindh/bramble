@@ -156,6 +156,11 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/gps/nmea_parser.c
   ${BRAMBLE_COMPONENTS}/battery/battery_pct.c
   ${BRAMBLE_COMPONENTS}/indicators/alerts.c
+  ${BRAMBLE_COMPONENTS}/ota/ota_progress.c
+  ${BRAMBLE_COMPONENTS}/ota/ota_origin.c
+  ${BRAMBLE_COMPONENTS}/ota/ota_url.c
+  ${BRAMBLE_COMPONENTS}/ota/ota_version.c
+  ${BRAMBLE_COMPONENTS}/ota/ota_rollback_policy.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_task.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_beacon.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_persist.c
@@ -181,7 +186,7 @@ target_include_directories(bramble_core PUBLIC ${cjson_SOURCE_DIR})
 foreach(comp packet routing routing_auth dedup dm_session fragment replay_window
         security timesync airtime freq_plan mailbox nonce_counter bramble_probe
         channel identity location network_key msg_store reliability rpc
-        traffic_debug ui radio gps battery indicators crypto nvs_keys
+        traffic_debug ui radio gps battery indicators crypto nvs_keys ota
         board_config)
   target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/${comp}/include)
 endforeach()
@@ -287,6 +292,7 @@ add_executable(bramble-nrf
   src/ble_host.c
   ${BRAMBLE_COMPONENTS}/ble/ble_server.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_token.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
   src/nrf_provision.c
   shim/console_uart.c
   shim/esp_timer_freertos.c
@@ -295,6 +301,7 @@ add_executable(bramble-nrf
   shim/gps_null.c
   shim/battery_null.c
   shim/esp_app_desc_nrf.c
+  shim/rpc_platform_stubs.c
   shim/nvs_lfs.c
   shim/mbedtls_platform_freertos.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
@@ -304,6 +311,9 @@ target_include_directories(bramble-nrf PRIVATE
   boards
   src
   ${BRAMBLE_COMPONENTS}/ble/include
+  ${BRAMBLE_COMPONENTS}/ota/include
+  ${BRAMBLE_COMPONENTS}/display/include
+  ${BRAMBLE_COMPONENTS}/wifi/include
   shim/include
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )

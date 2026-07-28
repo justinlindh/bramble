@@ -1,3 +1,5 @@
+#include <stdio.h> /* sscanf */
+
 #include "rpc_methods.h"
 #include "esp_app_desc.h"
 #include "util.h"
@@ -33,9 +35,11 @@
 #include "wifi_manager.h"
 #include "ws_server.h"
 #include "network_key.h"
-/* Deep sleep, GPIO wake, esp_wifi and mDNS do not exist on the POSIX/Linux
- * simulator; the affected RPC handlers degrade there (see the gates below). */
-#ifndef CONFIG_IDF_TARGET_LINUX
+/* Deep sleep, GPIO wake, esp_wifi and mDNS exist only on the ESP32 targets:
+ * not on the POSIX/Linux simulator, and not on the nRF52840 (which has no
+ * Wi-Fi at all). The affected RPC handlers degrade on both; see the gates
+ * below, which share this condition. */
+#if !defined(CONFIG_IDF_TARGET_LINUX) && !defined(BRAMBLE_PLATFORM_NRF)
 #include "esp_sleep.h"
 #include "driver/gpio.h"
 #include "esp_wifi.h"
@@ -250,7 +254,7 @@ static int handle_get_wifi_status(const cJSON* params, cJSON* result) {
 
     uint8_t mac[6] = {0};
     int clients = 0;
-#ifndef CONFIG_IDF_TARGET_LINUX
+#if !defined(CONFIG_IDF_TARGET_LINUX) && !defined(BRAMBLE_PLATFORM_NRF)
     esp_err_t mac_rc =
         esp_wifi_get_mac(status.mode == BRAMBLE_WIFI_AP ? WIFI_IF_AP : WIFI_IF_STA, mac);
 
@@ -861,7 +865,7 @@ static int handle_set_node_name(const cJSON* params, cJSON* result) {
     /* Best-effort: reflect the new name in the mDNS TXT record so discovery
      * shows it without a reboot. Fails harmlessly when mDNS is not running
      * (AP mode / WiFi off). */
-#ifndef CONFIG_IDF_TARGET_LINUX
+#if !defined(CONFIG_IDF_TARGET_LINUX) && !defined(BRAMBLE_PLATFORM_NRF)
     (void)mdns_service_txt_item_set("_bramble", "_tcp", "name", name);
 #endif
 
@@ -2547,7 +2551,7 @@ static int handle_sleep(const cJSON* params, cJSON* result) {
     /* Delay to let RPC response flush, then sleep */
     vTaskDelay(pdMS_TO_TICKS(500));
 
-#ifdef CONFIG_IDF_TARGET_LINUX
+#if defined(CONFIG_IDF_TARGET_LINUX) || defined(BRAMBLE_PLATFORM_NRF)
     /* No deep sleep on the POSIX/Linux simulator. */
     ESP_LOGW(TAG, "bramble.sleep: deep sleep not supported on the simulator");
 #else
