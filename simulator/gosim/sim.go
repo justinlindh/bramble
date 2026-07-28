@@ -236,11 +236,8 @@ func (s *Sim) State() SimState {
 // Stop shuts down the simulation.
 func (s *Sim) Stop() {
 	close(s.stopCh)
-	// Restore stdout
-	syscall.Dup2(s.origStdout, 1)
-	syscall.Close(s.origStdout)
-	s.pipeW.Close()
-	// pipeR will get EOF and readPipe will exit
+	// Restore stdout; pipeR then gets EOF and readPipe exits.
+	s.restoreStdout(0)
 }
 
 // run is the main simulation goroutine.
@@ -1333,13 +1330,20 @@ func confirmedDeliveryRate(confirmed, delivered, dropped, undelivered uint64) fl
 	return float64(confirmed) / float64(total)
 }
 
-// dup2Stdout restores fd 1 from the saved original-stdout fd. Small wrapper so
-// extnode.go's real-time teardown does not need its own syscall import.
-func dup2Stdout(origStdout int) { syscall.Dup2(origStdout, 1) }
-
-// closeFd closes a raw file descriptor (used by the emu-link test harness to
-// release the saved original stdout after restoring it).
-func closeFd(fd int) { syscall.Close(fd) }
+// restoreStdout tears down the C-stdout capture: it closes the pipe's write
+// end, points fd 1 back at the saved original stdout, waits `drain` for the
+// readPipe goroutine to flush the last buffered lines (which, when headless,
+// still go out via origStdout), and only then releases the saved fd. Every
+// teardown path funnels through here so the fd handling and close-after-drain
+// ordering stay consistent.
+func (s *Sim) restoreStdout(drain time.Duration) {
+	s.pipeW.Close()
+	syscall.Dup2(s.origStdout, 1)
+	if drain > 0 {
+		time.Sleep(drain)
+	}
+	syscall.Close(s.origStdout)
+}
 
 // emitRaw fans a ready-to-send line (already newline-terminated) out to the
 // websocket broadcast callback and, when running headless, additionally to the
@@ -1468,9 +1472,7 @@ func RunHeadless(scenarioPath string) error {
 	sim.mu.Unlock()
 
 	// Flush pipe
-	sim.pipeW.Close()
-	syscall.Dup2(sim.origStdout, 1)
-	time.Sleep(100 * time.Millisecond) // let readPipe drain
+	sim.restoreStdout(100 * time.Millisecond)
 
 	return nil
 }

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unsafe"
 )
@@ -268,10 +267,7 @@ func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
 	sim.complete()
 	sim.mu.Unlock()
 
-	sim.pipeW.Close()
-	syscall.Dup2(sim.origStdout, 1)
-	syscall.Close(sim.origStdout)
-	time.Sleep(50 * time.Millisecond) // let readPipe drain
+	sim.restoreStdout(50 * time.Millisecond)
 
 	return &scenarioRunResult{lines: lines, sim: sim}, nil
 }
