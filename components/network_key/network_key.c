@@ -1,4 +1,5 @@
 #include "include/network_key.h"
+#include "bramble_storage.h"
 #include "crypto.h"
 #include <string.h>
 
@@ -13,7 +14,7 @@ static int s_provisioned = 0;
 static int netkey_store_read(uint8_t key_out[32]);
 static int netkey_store_write(const uint8_t key[32]);
 
-#if defined(ESP_PLATFORM) || defined(BRAMBLE_PLATFORM_NRF)
+#ifdef BRAMBLE_HAS_NVS
 #include "nvs.h"
 #include "nvs_keys.h"
 

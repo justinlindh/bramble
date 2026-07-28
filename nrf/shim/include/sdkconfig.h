@@ -6,8 +6,10 @@
 #define CONFIG_BRAMBLE_BOARD_CUSTOM 1
 
 // Kconfig defaults (matching components/*/Kconfig and main/Kconfig.projbuild)
-#define CONFIG_BRAMBLE_RPC_MAX_METHODS 40
+#define CONFIG_BRAMBLE_RPC_MAX_METHODS 64
 #define CONFIG_BRAMBLE_MSG_STORE_CAP 20
-// Message persistence stays off in P0 (RAM-backed NVS only; SPIFFS backend
-// is not compiled), matching CONFIG_BRAMBLE_MSG_PERSIST_ENABLED unset.
+// P2: message persistence on LittleFS (values match the Kconfig defaults).
+#define CONFIG_BRAMBLE_MSG_PERSIST_ENABLED 1
+#define CONFIG_BRAMBLE_MSG_PERSIST_MAX 200
+#define CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT 75
 // Region: US-915 (neither CONFIG_BRAMBLE_REGION_EU nor _AU defined).

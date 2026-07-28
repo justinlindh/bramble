@@ -8,6 +8,11 @@
 extern "C" {
 #endif
 
+/* Overridable per target: this is local delivery history for the UI, not
+ * protocol state, so depth costs only how far back the timeline goes. 512 is
+ * an ESP-with-PSRAM figure; the nRF52840 build overrides it to 128 (see
+ * nrf/CMakeLists.txt) because that chip has 256KB in total and no PSRAM to
+ * spill into, and the test build overrides it to 4. */
 #ifndef DELIVERY_EVENT_RING_CAPACITY
 #define DELIVERY_EVENT_RING_CAPACITY 512u
 #endif

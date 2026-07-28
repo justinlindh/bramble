@@ -14,6 +14,9 @@ config BRAMBLE_RPC_MAX_RESPONSE
 
 config BRAMBLE_RPC_MAX_METHODS
     int "Max registered RPC methods"
-    default 40
+    # 64, not 40: the firmware registers 61 methods and every shipped profile
+    # already overrode this to 64; a 40 default silently drops registrations
+    # on any build that forgets the override (the nRF target nearly did).
+    default 64
 
 endmenu
