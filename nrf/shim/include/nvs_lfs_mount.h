@@ -8,3 +8,10 @@
 // Returns the mounted filesystem, or NULL when nvs_flash_init has not
 // succeeded (callers must treat NULL as "no persistence").
 lfs_t* nvs_lfs_handle(void);
+
+// The filesystem lock. littlefs is not thread-safe and the nvs_* API only
+// protects its own calls, so every direct lfs_* access to the handle above
+// must sit between these. Recursive use is NOT supported; take it at the
+// outermost call.
+void nvs_lfs_lock(void);
+void nvs_lfs_unlock(void);

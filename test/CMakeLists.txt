@@ -615,6 +615,44 @@ target_include_directories(test_nvs_lfs_shim PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 
+# The nRF message-store backend, run for real against littlefs's RAM block
+# device: recovery invariants (count from file size, torn-record truncation,
+# corrupt-header recreate), the streaming rollover, and clear. The ESP SPIFFS
+# variant's host test can only assert its stubs fail; this one executes the
+# actual persistence code the nRF exit gate ships.
+add_executable(test_msg_store_lfs
+    test_msg_store_lfs.c
+    ../components/msg_store/msg_store_lfs.c
+    ../nrf/shim/nvs_lfs.c
+    stubs/lfs_nvmc_rambd.c
+    stubs/nrf_log_host_stub.c
+    ${littlefs_SOURCE_DIR}/lfs.c
+    ${littlefs_SOURCE_DIR}/lfs_util.c
+    ${littlefs_SOURCE_DIR}/bd/lfs_rambd.c
+    unity/unity.c
+)
+# BRAMBLE_PLATFORM_NRF goes on the backend source alone: it is the guard
+# that compiles msg_store_lfs.c's body in, but nvs_lfs.c keys its RTOS-vs-
+# host lock branch on the same macro and must build the host branch here.
+set_source_files_properties(../components/msg_store/msg_store_lfs.c PROPERTIES
+    COMPILE_DEFINITIONS BRAMBLE_PLATFORM_NRF)
+target_compile_definitions(test_msg_store_lfs PRIVATE
+    BRAMBLE_TEST_NVS_LFS
+    BRAMBLE_LFS_BASE=0
+    BRAMBLE_LFS_SIZE=0x2D000
+    LFS_NO_MALLOC
+)
+target_include_directories(test_msg_store_lfs BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src
+    ${littlefs_SOURCE_DIR}
+)
+target_include_directories(test_msg_store_lfs PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+
 add_executable(test_rerr_ack_fastfail
     test_rerr_ack_fastfail.c
     unity/unity.c

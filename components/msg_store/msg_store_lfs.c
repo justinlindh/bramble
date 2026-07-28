@@ -62,7 +62,7 @@ static int write_header(void) {
     return lfs_file_sync(fs(), &s_file) == LFS_ERR_OK ? 0 : -1;
 }
 
-int msg_store_spiffs_init(void) {
+static int init_unlocked(void) {
     if (fs() == NULL) {
         ESP_LOGW(TAG, "filesystem not mounted, persistence disabled");
         return -1;
@@ -125,7 +125,7 @@ int msg_store_spiffs_init(void) {
     return 0;
 }
 
-int msg_store_spiffs_save(const stored_msg_t* msg) {
+static int save_unlocked(const stored_msg_t* msg) {
     if (!s_initialized || msg == NULL) {
         return -1;
     }
@@ -147,7 +147,7 @@ int msg_store_spiffs_save(const stored_msg_t* msg) {
 
 int msg_store_spiffs_get_count(void) { return s_initialized ? (int)s_header.record_count : 0; }
 
-int msg_store_spiffs_load_recent(stored_msg_t* msgs, int max_count) {
+static int load_recent_unlocked(stored_msg_t* msgs, int max_count) {
     if (!s_initialized || msgs == NULL || max_count <= 0) {
         return 0;
     }
@@ -170,7 +170,7 @@ int msg_store_spiffs_load_recent(stored_msg_t* msgs, int max_count) {
     return loaded;
 }
 
-void msg_store_spiffs_rollover(int max_messages, int keep_pct) {
+static void rollover_unlocked(int max_messages, int keep_pct) {
     if (!s_initialized || (int)s_header.record_count <= max_messages) {
         return;
     }
@@ -240,7 +240,7 @@ void msg_store_spiffs_rollover(int max_messages, int keep_pct) {
     ESP_LOGI(TAG, "rollover complete: %lu messages retained", (unsigned long)s_header.record_count);
 }
 
-void msg_store_spiffs_clear(void) {
+static void clear_unlocked(void) {
     if (s_initialized) {
         lfs_file_close(fs(), &s_file);
         s_initialized = false;
@@ -249,6 +249,49 @@ void msg_store_spiffs_clear(void) {
         lfs_remove(fs(), MSG_FILE_PATH);
     }
     ESP_LOGI(TAG, "cleared message file");
+}
+
+/*
+ * Public entry points: every one takes the filesystem lock for its whole
+ * body. littlefs is not thread-safe, this file shares one lfs_t (and one set
+ * of block-device cache buffers, see nrf/src/lfs_nvmc.c) with the NVS shim,
+ * and three tasks reach that filesystem concurrently on this target: the
+ * mesh task appends messages here, the BLE RPC task writes settings through
+ * the locked nvs_* API, and the bond writer flushes on its own schedule.
+ * Found by review, not by the bench: the exit-gate soak never happened to
+ * interleave a message append with a settings write.
+ */
+int msg_store_spiffs_init(void) {
+    nvs_lfs_lock();
+    int rc = init_unlocked();
+    nvs_lfs_unlock();
+    return rc;
+}
+
+int msg_store_spiffs_save(const stored_msg_t* msg) {
+    nvs_lfs_lock();
+    int rc = save_unlocked(msg);
+    nvs_lfs_unlock();
+    return rc;
+}
+
+int msg_store_spiffs_load_recent(stored_msg_t* msgs, int max_count) {
+    nvs_lfs_lock();
+    int rc = load_recent_unlocked(msgs, max_count);
+    nvs_lfs_unlock();
+    return rc;
+}
+
+void msg_store_spiffs_rollover(int max_messages, int keep_pct) {
+    nvs_lfs_lock();
+    rollover_unlocked(max_messages, keep_pct);
+    nvs_lfs_unlock();
+}
+
+void msg_store_spiffs_clear(void) {
+    nvs_lfs_lock();
+    clear_unlocked();
+    nvs_lfs_unlock();
 }
 
 #endif /* BRAMBLE_PLATFORM_NRF */

@@ -104,7 +104,9 @@ void lfs_nvmc_config_init(struct lfs_config* cfg, uint32_t base, uint32_t size) 
 
     /* LFS_NO_MALLOC: littlefs never allocates, so the caches are ours. One
      * set is enough because every filesystem call is serialized by the NVS
-     * shim's lock. */
+     * shim's lock: the nvs_* API takes it internally, and direct consumers
+     * of nvs_lfs_handle() (the message store) take it via nvs_lfs_lock().
+     * Any new direct consumer inherits that obligation. */
     static uint8_t read_buffer[LFS_NVMC_CACHE_SIZE];
     static uint8_t prog_buffer[LFS_NVMC_CACHE_SIZE];
     static uint32_t lookahead_buffer[32 / sizeof(uint32_t)];

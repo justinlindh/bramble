@@ -65,6 +65,15 @@ static void lock_take(void) {}
 static void lock_give(void) {}
 #endif
 
+/* The lock, exported for the mount header's other consumers. littlefs is not
+ * thread-safe, there is exactly one lfs_t on this device, and the nvs_* API
+ * takes this lock internally; anything that touches the handle from
+ * nvs_lfs_handle() directly (the message store) must hold it across every
+ * lfs_* call, or a mesh-task message append can interleave with an RPC-task
+ * settings write inside littlefs's shared metadata and cache state. */
+void nvs_lfs_lock(void) { lock_take(); }
+void nvs_lfs_unlock(void) { lock_give(); }
+
 static int ns_index(const char* ns) {
     for (int i = 0; i < s_ns_count; i++) {
         if (strcmp(s_namespaces[i], ns) == 0) {
