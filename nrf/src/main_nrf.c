@@ -5,6 +5,7 @@
 #include <task.h>
 
 #include <hal/nrf_gpio.h>
+#include <nrfx.h>
 
 #include <string.h>
 
@@ -29,7 +30,14 @@ uint32_t bramble_log_timestamp_ms(void) {
 }
 
 void bramble_assert_failed(const char* file, int line) {
-    ESP_LOGE(TAG, "assert failed: %s:%d", file, line);
+    /* Name the task: an assert deep in the kernel or a vendored stack is
+     * near-useless without knowing who called it. */
+    const char* who = "pre-scheduler";
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        who = pcTaskGetName(NULL);
+    }
+    ESP_LOGE(TAG, "assert failed in task '%s': %s:%d (sched=%d icsr=0x%08lx)", who ? who : "?",
+             file, line, (int)xTaskGetSchedulerState(), (unsigned long)SCB->ICSR);
     taskDISABLE_INTERRUPTS();
     for (;;) {
     }

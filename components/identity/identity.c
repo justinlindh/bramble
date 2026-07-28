@@ -50,7 +50,9 @@ int identity_mint_ws_auth_token(char* token_out, size_t token_out_len) {
 static int id_store_read(const char* key, uint8_t* buf, size_t len);
 static int id_store_write(const char* key, const uint8_t* buf, size_t len);
 
-#ifdef ESP_PLATFORM
+#include "bramble_storage.h"
+
+#ifdef BRAMBLE_HAS_NVS
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
