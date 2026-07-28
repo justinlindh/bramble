@@ -18,6 +18,7 @@
 #define BOARD_PIN_UART2_RX 6  // P0.06
 #define BOARD_PIN_CONSOLE_TX BOARD_PIN_UART1_TX
 #define BOARD_PIN_CONSOLE_RX BOARD_PIN_UART1_RX
+#define BOARD_HAS_CONSOLE 1
 
 // LR1110 radio bus (P1 phase; unused in P0)
 #define BOARD_PIN_LORA_SCK (32 + 13)   // P1.13
@@ -31,3 +32,12 @@
 
 // Peripheral power
 #define BOARD_PIN_3V3_EN 7 // P0.07, sensor rail enable
+
+// RF switch truth table (Seeed vendor SDK, Meshtastic-confirmed): a two pin
+// network on DIO5/DIO6. RFSW0/RFSW1 are the LR1110 names for DIO5/DIO6.
+#define BOARD_RFSW_ENABLE (LR11XX_SYSTEM_RFSW0_HIGH | LR11XX_SYSTEM_RFSW1_HIGH)
+#define BOARD_RFSW_STANDBY 0
+#define BOARD_RFSW_RX LR11XX_SYSTEM_RFSW0_HIGH
+#define BOARD_RFSW_TX (LR11XX_SYSTEM_RFSW0_HIGH | LR11XX_SYSTEM_RFSW1_HIGH)
+#define BOARD_RFSW_TX_HP LR11XX_SYSTEM_RFSW1_HIGH
+#define BOARD_RFSW_GNSS 0

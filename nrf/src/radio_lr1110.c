@@ -38,7 +38,7 @@
 #include "radio.h"
 #include "radio_internal.h"
 #include "tx_gate.h"
-#include "wio_wm1110_devkit.h"
+#include "bramble_board.h"
 
 static const char* TAG = "radio_lr1110";
 
@@ -403,13 +403,16 @@ static int lr1110_system_init(void) {
     if (lr11xx_system_set_reg_mode(s_lr, LR11XX_SYSTEM_REG_MODE_DCDC) != LR11XX_STATUS_OK)
         return -1;
 
-    /* Wio-WM1110 RF switch table (Seeed vendor SDK, Meshtastic-confirmed). */
+    /* RF switch table: a board fact (the dev kit runs a two pin network on
+     * DIO5/DIO6, the T1000-E a four pin one with DIO8 in every active mode
+     * and DIO7 on the GNSS LNA), so the masks live in the board header. */
     lr11xx_system_rfswitch_cfg_t rfsw = {0};
-    rfsw.enable = LR11XX_SYSTEM_RFSW0_HIGH | LR11XX_SYSTEM_RFSW1_HIGH;
-    rfsw.standby = 0;
-    rfsw.rx = LR11XX_SYSTEM_RFSW0_HIGH;
-    rfsw.tx = LR11XX_SYSTEM_RFSW0_HIGH | LR11XX_SYSTEM_RFSW1_HIGH;
-    rfsw.tx_hp = LR11XX_SYSTEM_RFSW1_HIGH;
+    rfsw.enable = BOARD_RFSW_ENABLE;
+    rfsw.standby = BOARD_RFSW_STANDBY;
+    rfsw.rx = BOARD_RFSW_RX;
+    rfsw.tx = BOARD_RFSW_TX;
+    rfsw.tx_hp = BOARD_RFSW_TX_HP;
+    rfsw.gnss = BOARD_RFSW_GNSS;
     if (lr11xx_system_set_dio_as_rf_switch(s_lr, &rfsw) != LR11XX_STATUS_OK)
         return -1;
 

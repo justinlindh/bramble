@@ -218,7 +218,6 @@ target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../ma
 # costs only how far back the timeline goes. 128 keeps a useful window and
 # returns 21KB to the heap that pairing needs for its P-256 keypair.
 target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF
-                                               CONFIG_BRAMBLE_BOARD_WM1110
                                                DELIVERY_EVENT_RING_CAPACITY=128u)
 target_link_libraries(bramble_core PUBLIC freertos_kernel littlefs_lib)
 
@@ -358,14 +357,33 @@ if(DEFINED BRAMBLE_NRF_DEV_NETKEY)
   target_compile_definitions(bramble-nrf PRIVATE
     BRAMBLE_NRF_DEV_NETKEY="${BRAMBLE_NRF_DEV_NETKEY}")
 endif()
+# Dev-only RPC auth token, same rules as the network key above: passed
+# locally at configure time, NEVER committed. Needed on consoleless boards
+# (T1000-E), where the auto-minted token is logged to a UART that does not
+# exist, so without this nobody can ever authenticate to the device.
+if(DEFINED BRAMBLE_NRF_DEV_AUTH_TOKEN)
+  target_compile_definitions(bramble-nrf PRIVATE
+    BRAMBLE_NRF_DEV_AUTH_TOKEN="${BRAMBLE_NRF_DEV_AUTH_TOKEN}")
+endif()
 target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519 swdr001_lib littlefs_lib nimble_lib m)
 # Flash layout: `swd` (default) links at 0x0 for the dev kit; `uf2` links at
 # 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
 # bramble-nrf.uf2 for drag-and-drop flashing.
 set(BRAMBLE_NRF_LAYOUT swd CACHE STRING "Flash layout: swd or uf2")
+# Which physical board's pin map and profile to compile. The dev kit is the
+# default; t1000e selects the SenseCAP card (nrf/boards/t1000e.h, consoleless,
+# four pin RF switch) and its shared identity profile.
+set(BRAMBLE_NRF_BOARD wm1110_devkit CACHE STRING "Board: wm1110_devkit or t1000e")
+if(BRAMBLE_NRF_BOARD STREQUAL "t1000e")
+  target_compile_definitions(bramble_core PUBLIC BRAMBLE_BOARD_T1000E CONFIG_BRAMBLE_BOARD_T1000E)
+else()
+  target_compile_definitions(bramble_core PUBLIC CONFIG_BRAMBLE_BOARD_WM1110)
+endif()
 # App base under the T1000-E's Adafruit UF2 bootloader (S140 v7.3.0 layout;
 # must match ld/nrf52840_s140_app.ld FLASH ORIGIN).
 set(BRAMBLE_UF2_BASE 0x27000)
+# The UF2 family ID stays the generic nRF52840 one for every board; see the
+# note in scripts/make_uf2.py before changing it.
 if(BRAMBLE_NRF_LAYOUT STREQUAL "uf2")
   set(BRAMBLE_LD ${CMAKE_CURRENT_SOURCE_DIR}/ld/nrf52840_s140_app.ld)
 else()

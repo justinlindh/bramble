@@ -15,7 +15,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
-#include "wio_wm1110_devkit.h"
+#include "bramble_board.h"
 
 void bramble_mbedtls_platform_init(void);
 

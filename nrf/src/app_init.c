@@ -51,6 +51,13 @@ void app_init_stack(void) {
 
     /* BLE last: the mesh owns the node's identity and RPC state, and the
      * transport should not accept a connection before they exist. */
+    /* Consoleless boards cannot surface a minted token (the mint is logged
+     * once, over a UART the T1000-E does not have), so a build-time token is
+     * seeded first when one was provided. Seeds only if none is stored, and
+     * must precede ws_server_load_token, which mints when it finds none. */
+    extern int nrf_seed_auth_token_from_build(void);
+    nrf_seed_auth_token_from_build();
+
     /* Mints or loads the per-device RPC auth token. The entropy gate is
      * already open here (the hardware RNG opened it at boot), so unlike the
      * ESP boot path this cannot be deferred. */

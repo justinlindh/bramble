@@ -21,6 +21,14 @@ FLAG_FAMILY_ID = 0x00002000
 FAMILY_NRF52840 = 0xADA52840
 PAYLOAD = 256
 
+# Do not "correct" the family ID to the board-specific one that appears in the
+# T1000-E bootloader's own CURRENT.UF2 header (0x28860057, its USB VID:PID).
+# That value is how the bootloader TAGS the flash dump it exposes for reading;
+# it is not what it accepts for writing. Seeed's stock bootloader accepts the
+# generic ID above, which is what the official Meshtastic T1000-E image ships
+# with (verified against firmware-tracker-t1000-e-2.7.26: base 0x27000,
+# family 0xADA52840). A readback artifact is not an acceptance oracle.
+
 
 def write_uf2(data: bytes, base: int, out_path: str) -> int:
     blocks = (len(data) + PAYLOAD - 1) // PAYLOAD

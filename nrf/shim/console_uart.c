@@ -11,7 +11,7 @@
 #include <nrfx_uarte.h>
 
 #include "esp_log.h"
-#include "wio_wm1110_devkit.h"
+#include "bramble_board.h"
 
 // The console pins are a board fact (bench-determined CH340 route); see the
 // board header.
@@ -25,6 +25,7 @@ static StaticSemaphore_t s_lock_buf;
 static volatile uint32_t s_dropped;
 
 void console_init(void) {
+#if BOARD_HAS_CONSOLE
     s_lock = xSemaphoreCreateMutexStatic(&s_lock_buf);
 
     nrfx_uarte_config_t cfg = NRFX_UARTE_DEFAULT_CONFIG(CONSOLE_TX_PIN, CONSOLE_RX_PIN);
@@ -33,6 +34,12 @@ void console_init(void) {
     if (nrfx_uarte_init(&s_uarte, &cfg, NULL) == NRFX_SUCCESS) {
         s_ready = true;
     }
+#else
+    /* Boards with no UART bridge (T1000-E: the only exposed UART pads belong
+     * to the GNSS) run consoleless. s_ready stays false, console_write drops
+     * everything, and BLE is the interface. The UARTE peripheral is never
+     * initialized, so the named pins are never driven. */
+#endif
 }
 
 void console_write(const char* buf, size_t len) {
