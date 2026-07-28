@@ -387,7 +387,6 @@ int radio_reconfigure(const radio_config_t* config) {
 
 void radio_get_config(radio_config_t* config) { memcpy(config, &s_config, sizeof(*config)); }
 
-
 /* Full LR1110 system bring-up: the board-level sequence that has no SX1262
  * equivalent lives here rather than in configure_radio so reconfigure stays
  * cheap (the system settings survive a reconfigure; only a hard reset loses
