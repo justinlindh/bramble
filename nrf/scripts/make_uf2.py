@@ -31,6 +31,16 @@ PAYLOAD = 256
 
 
 def write_uf2(data: bytes, base: int, out_path: str) -> int:
+    # Pad to a whole number of 256-byte payloads. A short final block is legal
+    # per the UF2 spec, but the T1000-E's stock bootloader rejects it: it then
+    # never counts that block, numWritten never reaches numBlocks, the
+    # download never completes, and the board sits in DFU forever with
+    # correct-but-unactivated firmware in flash and no error reported
+    # anywhere. Confirmed on hardware by reading the bootloader's own
+    # CURRENT.UF2 back: every full block matched, the 60-byte tail did not.
+    # 0xFF is the erased-flash value, so the padding is a no-op to program.
+    if len(data) % PAYLOAD:
+        data += b"\xff" * (PAYLOAD - len(data) % PAYLOAD)
     blocks = (len(data) + PAYLOAD - 1) // PAYLOAD
     with open(out_path, "wb") as f:
         for i in range(blocks):
