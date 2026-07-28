@@ -38,6 +38,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Restore crypto dependency sources
+        # The ASan and coverage build trees share one FetchContent download
+        # dir (test/build-deps, set in test/CMakeLists.txt), cached so the
+        # pinned mbedtls/Monocypher archives are not re-fetched every run.
+        uses: actions/cache@v4
+        with:
+          path: test/build-deps
+          key: host-test-deps-${{ hashFiles('components/crypto/crypto_deps.cmake') }}
       - name: Assert host test deps are pre-baked on the runner
         run: |
           for tool in cmake make gcc g++; do
@@ -229,6 +237,71 @@ jobs:
           path: test/fuzz/artifacts/
           retention-days: 14
           if-no-files-found: ignore
+
+  nrf-build:
+    name: nRF52840 build
+    # Builds the bare-metal nRF52840 target (nrf/, bare FreeRTOS + nrfx, no
+    # ESP-IDF) with arm-none-eabi-gcc. The build itself enforces the RAM
+    # budget gate (nrf/scripts/size_report.py runs post-link and fails over
+    # budget). Compiles components/ sources directly, so the firmware area
+    # re-runs it too.
+    needs: detect
+    if: |
+      needs.detect.outputs.firmware == 'true' ||
+      needs.detect.outputs.nrf == 'true' ||
+      needs.detect.outputs.ci_core == 'true'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Assert baked ARM toolchain matches the pin
+        # arm-none-eabi-gcc + newlib-nano are baked into the runner image
+        # (image 1.3.0), the same Noble distro package this job used to
+        # apt-get install per run on ubuntu-latest, so the compiler the job
+        # builds with does not change. ninja, ccache and cmake were already
+        # baked. Per the bramble#222 bake contract the job asserts the pin
+        # instead of installing and fails loud on image drift.
+        run: |
+          command -v arm-none-eabi-gcc >/dev/null || { echo "::error::arm-none-eabi-gcc missing from runner image (bramble#222 bake contract, image 1.3.0)"; exit 1; }
+          want="13.2.1"
+          got="$(arm-none-eabi-gcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          if [[ "$got" != "$want" ]]; then
+            echo "::error::arm-none-eabi-gcc version mismatch: runner image has ${got:-unknown}, pinned version is ${want}. Bump ARM_GCC_VERSION in the private runner-image definition or this pin so they agree."
+            exit 1
+          fi
+          ninja --version
+          ccache --version | head -1
+      - name: Restore pinned dependency sources
+        uses: actions/cache@v4
+        with:
+          path: nrf/build/_deps
+          key: nrf-deps-${{ hashFiles('nrf/CMakeLists.txt', 'components/crypto/crypto_deps.cmake') }}
+          # The key hashes the whole CMakeLists, which changes for many
+          # non-dependency reasons; the fallback restore lets FetchContent
+          # re-verify stamps and fetch only what actually moved.
+          restore-keys: nrf-deps-
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: nrf-ccache-${{ github.sha }}
+          restore-keys: nrf-ccache-
+      - name: Configure and build (includes the RAM budget gate)
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: |
+          cmake -S nrf -B nrf/build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_ASM_COMPILER_LAUNCHER=ccache
+          cmake --build nrf/build
+          ccache -s | head -6
+      - name: Upload memory report
+        uses: actions/upload-artifact@v7
+        with:
+          name: nrf-size-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: nrf/build/size-report.json
+          retention-days: 14
 
   release-config:
     name: Release config

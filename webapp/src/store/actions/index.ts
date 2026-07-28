@@ -86,4 +86,3 @@ export {
   forgetSavedDevice,
   renameSavedDevice,
 } from './deviceBook';
-export { getClient } from './client';

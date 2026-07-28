@@ -270,6 +270,71 @@ void test_set_provisioned_persists_for_later_load(void) {
     TEST_ASSERT_EQUAL_MEMORY(key, out, sizeof(key));
 }
 
+/* --- network_key_set_from_hex: the entire validation layer for the
+ * compile-time bench key (nRF dev provisioning), so every rejection path is
+ * pinned here. --- */
+
+static void test_set_from_hex_provisions_a_valid_key(void) {
+    const char* hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+    TEST_ASSERT_EQUAL_INT(0, network_key_set_from_hex(hex));
+    TEST_ASSERT_TRUE(network_key_is_provisioned());
+    uint8_t key[32];
+    TEST_ASSERT_EQUAL_INT(0, network_key_get(key));
+    TEST_ASSERT_EQUAL_HEX8(0x00, key[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x11, key[1]);
+    TEST_ASSERT_EQUAL_HEX8(0xff, key[15]);
+    TEST_ASSERT_EQUAL_HEX8(0xff, key[31]);
+}
+
+static void test_set_from_hex_accepts_mixed_case(void) {
+    uint8_t lower_key[32], upper_key[32];
+    TEST_ASSERT_EQUAL_INT(0,
+                          network_key_set_from_hex(
+                              "aabbccddeeff00112233445566778899aabbccddeeff0011223344556677aabb"));
+    TEST_ASSERT_EQUAL_INT(0, network_key_get(lower_key));
+    TEST_ASSERT_EQUAL_INT(0,
+                          network_key_set_from_hex(
+                              "AABBCCDDEEFF00112233445566778899AABBCCDDEEFF0011223344556677AABB"));
+    TEST_ASSERT_EQUAL_INT(0, network_key_get(upper_key));
+    TEST_ASSERT_EQUAL_MEMORY(lower_key, upper_key, 32);
+}
+
+static void test_set_from_hex_rejects_wrong_length(void) {
+    network_key_clear();
+    TEST_ASSERT_EQUAL_INT(-1, network_key_set_from_hex(NULL));
+    TEST_ASSERT_EQUAL_INT(-1, network_key_set_from_hex(""));
+    TEST_ASSERT_EQUAL_INT(-1, network_key_set_from_hex("aabb"));
+    /* 63 and 65 chars bracket the only accepted length */
+    TEST_ASSERT_EQUAL_INT(-1,
+                          network_key_set_from_hex(
+                              "00112233445566778899aabbccddeeff00112233445566778899aabbccddeef"));
+    TEST_ASSERT_EQUAL_INT(-1,
+                          network_key_set_from_hex(
+                              "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff0"));
+    TEST_ASSERT_FALSE(network_key_is_provisioned());
+}
+
+static void test_set_from_hex_rejects_non_hex_and_leaves_state_unchanged(void) {
+    /* Provision a known-good key first: a rejected string must not disturb it. */
+    const char* good = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+    TEST_ASSERT_EQUAL_INT(0, network_key_set_from_hex(good));
+    uint8_t before[32];
+    TEST_ASSERT_EQUAL_INT(0, network_key_get(before));
+
+    /* Non-hex in the middle, and trailing garbage at the right length */
+    TEST_ASSERT_EQUAL_INT(-1,
+                          network_key_set_from_hex(
+                              "00112233445566778899aabbccddeeffZZ112233445566778899aabbccddeeff"));
+    TEST_ASSERT_EQUAL_INT(-1,
+                          network_key_set_from_hex(
+                              "00112233445566778899aabbccddeeff00112233445566778899aabbccddee!!"));
+
+    TEST_ASSERT_TRUE(network_key_is_provisioned());
+    uint8_t after[32];
+    TEST_ASSERT_EQUAL_INT(0, network_key_get(after));
+    TEST_ASSERT_EQUAL_MEMORY(before, after, 32);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_unprovisioned_get_fails_and_leaves_key_out_untouched);
@@ -286,6 +351,10 @@ int main(void) {
     RUN_TEST(test_mac_accepts_the_maximum_data_length);
     RUN_TEST(test_mac_rejects_oversized_label_at_runtime);
     RUN_TEST(test_mac_bound_is_checked_before_key_material_is_touched);
+    RUN_TEST(test_set_from_hex_provisions_a_valid_key);
+    RUN_TEST(test_set_from_hex_accepts_mixed_case);
+    RUN_TEST(test_set_from_hex_rejects_wrong_length);
+    RUN_TEST(test_set_from_hex_rejects_non_hex_and_leaves_state_unchanged);
     RUN_TEST(test_load_from_nvs_returns_nonzero_when_nothing_stored);
     RUN_TEST(test_nvs_round_trip_restores_key_and_fingerprint);
     RUN_TEST(test_set_provisioned_persists_for_later_load);

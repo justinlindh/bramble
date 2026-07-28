@@ -237,6 +237,13 @@ void mesh_load_network_key(void) {
     extern int emu_node_seed_network_key_from_env(void);
     emu_node_seed_network_key_from_env();
 #endif
+#ifdef BRAMBLE_PLATFORM_NRF
+    /* Bench only: the nRF target has no RPC transport until P2, so a local
+     * build may seed the key at compile time (nrf/src/nrf_provision.c). No-op
+     * without the define; the key value is never committed. */
+    extern int nrf_seed_network_key_from_build(void);
+    nrf_seed_network_key_from_build();
+#endif
     if (network_key_load_from_nvs() == 0) {
         ESP_LOGI(TAG, "Network key loaded from NVS (provisioned)");
     } else {

@@ -5,9 +5,7 @@ function makeEvent(overrides: Partial<DeliveryEventRecord> = {}): DeliveryEventR
   return {
     eventId: `evt-${Math.random().toString(16).slice(2)}`,
     messageId: 'msg-1',
-    conversationKey: 'dm:1-2',
     ts: Date.now(),
-    nodeAddr: 'ABCDEF01',
     eventType: 'ack',
     payload: { status: 'delivered' },
     ...overrides,

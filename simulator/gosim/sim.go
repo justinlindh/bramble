@@ -660,6 +660,42 @@ func (s *Sim) handleInterferenceEnd(evt *C.sim_event_t) {
 	radioClearInterference(&s.radio, int(idata.zone_index))
 }
 
+// putSharedMetrics fills the counter and rate fields the periodic "metrics"
+// tick and the terminal "final_metrics" event report identically into m. Both
+// events used to inline these 20 key/value pairs verbatim, so a change to one
+// (a renamed counter, a different divisor) had to be mirrored in the other or
+// the two payloads would silently drift, exactly the hazard the surrounding
+// comments warn about. The fields that legitimately differ between the two
+// events (messages_sent/delivered/dropped, which the final event ties to the
+// same terminal-state locals its rate math uses) are set by each caller.
+func (s *Sim) putSharedMetrics(m map[string]any) {
+	m["total_packets"] = uint64(s.metrics.total_packets)
+	m["retried"] = uint64(s.metrics.messages_retried)
+	m["delivered_on_retry"] = uint64(s.metrics.messages_delivered_retry)
+	m["dedup_dropped"] = uint64(s.metrics.dedup_dropped)
+	m["airtime_deferred"] = uint64(s.metrics.airtime_deferred)
+	m["fragments_sent"] = uint64(s.metrics.fragments_sent)
+	m["fragments_reassembled"] = uint64(s.metrics.fragments_reassembled)
+	m["reassembly_timeout"] = uint64(s.metrics.reassembly_timeout)
+	m["crypto_encrypted"] = uint64(s.metrics.crypto_encrypted)
+	m["crypto_decrypted"] = uint64(s.metrics.crypto_decrypted)
+	m["crypto_auth_failed"] = uint64(s.metrics.crypto_auth_failed)
+	m["collisions"] = uint64(s.metrics.collisions)
+	m["half_duplex_drops"] = uint64(s.metrics.half_duplex_drops)
+	m["capture_wins"] = uint64(s.metrics.capture_wins)
+	m["lbt_backoffs"] = uint64(s.metrics.lbt_backoffs)
+	m["receptions_ok"] = uint64(s.metrics.receptions_ok)
+	m["channel_log_overflow"] = uint64(s.radio.channel.overflow_drops)
+	m["airtime_total_ms"] = uint64(s.metrics.airtime_total_us) / 1000
+	m["avg_latency_ms"] = metricsAvgLatencyMs(&s.metrics)
+	// delivery_rate divides delivered by total_packets (every frame of every
+	// type on the air, beacons included), which is NOT a message delivery
+	// figure and understates end-to-end delivery by an order of magnitude in
+	// control-heavy runs. Kept under its old name for continuity; the honest
+	// number is message_delivery_rate on the final_metrics event.
+	m["delivery_rate"] = metricsDeliveryRate(&s.metrics)
+}
+
 func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 	ts := getEventTimestamp(evt)
 
@@ -674,34 +710,16 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 	}
 	metricsUpdateActiveNodes(&s.metrics, active)
 
-	s.emitJSON(map[string]any{
-		"type":                  "metrics",
-		"timestamp_us":          ts,
-		"active_nodes":          active,
-		"total_packets":         uint64(s.metrics.total_packets),
-		"messages_sent":         uint64(s.metrics.messages_sent),
-		"delivered":             uint64(s.metrics.delivered_packets),
-		"dropped":               uint64(s.metrics.dropped_packets),
-		"retried":               uint64(s.metrics.messages_retried),
-		"delivered_on_retry":    uint64(s.metrics.messages_delivered_retry),
-		"dedup_dropped":         uint64(s.metrics.dedup_dropped),
-		"airtime_deferred":      uint64(s.metrics.airtime_deferred),
-		"fragments_sent":        uint64(s.metrics.fragments_sent),
-		"fragments_reassembled": uint64(s.metrics.fragments_reassembled),
-		"reassembly_timeout":    uint64(s.metrics.reassembly_timeout),
-		"crypto_encrypted":      uint64(s.metrics.crypto_encrypted),
-		"crypto_decrypted":      uint64(s.metrics.crypto_decrypted),
-		"crypto_auth_failed":    uint64(s.metrics.crypto_auth_failed),
-		"collisions":            uint64(s.metrics.collisions),
-		"half_duplex_drops":     uint64(s.metrics.half_duplex_drops),
-		"capture_wins":          uint64(s.metrics.capture_wins),
-		"lbt_backoffs":          uint64(s.metrics.lbt_backoffs),
-		"receptions_ok":         uint64(s.metrics.receptions_ok),
-		"channel_log_overflow":  uint64(s.radio.channel.overflow_drops),
-		"airtime_total_ms":      uint64(s.metrics.airtime_total_us) / 1000,
-		"avg_latency_ms":        metricsAvgLatencyMs(&s.metrics),
-		"delivery_rate":         metricsDeliveryRate(&s.metrics),
-	})
+	metrics := map[string]any{
+		"type":          "metrics",
+		"timestamp_us":  ts,
+		"active_nodes":  active,
+		"messages_sent": uint64(s.metrics.messages_sent),
+		"delivered":     uint64(s.metrics.delivered_packets),
+		"dropped":       uint64(s.metrics.dropped_packets),
+	}
+	s.putSharedMetrics(metrics)
+	s.emitJSON(metrics)
 
 	// Check black holes
 	for i := 0; i < count; i++ {
@@ -820,10 +838,21 @@ func (s *Sim) cmdLoad(cmd Command) {
 	//   - "unanchored" (trust-anchor campaign P2 red-team): boots without a fleet
 	//     anchor and TOFU-pins until a provision_anchor event hardens it;
 	//     defaults to anchored (the harness default).
+	// Trust overrides, applied to each listed node AFTER join (join defaults
+	// every node to the trusted state: provisioned, endorsed, and anchored).
+	// Each entry flips one trust bit for the nodes the scenario names under its
+	// flag key and announces it; see the loadNodeFlagIDs notes above for what
+	// each override models.
 	trustFlags := loadNodeFlagIDs(scenarioData, "unprovisioned", "unendorsed", "unanchored")
-	unprovisioned := trustFlags["unprovisioned"]
-	unendorsed := trustFlags["unendorsed"]
-	unanchored := trustFlags["unanchored"]
+	trustOverrides := []struct {
+		nodes     map[string]bool
+		mark      func(int)
+		eventType string
+	}{
+		{trustFlags["unprovisioned"], nodeMarkUnprovisioned, "node_unprovisioned"},
+		{trustFlags["unendorsed"], nodeMarkUnendorsed, "node_unendorsed"},
+		{trustFlags["unanchored"], nodeMarkUnanchored, "node_unanchored"},
+	}
 
 	// Broadcast node_joined for each initial node
 	count := nodeCount(&s.nodes)
@@ -832,6 +861,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		if node == nil {
 			continue
 		}
+		nodeID := C.GoString(&node.id[0])
 		nodeActivate(node)
 		s.applyDutyCycleCap(node)
 		anomalyInit(&s.anomaly[i])
@@ -844,37 +874,14 @@ func (s *Sim) cmdLoad(cmd Command) {
 		C.bridge_handle_node_join_ext(C.int(i), C.uint32_t(node.addr),
 			node.x, node.y, C.uint64_t(0))
 
-		// Apply the unprovisioned override AFTER join (join defaults the node
-		// to provisioned). An unprovisioned node is inert for the whole run.
-		if unprovisioned[C.GoString(&node.id[0])] {
-			nodeMarkUnprovisioned(i)
-			s.emitJSON(map[string]any{
-				"type": "node_unprovisioned", "timestamp_us": 0,
-				"node": C.GoString(&node.id[0]),
-			})
-		}
-
-		// Trust-anchor campaign (P2): apply the unendorsed override AFTER join
-		// (join defaults the node to endorsed). An unendorsed node attests with
-		// no fleet-anchor cert for the whole run, so anchored receivers never
-		// pin it.
-		if unendorsed[C.GoString(&node.id[0])] {
-			nodeMarkUnendorsed(i)
-			s.emitJSON(map[string]any{
-				"type": "node_unendorsed", "timestamp_us": 0,
-				"node": C.GoString(&node.id[0]),
-			})
-		}
-
-		// Trust-anchor campaign (P2 red-team): apply the unanchored override
-		// AFTER join (join anchors the node to the fleet anchor). An unanchored
-		// node TOFU-pins until a provision_anchor event hardens it.
-		if unanchored[C.GoString(&node.id[0])] {
-			nodeMarkUnanchored(i)
-			s.emitJSON(map[string]any{
-				"type": "node_unanchored", "timestamp_us": 0,
-				"node": C.GoString(&node.id[0]),
-			})
+		for _, ov := range trustOverrides {
+			if ov.nodes[nodeID] {
+				ov.mark(i)
+				s.emitJSON(map[string]any{
+					"type": ov.eventType, "timestamp_us": 0,
+					"node": nodeID,
+				})
+			}
 		}
 
 		// Schedule initial tick (staggered by 100ms per node)
@@ -883,7 +890,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 
 		s.emitJSON(map[string]any{
 			"type": "node_joined", "timestamp_us": 0,
-			"node": C.GoString(&node.id[0]),
+			"node": nodeID,
 			"addr": fmt.Sprintf("0x%08X", node.addr),
 			"x":    node.x, "y": node.y,
 		})
@@ -1210,23 +1217,12 @@ func (s *Sim) complete() {
 		"channel_util_pct": channelUtilPct,
 	})
 
-	s.emitJSON(map[string]any{
-		"type":                  "final_metrics",
-		"total_packets":         uint64(s.metrics.total_packets),
-		"messages_sent":         sent,
-		"delivered":             delivered,
-		"dropped":               dropped,
-		"undelivered":           undelivered,
-		"retried":               uint64(s.metrics.messages_retried),
-		"delivered_on_retry":    uint64(s.metrics.messages_delivered_retry),
-		"dedup_dropped":         uint64(s.metrics.dedup_dropped),
-		"airtime_deferred":      uint64(s.metrics.airtime_deferred),
-		"fragments_sent":        uint64(s.metrics.fragments_sent),
-		"fragments_reassembled": uint64(s.metrics.fragments_reassembled),
-		"reassembly_timeout":    uint64(s.metrics.reassembly_timeout),
-		"crypto_encrypted":      uint64(s.metrics.crypto_encrypted),
-		"crypto_decrypted":      uint64(s.metrics.crypto_decrypted),
-		"crypto_auth_failed":    uint64(s.metrics.crypto_auth_failed),
+	finalMetrics := map[string]any{
+		"type":          "final_metrics",
+		"messages_sent": sent,
+		"delivered":     delivered,
+		"dropped":       dropped,
+		"undelivered":   undelivered,
 		// beacons_sent/rreqs_sent/rreps_sent (and every per-type count/ToA
 		// bucket below) count SUCCESSFUL transmissions only, i.e. post the
 		// Task 1 airtime-budget gate and Task 2 RREQ rate limiters: a
@@ -1238,23 +1234,9 @@ func (s *Sim) complete() {
 		"beacons_sent":         uint64(s.metrics.beacons_sent),
 		"rreqs_sent":           uint64(s.metrics.rreqs_sent),
 		"rreps_sent":           uint64(s.metrics.rreps_sent),
-		"collisions":           uint64(s.metrics.collisions),
-		"half_duplex_drops":    uint64(s.metrics.half_duplex_drops),
-		"capture_wins":         uint64(s.metrics.capture_wins),
-		"lbt_backoffs":         uint64(s.metrics.lbt_backoffs),
-		"receptions_ok":        uint64(s.metrics.receptions_ok),
-		"channel_log_overflow": uint64(s.radio.channel.overflow_drops),
-		"airtime_total_ms":     uint64(s.metrics.airtime_total_us) / 1000,
 		"airtime_ms_by_type":   airtimeMsByType,
 		"offered_load_erlangs": offeredLoadErlangs,
 		"channel_util_pct":     channelUtilPct,
-		"avg_latency_ms":       metricsAvgLatencyMs(&s.metrics),
-		// delivery_rate divides delivered by total_packets (every frame of
-		// every type on the air, beacons included), which is NOT a message
-		// delivery figure and understates end-to-end delivery by an order of
-		// magnitude in control-heavy runs. Kept under its old name for
-		// continuity; use message_delivery_rate for the honest number.
-		"delivery_rate": metricsDeliveryRate(&s.metrics),
 		// message_delivery_rate is the end-to-end scripted-message outcome:
 		// delivered / all scripted messages that reached a terminal state
 		// (delivered + dropped + undelivered). THE delivery number for
@@ -1284,7 +1266,9 @@ func (s *Sim) complete() {
 		"budget_denied_by_tier": budgetDeniedByTier,
 		"rreq_rate_denied":      rreqRateDenied,
 		"rreq_fwd_denied":       rreqFwdDenied,
-	})
+	}
+	s.putSharedMetrics(finalMetrics)
+	s.emitJSON(finalMetrics)
 
 	// Phase 2 Task 0 (flood-comparison baseline): flood mode's own delivery
 	// bars. message_delivery_rate above is 0/0 in flood runs (flood.go never
@@ -1357,6 +1341,19 @@ func dup2Stdout(origStdout int) { syscall.Dup2(origStdout, 1) }
 // release the saved original stdout after restoring it).
 func closeFd(fd int) { syscall.Close(fd) }
 
+// emitRaw fans a ready-to-send line (already newline-terminated) out to the
+// websocket broadcast callback and, when running headless, additionally to the
+// saved real stdout: the pipe redirect steals the normal one, so headless runs
+// write JSON to origStdout directly.
+func (s *Sim) emitRaw(data []byte) {
+	if s.broadcast != nil {
+		s.broadcast(data)
+	}
+	if s.headless {
+		syscall.Write(s.origStdout, data)
+	}
+}
+
 // emitJSON marshals and broadcasts a JSON event.
 func (s *Sim) emitJSON(v any) {
 	data, err := json.Marshal(v)
@@ -1364,13 +1361,7 @@ func (s *Sim) emitJSON(v any) {
 		return
 	}
 	data = append(data, '\n')
-	if s.broadcast != nil {
-		s.broadcast(data)
-	}
-	if s.headless {
-		// Write to original stdout (not the pipe-redirected one)
-		syscall.Write(s.origStdout, data)
-	}
+	s.emitRaw(data)
 }
 
 // readPipe reads JSON lines from the pipe (C stdout output) and broadcasts them.
@@ -1393,21 +1384,11 @@ func (s *Sim) readPipe() {
 		out := make([]byte, len(line)+1)
 		copy(out, line)
 		out[len(line)] = '\n'
-		if s.broadcast != nil {
-			s.broadcast(out)
-		}
-		if s.headless {
-			syscall.Write(s.origStdout, out)
-		}
+		s.emitRaw(out)
 
 		if delivery, ok := websocket.BuildBroadcastDeliveryNotification(line, s.broadcastTelemetryMode); ok {
 			delivery = append(delivery, '\n')
-			if s.broadcast != nil {
-				s.broadcast(delivery)
-			}
-			if s.headless {
-				syscall.Write(s.origStdout, delivery)
-			}
+			s.emitRaw(delivery)
 		}
 	}
 }

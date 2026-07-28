@@ -66,6 +66,11 @@ uint32_t bramble_calculate_airtime_us(uint16_t payload_bytes, uint8_t sf, uint32
  */
 #define BRAMBLE_CAD_SYMBOL_NUM_REG 2u
 
+/** The same CAD length as a plain symbol count, for radio chips whose CAD
+ *  command takes one directly (LR1110). Deriving it here keeps the
+ *  configured CAD length and bramble_cad_timeout_ms's budget in lockstep. */
+#define BRAMBLE_CAD_SYMBOL_COUNT (1u << BRAMBLE_CAD_SYMBOL_NUM_REG)
+
 /** Fixed slack added to the CAD wait for IRQ delivery, SPI arbitration and
  *  scheduler latency, on top of the proportional margin. */
 #define BRAMBLE_CAD_OVERHEAD_MS 10u

@@ -2,16 +2,14 @@ export interface DeliveryEventRecord {
   eventId: string;
   messageId: string;
   packetId?: string;
-  conversationKey: string;
   ts: number;
-  nodeAddr: string;
   eventType: string;
   payload?: unknown;
 }
 
 class DeliveryEventStore {
   private db: IDBDatabase | null = null;
-  private readonly DB_VERSION = 2;
+  private readonly DB_VERSION = 3;
   private readonly STORE_NAME = 'delivery_events';
   private nodeAddr = '';
 
@@ -40,14 +38,16 @@ class DeliveryEventStore {
         if (!store.indexNames.contains('by-packet')) {
           store.createIndex('by-packet', 'packetId', { unique: false });
         }
-        if (!store.indexNames.contains('by-conversation')) {
-          store.createIndex('by-conversation', 'conversationKey', { unique: false });
-        }
         if (!store.indexNames.contains('by-ts')) {
           store.createIndex('by-ts', 'ts', { unique: false });
         }
-        if (!store.indexNames.contains('by-node-addr')) {
-          store.createIndex('by-node-addr', 'nodeAddr', { unique: false });
+        // v2 also created by-conversation and by-node-addr indexes that nothing
+        // ever queried; drop them from existing databases on the v3 upgrade.
+        if (store.indexNames.contains('by-conversation')) {
+          store.deleteIndex('by-conversation');
+        }
+        if (store.indexNames.contains('by-node-addr')) {
+          store.deleteIndex('by-node-addr');
         }
       };
       req.onsuccess = () => {
