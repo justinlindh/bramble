@@ -218,9 +218,9 @@ target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel 
 # 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
 # bramble-nrf.uf2 for drag-and-drop flashing.
 set(BRAMBLE_NRF_LAYOUT swd CACHE STRING "Flash layout: swd or uf2")
-# App base under the T1000-E's Adafruit UF2 bootloader (must match
-# ld/nrf52840_s140_app.ld FLASH ORIGIN).
-set(BRAMBLE_UF2_BASE 0x26000)
+# App base under the T1000-E's Adafruit UF2 bootloader (S140 v7.3.0 layout;
+# must match ld/nrf52840_s140_app.ld FLASH ORIGIN).
+set(BRAMBLE_UF2_BASE 0x27000)
 if(BRAMBLE_NRF_LAYOUT STREQUAL "uf2")
   set(BRAMBLE_LD ${CMAKE_CURRENT_SOURCE_DIR}/ld/nrf52840_s140_app.ld)
 else()

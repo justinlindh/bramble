@@ -41,7 +41,7 @@ report and fails the build if RAM demand exceeds the 200KB budget.
 
 Flash layouts: the default `swd` layout links at 0x0 for the dev kit. For
 the T1000-E's stock Adafruit UF2 bootloader, configure with
-`-DBRAMBLE_NRF_LAYOUT=uf2` to link at 0x26000 and emit `bramble-nrf.uf2`
+`-DBRAMBLE_NRF_LAYOUT=uf2` to link at 0x27000 (the S140 v7.3.0 app base the T1000-E's stock bootloader expects; physical-card confirmation pending) and emit `bramble-nrf.uf2`
 (family 0xADA52840) for drag-and-drop flashing.
 
 ## Flash and debug (dev kit)

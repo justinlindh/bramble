@@ -103,14 +103,37 @@ static uint8_t ldro_for(uint8_t sf, uint32_t bw_hz) {
     return bramble_symbol_time_us(sf, bw_hz) >= 16380 ? 1 : 0;
 }
 
-/* CAD detection peak per SF, from Semtech's SWSD003 measured table
- * (2-symbol CAD; SF5..SF12). det_min stays at the recommended 10. */
-static uint8_t cad_det_peak_for(uint8_t sf) {
-    static const uint8_t peaks[] = {48, 48, 50, 55, 55, 59, 61, 65};
+/* CAD detection peak per SF and bandwidth, from Semtech's SWSD003 measured
+ * table for a 4-SYMBOL CAD, matching BRAMBLE_CAD_SYMBOL_COUNT (the review
+ * caught the first cut pairing 2-symbol/250kHz numbers with a 4-symbol
+ * scan). det_min stays at the recommended 10. */
+static uint8_t cad_det_peak_for(uint8_t sf, uint32_t bw_hz) {
+    static const uint8_t peaks_4symb[4][8] = {
+        {43, 45, 45, 50, 53, 57, 59, 63}, /* BW 62.5kHz, SF5..SF12 */
+        {44, 46, 49, 53, 53, 55, 57, 62}, /* BW 125kHz */
+        {45, 47, 47, 51, 51, 56, 59, 62}, /* BW 250kHz */
+        {58, 66, 58, 65, 62, 55, 60, 57}, /* BW 500kHz */
+    };
     if (sf < 5 || sf > 12) {
         return 0x32; /* driver default */
     }
-    return peaks[sf - 5];
+    int row;
+    switch (bw_hz) {
+    case 62500:
+        row = 0;
+        break;
+    case 250000:
+        row = 2;
+        break;
+    case 500000:
+        row = 3;
+        break;
+    case 125000:
+    default:
+        row = 1;
+        break;
+    }
+    return peaks_4symb[row][sf - 5];
 }
 
 /* PA selection per the Seeed shield table: low-power PA/VREG up to +14dBm,
@@ -189,7 +212,7 @@ static int configure_radio(const radio_config_t* cfg) {
 
     lr11xx_radio_cad_params_t cad = {
         .cad_symb_nb = BRAMBLE_CAD_SYMBOL_COUNT,
-        .cad_detect_peak = cad_det_peak_for(cfg->sf),
+        .cad_detect_peak = cad_det_peak_for(cfg->sf, cfg->bw_hz),
         .cad_detect_min = 10,
         .cad_exit_mode = LR11XX_RADIO_CAD_EXIT_MODE_STANDBYRC,
         .cad_timeout = 0,
