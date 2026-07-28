@@ -1,5 +1,9 @@
 /**
- * Host tests for the nRF target's RAM-backed NVS shim (nrf/shim/nvs_ram.c).
+ * Host tests for the nRF target's NVS shims. One source, two backends: the
+ * RAM shim (nrf/shim/nvs_ram.c) and, under BRAMBLE_TEST_NVS_LFS, the
+ * flash-backed shim (nrf/shim/nvs_lfs.c) over littlefs's RAM block device.
+ * Both must satisfy the identical nvs.h contract, which is exactly what
+ * makes the P2 storage swap safe.
  *
  * The shim must hold the real blob sizes the firmware persists: the largest
  * today is the serialized identity pin store (IDENTITY_STORE_BLOB_MAX = 2466
@@ -166,14 +170,20 @@ static void test_type_mismatch(void) {
     nvs_close(h);
 }
 
-static void test_pool_exhaustion_returns_not_enough_space(void) {
+/* Capacity contract, backend-independent: the store must hold at least three
+ * pin-store-sized blobs (the pin store plus both replay windows), and when it
+ * does run out it must say so with NOT_ENOUGH_SPACE rather than failing some
+ * other way. The RAM shim exhausts an 8KB pool after a few; the flash backend
+ * has a whole partition, so the loop is bounded generously and the assertion
+ * is on the invariant, not on a particular capacity. */
+static void test_capacity_and_exhaustion_contract(void) {
     nvs_handle_t h = open_rw("bramble_id");
     static uint8_t blob[PIN_STORE_BLOB_SIZE];
     memset(blob, 0x5A, sizeof(blob));
     char key[NVS_RAM_NAME_MAX];
     esp_err_t err = ESP_OK;
     int wrote = 0;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 128; i++) {
         snprintf(key, sizeof(key), "big%d", i);
         err = nvs_set_blob(h, key, blob, sizeof(blob));
         if (err != ESP_OK) {
@@ -181,10 +191,10 @@ static void test_pool_exhaustion_returns_not_enough_space(void) {
         }
         wrote++;
     }
-    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_ENOUGH_SPACE, err);
-    // The pool must hold at least three pin-store-sized blobs (pin store +
-    // both replay windows head-room).
     TEST_ASSERT_GREATER_OR_EQUAL_INT(3, wrote);
+    if (err != ESP_OK) {
+        TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_ENOUGH_SPACE, err);
+    }
     nvs_close(h);
 }
 
@@ -244,7 +254,7 @@ int main(void) {
     RUN_TEST(test_erase_key);
     RUN_TEST(test_overwrite_with_larger_value);
     RUN_TEST(test_type_mismatch);
-    RUN_TEST(test_pool_exhaustion_returns_not_enough_space);
+    RUN_TEST(test_capacity_and_exhaustion_contract);
     RUN_TEST(test_iterator_enumerates_namespace);
     RUN_TEST(test_flash_erase_resets_everything);
     return UNITY_END();

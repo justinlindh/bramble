@@ -32,11 +32,15 @@ FetchContent_Declare(cjson
 )
 # Semtech LR11xx driver (Clear BSD). v3.0.0; do not pin below v2.7.0 (an
 # lr11xx_hal_read pointer-conversion fix lives there).
+FetchContent_Declare(littlefs
+  URL https://github.com/littlefs-project/littlefs/archive/refs/tags/v2.11.3.tar.gz
+  SOURCE_SUBDIR cmake-noop
+)
 FetchContent_Declare(swdr001
   URL https://github.com/Lora-net/SWDR001/archive/refs/tags/v3.0.0.tar.gz
   SOURCE_SUBDIR cmake-noop
 )
-FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson swdr001)
+FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson swdr001 littlefs)
 bramble_crypto_deps_exclude_tls()
 bramble_add_monocypher_ed25519(monocypher_ed25519)
 
@@ -55,6 +59,7 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/mdk/gcc_startup_nrf52840.S
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_uarte.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_nvmc.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
 )
@@ -172,6 +177,15 @@ target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../ma
 target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF)
 target_link_libraries(bramble_core PUBLIC freertos_kernel)
 
+add_library(littlefs_lib STATIC
+  ${littlefs_SOURCE_DIR}/lfs.c
+  ${littlefs_SOURCE_DIR}/lfs_util.c
+)
+target_include_directories(littlefs_lib PUBLIC ${littlefs_SOURCE_DIR})
+# The target has no stdio; littlefs's debug macros would pull printf in.
+target_compile_definitions(littlefs_lib PUBLIC LFS_NO_DEBUG LFS_NO_WARN LFS_NO_ERROR
+                                               LFS_NO_ASSERT LFS_NO_MALLOC)
+
 # SWDR001: only the command areas the radio backend uses; the HAL under
 # nrf/src implements its 6-function contract on nrfx SPIM2.
 add_library(swdr001_lib STATIC
@@ -181,11 +195,19 @@ add_library(swdr001_lib STATIC
 )
 target_include_directories(swdr001_lib PUBLIC ${swdr001_SOURCE_DIR}/src)
 
+# Settings/message filesystem partition. It sits above the application in
+# both layouts so one base serves both: under uf2 the app region is
+# 0x27000-0xC0000 and the stock bootloader owns 0xED000 up; under swd the
+# app starts at 0x0 and the top of flash is ours.
+set(BRAMBLE_LFS_BASE 0xC0000)
+set(BRAMBLE_LFS_SIZE 0x2D000) # 180KB, ends at 0xED000
+
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
   src/radio_lr1110.c
   src/lr11xx_hal_nrf.c
+  src/lfs_nvmc.c
   src/nrf_provision.c
   shim/console_uart.c
   shim/esp_timer_freertos.c
@@ -194,19 +216,22 @@ add_executable(bramble-nrf
   shim/gps_null.c
   shim/battery_null.c
   shim/esp_app_desc_nrf.c
-  shim/nvs_ram.c
+  shim/nvs_lfs.c
   shim/mbedtls_platform_freertos.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_esp.c
 )
 target_include_directories(bramble-nrf PRIVATE
   boards
+  src
   shim/include
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 target_compile_definitions(bramble-nrf PRIVATE BRAMBLE_PLATFORM_NRF)
 target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
+  BRAMBLE_LFS_BASE=${BRAMBLE_LFS_BASE}
+  BRAMBLE_LFS_SIZE=${BRAMBLE_LFS_SIZE}
 )
 # Dev-only bench network key (64 hex chars), passed locally at configure
 # time and NEVER committed; see nrf/src/nrf_provision.c and nrf/README.md.
@@ -214,7 +239,7 @@ if(DEFINED BRAMBLE_NRF_DEV_NETKEY)
   target_compile_definitions(bramble-nrf PRIVATE
     BRAMBLE_NRF_DEV_NETKEY="${BRAMBLE_NRF_DEV_NETKEY}")
 endif()
-target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519 swdr001_lib m)
+target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519 swdr001_lib littlefs_lib m)
 # Flash layout: `swd` (default) links at 0x0 for the dev kit; `uf2` links at
 # 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
 # bramble-nrf.uf2 for drag-and-drop flashing.

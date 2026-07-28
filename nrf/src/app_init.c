@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "identity.h"
 #include "mesh_task.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 
 static const char* TAG = "app_init";
@@ -17,6 +18,8 @@ static const char* TAG = "app_init";
 static bramble_identity_t s_identity;
 
 void app_init_stack(void) {
+    /* Mounts the LittleFS settings partition; identity, network key and
+     * channel state live here now and survive a reboot. */
     ESP_LOGI(TAG, "nvs_flash_init: %d", nvs_flash_init());
 
     if (identity_load(&s_identity) == 0) {
