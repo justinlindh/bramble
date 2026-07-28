@@ -32,11 +32,42 @@ FetchContent_Declare(cjson
 )
 # Semtech LR11xx driver (Clear BSD). v3.0.0; do not pin below v2.7.0 (an
 # lr11xx_hal_read pointer-conversion fix lives there).
+# Apache NimBLE, host + controller, no SoftDevice. Two patches are required.
+# The ISR-safe critical section, because upstream's uses vPortEnterCritical,
+# which the Cortex-M FreeRTOS port asserts on when the link layer calls it
+# from its RADIO/RTC0 ISRs. And the duplicate-PDU tolerance during encryption
+# start, without which a retransmitted plaintext control PDU makes the
+# controller terminate the link with 0x3D; see that patch for the full story.
+set(NIMBLE_PATCHES
+  ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-isr-safe-critical.patch
+  ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-dup-pdu-during-enc-start.patch)
+FetchContent_Declare(nimble
+  GIT_REPOSITORY https://github.com/apache/mynewt-nimble.git
+  GIT_TAG nimble_1_10_0_tag
+  GIT_SHALLOW TRUE
+  # Idempotent but not silent: if the patch is already applied (CMake re-runs
+  # this step on every reconfigure) the reverse-check short-circuits;
+  # otherwise it must apply cleanly or the build fails. Never `|| true`: a
+  # patch that quietly fails to apply produces a build that asserts inside
+  # the link layer's first interrupt, which is miserable to debug.
+  #
+  # One list, used for both the check and the apply: git apply is
+  # all-or-nothing across the files it is given, so the set must be identical
+  # on both sides. Naming it once is what keeps them that way; adding a patch
+  # to only one list would give a reverse-check that never short-circuits and
+  # therefore a re-apply failure on every reconfigure.
+  PATCH_COMMAND git apply --reverse --check --ignore-whitespace ${NIMBLE_PATCHES} ||
+                git apply --ignore-whitespace ${NIMBLE_PATCHES}
+)
+FetchContent_Declare(littlefs
+  URL https://github.com/littlefs-project/littlefs/archive/refs/tags/v2.11.3.tar.gz
+  SOURCE_SUBDIR cmake-noop
+)
 FetchContent_Declare(swdr001
   URL https://github.com/Lora-net/SWDR001/archive/refs/tags/v3.0.0.tar.gz
   SOURCE_SUBDIR cmake-noop
 )
-FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson swdr001)
+FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson swdr001 littlefs nimble)
 bramble_crypto_deps_exclude_tls()
 bramble_add_monocypher_ed25519(monocypher_ed25519)
 
@@ -55,6 +86,7 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/mdk/gcc_startup_nrf52840.S
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_uarte.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_nvmc.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
 )
@@ -73,7 +105,10 @@ target_compile_definitions(nrfx_lib PUBLIC NRF52840_XXAA)
 # bootstraps, ISRs are shallow, and newlib allocates little (printf buffers);
 # the mesh runs on FreeRTOS task stacks and ucHeap. Sized when the mesh
 # statics first pushed the RAM gate over budget.
-target_compile_definitions(nrfx_lib PRIVATE __STACK_SIZE=8192 __HEAP_SIZE=4096)
+# __HEAP_SIZE=0: newlib's sbrk heap is dead weight now that
+# shim/malloc_freertos.c serves malloc from the FreeRTOS pool, and reserving
+# a second region would just take RAM away from the one heap that is used.
+target_compile_definitions(nrfx_lib PRIVATE __STACK_SIZE=8192 __HEAP_SIZE=0)
 
 execute_process(
   COMMAND git describe --always --dirty
@@ -117,6 +152,7 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/location/location.c
   ${BRAMBLE_COMPONENTS}/network_key/network_key.c
   ${BRAMBLE_COMPONENTS}/msg_store/msg_store.c
+  ${BRAMBLE_COMPONENTS}/msg_store/msg_store_lfs.c
   ${BRAMBLE_COMPONENTS}/reliability/reliability.c
   ${BRAMBLE_COMPONENTS}/rpc/rpc_dispatcher.c
   ${BRAMBLE_COMPONENTS}/rpc/rpc_auth.c
@@ -132,6 +168,11 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/gps/nmea_parser.c
   ${BRAMBLE_COMPONENTS}/battery/battery_pct.c
   ${BRAMBLE_COMPONENTS}/indicators/alerts.c
+  ${BRAMBLE_COMPONENTS}/ota/ota_progress.c
+  ${BRAMBLE_COMPONENTS}/ota/ota_origin.c
+  ${BRAMBLE_COMPONENTS}/ota/ota_url.c
+  ${BRAMBLE_COMPONENTS}/ota/ota_version.c
+  ${BRAMBLE_COMPONENTS}/ota/ota_rollback_policy.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_task.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_beacon.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_persist.c
@@ -157,7 +198,7 @@ target_include_directories(bramble_core PUBLIC ${cjson_SOURCE_DIR})
 foreach(comp packet routing routing_auth dedup dm_session fragment replay_window
         security timesync airtime freq_plan mailbox nonce_counter bramble_probe
         channel identity location network_key msg_store reliability rpc
-        traffic_debug ui radio gps battery indicators crypto nvs_keys
+        traffic_debug ui radio gps battery indicators crypto nvs_keys ota
         board_config)
   target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/${comp}/include)
 endforeach()
@@ -168,9 +209,27 @@ target_include_directories(bramble_core BEFORE PUBLIC
 # radio_internal.h (the tx_gate-only transmit primitive) lives outside
 # include/ on purpose; radio_lr1110.c implements it.
 target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/radio)
-target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../main)
-target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF)
-target_link_libraries(bramble_core PUBLIC freertos_kernel)
+target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../main
+  ${CMAKE_CURRENT_SOURCE_DIR}/src)
+# PUBLIC so every translation unit that sees delivery_event_ring.h agrees on
+# the struct size. 512 records (28KB) is an ESP-with-PSRAM figure; this chip
+# has 256KB in total and no PSRAM to spill into, and the ring holds local
+# delivery history for the UI rather than any protocol state, so depth here
+# costs only how far back the timeline goes. 128 keeps a useful window and
+# returns 21KB to the heap that pairing needs for its P-256 keypair.
+target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF
+                                               CONFIG_BRAMBLE_BOARD_WM1110
+                                               DELIVERY_EVENT_RING_CAPACITY=128u)
+target_link_libraries(bramble_core PUBLIC freertos_kernel littlefs_lib)
+
+add_library(littlefs_lib STATIC
+  ${littlefs_SOURCE_DIR}/lfs.c
+  ${littlefs_SOURCE_DIR}/lfs_util.c
+)
+target_include_directories(littlefs_lib PUBLIC ${littlefs_SOURCE_DIR})
+# The target has no stdio; littlefs's debug macros would pull printf in.
+target_compile_definitions(littlefs_lib PUBLIC LFS_NO_DEBUG LFS_NO_WARN LFS_NO_ERROR
+                                               LFS_NO_ASSERT LFS_NO_MALLOC)
 
 # SWDR001: only the command areas the radio backend uses; the HAL under
 # nrf/src implements its 6-function contract on nrfx SPIM2.
@@ -181,11 +240,86 @@ add_library(swdr001_lib STATIC
 )
 target_include_directories(swdr001_lib PUBLIC ${swdr001_SOURCE_DIR}/src)
 
+# Settings/message filesystem partition. It sits above the application in
+# both layouts so one base serves both: under uf2 the app region is
+# 0x27000-0xC0000 and the stock bootloader owns 0xED000 up; under swd the
+# app starts at 0x0 and the top of flash is ours.
+set(BRAMBLE_LFS_BASE 0xC0000)
+set(BRAMBLE_LFS_SIZE 0x2D000) # 180KB, ends at 0xED000
+
+
+# NimBLE: sources hand-listed because the upstream porting Makefiles still
+# reference paths that moved (nimble/drivers/nrf52 is now nrf5x, and the RAM
+# transport was replaced by the unified transport).
+file(GLOB NIMBLE_HOST_SRC ${nimble_SOURCE_DIR}/nimble/host/src/*.c)
+file(GLOB NIMBLE_CTRL_SRC ${nimble_SOURCE_DIR}/nimble/controller/src/*.c)
+file(GLOB NIMBLE_PORTING_SRC ${nimble_SOURCE_DIR}/porting/nimble/src/*.c)
+add_library(nimble_lib STATIC
+  ${NIMBLE_HOST_SRC}
+  ${NIMBLE_CTRL_SRC}
+  ${NIMBLE_PORTING_SRC}
+  ${nimble_SOURCE_DIR}/nimble/host/services/gap/src/ble_svc_gap.c
+  ${nimble_SOURCE_DIR}/nimble/host/services/gatt/src/ble_svc_gatt.c
+  ${nimble_SOURCE_DIR}/nimble/host/store/config/src/ble_store_config.c
+  ${nimble_SOURCE_DIR}/nimble/host/util/src/addr.c
+  ${nimble_SOURCE_DIR}/nimble/transport/src/transport.c
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src/ble_hw.c
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src/ble_phy.c
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src/nrf52/phy.c
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src/ble_phy_trace.c
+  ${nimble_SOURCE_DIR}/porting/npl/freertos/src/npl_os_freertos.c
+)
+target_include_directories(nimble_lib PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/config/nimble
+  ${nimble_SOURCE_DIR}/nimble/include
+  ${nimble_SOURCE_DIR}/nimble/host/include
+  ${nimble_SOURCE_DIR}/nimble/host/services/gap/include
+  ${nimble_SOURCE_DIR}/nimble/host/services/gatt/include
+  ${nimble_SOURCE_DIR}/nimble/host/store/config/include
+  # src/ too: ble_store_nvs.c implements the persistence hooks declared in
+  # the store's private header, so both sides share one declaration.
+  ${nimble_SOURCE_DIR}/nimble/host/store/config/src
+  ${nimble_SOURCE_DIR}/nimble/host/util/include
+  ${nimble_SOURCE_DIR}/nimble/controller/include
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/include
+  ${nimble_SOURCE_DIR}/nimble/drivers/nrf5x/src
+  ${nimble_SOURCE_DIR}/nimble/transport/include
+  ${nimble_SOURCE_DIR}/porting/nimble/include
+  ${nimble_SOURCE_DIR}/porting/npl/freertos/include
+)
+# NIMBLE_CFG_CONTROLLER selects the combined host+controller build. It is a
+# command-line flag in the upstream Makefiles (which this build does not use,
+# because they still reference moved paths), and without it nimble_port_init
+# silently skips ble_ll_init and the controller is simply absent.
+#
+# FREERTOS makes the link layer place its RADIO interrupt at priority 5
+# instead of 0. Priority 0 is numerically above configMAX_SYSCALL_INTERRUPT_
+# PRIORITY, so the ISR's FromISR calls trip FreeRTOS's interrupt-priority
+# assert; upstream already accounts for this, the flag just has to be set.
+target_compile_definitions(nimble_lib PUBLIC NIMBLE_CFG_CONTROLLER=1 FREERTOS=1)
+target_link_libraries(nimble_lib PUBLIC nrfx_lib freertos_kernel)
+# Third-party code is not held to this repo's warning wall.
+target_compile_options(nimble_lib PRIVATE -Wno-unused-parameter -Wno-sign-compare
+                                          -Wno-implicit-fallthrough -Wno-unused-but-set-variable
+                                          -include ${CMAKE_CURRENT_SOURCE_DIR}/config/nimble/bramble_nimble_decls.h)
+target_link_libraries(nimble_lib PUBLIC mbedcrypto)
+
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
   src/radio_lr1110.c
   src/lr11xx_hal_nrf.c
+  src/lfs_nvmc.c
+  src/nimble_glue.c
+  src/ble_store_nvs.c
+  # Replaces upstream's porting/npl/freertos/src/nimble_port_freertos.c,
+  # which is deliberately absent from nimble_lib above: the BLE task
+  # priorities and stacks are this port's to choose.
+  src/nimble_port_freertos.c
+  src/ble_host.c
+  ${BRAMBLE_COMPONENTS}/ble/ble_server.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_token.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
   src/nrf_provision.c
   shim/console_uart.c
   shim/esp_timer_freertos.c
@@ -193,19 +327,30 @@ add_executable(bramble-nrf
   shim/esp_system_nrf.c
   shim/gps_null.c
   shim/battery_null.c
-  shim/nvs_ram.c
+  shim/esp_app_desc_nrf.c
+  shim/rpc_platform_stubs.c
+  shim/nvs_lfs.c
   shim/mbedtls_platform_freertos.c
+  shim/malloc_freertos.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_esp.c
 )
 target_include_directories(bramble-nrf PRIVATE
   boards
+  src
+  ${BRAMBLE_COMPONENTS}/ble/include
+  ${BRAMBLE_COMPONENTS}/ota/include
+  ${BRAMBLE_COMPONENTS}/display/include
+  ${BRAMBLE_COMPONENTS}/wifi/include
   shim/include
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 target_compile_definitions(bramble-nrf PRIVATE BRAMBLE_PLATFORM_NRF)
 target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
+  BRAMBLE_LFS_BASE=${BRAMBLE_LFS_BASE}
+  BRAMBLE_LFS_SIZE=${BRAMBLE_LFS_SIZE}
+  $<$<BOOL:${BRAMBLE_LOG_DEBUG}>:BRAMBLE_LOG_DEBUG>
 )
 # Dev-only bench network key (64 hex chars), passed locally at configure
 # time and NEVER committed; see nrf/src/nrf_provision.c and nrf/README.md.
@@ -213,7 +358,7 @@ if(DEFINED BRAMBLE_NRF_DEV_NETKEY)
   target_compile_definitions(bramble-nrf PRIVATE
     BRAMBLE_NRF_DEV_NETKEY="${BRAMBLE_NRF_DEV_NETKEY}")
 endif()
-target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519 swdr001_lib m)
+target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519 swdr001_lib littlefs_lib nimble_lib m)
 # Flash layout: `swd` (default) links at 0x0 for the dev kit; `uf2` links at
 # 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
 # bramble-nrf.uf2 for drag-and-drop flashing.
