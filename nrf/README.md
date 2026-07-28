@@ -1,4 +1,4 @@
-# Bramble nRF52840 target (P0 bring-up)
+# Bramble nRF52840 target (P1: LR1110 radio, bench-mesh peer)
 
 Experimental port of Bramble to the nRF52840 (Seeed Wio-WM1110 dev kit now,
 SenseCAP T1000-E later). Bare-metal FreeRTOS + nrfx, no ESP-IDF, no
