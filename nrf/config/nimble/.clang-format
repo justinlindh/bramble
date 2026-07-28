@@ -1,0 +1,5 @@
+# Vendored, upstream-generated NimBLE configuration adopted into this tree.
+# Keeping it byte-identical in shape to what NimBLE generates is what makes a
+# future regeneration a readable diff, so it is exempt from this repo's style.
+DisableFormat: true
+SortIncludes: Never

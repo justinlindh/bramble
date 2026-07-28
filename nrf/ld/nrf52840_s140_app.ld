@@ -11,7 +11,9 @@
  */
 MEMORY
 {
-  FLASH (rx) : ORIGIN = 0x27000, LENGTH = 0xC6000
+  /* Ends at 0xC0000 where the settings filesystem begins
+     (BRAMBLE_LFS_BASE in nrf/CMakeLists.txt). */
+  FLASH (rx) : ORIGIN = 0x27000, LENGTH = 0x99000
   RAM (rwx) : ORIGIN = 0x20000000, LENGTH = 0x40000
 }
 

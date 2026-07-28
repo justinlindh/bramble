@@ -1,4 +1,4 @@
-# Bramble nRF52840 target (P0 bring-up)
+# Bramble nRF52840 target (P2: BLE RPC + flash persistence)
 
 Experimental port of Bramble to the nRF52840 (Seeed Wio-WM1110 dev kit now,
 SenseCAP T1000-E later). Bare-metal FreeRTOS + nrfx, no ESP-IDF, no
@@ -6,20 +6,32 @@ SoftDevice; the portable protocol components compile unchanged and the
 platform seams are shimmed (`shim/`).
 
 Status, stated per the repo's honesty conventions: builds, boots, and runs
-as a live peer on the bench mesh from the Wio-WM1110 dev kit (P1). The
-LR1110 radio backend (`src/radio_lr1110.c`, Semtech SWDR001) transmits and
-receives; the real `main/` mesh loop runs (beacons, neighbor discovery,
-attestation relay, forwarding); the crypto backend is pinned to the ESP32
-fleet by shared standards-vector suites on the host
-(`test/test_*_nrf_backend`). Bench-verified 2026-07-27: mutual neighbor
-visibility with the 7-node bench mesh (the dev kit in a bench V4's
-`getNeighbors` at RSSI -74, and 3+ bench nodes verified in its own table), a
-10-minute soak with zero radio reinits, zero CAD timeouts, and a
-byte-stable heap. Still absent: BLE and any RPC transport (P2), flash
-persistence (NVS is RAM-backed until LittleFS in P2; identity and network
-key do not survive a reboot), GNSS (P3), power management (P3). Network-key
-provisioning is a dev-only compile-time define (see below). Not a supported
-device yet.
+as a live peer on the bench mesh from the Wio-WM1110 dev kit, with the
+fleet's BLE GATT server, the full RPC surface, and flash persistence (P2).
+The LR1110 radio backend (`src/radio_lr1110.c`, Semtech SWDR001) transmits
+and receives; the real `main/` mesh loop runs (beacons, neighbor discovery,
+attestation relay, forwarding); NimBLE (host and controller, no SoftDevice)
+runs alongside it, pairing with LE Secure Connections and persisting bonds;
+identity, network key, messages and bonds live in LittleFS and survive
+reboot; the crypto backend is pinned to the ESP32 fleet by shared
+standards-vector suites on the host (`test/test_*_nrf_backend`).
+
+P2 exit gate, bench-verified 2026-07-28 on the 7-node bench mesh: an ERASED
+device (fresh identity, no network key, node INERT) was provisioned entirely
+over an encrypted BLE link exactly as the webapp does it: paired (Just
+Works over LE Secure Connections), authenticated with the per-device token,
+`bramble.setNetworkKey` over the link, after which it joined the mesh (7
+named neighbors), its broadcast was received and stored by a bench T-Deck,
+and after a reset the SAME identity, network key and BLE bond all loaded
+from flash and the node rejoined inside a minute. A 10-minute soak followed
+with continuous heartbeats and a stable heap. BLE pairing reliability: 45
+consecutive connected attempts reached encryption with zero link kills
+(the controller previously terminated ~20% of attempts; see
+`patches/nimble-dup-pdu-during-enc-start.patch`).
+
+Still absent: GNSS (P3), power management (P3, the 32MHz crystal stays on),
+UF2/T1000-E validation on the physical card (scheduled next). Not a
+supported device yet.
 
 ## Build
 
@@ -37,7 +49,8 @@ cmake --build nrf/build
 ```
 
 Every build ends with `scripts/size_report.py`, which prints the memory
-report and fails the build if RAM demand exceeds the 200KB budget.
+report and fails the build on any of three limits: total RAM over
+252KB, static (non-heap) RAM over 100KB, or the heap below its 144KB floor.
 
 Flash layouts: the default `swd` layout links at 0x0 for the dev kit. For
 the T1000-E's stock Adafruit UF2 bootloader, configure with
@@ -88,14 +101,14 @@ and fails it over budget):
 | .data | 112 | |
 | libc heap (.heap) | 16,388 | nrfx startup default, newlib only |
 | MSP stack | 16,384 | nrfx startup default |
-| RAM total | 150,464 / 262,144 | 57.4%, 54,336 under the 200KB gate |
+| RAM total | 150,464 / 262,144 | 57.4% (figure predates the P2 heap unification) |
 | Flash | 43,704 / 1,048,576 | 4.2%, Berkeley text+data (includes .data load image) |
 
 These measurements supersede the scoping spike's 190-230KB estimate. Largest
 static objects: `ucHeap` 48K, `s_dm_table` 44K (the DM session table, the
 top shrink knob if P2 needs room), `s_msgs_storage` 14K. The libc heap and
 MSP stack sizes are untuned nrfx defaults with obvious headroom to reclaim.
-Not yet in this image: LR1110 driver + radio buffers (P1), NimBLE (~30K, P2),
+Not in the P0 image measured below: LR1110 driver + radio buffers (P1), NimBLE (P2),
 and mesh_task statics from `main/` (P2); the 54KB slack is their landing
 zone, which is why the gate does not move.
 
@@ -106,7 +119,8 @@ verifies 103ms.
 ## Measured (P1, full mesh image)
 
 Measured 2026-07-27 on the P1 exit-gate image (LR1110 radio + full mesh
-loop): RAM 195,936 / 262,144 bytes (74.7%, 8,864 under the 200KB gate) with
+loop): RAM 195,936 / 262,144 bytes (74.7%; figure predates the P2 heap
+unification, which moved plain malloc into ucHeap and made the total honest) with
 the FreeRTOS heap at 96KB and the MSP stack/libc heap tuned to 8KB/4KB;
 flash 151,912 bytes (14.5%). On-air: first beacon TX 230 bytes; 10 beacons
 per 10-minute soak at the adaptive interval; LR1110 TCXO runs at 1.6V/164

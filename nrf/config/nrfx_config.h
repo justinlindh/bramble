@@ -15,6 +15,8 @@
 #define NRFX_SPIM2_ENABLED 1
 #define NRFX_GPIOTE_ENABLED 1
 #define NRFX_GPIOTE0_ENABLED 1
+// Internal flash for the settings/message filesystem.
+#define NRFX_NVMC_ENABLED 1
 
 #include "nrfx_config_nrf52840.h"
 
