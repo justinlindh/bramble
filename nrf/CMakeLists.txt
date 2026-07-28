@@ -30,7 +30,13 @@ FetchContent_Declare(cjson
   URL https://github.com/DaveGamble/cJSON/archive/refs/tags/v1.7.18.tar.gz
   SOURCE_SUBDIR cmake-noop
 )
-FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson)
+# Semtech LR11xx driver (Clear BSD). v3.0.0; do not pin below v2.7.0 (an
+# lr11xx_hal_read pointer-conversion fix lives there).
+FetchContent_Declare(swdr001
+  URL https://github.com/Lora-net/SWDR001/archive/refs/tags/v3.0.0.tar.gz
+  SOURCE_SUBDIR cmake-noop
+)
+FetchContent_MakeAvailable(nrfx cmsis6 mbedtls monocypher cjson swdr001)
 bramble_crypto_deps_exclude_tls()
 bramble_add_monocypher_ed25519(monocypher_ed25519)
 
@@ -48,7 +54,8 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/mdk/system_nrf52840.c
   ${nrfx_SOURCE_DIR}/mdk/gcc_startup_nrf52840.S
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_uarte.c
-  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_rng.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
 )
 target_include_directories(nrfx_lib PUBLIC
@@ -62,6 +69,11 @@ target_include_directories(nrfx_lib PUBLIC
   ${cmsis6_SOURCE_DIR}/CMSIS/Core/Include
 )
 target_compile_definitions(nrfx_lib PUBLIC NRF52840_XXAA)
+# MSP stack and newlib heap, tuned from the nrfx 16K defaults: main() only
+# bootstraps, ISRs are shallow, and newlib allocates little (printf buffers);
+# the mesh runs on FreeRTOS task stacks and ucHeap. Sized when the mesh
+# statics first pushed the RAM gate over budget.
+target_compile_definitions(nrfx_lib PRIVATE __STACK_SIZE=8192 __HEAP_SIZE=4096)
 
 execute_process(
   COMMAND git describe --always --dirty
@@ -115,9 +127,30 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/radio/radio_airtime.c
   ${BRAMBLE_COMPONENTS}/radio/radio_profiles.c
   ${BRAMBLE_COMPONENTS}/radio/tx_gate.c
+  ${BRAMBLE_COMPONENTS}/radio/tx_gate_esp.c
+  ${BRAMBLE_COMPONENTS}/radio/phy_passthrough.c
   ${BRAMBLE_COMPONENTS}/gps/nmea_parser.c
   ${BRAMBLE_COMPONENTS}/battery/battery_pct.c
   ${BRAMBLE_COMPONENTS}/indicators/alerts.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_task.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_beacon.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_persist.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_dm.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_reliability.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_probe.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_location.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_routing.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_channels.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_mailbox.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/rreq_pseudonym.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/beacon_policy_calc.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/probe_results.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/probe_reply.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/rerr_ack_fastfail.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/broadcast_delivery_receipt.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/delivery_event_ring.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/board.c
   ${cjson_SOURCE_DIR}/cJSON.c
 )
 target_include_directories(bramble_core PUBLIC ${cjson_SOURCE_DIR})
@@ -133,17 +166,33 @@ target_include_directories(bramble_core BEFORE PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/boards
 )
 # radio_internal.h (the tx_gate-only transmit primitive) lives outside
-# include/ on purpose; radio_null.c implements it.
+# include/ on purpose; radio_lr1110.c implements it.
 target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/radio)
+target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../main)
+target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF)
 target_link_libraries(bramble_core PUBLIC freertos_kernel)
+
+# SWDR001: only the command areas the radio backend uses; the HAL under
+# nrf/src implements its 6-function contract on nrfx SPIM2.
+add_library(swdr001_lib STATIC
+  ${swdr001_SOURCE_DIR}/src/lr11xx_system.c
+  ${swdr001_SOURCE_DIR}/src/lr11xx_radio.c
+  ${swdr001_SOURCE_DIR}/src/lr11xx_regmem.c
+)
+target_include_directories(swdr001_lib PUBLIC ${swdr001_SOURCE_DIR}/src)
 
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
-  src/radio_null.c
+  src/radio_lr1110.c
+  src/lr11xx_hal_nrf.c
+  src/nrf_provision.c
   shim/console_uart.c
   shim/esp_timer_freertos.c
   shim/esp_random_nrf.c
+  shim/esp_system_nrf.c
+  shim/gps_null.c
+  shim/battery_null.c
   shim/nvs_ram.c
   shim/mbedtls_platform_freertos.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
@@ -158,14 +207,20 @@ target_compile_definitions(bramble-nrf PRIVATE BRAMBLE_PLATFORM_NRF)
 target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
 )
-target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519)
+# Dev-only bench network key (64 hex chars), passed locally at configure
+# time and NEVER committed; see nrf/src/nrf_provision.c and nrf/README.md.
+if(DEFINED BRAMBLE_NRF_DEV_NETKEY)
+  target_compile_definitions(bramble-nrf PRIVATE
+    BRAMBLE_NRF_DEV_NETKEY="${BRAMBLE_NRF_DEV_NETKEY}")
+endif()
+target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519 swdr001_lib m)
 # Flash layout: `swd` (default) links at 0x0 for the dev kit; `uf2` links at
 # 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
 # bramble-nrf.uf2 for drag-and-drop flashing.
 set(BRAMBLE_NRF_LAYOUT swd CACHE STRING "Flash layout: swd or uf2")
-# App base under the T1000-E's Adafruit UF2 bootloader (must match
-# ld/nrf52840_s140_app.ld FLASH ORIGIN).
-set(BRAMBLE_UF2_BASE 0x26000)
+# App base under the T1000-E's Adafruit UF2 bootloader (S140 v7.3.0 layout;
+# must match ld/nrf52840_s140_app.ld FLASH ORIGIN).
+set(BRAMBLE_UF2_BASE 0x27000)
 if(BRAMBLE_NRF_LAYOUT STREQUAL "uf2")
   set(BRAMBLE_LD ${CMAKE_CURRENT_SOURCE_DIR}/ld/nrf52840_s140_app.ld)
 else()

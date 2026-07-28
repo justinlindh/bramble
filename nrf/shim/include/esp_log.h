@@ -14,5 +14,18 @@ void bramble_log_write(char level, const char* tag, const char* fmt, ...)
 #define ESP_LOGE(tag, fmt, ...) bramble_log_write('E', tag, fmt, ##__VA_ARGS__)
 #define ESP_LOGW(tag, fmt, ...) bramble_log_write('W', tag, fmt, ##__VA_ARGS__)
 #define ESP_LOGI(tag, fmt, ...) bramble_log_write('I', tag, fmt, ##__VA_ARGS__)
+// Debug level compiles out unless a bench build opts in, matching the ESP
+// fleet's default log level; blocking UART writes on the RX path are the
+// cost this avoids.
+#ifdef BRAMBLE_LOG_DEBUG
 #define ESP_LOGD(tag, fmt, ...) bramble_log_write('D', tag, fmt, ##__VA_ARGS__)
+#else
+#define ESP_LOGD(tag, fmt, ...) ((void)0)
+#endif
 #define ESP_LOGV(tag, fmt, ...) ((void)0)
+
+// IDF's EARLY variants exist for pre-scheduler/ISR contexts; the blocking
+// UART writer here is safe in the contexts the mesh uses them (timer task).
+#define ESP_EARLY_LOGE ESP_LOGE
+#define ESP_EARLY_LOGW ESP_LOGW
+#define ESP_EARLY_LOGI ESP_LOGI

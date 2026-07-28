@@ -6,13 +6,20 @@ SoftDevice; the portable protocol components compile unchanged and the
 platform seams are shimmed (`shim/`).
 
 Status, stated per the repo's honesty conventions: builds, boots, and runs
-the portable protocol stack (identity, routing tables, DM table, message
-store, text UI state machine, crypto) on the Wio-WM1110 dev kit bench, with
-the crypto backend pinned to the ESP32 fleet's behavior by shared
-standards-vector suites on the host (`test/test_*_nrf_backend`). There is no
-radio driver yet (`src/radio_null.c`; the LR1110 backend is phase P1), no
-BLE, no RPC transport, and no flash persistence (NVS is RAM-backed for P0;
-LittleFS lands in P2). Not a supported device.
+as a live peer on the bench mesh from the Wio-WM1110 dev kit (P1). The
+LR1110 radio backend (`src/radio_lr1110.c`, Semtech SWDR001) transmits and
+receives; the real `main/` mesh loop runs (beacons, neighbor discovery,
+attestation relay, forwarding); the crypto backend is pinned to the ESP32
+fleet by shared standards-vector suites on the host
+(`test/test_*_nrf_backend`). Bench-verified 2026-07-27: mutual neighbor
+visibility with the 7-node bench mesh (the dev kit in a bench V4's
+`getNeighbors` at RSSI -74, and 3+ bench nodes verified in its own table), a
+10-minute soak with zero radio reinits, zero CAD timeouts, and a
+byte-stable heap. Still absent: BLE and any RPC transport (P2), flash
+persistence (NVS is RAM-backed until LittleFS in P2; identity and network
+key do not survive a reboot), GNSS (P3), power management (P3). Network-key
+provisioning is a dev-only compile-time define (see below). Not a supported
+device yet.
 
 ## Build
 
@@ -34,7 +41,7 @@ report and fails the build if RAM demand exceeds the 200KB budget.
 
 Flash layouts: the default `swd` layout links at 0x0 for the dev kit. For
 the T1000-E's stock Adafruit UF2 bootloader, configure with
-`-DBRAMBLE_NRF_LAYOUT=uf2` to link at 0x26000 and emit `bramble-nrf.uf2`
+`-DBRAMBLE_NRF_LAYOUT=uf2` to link at 0x27000 (the S140 v7.3.0 app base the T1000-E's stock bootloader expects; physical-card confirmation pending) and emit `bramble-nrf.uf2`
 (family 0xADA52840) for drag-and-drop flashing.
 
 ## Flash and debug (dev kit)
@@ -60,6 +67,14 @@ stty -F /dev/ttyUSB0 115200 raw -echo && cat /dev/ttyUSB0
 
 Note: logging uses newlib-nano printf, which has no `%lld`; keep 32-bit
 format specifiers in target logs.
+
+## Dev network key (bench only)
+
+The target has no RPC transport until P2, so bench builds may seed the
+network key at configure time: `cmake ... -DBRAMBLE_NRF_DEV_NETKEY=<64 hex>`
+(the emulator's `EMU_NETWORK_KEY` pattern, compile-time edition). The key
+value must never be committed; without the define the node boots INERT
+exactly like an unprovisioned fleet node.
 
 ## Measured memory (P0 exit gate)
 
@@ -87,3 +102,12 @@ zone, which is why the gate does not move.
 On-target crypto timings (Wio-WM1110 bench, 64MHz, software crypto, small
 ECP window): full identity generation 542ms one-time; Ed25519 sign plus two
 verifies 103ms.
+
+## Measured (P1, full mesh image)
+
+Measured 2026-07-27 on the P1 exit-gate image (LR1110 radio + full mesh
+loop): RAM 195,936 / 262,144 bytes (74.7%, 8,864 under the 200KB gate) with
+the FreeRTOS heap at 96KB and the MSP stack/libc heap tuned to 8KB/4KB;
+flash 151,912 bytes (14.5%). On-air: first beacon TX 230 bytes; 10 beacons
+per 10-minute soak at the adaptive interval; LR1110 TCXO runs at 1.6V/164
+ticks (the vendor SDK's 3.0V was not needed; no calibration errors).
