@@ -14,9 +14,6 @@
 
 static const char* TAG = "mesh";
 
-/* Forward declarations for intra-module static helpers. */
-static void mesh_persist_channel_psk_flags(void);
-
 static void mesh_persist_channel_psk_flags(void) {
     nvs_handle_t h;
     if (nvs_open(NVS_NS_CHANNEL, NVS_READWRITE, &h) != ESP_OK) {

@@ -11,10 +11,6 @@
 
 static const char* TAG = "mesh";
 
-/* Forward declarations for intra-module static helpers. */
-static void mesh_replay_store_save_one(nvs_handle_t h, const char* key, replay_table_t* t);
-static void mesh_replay_store_load_one(nvs_handle_t h, const char* key, replay_table_t* t);
-
 /* Nonce counter NVS persistence: reserve-ahead ceiling under NVS_NS_NONCE.
  * Not-found (first boot) resumes from ceiling 0, matching nonce_counter's own
  * zero-initialized static state. */
