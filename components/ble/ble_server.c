@@ -152,10 +152,26 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
         if (n > max_chunk)
             n = max_chunk;
 
-        struct os_mbuf* om = NULL;
-        /* Bounded retry: the msys pool refills as the stack drains queued
-         * notifications; dropping a chunk would corrupt the JSON stream. */
-        for (int attempt = 0; attempt < 10 && om == NULL; attempt++) {
+        /*
+         * Bounded retry covering BOTH the allocation and the send. The msys
+         * pool refills as the stack drains queued notifications, and an
+         * ENOMEM out of notify_custom means the same "momentarily empty" as a
+         * NULL allocation: a 253-byte chunk needs two 292-byte blocks, so a
+         * response of a few chunks can outrun a 12-block pool and then
+         * recover a few milliseconds later. Retrying the send matters as much
+         * as retrying the alloc, because giving up mid-response truncates the
+         * JSON stream, which is the corruption the chunking exists to avoid.
+         * Observed on the nRF bench: an 895-byte getNeighbors reply died at
+         * 759/896 with rc=6.
+         *
+         * Each attempt must build a fresh mbuf: ble_att_clt_tx_notify
+         * consumes the one it is given on every path, failures included.
+         * Only ENOMEM is worth retrying; ENOTCONN and friends will not
+         * improve with time.
+         */
+        int rc = BLE_HS_ENOMEM;
+        for (int attempt = 0; attempt < 25 && rc == BLE_HS_ENOMEM; attempt++) {
+            struct os_mbuf* om;
             if (off + n <= len) {
                 om = ble_hs_mbuf_from_flat(json + off, n);
             } else if (off < len) {
@@ -170,17 +186,16 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
             }
             if (om == NULL) {
                 vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
+            rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
+            if (rc == BLE_HS_ENOMEM) {
+                vTaskDelay(pdMS_TO_TICKS(20));
             }
         }
-        if (om == NULL) {
-            ESP_LOGW(TAG, "Notify chunk alloc failed at %u/%u; dropping rest", (unsigned)off,
-                     (unsigned)total);
-            return;
-        }
-
-        int rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
         if (rc != 0) {
-            ESP_LOGW(TAG, "Notify chunk failed: %d at %u/%u", rc, (unsigned)off, (unsigned)total);
+            ESP_LOGW(TAG, "Notify chunk failed: %d at %u/%u; dropping rest", rc, (unsigned)off,
+                     (unsigned)total);
             return;
         }
         off += n;
