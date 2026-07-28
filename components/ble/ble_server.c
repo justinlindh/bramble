@@ -35,7 +35,9 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "nvs_flash.h"
 #include "nvs_keys.h"
+#include "mesh_task.h"
 #include "ws_server.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -71,6 +73,10 @@ static uint16_t s_mtu = BLE_MTU_DEFAULT + 3; /* negotiated ATT MTU */
 static char s_line_buf[BLE_RPC_BUF_SIZE];
 static size_t s_line_len = 0;
 static char s_device_name[32] = "Bramble";
+
+/* Longest name that still fits an advertising PDU beside the flags and TX
+ * power fields; see start_advertising. */
+#define BLE_ADV_NAME_MAX 23
 static bool s_ble_authenticated = false;
 static uint8_t s_auth_fail_count = 0;
 
@@ -391,9 +397,18 @@ static void start_advertising(void) {
 
     struct ble_hs_adv_fields fields = {0};
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    /* The advertising PDU is 31 bytes: flags (3) and TX power (3) leave
+     * 23 for the name after its own 2 byte header. setNodeName accepts up to
+     * BRAMBLE_NODE_NAME_MAX (32), and an over-long name made
+     * ble_gap_adv_set_fields return BLE_HS_EMSGSIZE, which aborted this
+     * function and left the node advertising NOTHING: undiscoverable until
+     * someone renamed it over a transport they could no longer reach. Send
+     * the shortened-name form instead, which is exactly what it is for; the
+     * complete name is still readable from the GAP characteristic. */
+    size_t name_len = strlen(s_device_name);
     fields.name = (uint8_t*)s_device_name;
-    fields.name_len = strlen(s_device_name);
-    fields.name_is_complete = 1;
+    fields.name_is_complete = name_len <= BLE_ADV_NAME_MAX;
+    fields.name_len = (uint8_t)(fields.name_is_complete ? name_len : BLE_ADV_NAME_MAX);
     fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
     fields.tx_pwr_lvl_is_present = 1;
 
@@ -565,15 +580,36 @@ static void on_reset(int reason) { ESP_LOGW(TAG, "BLE host reset: reason=%d", re
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
+/* Default BLE name when the operator has not named the node: "Bramble-XXXX"
+ * carrying the low 16 bits of the node address, the same short form the mDNS
+ * hostname (bramble-%04x) and the webapp's formatAddrShort already use. A
+ * fleet of unnamed nodes otherwise advertises one indistinguishable
+ * "Bramble", and on a consoleless board (T1000-E) the advertisement is the
+ * only place the address is legible before connecting. Identity is started
+ * before the transport on both platforms, so the lookup normally succeeds;
+ * the bare name remains the fallback if it ever does not. */
+static void set_default_device_name(void) {
+    uint32_t addr = 0;
+    uint8_t pubkey[32];
+    if (mesh_get_identity(&addr, pubkey) == 0) {
+        snprintf(s_device_name, sizeof(s_device_name), "Bramble-%04" PRIX32, addr & 0xFFFFu);
+    } else {
+        strncpy(s_device_name, "Bramble", sizeof(s_device_name) - 1);
+        s_device_name[sizeof(s_device_name) - 1] = '\0';
+    }
+}
+
 int ble_server_init(void) {
     /* Read node name for BLE device name */
+    bool named = false;
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &nvs) == ESP_OK) {
         size_t len = sizeof(s_device_name);
-        if (nvs_get_str(nvs, "node_name", s_device_name, &len) != ESP_OK) {
-            strncpy(s_device_name, "Bramble", sizeof(s_device_name));
-        }
+        named = nvs_get_str(nvs, "node_name", s_device_name, &len) == ESP_OK && s_device_name[0];
         nvs_close(nvs);
+    }
+    if (!named) {
+        set_default_device_name();
     }
 
     /* Create RPC processing queue and task */
