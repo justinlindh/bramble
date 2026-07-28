@@ -66,7 +66,7 @@ func TestIdentityAnchorEndorsedPinsUnendorsedRejected(t *testing.T) {
 	var addrA, ed8A, addrD, ed8D string
 	sawUnendorsedMark := false
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
@@ -108,7 +108,7 @@ func TestIdentityAnchorEndorsedPinsUnendorsedRejected(t *testing.T) {
 	pinnedD := map[string]bool{}     // node -> (wrongly) pinned D's address
 	unendorsedD := map[string]bool{} // node -> refused D as unendorsed
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
@@ -227,7 +227,7 @@ func TestRuntimeSetAnchorDropsStalePins(t *testing.T) {
 	provisionTsUs := uint64(0)
 	var lastPinTsUs uint64
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
@@ -262,7 +262,7 @@ func TestRuntimeSetAnchorDropsStalePins(t *testing.T) {
 
 	// Count B's pins of A, and note the last one's timestamp.
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}

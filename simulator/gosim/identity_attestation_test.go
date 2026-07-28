@@ -77,7 +77,7 @@ func TestIdentityAttestationMultiHopPinAndAddrMismatch(t *testing.T) {
 	// First pass: capture the two attestation_sent events (A's genuine one
 	// and E's forged claim of A's address).
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
@@ -103,7 +103,7 @@ func TestIdentityAttestationMultiHopPinAndAddrMismatch(t *testing.T) {
 	}
 
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
@@ -215,7 +215,7 @@ func TestIdentityAttestationX25519RotationConflict(t *testing.T) {
 
 	var addrA, ed8A string
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
@@ -234,7 +234,7 @@ func TestIdentityAttestationX25519RotationConflict(t *testing.T) {
 	conflicts := map[string]bool{}
 	mismatches := map[string]bool{}
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}

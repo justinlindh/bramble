@@ -43,7 +43,7 @@ import (
 // event, plus the node-id to address mapping the scenario's own node_joined
 // events establish.
 type scenarioRun struct {
-	events []map[string]interface{}
+	events []map[string]any
 	// addrOf maps a scenario node id ("A") to its derived address string
 	// ("0x0C57406A"). Resolved from the run rather than hardcoded so that a
 	// change to gosim's identity-derived addressing does not silently turn
@@ -67,7 +67,7 @@ func runGatedScenario(t *testing.T, name string) *scenarioRun {
 		idOf:   map[string]string{},
 	}
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if json.Unmarshal([]byte(line), &evt) != nil {
 			continue // non-JSON log noise on the captured stream
 		}
@@ -101,8 +101,8 @@ func (r *scenarioRun) addr(t *testing.T, id string) string {
 }
 
 // anomalies returns every emitted anomaly of the given anomaly_type.
-func (r *scenarioRun) anomalies(anomalyType string) []map[string]interface{} {
-	var out []map[string]interface{}
+func (r *scenarioRun) anomalies(anomalyType string) []map[string]any {
+	var out []map[string]any
 	for _, e := range r.events {
 		if e["type"] == "anomaly" && e["anomaly_type"] == anomalyType {
 			out = append(out, e)
@@ -112,7 +112,7 @@ func (r *scenarioRun) anomalies(anomalyType string) []map[string]interface{} {
 }
 
 // finalMetrics returns the single terminal final_metrics event.
-func (r *scenarioRun) finalMetrics(t *testing.T) map[string]interface{} {
+func (r *scenarioRun) finalMetrics(t *testing.T) map[string]any {
 	t.Helper()
 	for i := len(r.events) - 1; i >= 0; i-- {
 		if r.events[i]["type"] == "final_metrics" {
@@ -148,7 +148,7 @@ func (r *scenarioRun) receipts() []receipt {
 		if e["type"] != "message_delivered" {
 			continue
 		}
-		raw, ok := e["path"].([]interface{})
+		raw, ok := e["path"].([]any)
 		if !ok {
 			continue
 		}
@@ -713,7 +713,7 @@ func TestScenarioLocationSharing(t *testing.T) {
 		{"A", coord{370058000, -1235183000}},
 	}
 
-	var sent []map[string]interface{}
+	var sent []map[string]any
 	received := map[coord]map[string]bool{} // coord -> set of receiving node ids
 	for _, e := range run.events {
 		switch e["type"] {

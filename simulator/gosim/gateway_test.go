@@ -44,7 +44,7 @@ func newFakeSerial(conn net.Conn, refuseUnlessForce bool) *fakeSerial {
 	return fs
 }
 
-func (fs *fakeSerial) writeLine(v interface{}) {
+func (fs *fakeSerial) writeLine(v any) {
 	b, _ := json.Marshal(v)
 	b = append(b, '\n')
 	fs.wmu.Lock()
@@ -78,9 +78,9 @@ func (fs *fakeSerial) readLoop() {
 			if fs.refuseUnlessForce && !m.Params.Force {
 				enabled, requiresForce = false, true
 			}
-			fs.writeLine(map[string]interface{}{
+			fs.writeLine(map[string]any{
 				"jsonrpc": "2.0", "id": m.ID,
-				"result": map[string]interface{}{
+				"result": map[string]any{
 					"enabled": enabled, "requires_force": requiresForce,
 					"ttl_s": 1800, "remaining_s": 1800,
 				},
@@ -93,9 +93,9 @@ func (fs *fakeSerial) readLoop() {
 				default:
 				}
 			}
-			fs.writeLine(map[string]interface{}{
+			fs.writeLine(map[string]any{
 				"jsonrpc": "2.0", "id": m.ID,
-				"result": map[string]interface{}{"ok": true, "len": len(raw)},
+				"result": map[string]any{"ok": true, "len": len(raw)},
 			})
 		}
 	}
@@ -103,9 +103,9 @@ func (fs *fakeSerial) readLoop() {
 
 // emitFrame pushes a real-mesh reception up the link as the firmware would.
 func (fs *fakeSerial) emitFrame(frame []byte, rssi, snr int, freqHz int64) {
-	fs.writeLine(map[string]interface{}{
+	fs.writeLine(map[string]any{
 		"jsonrpc": "2.0", "method": "bramble.onPhyFrame",
-		"params": map[string]interface{}{
+		"params": map[string]any{
 			"frame": hex.EncodeToString(frame), "rssi": rssi, "snr": snr, "freq": freqHz,
 		},
 	})
