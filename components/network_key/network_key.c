@@ -13,7 +13,7 @@ static int s_provisioned = 0;
 static int netkey_store_read(uint8_t key_out[32]);
 static int netkey_store_write(const uint8_t key[32]);
 
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) || defined(BRAMBLE_PLATFORM_NRF)
 #include "nvs.h"
 #include "nvs_keys.h"
 

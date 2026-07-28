@@ -187,6 +187,7 @@ add_executable(bramble-nrf
   src/app_init.c
   src/radio_lr1110.c
   src/lr11xx_hal_nrf.c
+  src/nrf_provision.c
   shim/console_uart.c
   shim/esp_timer_freertos.c
   shim/esp_random_nrf.c
@@ -207,6 +208,12 @@ target_compile_definitions(bramble-nrf PRIVATE BRAMBLE_PLATFORM_NRF)
 target_compile_definitions(bramble-nrf PRIVATE
   BRAMBLE_GIT_DESCRIBE="${BRAMBLE_GIT_DESCRIBE}"
 )
+# Dev-only bench network key (64 hex chars), passed locally at configure
+# time and NEVER committed; see nrf/src/nrf_provision.c and nrf/README.md.
+if(DEFINED BRAMBLE_NRF_DEV_NETKEY)
+  target_compile_definitions(bramble-nrf PRIVATE
+    BRAMBLE_NRF_DEV_NETKEY="${BRAMBLE_NRF_DEV_NETKEY}")
+endif()
 target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel mbedcrypto monocypher_ed25519 swdr001_lib m)
 # Flash layout: `swd` (default) links at 0x0 for the dev kit; `uf2` links at
 # 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
