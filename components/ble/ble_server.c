@@ -20,6 +20,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/timers.h"
 /* ESP-IDF's HCI shim: on that platform nimble_port_init() also brings up the
  * ESP controller through it. Bare-metal builds link NimBLE's own nRF52
  * controller instead, so there is no HCI transport to initialize (and no
@@ -394,6 +395,38 @@ static const struct ble_gatt_svc_def s_gatt_svcs[] = {
 /* ── GAP event handler ───────────────────────────────────────────────── */
 
 static int gap_event_handler(struct ble_gap_event* event, void* arg);
+static void start_advertising(void);
+
+/* Advertising restart retry. start_advertising used to be fire-and-forget:
+ * called once per disconnect, and if the host returned any transient error
+ * (busy during a host reset, EPREEMPTED, momentary pool pressure) the
+ * failure was logged and the device simply never advertised again while the
+ * mesh kept running. On a consoleless board that is indistinguishable from
+ * a dead node, and it is reachable in practice: a client that drops the
+ * link mid-pairing can race the restart against SMP teardown. Reproduced on
+ * the bench (T1000-E, killed bleak sessions) and seen once on the dev kit
+ * after 11.7h. Any failed start now arms a one-shot retry timer; the timer
+ * re-arms until advertising is up or a connection exists. */
+#define BLE_ADV_RETRY_MS 1000
+
+static TimerHandle_t s_adv_retry_timer;
+
+static void adv_retry_cb(TimerHandle_t t) {
+    (void)t;
+    if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE && !ble_gap_adv_active()) {
+        start_advertising();
+    }
+}
+
+static void schedule_adv_retry(void) {
+    if (s_adv_retry_timer == NULL) {
+        s_adv_retry_timer = xTimerCreate("ble_adv_retry", pdMS_TO_TICKS(BLE_ADV_RETRY_MS), pdFALSE,
+                                         NULL, adv_retry_cb);
+    }
+    if (s_adv_retry_timer != NULL) {
+        xTimerStart(s_adv_retry_timer, 0);
+    }
+}
 
 static void start_advertising(void) {
     struct ble_gap_adv_params adv_params = {
@@ -423,6 +456,7 @@ static void start_advertising(void) {
     int rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
         ESP_LOGE(TAG, "adv_set_fields failed: %d", rc);
+        schedule_adv_retry();
         return;
     }
 
@@ -435,6 +469,7 @@ static void start_advertising(void) {
     rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
     if (rc != 0) {
         ESP_LOGE(TAG, "adv_rsp_set_fields failed: %d", rc);
+        schedule_adv_retry();
         return;
     }
 
@@ -442,9 +477,10 @@ static void start_advertising(void) {
     rc = ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER, &adv_params,
                            gap_event_handler, NULL);
     bramble_boot_probe(0x10, rc);
-    if (rc != 0) {
+    if (rc != 0 && rc != BLE_HS_EALREADY) {
         ESP_LOGE(TAG, "adv_start failed: %d", rc);
-    } else {
+        schedule_adv_retry();
+    } else if (rc == 0) {
         ESP_LOGI(TAG, "BLE advertising started as '%s' (random addr)", s_device_name);
     }
 }
