@@ -99,3 +99,80 @@ The Phase 1 delivery-core plan the internal design plan found that the numbers a
 **Caveat on the flood numbers.** gosim's aggregate `delivered`/`dropped`/`message_delivery_rate` metrics cannot credit a broadcast as delivered (the bookkeeping structure they read from is inherently unicast-shaped); every one of the 10 added broadcasts in these runs lands in `undelivered` by construction, even on the 10-node runs where a dedicated gosim scenario (`TestPhase1ChannelFloodReachesFarNode`, a 5-node line) separately proves the flood reaches a node 4 hops from the sender. Read the unicast delivery collapse above from the `delivered`/`dropped` columns of the SAME scripted unicast messages, isolated from the flood traffic layered on top, not from the aggregate rate.
 
 Methodology: every number above comes from the gosim scenario runner (`simulator/gosim/`), driven with the scenario JSON that `simulator/scenarios/generate.py --legacy` emits for the scale runs, or the committed files in `simulator/scenarios/` for the named ones; re-run any scenario JSON with the commands under "Reproduction" to reproduce.
+
+## Receipt reliability: the LBT defer fix, before and after (2026-07-28)
+
+### Bench finding
+
+Bench testing of a uniform-1.6.0 fleet measured broadcast delivery receipt return at roughly 75-80% during receipt storms, a receipt storm being the burst of receipts that a broadcast triggers when several hearers all originate a reply back at the sender within seconds of each other. This was root-caused to `components/radio/tx_gate.c`'s Listen-Before-Talk loop: after three busy CAD checks on any TX kind, tx_gate transmitted anyway ("blind-fire," to avoid starving lanes that cannot afford to wait indefinitely), and a receipt storm keeps the channel busy long enough that most blind-fired receipt attempts collided at the origin and were lost. The bench evidence for this figure lives in the repository's history and in the project's internal tracking; specific bench hardware, addresses and RSSI figures are kept out of this public document by house rule. The simulation below reproduces the mechanism directly rather than restating the bench number.
+
+### What the simulator gained
+
+Before this branch, gosim had no way to measure broadcast receipt return at all. Four pieces landed to make an honest before/after possible:
+
+- A `receipt_return_rate` metric (`broadcast_receipts_registered` / `broadcast_receipts_expected`, counted from the same firmware bookkeeping that records real delivery events at the origin, not a sim-only shortcut).
+- A ten-node all-in-range storm scenario (`simulator/gosim/receipt_storm_test.go`) sized so one broadcast owes exactly nine receipts, with a lead-in long enough for every node's neighbor table, and therefore its anti-collision slot spacing, to be populated before the broadcast fires.
+- Verification that `tx_gate`'s `ops.channel_busy` reflects the ether's real carrier state in sim rather than reading "never busy," which would have made the blind-fire defect impossible to reproduce at all.
+- The firmware fix itself: `components/radio/tx_gate.c` now answers `TX_GATE_ERR_CHANNEL_BUSY` for `TX_KIND_RECEIPT` after LBT exhaustion instead of transmitting, and `main/mesh_reliability.c`'s `mesh_process_receipt_tx_event` reschedules the same attempt with fresh 250-999ms jitter, capped at 8 defers (after which it counts as a consumed attempt, so a permanently jammed channel still terminates the same way it always did). Every other TX kind keeps the original anti-starvation blind-fire; deferring is receipt-only by design, because a receipt's app-layer retry budget (three attempts, 12s) can afford to wait where data, ACK and routing traffic cannot.
+
+The storm test runs both the pre-fix and post-fix world from the same code, the same firmware receipt policy (slot delay, jitter, three attempts, scaled backoff), and the same ten seeds, switched by a single scenario field (`receipt_tx_kind`): `receipt_forward` is the undeferred kind every receipt used before the fix, `receipt` is the deferred one after it.
+
+### A/B result: ten-node storm, ten seeds (simulation)
+
+`go test -run TestReceiptStormLBTDeferBeatsBlindFire -v` in `simulator/gosim`, one broadcast per seed, nine receipts owed:
+
+| seed | blind-fire rate | defer rate |
+| --- | --- | --- |
+| 1 | 0.8889 | 1.0000 |
+| 2 | 1.0000 | 1.0000 |
+| 3 | 0.8889 | 1.0000 |
+| 4 | 0.6667 | 0.8889 |
+| 5 | 0.8889 | 1.0000 |
+| 6 | 0.5556 | 1.0000 |
+| 7 | 0.8889 | 1.0000 |
+| 8 | 0.8889 | 1.0000 |
+| 9 | 0.8889 | 1.0000 |
+| 10 | 0.8889 | 1.0000 |
+| **mean** | **0.8444** | **0.9889** |
+
+The blind-fire arm reproduces the defect (84.4% mean), milder than the bench's 75-80% because this scenario runs the frequency plan's default SF9 rather than the bench's SF10, so a receipt occupies less air here and contends less. The defer arm clears the campaign's 95% exit gate at a 98.9% mean and beats the blind-fire arm on every seed except the one (seed 2) where both arms already returned 100%.
+
+Seed 6 is the sharpest single-seed illustration: 179 collisions in the blind-fire arm against 116 in the defer arm, receipt_return_rate 0.5556 against 1.0000. Deferring does not eliminate contention outright (the defer arm still has a nonzero collision count, from other traffic sharing the channel); it removes the specific failure mode where a receipt collides because it fired anyway into a channel LBT had just reported busy.
+
+### Zero extra airtime (simulation)
+
+Receipt-tier and total time-on-air are identical between arms on every one of the ten seeds:
+
+| | receipt-tier ToA | total ToA |
+| --- | --- | --- |
+| blind-fire | 7658 ms | 21622 ms |
+| defer | 7658 ms | 21622 ms |
+
+No attempt in the defer arm ever hit the eight-defer cap in this scenario, so exactly the same 27 receipt transmissions (nine hearers times three attempts) flew in both arms; the fix changes when they fly, not how many. The defer arm buys 14.4 points of receipt return for zero extra airtime: every collision it avoids is airtime that would otherwise have been spent and wasted.
+
+### Regression sweep: legacy scale scenarios (simulation)
+
+The legacy scale generator's scenarios (`generate.py --legacy N --seed S`) carry no broadcast traffic, only scripted unicast messages, so they cannot exercise `TX_KIND_RECEIPT`'s defer path at all: a clean regression check for everything else the branch touches. This branch's build (`fix/receipt-lbt-defer` at `988f36c4`) was compared against `main` at the branch's merge base (`22c8f7e3`), same generator, same topologies, same seeds:
+
+| Scenario | message_delivery_rate before | after | airtime by type |
+| --- | --- | --- | --- |
+| n=10, seed 1 | 30% | 30% | identical |
+| n=10, seed 2 | 30% | 30% | identical |
+| n=10, seed 3 | 30% | 30% | identical |
+| n=50, seed 1 | 10% | 10% | identical |
+| n=50, seed 2 | 10% | 10% | identical |
+| n=50, seed 3 | 10% | 10% | identical |
+
+Every field in `final_metrics` came back byte-identical between before and after on all six runs, including every per-type airtime figure (`ack`, `beacon`, `data`, `receipt`, `rerr`, `rrep`, `rreq`), with one exception: the three fields Task 1 added to the metrics struct (`broadcast_receipts_expected`, `broadcast_receipts_registered`, `receipt_return_rate`), which read 0/0/1 in both before and after because these scenarios never broadcast. This is the expected result: no movement in `message_delivery_rate`, and no movement in airtime by type, because these particular scenarios contain no broadcast traffic for the fix to touch. A regression here would have meant the fix reached beyond `TX_KIND_RECEIPT`, which it does not.
+
+### Bench verification: pending
+
+The A/B and the regression sweep above are simulation only, run against the sim's model of the firmware's real `tx_gate` and receipt-queue logic; neither is a bench measurement. Bench verification of the fix, flashing the release build to the fleet and re-running receipt-trace rounds against the same kind of storm the bench originally measured at 75-80%, has not happened as of this section. That step requires physical hardware this task does not have access to and is not claimed here.
+
+### Reproduction
+
+```bash
+cd simulator/gosim && go test -run TestReceiptStormLBTDeferBeatsBlindFire -v   # A/B storm, both arms, 10 seeds
+python3 ../scenarios/generate.py --legacy N --seed S --out /tmp/nN-sS.json    # N in {10,50}, S in {1,2,3}
+./bramble-gosim --headless --scenario /tmp/nN-sS.json                         # read final_metrics
+```
