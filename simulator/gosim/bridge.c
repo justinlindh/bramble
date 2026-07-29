@@ -1401,15 +1401,21 @@ void bridge_handle_receipt_tx(sim_event_t* event, node_array_t* nodes, radio_con
 
     uint32_t retry_delay_ms;
     if (res == BRIDGE_TX_SENT) {
-        /* Normal inter-attempt spacing (main/mesh_reliability.c:370):
-         * 500 + 700*i ms base, plus 0..(500 + 400*i) ms of jitter, both scaled
-         * by the receipt-budget pressure multiplier. */
-        uint32_t i = (uint32_t)(ext->receipt_queue[slot].attempts_sent - 1u);
-        uint32_t base_ms = bridge_receipt_scaled_ms(node, 500u + i * 700u);
-        uint32_t jitter_range = bridge_receipt_scaled_ms(node, 500u + i * 400u);
-        if (jitter_range == 0u)
-            jitter_range = 1u;
-        retry_delay_ms = base_ms + (uint32_t)(pcg32_random(rng) % jitter_range);
+        /* Normal inter-attempt spacing mirrors mesh_process_receipt_tx_event:
+         * each retry re-draws a FULL contention slot with the attempt number
+         * salted into the slot hash, so retries scatter into fresh slots of
+         * the next window instead of folding into other senders' first
+         * attempts (the bench-measured storm-occupancy loss). Uses the real
+         * mesh_broadcast_receipt_slot_delay_ms, so the widened slot pitch
+         * flows in from the compiled firmware policy. */
+        uint32_t att = (uint32_t)ext->receipt_queue[slot].attempts_sent;
+        uint32_t reslot_ms = mesh_broadcast_receipt_slot_delay_ms(
+            node->addr, ext->receipt_queue[slot].original_packet_id ^ (att << 28),
+            (uint8_t)neighbor_count(&node->neighbors));
+        retry_delay_ms =
+            bridge_receipt_scaled_ms(node, reslot_ms + (uint32_t)(pcg32_random(rng) % 400u));
+        if (retry_delay_ms == 0u)
+            retry_delay_ms = 1u;
     } else {
         /* Deny/defer-exhaustion backoff (main/mesh_reliability.c:288 and
          * :356, identical formula in both): 1000 + 2000*attempts_sent ms plus
