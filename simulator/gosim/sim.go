@@ -1157,6 +1157,13 @@ func (s *Sim) complete() {
 		rreqRateDenied += uint64(node.rreq_rate_denied)
 		rreqFwdDenied += uint64(node.rreq_fwd_denied)
 	}
+	// Receipt reliability campaign Task 1: bridge_ext_metrics_t (bridge.h)
+	// is a single process-global struct, unlike the per-node counters
+	// summed above, so it is read once rather than accumulated per node.
+	extMetrics := C.bridge_ext_metrics_get()
+	broadcastReceiptsExpected := uint64(extMetrics.broadcast_receipts_expected)
+	broadcastReceiptsRegistered := uint64(extMetrics.broadcast_receipts_registered)
+
 	sort.Slice(perNodeMs, func(i, j int) bool { return perNodeMs[i] < perNodeMs[j] })
 	pct := func(p float64) uint64 {
 		if len(perNodeMs) == 0 {
@@ -1264,6 +1271,19 @@ func (s *Sim) complete() {
 		"budget_denied_by_tier": budgetDeniedByTier,
 		"rreq_rate_denied":      rreqRateDenied,
 		"rreq_fwd_denied":       rreqFwdDenied,
+		// Receipt reliability campaign Task 1: broadcast_receipts_expected
+		// is every (recipient, broadcast) pair where a node other than the
+		// origin stored the broadcast; broadcast_receipts_registered is how
+		// many of those pairs the origin actually saw a delivery receipt
+		// for (bridge.c's bridge_send_broadcast_delivery_receipt, gated
+		// through g_ext_metrics so the count survives exactly once per pair
+		// no matter how many redundant relay paths deliver the receipt).
+		// receipt_return_rate is the ratio the rest of this campaign tunes
+		// against; a broadcast-free scenario reports 1.0 (nothing was owed,
+		// nothing was missed), not 0.0.
+		"broadcast_receipts_expected":   broadcastReceiptsExpected,
+		"broadcast_receipts_registered": broadcastReceiptsRegistered,
+		"receipt_return_rate":           receiptReturnRate(broadcastReceiptsExpected, broadcastReceiptsRegistered),
 	}
 	s.putSharedMetrics(finalMetrics)
 	s.emitJSON(finalMetrics)
@@ -1329,6 +1349,20 @@ func confirmedDeliveryRate(confirmed, delivered, dropped, undelivered uint64) fl
 		return 0.0
 	}
 	return float64(confirmed) / float64(total)
+}
+
+// receiptReturnRate is registered / expected: of every (recipient,
+// broadcast) pair where a node other than the origin stored a broadcast
+// (expected), the fraction whose delivery receipt the origin actually saw
+// (registered). Unlike messageDeliveryRate/confirmedDeliveryRate, a
+// zero-denominator run reports 1.0, not 0.0: a scenario with no broadcasts
+// owes zero receipts, so nothing was missed, which is a passing result, not
+// a failing one.
+func receiptReturnRate(expected, registered uint64) float64 {
+	if expected == 0 {
+		return 1.0
+	}
+	return float64(registered) / float64(expected)
 }
 
 // restoreStdout tears down the C-stdout capture: it closes the pipe's write

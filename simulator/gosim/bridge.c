@@ -264,6 +264,51 @@ static void relay_path_remove(uint32_t packet_id) {
     }
 }
 
+/* ─── Broadcast receipt-return dedup (receipt reliability campaign Task 1) ─
+ * A broadcast's delivery receipt has no route to follow home (data_rx_decide
+ * never installs a reverse route off a broadcast DATA), so it always floods
+ * back exactly like the unicast receipt's flood-transport branch: more than
+ * one physical copy of the SAME (orig_packet_id, recipient) receipt commonly
+ * reaches the origin over redundant relay paths, especially in a dense or
+ * fully-connected topology. This table dedups on that pair so broadcast_
+ * receipts_registered counts each recipient's confirmation exactly once, no
+ * matter how many redundant copies of it arrive. Ring-buffer reuse like
+ * g_relay_paths above; sized for gosim's scripted-scenario scale, not the
+ * unbounded loaded-grid runs (which do not use scripted broadcasts). */
+#define MAX_BROADCAST_RECEIPT_SEEN 1024
+
+typedef struct {
+    bool used;
+    uint32_t orig_packet_id;
+    uint32_t recipient_addr;
+} broadcast_receipt_seen_t;
+
+static broadcast_receipt_seen_t g_broadcast_receipt_seen[MAX_BROADCAST_RECEIPT_SEEN];
+static int g_broadcast_receipt_seen_next = 0;
+
+static void broadcast_receipt_seen_init(void) {
+    memset(g_broadcast_receipt_seen, 0, sizeof(g_broadcast_receipt_seen));
+    g_broadcast_receipt_seen_next = 0;
+}
+
+/* Returns true iff (orig_packet_id, recipient_addr) was already registered,
+ * and records it (ring-buffer overwrite on capacity) if not. */
+static bool broadcast_receipt_seen_check_and_add(uint32_t orig_packet_id, uint32_t recipient_addr) {
+    for (int i = 0; i < MAX_BROADCAST_RECEIPT_SEEN; i++) {
+        if (g_broadcast_receipt_seen[i].used &&
+            g_broadcast_receipt_seen[i].orig_packet_id == orig_packet_id &&
+            g_broadcast_receipt_seen[i].recipient_addr == recipient_addr) {
+            return true;
+        }
+    }
+    g_broadcast_receipt_seen[g_broadcast_receipt_seen_next].used = true;
+    g_broadcast_receipt_seen[g_broadcast_receipt_seen_next].orig_packet_id = orig_packet_id;
+    g_broadcast_receipt_seen[g_broadcast_receipt_seen_next].recipient_addr = recipient_addr;
+    g_broadcast_receipt_seen_next =
+        (g_broadcast_receipt_seen_next + 1) % MAX_BROADCAST_RECEIPT_SEEN;
+    return false;
+}
+
 /* ─── Crypto helpers (Phase 5) ─────────────────────────────────────────── */
 
 /* Derive a shared symmetric key for a node pair from their addresses */
@@ -490,6 +535,22 @@ uint32_t bridge_msg_track_find_src(msg_tracker_t* track, int count, uint32_t pac
         }
     }
     return 0;
+}
+
+/* Receipt reliability campaign Task 1: was the scripted message packet_id
+ * originated at dest_addr 0xFFFFFFFF (a broadcast), as opposed to a
+ * targeted unicast? Used at the origin, when a delivery receipt comes home,
+ * to decide whether it counts toward broadcast_receipts_registered.
+ * Same match-regardless-of-active rule as bridge_msg_track_find_src above,
+ * for the same reason: a receipt can arrive well after the tracker entry's
+ * `active` flag has already cleared. */
+static bool bridge_msg_track_is_broadcast(msg_tracker_t* track, int count, uint32_t packet_id) {
+    for (int i = 0; i < count; i++) {
+        if (track[i].packet_id == packet_id && track[i].src_addr != 0) {
+            return track[i].dest_addr == 0xFFFFFFFF;
+        }
+    }
+    return false;
 }
 
 bool bridge_msg_track_complete(msg_tracker_t* track, int count, uint32_t packet_id, uint64_t now_us,
@@ -811,6 +872,27 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         return;
 
     if (receipt.header.dest_addr == rx->addr) {
+        /* Receipt reliability campaign Task 1: a broadcast's receipt is a
+         * per-recipient confirmation (every hearer that stored the
+         * broadcast sends its own), not the single-destination signal
+         * bridge_msg_track_complete/confirm below model -- both fire at
+         * most once per packet_id, which would silently swallow every
+         * recipient's receipt after the first one home. Track broadcast
+         * receipts independently instead, deduped on (orig_packet_id,
+         * recipient) so a receipt that arrives over more than one
+         * redundant relay path still only registers once, and return
+         * before any of the unicast-only bookkeeping below runs: this
+         * packet_id's shared msg_track entry stays exactly as _handle_
+         * data's broadcast branch left it (active, unconfirmed), matching
+         * that branch's own documented invariant that message_delivery_rate
+         * and confirmed_delivery_rate stay unicast-only. */
+        if (bridge_msg_track_is_broadcast(msg_track, msg_track_count, receipt.orig_packet_id)) {
+            if (!broadcast_receipt_seen_check_and_add(receipt.orig_packet_id, receipt.src_addr)) {
+                g_ext_metrics.broadcast_receipts_registered++;
+            }
+            return;
+        }
+
         /* This receipt is for us, the original sender */
         bridge_msg_track_complete(msg_track, msg_track_count, receipt.orig_packet_id, now_us,
                                   metrics);
@@ -1059,6 +1141,73 @@ static bool bridge_flood_relay(sim_node_t* rx, const uint8_t* buf, uint16_t len,
     return is_dup;
 }
 
+/* Receipt reliability campaign Task 1: every non-origin node that stores a
+ * broadcast (a fresh, non-echo, non-duplicate delivery of a DATA frame with
+ * dest 0xFFFFFFFF) sends its own delivery receipt back toward the origin,
+ * mirroring firmware's queue_broadcast_delivery_receipt (main/mesh_
+ * reliability.c, part of the app layer and not linked into gosim's
+ * component-only build -- this is the sim's own faithful re-expression of
+ * that behavior, not a call into the firmware source). A broadcast never
+ * gets a reverse route installed (components/routing/forwarding.c's
+ * data_rx_decide deliberately skips it: "installing off it lets a single
+ * forged broadcast poison the whole neighborhood at once"), so unlike the
+ * unicast receipt in _handle_data below there is no route-vs-flood fork:
+ * the receipt always originates as its own broadcast (dest 0xFFFFFFFF) and
+ * rides the same flood-relay engine home, exactly like the unicast
+ * receipt's flood-transport branch. hop_count is always 0: a broadcast's
+ * DATA never went through forward_data's hop-by-hop tracking (it flooded),
+ * so there is no relay path to attach.
+ *
+ * Known gap: propagation past the originating hop still goes through
+ * _handle_delivery_receipt's existing dispatch, which under g_flood_
+ * transport_enabled == false (the default) tries forward_data instead of
+ * flood-relaying once the receipt is NOT addressed to the receiving node
+ * (see that function's "Forward the receipt toward its destination"
+ * branch). A broadcast recipient has no route to the origin (by the same
+ * data_rx_decide rule cited above), so an intermediate relay silently drops
+ * the receipt there and it never gets home beyond one hop. Single-hop
+ * "all in range" scenarios (this campaign's Task 1/2 test topologies) are
+ * unaffected; a genuinely multi-hop broadcast scenario needs flood_
+ * transport enabled for its receipts to return at all. Left as-is rather
+ * than widening _handle_delivery_receipt's dispatch: that function is
+ * shared with the unicast receipt path, whose reactive-vs-flood behavior is
+ * asserted by TestFloodedAckOffRoutesReceipt and must not change here. */
+static void bridge_send_broadcast_delivery_receipt(sim_node_t* rx, uint32_t orig_sender,
+                                                   uint32_t orig_packet_id, node_array_t* nodes,
+                                                   radio_config_t* radio, pcg32_state_t* rng,
+                                                   event_queue_t* events, metrics_state_t* metrics,
+                                                   uint64_t now_us) {
+    bramble_delivery_receipt_t receipt;
+    memset(&receipt, 0, sizeof(receipt));
+    receipt.header.version = BRAMBLE_VERSION;
+    receipt.header.type = PKT_TYPE_DELIVERY_RECEIPT;
+    receipt.header.flags = 0;
+    receipt.header.hop_limit =
+        flood_origination_hop_limit(g_flood_transport_enabled, g_flood_hop_limit);
+    receipt.header.dest_addr = orig_sender;
+    receipt.header.packet_id = pcg32_random(rng);
+    receipt.src_addr = rx->addr;
+    receipt.orig_packet_id = orig_packet_id;
+    receipt.hop_count = 0;
+
+    uint8_t receipt_buf[DELIVERY_RECEIPT_MAX_SIZE];
+    uint16_t receipt_len = DELIVERY_RECEIPT_MIN_SIZE;
+    if (bramble_delivery_receipt_serialize(&receipt, receipt_buf, sizeof(receipt_buf)) != ESP_OK) {
+        return;
+    }
+
+    outbound_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    memcpy(pkt.data, receipt_buf, receipt_len);
+    pkt.len = receipt_len;
+    pkt.is_broadcast = true;
+    pkt.dest_addr = 0xFFFFFFFF;
+    pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
+
+    /* tx_gate_kind_tier: TX_KIND_RECEIPT -> AIRTIME_TIER_RECEIPT. */
+    budget_gated_send(rx, &pkt, AIRTIME_TIER_RECEIPT, nodes, radio, rng, events, metrics, now_us);
+}
+
 static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint32_t pkt_src_addr,
                          int8_t rssi, int8_t snr, uint64_t now_us, uint32_t now_ms,
                          node_array_t* nodes, radio_config_t* radio, pcg32_state_t* rng,
@@ -1163,6 +1312,18 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
                     ",\"node\":\"%s\",\"packet_id\":\"0x%08X\"}\n",
                     (unsigned long long)now_us, rx->id, hdr.packet_id);
             fflush(stdout);
+
+            /* Receipt reliability campaign Task 1: this hearer just stored
+             * the broadcast, so it owes the origin a delivery receipt (see
+             * bridge_send_broadcast_delivery_receipt's doc comment). Guarded
+             * on orig_sender != 0 for the same defensive reason the unicast
+             * receipt build below is: a lookup miss must never address a
+             * receipt to 0. */
+            if (orig_sender != 0) {
+                g_ext_metrics.broadcast_receipts_expected++;
+                bridge_send_broadcast_delivery_receipt(rx, orig_sender, hdr.packet_id, nodes, radio,
+                                                       rng, events, metrics, now_us);
+            }
         }
         return;
     }
@@ -2594,6 +2755,7 @@ void bridge_init(void) {
     sim_emitter_set_quiet(false);
 
     relay_path_init();
+    broadcast_receipt_seen_init();
 
     /* Mandatory-provisioning (Task 2): provision the shared default network key
      * for the whole sim fleet BEFORE any node originates, so control-plane
