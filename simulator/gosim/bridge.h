@@ -67,6 +67,16 @@ typedef struct {
     uint64_t mailbox_delivered; /* stored packets delivered on node rejoin */
     uint64_t mailbox_expired;   /* mailbox entries expired (24h TTL) */
     uint64_t location_updates;  /* location position updates processed */
+    /* Receipt reliability campaign Task 1: broadcast_receipts_expected is
+     * every (recipient, broadcast) pair where a node other than the origin
+     * stored the broadcast (a fresh, non-echo, non-duplicate delivery of a
+     * DATA frame with dest 0xFFFFFFFF); broadcast_receipts_registered is
+     * however many of those pairs the origin actually saw a delivery
+     * receipt for. Read together (registered/expected) they are the
+     * receipt-return rate this campaign exists to fix; see sim.go's
+     * final_metrics emission for the derived rate field. */
+    uint64_t broadcast_receipts_expected;
+    uint64_t broadcast_receipts_registered;
 } bridge_ext_metrics_t;
 
 /* Accessor functions */
