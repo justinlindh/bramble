@@ -172,20 +172,6 @@ int sleep_manager_init(void) {
     return 0;
 }
 
-void sleep_manager_deinit(void) {
-    if (!s_sleep.initialized)
-        return;
-
-    if (s_sleep.timer) {
-        esp_timer_stop(s_sleep.timer);
-        esp_timer_delete(s_sleep.timer);
-        s_sleep.timer = NULL;
-    }
-
-    s_sleep.initialized = false;
-    ESP_LOGI(TAG, "Sleep manager deinitialized");
-}
-
 /* UI-task side of the sleep transition. Drains the want_sleep flag raised by
  * the esp_timer callback and, only if the panel is still genuinely idle,
  * powers it down. Doing the SPI here (not in the timer cb) keeps blocking bus
@@ -250,8 +236,6 @@ void sleep_manager_activity(void) {
         s_sleep.asleep = false;
     }
 }
-
-bool sleep_manager_is_asleep(void) { return s_sleep.asleep; }
 
 void sleep_manager_set_enabled(bool enabled) {
     s_sleep.enabled = enabled;
