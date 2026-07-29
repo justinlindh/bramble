@@ -705,6 +705,7 @@ __attribute__((weak)) int bramble_platform_enter_dfu(void) { return -1; }
 static int handle_enter_dfu(const cJSON* params, cJSON* result) {
     (void)params;
     if (bramble_platform_enter_dfu() != 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", "DFU mode not supported on this platform");
         return 0;
     }
