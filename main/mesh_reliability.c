@@ -387,14 +387,25 @@ void mesh_process_receipt_tx_event(void) {
     uint32_t scale_den = 1u;
     receipt_retry_scale(&scale_num, &scale_den);
 
-    uint32_t raw_base_ms = 500u + ((uint32_t)i * 700u);
-    uint32_t raw_jitter_range = 500u + ((uint32_t)i * 400u);
-    uint32_t base_ms = (raw_base_ms * scale_num) / scale_den;
-    uint32_t jitter_range = (raw_jitter_range * scale_num) / scale_den;
-    if (jitter_range == 0u) {
-        jitter_range = 1u;
+    /* Retry spacing re-draws a FULL contention slot, salted by the attempt
+     * number, instead of the old short fixed backoff (500+700i ms plus small
+     * jitter). Bench telemetry showed why the old shape lost receipts: first
+     * attempts are slot-spread across a window sized to the peer count, but
+     * short-backoff retries folded attempts 2 and 3 back into OTHER nodes'
+     * first-attempt slots, so during a 9-receipt storm each transmission was
+     * received by fewer than half the nodes in range and some receipts lost
+     * every copy at the origin. Salting the slot hash with the attempt
+     * number scatters each retry into a fresh pseudo-random slot of the
+     * next window, decorrelated from every other sender's attempts, at
+     * unchanged TX volume. The budget-pressure scale still stretches the
+     * result when the receipt lane is under pressure. */
+    uint32_t reslot_ms = mesh_broadcast_receipt_slot_delay_ms(
+        s_identity->address, item->original_packet_id ^ ((uint32_t)item->attempts_sent << 28),
+        (uint8_t)neighbor_count(&s_neighbors));
+    uint32_t retry_delay_ms = ((reslot_ms + (esp_random() % 400u)) * scale_num) / scale_den;
+    if (retry_delay_ms == 0u) {
+        retry_delay_ms = 1u;
     }
-    uint32_t retry_delay_ms = base_ms + (esp_random() % jitter_range);
     item->due_at_ms = now_ms() + retry_delay_ms;
 
     mesh_schedule_next_receipt_timer();
