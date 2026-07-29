@@ -419,10 +419,9 @@ static void adv_retry_cb(TimerHandle_t t) {
 }
 
 static void schedule_adv_retry(void) {
-    if (s_adv_retry_timer == NULL) {
-        s_adv_retry_timer = xTimerCreate("ble_adv_retry", pdMS_TO_TICKS(BLE_ADV_RETRY_MS), pdFALSE,
-                                         NULL, adv_retry_cb);
-    }
+    /* Created once in ble_server_init, so no lazy-create race between the
+     * host task and the timer task; NULL only if creation failed at init,
+     * in which case the old fire-and-forget behavior is what remains. */
     if (s_adv_retry_timer != NULL) {
         xTimerStart(s_adv_retry_timer, 0);
     }
@@ -657,6 +656,11 @@ int ble_server_init(void) {
         set_default_device_name();
     }
 
+    /* Advertising restart retry timer; see schedule_adv_retry. Created
+     * here once so no two tasks ever race the creation. */
+    s_adv_retry_timer =
+        xTimerCreate("ble_adv_retry", pdMS_TO_TICKS(BLE_ADV_RETRY_MS), pdFALSE, NULL, adv_retry_cb);
+
     /* Create RPC processing queue and task */
     s_rpc_queue = xQueueCreate(4, sizeof(ble_rpc_msg_t));
     if (!s_rpc_queue) {
@@ -756,6 +760,13 @@ int ble_server_start(void) {
 }
 
 void ble_server_stop(void) {
+    /* A retry armed just before shutdown must not fire into a deinitialized
+     * host. Delete waits for the timer command queue, so after this returns
+     * the callback can no longer run. */
+    if (s_adv_retry_timer != NULL) {
+        xTimerDelete(s_adv_retry_timer, portMAX_DELAY);
+        s_adv_retry_timer = NULL;
+    }
 #ifdef ESP_PLATFORM
     int rc = nimble_port_stop();
     if (rc == 0) {
