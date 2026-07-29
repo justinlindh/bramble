@@ -184,4 +184,30 @@ void sim_radio_broadcast(sim_node_t* tx_node, const outbound_packet_t* pkt, node
                          radio_config_t* radio, pcg32_state_t* rng, event_queue_t* events,
                          metrics_state_t* metrics, uint64_t now_us);
 
+/*
+ * Outcome of a Listen-Before-Talk-gated transmit (sim_radio_broadcast_lbt).
+ */
+typedef enum {
+    SIM_TX_SENT = 0,     /* the frame is on the air */
+    SIM_TX_CHANNEL_BUSY, /* LBT never found a quiet channel and this caller
+                            defers: nothing transmitted, no airtime charged */
+} sim_tx_outcome_t;
+
+/*
+ * sim_radio_broadcast_lbt: sim_radio_broadcast with the per-caller choice of
+ * what happens when all SIM_LBT_MAX_ATTEMPTS CAD checks find the channel
+ * busy, mirroring components/radio/tx_gate.c's lbt_defers() split
+ * (tx_gate.c:141). defer_on_busy == false is the historical behavior every
+ * other TX site keeps: transmit anyway to avoid starvation. defer_on_busy ==
+ * true returns SIM_TX_CHANNEL_BUSY with nothing on the air, and writes the
+ * simulated time at which the LBT backoffs finished into *out_lbt_end_us
+ * (may be NULL) so the caller can schedule its retry from there rather than
+ * from the moment it started listening.
+ */
+sim_tx_outcome_t sim_radio_broadcast_lbt(sim_node_t* tx_node, const outbound_packet_t* pkt,
+                                         node_array_t* nodes, radio_config_t* radio,
+                                         pcg32_state_t* rng, event_queue_t* events,
+                                         metrics_state_t* metrics, uint64_t now_us,
+                                         bool defer_on_busy, uint64_t* out_lbt_end_us);
+
 #endif /* SIM_RADIO_H */

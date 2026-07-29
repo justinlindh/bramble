@@ -451,6 +451,10 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 		// Trust-anchor campaign (P2 red-team): runtime setAnchor equivalent;
 		// (re-)anchors a node and drops any stale un-endorsed pins.
 		s.handleProvisionAnchor(evt)
+	case C.EVT_RECEIPT_TX:
+		// Receipt reliability campaign Task 2: one queued broadcast delivery
+		// receipt has come due on one node (the sim's MESH_EVT_RECEIPT_TX).
+		s.handleReceiptTx(evt)
 	case C.EVT_GENERATE_LOCATION:
 		// Location sharing (issue #172): position broadcasts always go
 		// through the real firmware C path in bridge.c, same rationale as
@@ -529,6 +533,13 @@ func (s *Sim) handleGenerateLocation(evt *C.sim_event_t) {
 // identity_store_set_anchor, dropping any stale pins it held while un-anchored.
 func (s *Sim) handleProvisionAnchor(evt *C.sim_event_t) {
 	C.bridge_handle_provision_anchor(evt, &s.nodes)
+}
+
+// handleReceiptTx fires one due broadcast delivery receipt through bridge.c's
+// mirror of firmware's mesh_process_receipt_tx_event: the real airtime gate,
+// the real LBT, and the per-kind defer-or-blind-fire decision.
+func (s *Sim) handleReceiptTx(evt *C.sim_event_t) {
+	C.bridge_handle_receipt_tx(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
 // handleFloodRelay fires a jittered channel-flood relay (Task 5): see
@@ -808,6 +819,15 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// re-applied on every load. bridge_set_flood_hop_limit clamps to the
 	// firmware range; a farther-reaching flood needs a larger value here.
 	C.bridge_set_flood_hop_limit(C.uint8_t(floodTransportHopLimit))
+
+	// Receipt reliability campaign Task 2: optional "receipt_tx_kind" scenario
+	// field ("receipt" | "receipt_forward"), read Go-side like the fields
+	// above. Selects which real tx_kind_t an ORIGINATED broadcast delivery
+	// receipt is transmitted as, which is what decides whether exhausting LBT
+	// on a busy channel defers the send or blind-fires into it (see bridge.h).
+	// Defaults to the shipped firmware kind; re-applied on every load so no
+	// run leaks a previous run's arm.
+	C.bridge_set_broadcast_receipt_tx_kind(C.int(loadReceiptTxKindConfig(scenarioData)))
 
 	// Seed the RNG (scenario_load_file only seeds for stochastic mode)
 	C.pcg32_seed(&s.rng, scenario.metadata.seed)
@@ -1358,6 +1378,34 @@ func confirmedDeliveryRate(confirmed, delivered, dropped, undelivered uint64) fl
 // zero-denominator run reports 1.0, not 0.0: a scenario with no broadcasts
 // owes zero receipts, so nothing was missed, which is a passing result, not
 // a failing one.
+// receiptTxKindConfigJSON is the receipt reliability campaign's scenario-level
+// A/B switch for the tx_kind_t an originated broadcast delivery receipt is
+// transmitted as. A pointer so an omitted field (the shipped firmware kind)
+// stays distinguishable from an explicit one, the same convention
+// intermediateRREPConfigJSON and floodTransportConfigJSON use.
+type receiptTxKindConfigJSON struct {
+	ReceiptTxKind *string `json:"receipt_tx_kind"`
+}
+
+// loadReceiptTxKindConfig reads the scenario bytes' optional "receipt_tx_kind"
+// field and returns the tx_kind_t to originate broadcast delivery receipts
+// as. "receipt" (the default, and what firmware passes) is the kind
+// tx_gate.c's lbt_defers() defers on a busy channel; "receipt_forward" is a
+// real firmware kind that is NOT in that set, so it reproduces the pre-fix
+// blind-fire-on-busy behavior for measurement. Any parse failure, omitted
+// field, or unrecognized value returns the default, the same fail-open
+// convention as the loaders above.
+func loadReceiptTxKindConfig(data []byte) int {
+	var cfg receiptTxKindConfigJSON
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return int(C.TX_KIND_RECEIPT)
+	}
+	if cfg.ReceiptTxKind != nil && *cfg.ReceiptTxKind == "receipt_forward" {
+		return int(C.TX_KIND_RECEIPT_FORWARD)
+	}
+	return int(C.TX_KIND_RECEIPT)
+}
+
 func receiptReturnRate(expected, registered uint64) float64 {
 	if expected == 0 {
 		return 1.0

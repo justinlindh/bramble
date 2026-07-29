@@ -44,6 +44,14 @@ typedef enum {
      * representation) so no float precision is lost on the way to
      * location_serialize_for_tier. */
     EVT_GENERATE_LOCATION,
+    /* Receipt reliability campaign: one pending broadcast delivery receipt
+     * has come due for transmission on one node, the sim analog of
+     * firmware's MESH_EVT_RECEIPT_TX (main/mesh_internal.h) fired by the
+     * s_receipt_timer. data.receipt_tx names the node and its queue slot;
+     * the receipt bytes and the attempt/defer counters live in that slot
+     * (bridge.h's bridge_node_ext_t.receipt_queue), exactly like firmware
+     * keeps them in s_receipt_queue rather than in the event. */
+    EVT_RECEIPT_TX,
 } event_type_t;
 
 /* Packet event data */
@@ -84,6 +92,12 @@ typedef struct {
     int16_t altitude_m;
 } location_event_data_t;
 
+/* Pending-receipt transmission event data (EVT_RECEIPT_TX) */
+typedef struct {
+    uint32_t node_addr; /* which node's receipt queue this fires on */
+    int slot;           /* index into that node's receipt_queue */
+} receipt_tx_event_data_t;
+
 /* Interference event data */
 typedef struct {
     int zone_index;
@@ -116,6 +130,7 @@ typedef struct {
         interference_event_data_t interference;
         tick_event_data_t tick;
         broadcast_delivery_event_data_t broadcast_delivery;
+        receipt_tx_event_data_t receipt_tx;
         uint32_t timer_id;
     } data;
 } sim_event_t;
