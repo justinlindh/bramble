@@ -39,6 +39,17 @@ module.exports = {
         { type: 'feat', scope: 'firmware', release: 'minor' },
         { type: 'fix', scope: 'firmware', release: 'patch' },
         { type: 'perf', scope: 'firmware', release: 'patch' },
+        // Scope `protocol` is the mesh protocol IMPLEMENTATION in main/ and
+        // components/ (receipt timing, reliability, routing behavior), which
+        // ships inside every firmware image; without these rules the
+        // receipt-storm fixes (PR #385, fix(protocol)) produced no firmware
+        // release at all and the bench-validated behavior could not reach
+        // the fleet through the release pipeline.
+        { breaking: true, scope: 'protocol', release: 'major' },
+        { revert: true, scope: 'protocol', release: 'patch' },
+        { type: 'feat', scope: 'protocol', release: 'minor' },
+        { type: 'fix', scope: 'protocol', release: 'patch' },
+        { type: 'perf', scope: 'protocol', release: 'patch' },
         { breaking: true, scope: 'ui', release: 'major' },
         { revert: true, scope: 'ui', release: 'patch' },
         { type: 'feat', scope: 'ui', release: 'minor' },
@@ -54,13 +65,14 @@ module.exports = {
         // Matching only out-of-scope scopes returns `false` for them
         // (blocking the default-rule fallback) while leaving in-scope commits
         // to the specific rules.
-        { scope: '!(firmware|ui)', release: false }
+        { scope: '!(firmware|ui|protocol)', release: false }
       ],
-      // Wrapped release-notes-generator options: only list firmware- and
-      // ui-scoped commits so the GitHub release notes stay component-specific.
+      // Wrapped release-notes-generator options: only list firmware-, ui-,
+      // and protocol-scoped commits so the GitHub release notes stay
+      // component-specific.
       writerOpts: {
         transform: (commit) => {
-          if (!commit.scope || !/(^|,)(firmware|ui)(,|$)/.test(commit.scope)) return;
+          if (!commit.scope || !/(^|,)(firmware|ui|protocol)(,|$)/.test(commit.scope)) return;
           const typeMap = { feat: 'Features', fix: 'Bug Fixes', perf: 'Performance Improvements' };
           if (!typeMap[commit.type]) return;
           return { ...commit, type: typeMap[commit.type], shortHash: commit.hash && commit.hash.substring(0, 7) };
