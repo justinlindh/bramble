@@ -79,6 +79,14 @@ async def rpc_enter_dfu(name: str, token: str) -> bool:
             responses.put_nowait(line)
 
     async with BleakClient(dev, timeout=30) as client:
+        # The NUS characteristics are WRITE_ENC/NOTIFY on an encrypted link
+        # only (LE Secure Connections, Just Works): an unpaired write makes
+        # the ATT server demand encryption and BlueZ drops the connection if
+        # it cannot elevate. Pair explicitly first; a no-op when bonded.
+        try:
+            await client.pair()
+        except Exception as e:
+            print(f"pairing: {e} (continuing; may already be bonded)")
         await client.start_notify(NUS_TX, on_notify)
 
         async def call(payload: dict) -> dict:
