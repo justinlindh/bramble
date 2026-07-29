@@ -382,7 +382,6 @@ void mesh_process_receipt_tx_event(void) {
         return;
     }
 
-    uint8_t i = (uint8_t)(item->attempts_sent - 1u);
     uint32_t scale_num = 1u;
     uint32_t scale_den = 1u;
     receipt_retry_scale(&scale_num, &scale_den);

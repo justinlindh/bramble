@@ -184,31 +184,9 @@ func receiptStormMeans(rs []receiptStormResult) receiptStormResult {
 // that policy exists in the pre-fix world too. Only the busy-channel decision
 // differs.
 //
-// Calibration measured 2026-07-28 on this scenario (go test -run
-// TestReceiptStormLBTDeferBeatsBlindFire -v), receipt_return_rate per seed:
-//
-//	seed:        1      2      3      4      5      6      7      8      9     10    mean
-//	blind-fire  .8889 1.0000 .8889 .6667 .8889 .5556 .8889 .8889 .8889 .8889  .8444
-//	defer       1.0000 1.0000 1.0000 .8889 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000  .9889
-//
-// The blind-fire arm loses 15.6% of broadcast receipts on average, which
-// reproduces the defect (the acceptance bar was a mean under 0.95). It is a
-// milder loss than the bench's traced 20-25%: this sim runs the freq_plan
-// default SF9 rather than the bench's SF10, so a receipt occupies ~284ms of
-// air here instead of the ~150-200ms-at-SF10 figure
-// broadcast_delivery_receipt.c cites, against slot spacing that does not
-// change with SF. Reported as measured, not tuned toward the bench number.
-//
-// Airtime, same runs, identical on every seed in both arms (all counts here
-// are seed-independent: 27 receipt transmissions, nine hearers times three
-// attempts, plus a fixed beacon cadence and flood):
-//
-//	receipt-tier ToA  7658ms per arm      total ToA  21622ms per arm
-//
-// That equality is the point rather than a coincidence: no attempt in the
-// defer arm ever hit the eight-defer cap, so the same 27 transmissions flew in
-// both arms, merely at quieter instants. The defer arm buys 14.4 points of
-// receipt return for exactly zero extra air.
+// Calibration history lives in the git log of this file: the original
+// tight-pitch calibration measured blind-fire mean 0.8444 vs defer 0.9889
+// with identical ToA; those numbers are RETIRED, see HISTORY below.
 //
 // HISTORY: the original calibration (tight 500ms slot pitch, short fixed
 // retry backoffs) reproduced the bench defect at blind-fire mean 0.8444 vs

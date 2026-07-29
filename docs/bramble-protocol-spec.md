@@ -229,7 +229,7 @@ This spreads receipt transmissions across a ~6.4-second window. With 32 buckets 
 
 **Layer 2, LBT (§3.3):** Each receipt transmission passes through the CAD check, providing a second chance to detect and avoid an in-progress transmission.
 
-**Layer 3, exponential retry backoff:** Each receipt is transmitted up to 3 times with increasing randomized delays between attempts:
+**Layer 3, slot-scattered retries:** Each receipt is transmitted up to 3 times. Every retry re-draws a full contention slot, with the attempt number salted into the slot hash, so retries land in fresh pseudo-random slots of later windows rather than folding back into other senders' first-attempt slots:
 
 ```text
 RECEIPT_RETRY_COUNT = 3
@@ -237,12 +237,13 @@ RECEIPT_RETRY_COUNT = 3
 for attempt in 0..2:
     transmit(receipt)  // goes through LBT
     if attempt < 2:
-        base  = 500 + (attempt × 700)    // 500ms, 1200ms
-        range = 500 + (attempt × 400)    // 500ms, 900ms
-        sleep_ms(base + random(0, range)) // 500–999ms, 1200–2099ms
+        slot = slot_delay(self_addr,
+                          orig_packet_id XOR (attempt_no << 28),
+                          peer_count)     // same slotting as attempt 1
+        sleep_ms(slot + random(0, 400))
 ```
 
-The combination of wide slot spacing, hardware channel sensing, and aggressive retries achieves near-100% delivery receipt rates in meshes of 5+ nodes.
+An earlier revision used a short fixed exponential backoff between attempts (500-2099ms). Hardware measurement showed that shape concentrated retries inside other senders' first-attempt slots and, together with a 500ms slot pitch, saturated the contention window during a many-node receipt storm; the slot pitch is now 1000ms and retries scatter as above. The combination of wide slot spacing, hardware channel sensing, and scattered retries achieves near-100% delivery receipt rates in meshes of 5+ nodes, measured on a 10-node bench.
 
 > **Firmware reality.** This is a design-target statement, not a measured field result. Under the honest collision-modeled simulator, re-measured 2026-07-24 at the PHY firmware transmits on (the frequency plan's SF9/125 kHz), a 10-node grid delivers 30% and larger meshes collapse as a single channel saturates under control-plane load (10% at 50 nodes, 0 to 5% at 100, 0% at 200); see [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md). No multi-node field test has been run. Treat the delivery-receipt layering here as a reliability mechanism, not a scale guarantee.
 
