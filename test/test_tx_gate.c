@@ -195,6 +195,60 @@ void test_lbt_gives_up_and_transmits_after_max_attempts(void) {
     TEST_ASSERT_EQUAL_INT(1, s_fake.tx_count);
 }
 
+/*
+ * Receipt LBT-defer contract (fix/receipt-lbt-defer, TX_GATE_ERR_CHANNEL_BUSY):
+ * TX_KIND_RECEIPT is the only kind that defers instead of blind-firing when
+ * every CAD attempt finds the channel busy. See lbt_defers() in tx_gate.c
+ * for the policy and its rationale.
+ */
+
+void test_lbt_defers_receipt_kind_after_max_attempts(void) {
+    s_fake.busy_responses = 100; /* permanently busy */
+    uint8_t pkt[20] = {0};
+    uint32_t before = airtime_budget_remaining(&s_gate.budget, AIRTIME_TIER_RECEIPT);
+
+    TEST_ASSERT_EQUAL_INT(TX_GATE_ERR_CHANNEL_BUSY,
+                          tx_gate_transmit(&s_gate, pkt, sizeof(pkt), TX_KIND_RECEIPT));
+    TEST_ASSERT_EQUAL_INT(0, s_fake.tx_count); /* radio never touched */
+    TEST_ASSERT_EQUAL_INT(3, s_fake.cad_calls);
+    TEST_ASSERT_EQUAL_INT(3, s_fake.delay_calls);
+    TEST_ASSERT_EQUAL_UINT32(before,
+                             airtime_budget_remaining(&s_gate.budget, AIRTIME_TIER_RECEIPT));
+}
+
+void test_lbt_blind_fire_preserved_for_non_deferring_kinds(void) {
+    /* Every other kind, including the new RECEIPT_FORWARD kind that shares
+     * the RECEIPT airtime lane, must keep the exact pre-existing anti-
+     * starvation behavior: transmit anyway after LBT exhausts its attempts. */
+    tx_kind_t kinds[] = {TX_KIND_DATA, TX_KIND_ACK, TX_KIND_RECEIPT_FORWARD};
+
+    for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
+        setUp(); /* fresh gate and fake radio per kind under test */
+        s_fake.busy_responses = 100;
+        uint8_t pkt[20] = {0};
+        uint8_t tier = tx_gate_kind_tier(kinds[i]);
+        uint32_t before = airtime_budget_remaining(&s_gate.budget, tier);
+
+        TEST_ASSERT_EQUAL_INT(TX_GATE_OK, tx_gate_transmit(&s_gate, pkt, sizeof(pkt), kinds[i]));
+        TEST_ASSERT_EQUAL_INT(1, s_fake.tx_count);
+        TEST_ASSERT_EQUAL_INT(3, s_fake.cad_calls);
+        TEST_ASSERT_EQUAL_INT(3, s_fake.delay_calls);
+        TEST_ASSERT_TRUE(airtime_budget_remaining(&s_gate.budget, tier) < before);
+    }
+}
+
+void test_lbt_receipt_transmits_normally_after_channel_clears(void) {
+    /* Deferral only happens on full exhaustion; a channel that clears
+     * before the last attempt still transmits, same as any other kind. */
+    s_fake.busy_responses = 2; /* busy twice, then clear */
+    uint8_t pkt[20] = {0};
+
+    TEST_ASSERT_EQUAL_INT(TX_GATE_OK, tx_gate_transmit(&s_gate, pkt, sizeof(pkt), TX_KIND_RECEIPT));
+    TEST_ASSERT_EQUAL_INT(3, s_fake.cad_calls);
+    TEST_ASSERT_EQUAL_INT(2, s_fake.delay_calls);
+    TEST_ASSERT_EQUAL_INT(1, s_fake.tx_count);
+}
+
 void test_lbt_skipped_entirely_when_budget_denies(void) {
     s_fake.busy_responses = 100;
     drain_tier(AIRTIME_TIER_NORMAL);
@@ -293,6 +347,9 @@ int main(void) {
     RUN_TEST(test_can_transmit_precheck_does_not_debit);
     RUN_TEST(test_lbt_backs_off_then_transmits);
     RUN_TEST(test_lbt_gives_up_and_transmits_after_max_attempts);
+    RUN_TEST(test_lbt_defers_receipt_kind_after_max_attempts);
+    RUN_TEST(test_lbt_blind_fire_preserved_for_non_deferring_kinds);
+    RUN_TEST(test_lbt_receipt_transmits_normally_after_channel_clears);
     RUN_TEST(test_lbt_skipped_entirely_when_budget_denies);
     RUN_TEST(test_denied_then_allowed_after_refill);
     RUN_TEST(test_routing_flood_cannot_exhaust_data_lane);

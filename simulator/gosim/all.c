@@ -54,3 +54,9 @@
  * (test/test_beacon_policy_calc.c). Lives under main/ but is logic, not
  * app glue, so it compiles into the sim exactly like the components/ above. */
 #include "../../main/beacon_policy_calc.c"
+/* Receipt reliability campaign Task 2: the broadcast delivery receipt's
+ * slot/jitter/retry policy and packet builder. Same rationale as
+ * beacon_policy_calc.c above (pure policy, no ESP-IDF deps, already host-
+ * tested directly), and it keeps gosim's receipt storm spread by firmware's
+ * real constants instead of a copy of them. */
+#include "../../main/broadcast_delivery_receipt.c"

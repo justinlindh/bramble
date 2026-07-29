@@ -16,6 +16,14 @@
 #include "../engine/sim_emitter.h"
 
 /* ─── New component headers (Phase 6) ──────────────────────────────────── */
+/* Receipt reliability campaign: DELIVERY_RECEIPT_MAX_SIZE sizes the pending
+ * receipt queue below, the same constant firmware's pending_receipt_t uses. */
+#include "../../components/packet/include/packet.h"
+/* Receipt reliability campaign Task 2: tx_kind_t is the real firmware enum
+ * (the gate's own C file is not linked into gosim; see bridge.c's
+ * budget_gated_send). Here rather than in bridge.c so gosim's Go side can
+ * name TX_KIND_RECEIPT / TX_KIND_RECEIPT_FORWARD when it selects an arm. */
+#include "../../components/radio/include/tx_gate.h"
 #include "../../components/mailbox/include/mailbox.h"
 #include "../../components/location/include/location.h"
 /* public_channel.h includes channel_key.h which includes crypto.h (via -I) */
@@ -25,6 +33,17 @@
 #include "../../components/identity/include/identity_store.h"
 
 /* ─── Extended per-node state (new components) ──────────────────────────── */
+
+/* Receipt reliability campaign Task 2: same capacity as firmware's
+ * RECEIPT_QUEUE_CAPACITY (main/mesh_internal.h:70), so a node that owes more
+ * simultaneous receipts than it can hold drops the overflow here exactly like
+ * a real node does. */
+#define SIM_RECEIPT_QUEUE_CAPACITY 8
+/* Same bound as firmware's RECEIPT_MAX_DEFERS (main/mesh_internal.h:91): how
+ * many times one attempt may be re-scheduled for a busy channel before it
+ * counts as spent, so a permanently jammed channel still terminates. */
+#define SIM_RECEIPT_MAX_DEFERS 8u
+
 typedef struct {
     mailbox_t mailbox;           /* store-and-forward for offline destinations */
     location_manager_t location; /* position sharing manager */
@@ -59,6 +78,26 @@ typedef struct {
      * its MAC-valid frame. Kept in the first-init guard like provisioned so a
      * rejoin preserves an intentionally-unendorsed node. */
     bool endorsed;
+    /* Receipt reliability campaign Task 2: this node's pending broadcast
+     * delivery receipts, the sim's mirror of firmware's s_receipt_queue
+     * (main/mesh_internal.h:219, pending_receipt_t at :143). Field-for-field
+     * the same state, with due_us in absolute simulated microseconds where
+     * firmware carries due_at_ms on its 32-bit ms clock. It lives here rather
+     * than on sim_node_t because it is app-layer state (main/, not
+     * components/), exactly like the mailbox and location managers above.
+     * Driven by bridge_handle_receipt_tx, the mirror of
+     * mesh_process_receipt_tx_event. */
+    struct {
+        bool used;
+        uint32_t original_src_addr;
+        uint32_t original_packet_id;
+        uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
+        uint8_t wire_len;
+        uint8_t attempts_total;
+        uint8_t attempts_sent;
+        uint8_t defers;
+        uint64_t due_us;
+    } receipt_queue[SIM_RECEIPT_QUEUE_CAPACITY];
 } bridge_node_ext_t;
 
 /* ─── Extended bridge-level metrics ────────────────────────────────────── */
@@ -67,6 +106,16 @@ typedef struct {
     uint64_t mailbox_delivered; /* stored packets delivered on node rejoin */
     uint64_t mailbox_expired;   /* mailbox entries expired (24h TTL) */
     uint64_t location_updates;  /* location position updates processed */
+    /* Receipt reliability campaign Task 1: broadcast_receipts_expected is
+     * every (recipient, broadcast) pair where a node other than the origin
+     * stored the broadcast (a fresh, non-echo, non-duplicate delivery of a
+     * DATA frame with dest 0xFFFFFFFF); broadcast_receipts_registered is
+     * however many of those pairs the origin actually saw a delivery
+     * receipt for. Read together (registered/expected) they are the
+     * receipt-return rate this campaign exists to fix; see sim.go's
+     * final_metrics emission for the derived rate field. */
+    uint64_t broadcast_receipts_expected;
+    uint64_t broadcast_receipts_registered;
 } bridge_ext_metrics_t;
 
 /* Accessor functions */
@@ -331,5 +380,35 @@ bool bridge_get_flood_transport_enabled(void);
  */
 void bridge_set_flood_hop_limit(uint8_t hops);
 uint8_t bridge_get_flood_hop_limit(void);
+
+/*
+ * Receipt reliability campaign Task 2: which tx_kind_t an ORIGINATED
+ * broadcast delivery receipt is transmitted as. Only two values are
+ * meaningful and both are real firmware kinds:
+ *
+ *   TX_KIND_RECEIPT (9, the default and what firmware actually uses): the
+ *     kind in tx_gate.c's lbt_defers() set, so exhausting LBT on a busy
+ *     channel defers the send instead of blind-firing into it.
+ *   TX_KIND_RECEIPT_FORWARD (10): not in the defer set, so the send
+ *     blind-fires after three busy CAD checks. This is what EVERY kind did
+ *     before the fix, which makes it the measurement arm for the pre-fix
+ *     world: same code, same seeds, one parameter.
+ *
+ * Anything else is rejected and leaves the current value alone. gosim/sim.go
+ * resets this on every scenario load from the optional "receipt_tx_kind"
+ * JSON field, so no run leaks a previous run's arm.
+ */
+void bridge_set_broadcast_receipt_tx_kind(int kind);
+int bridge_get_broadcast_receipt_tx_kind(void);
+
+/*
+ * bridge_handle_receipt_tx (receipt reliability campaign Task 2):
+ *   Fires one due EVT_RECEIPT_TX: the sim's mirror of firmware's
+ *   mesh_process_receipt_tx_event (main/mesh_reliability.c:253), including
+ *   the airtime-deny backoff, the channel-busy defer (bounded by
+ *   SIM_RECEIPT_MAX_DEFERS), and the per-attempt retry spacing.
+ */
+void bridge_handle_receipt_tx(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                              pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics);
 
 #endif /* BRIDGE_H */

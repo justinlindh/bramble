@@ -10,6 +10,11 @@
 #include "../../components/routing_auth/include/routing_auth.h"
 #include "../../components/network_key/include/network_key.h"
 #include "../../components/identity/include/identity.h"
+/* Receipt reliability campaign Task 2: the REAL slot/jitter/retry policy
+ * (main/broadcast_delivery_receipt.c is compiled into the sim via all.c, the
+ * same way main/beacon_policy_calc.c is), so the storm scenario spreads
+ * receipts with firmware's constants rather than a copy of them. */
+#include "../../main/broadcast_delivery_receipt.h"
 /* Note: mailbox.h, location.h,
  * channel_key.h, public_channel.h are all pulled in transitively via
  * bridge.h (Phase 6 headers). */
@@ -53,6 +58,21 @@ static uint8_t g_flood_hop_limit = FLOOD_HOP_LIMIT_DEFAULT;
 void bridge_set_flood_hop_limit(uint8_t hops) { g_flood_hop_limit = flood_hop_limit_clamp(hops); }
 
 uint8_t bridge_get_flood_hop_limit(void) { return g_flood_hop_limit; }
+
+/* ─── Originated-receipt TX kind (receipt reliability campaign Task 2) ───── */
+/* See bridge.h's doc comment. Default TX_KIND_RECEIPT, what firmware really
+ * passes at main/mesh_reliability.c:277; a measurement scenario can select
+ * TX_KIND_RECEIPT_FORWARD to get the pre-fix blind-fire-on-busy arm out of
+ * the same code. */
+static tx_kind_t g_broadcast_receipt_tx_kind = TX_KIND_RECEIPT;
+
+void bridge_set_broadcast_receipt_tx_kind(int kind) {
+    if (kind == TX_KIND_RECEIPT || kind == TX_KIND_RECEIPT_FORWARD) {
+        g_broadcast_receipt_tx_kind = (tx_kind_t)kind;
+    }
+}
+
+int bridge_get_broadcast_receipt_tx_kind(void) { return (int)g_broadcast_receipt_tx_kind; }
 
 /* ─── RREQ source-route install trust (issue #74 attack repro) ──────────── */
 /* Firmware's handle_rreq, after answering an RREQ, installs a route back
@@ -264,6 +284,51 @@ static void relay_path_remove(uint32_t packet_id) {
     }
 }
 
+/* ─── Broadcast receipt-return dedup (receipt reliability campaign Task 1) ─
+ * A broadcast's delivery receipt has no route to follow home (data_rx_decide
+ * never installs a reverse route off a broadcast DATA), so it always floods
+ * back exactly like the unicast receipt's flood-transport branch: more than
+ * one physical copy of the SAME (orig_packet_id, recipient) receipt commonly
+ * reaches the origin over redundant relay paths, especially in a dense or
+ * fully-connected topology. This table dedups on that pair so broadcast_
+ * receipts_registered counts each recipient's confirmation exactly once, no
+ * matter how many redundant copies of it arrive. Ring-buffer reuse like
+ * g_relay_paths above; sized for gosim's scripted-scenario scale, not the
+ * unbounded loaded-grid runs (which do not use scripted broadcasts). */
+#define MAX_BROADCAST_RECEIPT_SEEN 1024
+
+typedef struct {
+    bool used;
+    uint32_t orig_packet_id;
+    uint32_t recipient_addr;
+} broadcast_receipt_seen_t;
+
+static broadcast_receipt_seen_t g_broadcast_receipt_seen[MAX_BROADCAST_RECEIPT_SEEN];
+static int g_broadcast_receipt_seen_next = 0;
+
+static void broadcast_receipt_seen_init(void) {
+    memset(g_broadcast_receipt_seen, 0, sizeof(g_broadcast_receipt_seen));
+    g_broadcast_receipt_seen_next = 0;
+}
+
+/* Returns true iff (orig_packet_id, recipient_addr) was already registered,
+ * and records it (ring-buffer overwrite on capacity) if not. */
+static bool broadcast_receipt_seen_check_and_add(uint32_t orig_packet_id, uint32_t recipient_addr) {
+    for (int i = 0; i < MAX_BROADCAST_RECEIPT_SEEN; i++) {
+        if (g_broadcast_receipt_seen[i].used &&
+            g_broadcast_receipt_seen[i].orig_packet_id == orig_packet_id &&
+            g_broadcast_receipt_seen[i].recipient_addr == recipient_addr) {
+            return true;
+        }
+    }
+    g_broadcast_receipt_seen[g_broadcast_receipt_seen_next].used = true;
+    g_broadcast_receipt_seen[g_broadcast_receipt_seen_next].orig_packet_id = orig_packet_id;
+    g_broadcast_receipt_seen[g_broadcast_receipt_seen_next].recipient_addr = recipient_addr;
+    g_broadcast_receipt_seen_next =
+        (g_broadcast_receipt_seen_next + 1) % MAX_BROADCAST_RECEIPT_SEEN;
+    return false;
+}
+
 /* ─── Crypto helpers (Phase 5) ─────────────────────────────────────────── */
 
 /* Derive a shared symmetric key for a node pair from their addresses */
@@ -310,27 +375,68 @@ static int airtime_tier_idx(uint8_t tier) {
     }
 }
 
+/* Outcome of budget_gated_send_lbt, one-for-one with tx_gate_transmit's
+ * return codes: TX_GATE_OK, TX_GATE_ERR_BUDGET, TX_GATE_ERR_CHANNEL_BUSY. */
+typedef enum {
+    BRIDGE_TX_SENT = 0,
+    BRIDGE_TX_BUDGET_DENIED,
+    BRIDGE_TX_CHANNEL_BUSY,
+} bridge_tx_result_t;
+
+/* Which kinds refuse to blind-fire when LBT never finds a quiet channel.
+ * Mirrors the real lbt_defers in components/radio/tx_gate.c:141 (static
+ * there, and tx_gate.c itself is not one of the firmware sources all.c
+ * compiles into the sim: the gate's budget half is already re-expressed by
+ * budget_gated_send below against the node's own airtime_budget_t, and
+ * linking the real gate would need a second, parallel budget per node).
+ * Keep this in step with that function: it is the one behavior difference
+ * between the two arms the storm scenario measures. */
+static bool bridge_lbt_defers(tx_kind_t kind) { return kind == TX_KIND_RECEIPT; }
+
 /* Single chokepoint for every control-plane transmission (RREQ/RREP/RERR
  * origination and forwarding, delivery receipts): mirrors tx_gate_transmit's
- * check -> transmit -> debit sequence using the node's real airtime budget,
- * with the peer-count scaler refreshed from the current neighbor table first
- * (matching mesh_tx's tx_gate_set_peer_count call on every transmit). On
- * denial the packet is dropped, no queue, matching tx_gate's drop-no-queue
- * semantics, and the tier's budget_denied counter is incremented. Returns
- * true iff the packet was actually put on the air, so callers only count a
- * forward/send in their own stats when it really happened. */
-static bool budget_gated_send(sim_node_t* tx, const outbound_packet_t* pkt, uint8_t tier,
-                              node_array_t* nodes, radio_config_t* radio, pcg32_state_t* rng,
-                              event_queue_t* events, metrics_state_t* metrics, uint64_t send_us) {
+ * check -> LBT -> transmit -> debit sequence using the node's real airtime
+ * budget, with the peer-count scaler refreshed from the current neighbor
+ * table first (matching mesh_tx's tx_gate_set_peer_count call on every
+ * transmit). On budget denial the packet is dropped, no queue, matching
+ * tx_gate's drop-no-queue semantics, and the tier's budget_denied counter is
+ * incremented. `kind` picks the LBT-exhaustion behavior exactly as it does in
+ * the real gate (see bridge_lbt_defers): a deferring kind gets
+ * BRIDGE_TX_CHANNEL_BUSY back with nothing on the air and nothing debited,
+ * and *out_lbt_end_us (may be NULL) set to the simulated time the CAD
+ * backoffs ran out, so the caller can reschedule from there. */
+static bridge_tx_result_t budget_gated_send_lbt(sim_node_t* tx, const outbound_packet_t* pkt,
+                                                uint8_t tier, tx_kind_t kind, node_array_t* nodes,
+                                                radio_config_t* radio, pcg32_state_t* rng,
+                                                event_queue_t* events, metrics_state_t* metrics,
+                                                uint64_t send_us, uint64_t* out_lbt_end_us) {
     uint32_t airtime_ms = radio_frame_airtime_ms(radio, pkt->len);
     airtime_budget_set_mesh_size(&tx->airtime, (uint8_t)neighbor_count(&tx->neighbors));
     if (!airtime_budget_can_transmit(&tx->airtime, tier, airtime_ms)) {
         tx->budget_denied[airtime_tier_idx(tier)]++;
-        return false;
+        return BRIDGE_TX_BUDGET_DENIED;
     }
+    if (sim_radio_broadcast_lbt(tx, pkt, nodes, radio, rng, events, metrics, send_us,
+                                bridge_lbt_defers(kind), out_lbt_end_us) == SIM_TX_CHANNEL_BUSY) {
+        return BRIDGE_TX_CHANNEL_BUSY;
+    }
+    /* Debited after the frame is on the air, the same order tx_gate_transmit
+     * uses, so a deferred send costs nothing. */
     airtime_budget_debit(&tx->airtime, tier, airtime_ms);
-    sim_radio_broadcast(tx, pkt, nodes, radio, rng, events, metrics, send_us);
-    return true;
+    return BRIDGE_TX_SENT;
+}
+
+/* budget_gated_send: the non-deferring form every call site outside the
+ * originated-receipt path uses. TX_KIND_FORWARD is a kind bridge_lbt_defers
+ * says false for, i.e. the blind-fire-on-busy behavior this function has
+ * always had. Returns true iff the packet was actually put on the air, so
+ * callers only count a forward/send in their own stats when it really
+ * happened. */
+static bool budget_gated_send(sim_node_t* tx, const outbound_packet_t* pkt, uint8_t tier,
+                              node_array_t* nodes, radio_config_t* radio, pcg32_state_t* rng,
+                              event_queue_t* events, metrics_state_t* metrics, uint64_t send_us) {
+    return budget_gated_send_lbt(tx, pkt, tier, TX_KIND_FORWARD, nodes, radio, rng, events, metrics,
+                                 send_us, NULL) == BRIDGE_TX_SENT;
 }
 
 /* ─── Event union accessors ────────────────────────────────────────────── */
@@ -490,6 +596,22 @@ uint32_t bridge_msg_track_find_src(msg_tracker_t* track, int count, uint32_t pac
         }
     }
     return 0;
+}
+
+/* Receipt reliability campaign Task 1: was the scripted message packet_id
+ * originated at dest_addr 0xFFFFFFFF (a broadcast), as opposed to a
+ * targeted unicast? Used at the origin, when a delivery receipt comes home,
+ * to decide whether it counts toward broadcast_receipts_registered.
+ * Same match-regardless-of-active rule as bridge_msg_track_find_src above,
+ * for the same reason: a receipt can arrive well after the tracker entry's
+ * `active` flag has already cleared. */
+static bool bridge_msg_track_is_broadcast(msg_tracker_t* track, int count, uint32_t packet_id) {
+    for (int i = 0; i < count; i++) {
+        if (track[i].packet_id == packet_id && track[i].src_addr != 0) {
+            return track[i].dest_addr == 0xFFFFFFFF;
+        }
+    }
+    return false;
 }
 
 bool bridge_msg_track_complete(msg_tracker_t* track, int count, uint32_t packet_id, uint64_t now_us,
@@ -811,6 +933,27 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         return;
 
     if (receipt.header.dest_addr == rx->addr) {
+        /* Receipt reliability campaign Task 1: a broadcast's receipt is a
+         * per-recipient confirmation (every hearer that stored the
+         * broadcast sends its own), not the single-destination signal
+         * bridge_msg_track_complete/confirm below model -- both fire at
+         * most once per packet_id, which would silently swallow every
+         * recipient's receipt after the first one home. Track broadcast
+         * receipts independently instead, deduped on (orig_packet_id,
+         * recipient) so a receipt that arrives over more than one
+         * redundant relay path still only registers once, and return
+         * before any of the unicast-only bookkeeping below runs: this
+         * packet_id's shared msg_track entry stays exactly as _handle_
+         * data's broadcast branch left it (active, unconfirmed), matching
+         * that branch's own documented invariant that message_delivery_rate
+         * and confirmed_delivery_rate stay unicast-only. */
+        if (bridge_msg_track_is_broadcast(msg_track, msg_track_count, receipt.orig_packet_id)) {
+            if (!broadcast_receipt_seen_check_and_add(receipt.orig_packet_id, receipt.src_addr)) {
+                g_ext_metrics.broadcast_receipts_registered++;
+            }
+            return;
+        }
+
         /* This receipt is for us, the original sender */
         bridge_msg_track_complete(msg_track, msg_track_count, receipt.orig_packet_id, now_us,
                                   metrics);
@@ -1059,6 +1202,229 @@ static bool bridge_flood_relay(sim_node_t* rx, const uint8_t* buf, uint16_t len,
     return is_dup;
 }
 
+/* Schedules one queue slot's next transmission attempt as an EVT_RECEIPT_TX
+ * due at due_us. Firmware arms a single esp_timer for the earliest due item
+ * (mesh_schedule_next_receipt_timer) and mesh_process_receipt_tx_event then
+ * picks the due entry out of the queue; giving each item its own due event is
+ * the same schedule with less bookkeeping. Exactly one event is live per used
+ * slot at all times: queueing pushes one, and the handler either frees the
+ * slot (pushing none) or reschedules it (pushing one), so a freed slot can
+ * never be woken by a stale event left over from its previous occupant. */
+static void bridge_schedule_receipt_tx(uint32_t node_addr, int slot, uint64_t due_us,
+                                       event_queue_t* events) {
+    sim_event_t e;
+    memset(&e, 0, sizeof(e));
+    e.type = EVT_RECEIPT_TX;
+    e.timestamp_us = due_us;
+    e.data.receipt_tx.node_addr = node_addr;
+    e.data.receipt_tx.slot = slot;
+    event_queue_push(events, &e);
+}
+
+/* Receipt reliability campaign Task 1: every non-origin node that stores a
+ * broadcast (a fresh, non-echo, non-duplicate delivery of a DATA frame with
+ * dest 0xFFFFFFFF) sends its own delivery receipt back toward the origin,
+ * mirroring firmware's queue_broadcast_delivery_receipt (main/mesh_
+ * reliability.c, part of the app layer and not linked into gosim's
+ * component-only build -- this is the sim's own faithful re-expression of
+ * that behavior, not a call into the firmware source). A broadcast never
+ * gets a reverse route installed (components/routing/forwarding.c's
+ * data_rx_decide deliberately skips it: "installing off it lets a single
+ * forged broadcast poison the whole neighborhood at once"), so unlike the
+ * unicast receipt in _handle_data below there is no route-vs-flood fork:
+ * the receipt always originates as its own broadcast (dest 0xFFFFFFFF) and
+ * rides the same flood-relay engine home, exactly like the unicast
+ * receipt's flood-transport branch. hop_count is always 0: a broadcast's
+ * DATA never went through forward_data's hop-by-hop tracking (it flooded),
+ * so there is no relay path to attach.
+ *
+ * Known gap: propagation past the originating hop still goes through
+ * _handle_delivery_receipt's existing dispatch, which under g_flood_
+ * transport_enabled == false (the default) tries forward_data instead of
+ * flood-relaying once the receipt is NOT addressed to the receiving node
+ * (see that function's "Forward the receipt toward its destination"
+ * branch). A broadcast recipient has no route to the origin (by the same
+ * data_rx_decide rule cited above), so an intermediate relay silently drops
+ * the receipt there and it never gets home beyond one hop. Single-hop
+ * "all in range" scenarios (this campaign's Task 1/2 test topologies) are
+ * unaffected; a genuinely multi-hop broadcast scenario needs flood_
+ * transport enabled for its receipts to return at all. Left as-is rather
+ * than widening _handle_delivery_receipt's dispatch: that function is
+ * shared with the unicast receipt path, whose reactive-vs-flood behavior is
+ * asserted by TestFloodedAckOffRoutesReceipt and must not change here. */
+static void bridge_send_broadcast_delivery_receipt(sim_node_t* rx, uint32_t orig_sender,
+                                                   uint32_t orig_packet_id, node_array_t* nodes,
+                                                   pcg32_state_t* rng, event_queue_t* events,
+                                                   uint64_t now_us) {
+    bramble_delivery_receipt_t receipt;
+    memset(&receipt, 0, sizeof(receipt));
+    receipt.header.version = BRAMBLE_VERSION;
+    receipt.header.type = PKT_TYPE_DELIVERY_RECEIPT;
+    receipt.header.flags = 0;
+    receipt.header.hop_limit =
+        flood_origination_hop_limit(g_flood_transport_enabled, g_flood_hop_limit);
+    receipt.header.dest_addr = orig_sender;
+    receipt.header.packet_id = pcg32_random(rng);
+    receipt.src_addr = rx->addr;
+    receipt.orig_packet_id = orig_packet_id;
+    receipt.hop_count = 0;
+
+    uint8_t receipt_buf[DELIVERY_RECEIPT_MAX_SIZE];
+    uint16_t receipt_len = DELIVERY_RECEIPT_MIN_SIZE;
+    if (bramble_delivery_receipt_serialize(&receipt, receipt_buf, sizeof(receipt_buf)) != ESP_OK) {
+        return;
+    }
+
+    /* Task 2: the receipt is QUEUED, not sent here. Firmware never transmits
+     * a broadcast receipt from the RX path either: queue_broadcast_delivery_
+     * receipt (main/mesh_reliability.c:164) parks it in s_receipt_queue with a
+     * deterministic anti-collision slot delay plus jitter, and the timer-driven
+     * mesh_process_receipt_tx_event spends its attempts later. That spreading
+     * is exactly what the storm scenario measures, so the sim owes it the same
+     * schedule, from the same policy functions. */
+    int node_idx = (int)(rx - nodes->nodes);
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (!ext)
+        return;
+
+    int slot = -1;
+    for (int i = 0; i < SIM_RECEIPT_QUEUE_CAPACITY; i++) {
+        if (!ext->receipt_queue[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0)
+        return; /* queue full: firmware logs and drops the receipt too */
+
+    /* Real firmware policy (main/broadcast_delivery_receipt.c, compiled into
+     * the sim): slot = (addr ^ orig_packet_id) % clamp(2 * peer_count, 4, 32),
+     * delay = 300ms + slot * 500ms, then queue_broadcast_delivery_receipt's
+     * own +0..399ms jitter on top. peer_count is this node's neighbor count,
+     * the same proxy firmware passes. */
+    uint8_t peer_count = (uint8_t)neighbor_count(&rx->neighbors);
+    uint32_t initial_delay_ms =
+        mesh_broadcast_receipt_slot_delay_ms(rx->addr, orig_packet_id, peer_count) +
+        (uint32_t)(pcg32_random(rng) % 400u);
+
+    ext->receipt_queue[slot].used = true;
+    ext->receipt_queue[slot].original_src_addr = orig_sender;
+    ext->receipt_queue[slot].original_packet_id = orig_packet_id;
+    memcpy(ext->receipt_queue[slot].buf, receipt_buf, receipt_len);
+    ext->receipt_queue[slot].wire_len = (uint8_t)receipt_len;
+    ext->receipt_queue[slot].attempts_total = mesh_broadcast_receipt_retry_count();
+    if (ext->receipt_queue[slot].attempts_total == 0)
+        ext->receipt_queue[slot].attempts_total = 1;
+    ext->receipt_queue[slot].attempts_sent = 0;
+    ext->receipt_queue[slot].defers = 0;
+    ext->receipt_queue[slot].due_us = now_us + (uint64_t)initial_delay_ms * 1000ULL;
+
+    bridge_schedule_receipt_tx(rx->addr, slot, ext->receipt_queue[slot].due_us, events);
+}
+
+/* Airtime-pressure multiplier for delivery-receipt retry delays, mirroring
+ * receipt_retry_scale in main/mesh_reliability.c:230: one read of the node's
+ * remaining RECEIPT-lane budget through the real
+ * mesh_broadcast_receipt_retry_scale policy (<30% used -> 0.5x, 30-70% -> 1x,
+ * >70% -> 2x). Reads the lane without refilling it first, the sim's existing
+ * convention (node_tick owns airtime_budget_refill; no gated TX site refills
+ * on its own either), where firmware's tx_gate_remaining refills inline. */
+static uint32_t bridge_receipt_scaled_ms(const sim_node_t* node, uint32_t raw_ms) {
+    uint32_t scale_num = 1u;
+    uint32_t scale_den = 1u;
+    mesh_broadcast_receipt_retry_scale(
+        airtime_budget_remaining(&node->airtime, AIRTIME_TIER_RECEIPT), &scale_num, &scale_den);
+    return (raw_ms * scale_num) / scale_den;
+}
+
+void bridge_handle_receipt_tx(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                              pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics) {
+    uint64_t now_us = event->timestamp_us;
+    sim_node_t* node = node_array_find_by_addr(nodes, event->data.receipt_tx.node_addr);
+    if (!node || !node->active)
+        return;
+
+    int slot = event->data.receipt_tx.slot;
+    if (slot < 0 || slot >= SIM_RECEIPT_QUEUE_CAPACITY)
+        return;
+    bridge_node_ext_t* ext = bridge_node_ext_get((int)(node - nodes->nodes));
+    if (!ext || !ext->receipt_queue[slot].used)
+        return;
+
+    outbound_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    memcpy(pkt.data, ext->receipt_queue[slot].buf, ext->receipt_queue[slot].wire_len);
+    pkt.len = ext->receipt_queue[slot].wire_len;
+    pkt.is_broadcast = true;
+    pkt.dest_addr = 0xFFFFFFFF;
+    pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
+
+    /* tx_gate_kind_tier: both TX_KIND_RECEIPT and TX_KIND_RECEIPT_FORWARD map
+     * to AIRTIME_TIER_RECEIPT, so the arm switch changes the LBT-exhaustion
+     * behavior and nothing else about the send. */
+    uint64_t lbt_end_us = now_us;
+    bridge_tx_result_t res =
+        budget_gated_send_lbt(node, &pkt, AIRTIME_TIER_RECEIPT, g_broadcast_receipt_tx_kind, nodes,
+                              radio, rng, events, metrics, now_us, &lbt_end_us);
+
+    /* Channel-busy deferral, mirroring mesh_process_receipt_tx_event's
+     * TX_GATE_ERR_CHANNEL_BUSY branch (main/mesh_reliability.c:318): nothing
+     * went out and nothing was debited, so re-run the SAME attempt after a
+     * short jittered wait instead of spending it. Bounded by
+     * RECEIPT_MAX_DEFERS (8) so a permanently jammed channel still terminates
+     * exactly like a blind-fired-and-lost attempt did. Rescheduled from
+     * lbt_end_us, the simulated instant the CAD backoffs ran out, rather than
+     * from the moment the attempt started: on real hardware those backoffs are
+     * elapsed wall time before esp_random() is ever called. */
+    if (res == BRIDGE_TX_CHANNEL_BUSY) {
+        ext->receipt_queue[slot].defers++;
+        if (ext->receipt_queue[slot].defers < SIM_RECEIPT_MAX_DEFERS) {
+            uint32_t defer_delay_ms = 250u + (uint32_t)(pcg32_random(rng) % 750u);
+            ext->receipt_queue[slot].due_us = lbt_end_us + (uint64_t)defer_delay_ms * 1000ULL;
+            bridge_schedule_receipt_tx(node->addr, slot, ext->receipt_queue[slot].due_us, events);
+            return;
+        }
+        ext->receipt_queue[slot].defers = 0;
+        /* At the cap the attempt counts as spent and the receipt rejoins the
+         * normal retry/exhaustion path below. */
+    }
+
+    ext->receipt_queue[slot].attempts_sent++;
+    /* Any spent attempt resets the consecutive-defer count, including a
+     * budget-denied one (mirrors main/mesh_reliability.c: the invariant is
+     * "reset whenever the attempt is finally spent", however it is spent). */
+    ext->receipt_queue[slot].defers = 0;
+    if (ext->receipt_queue[slot].attempts_sent >= ext->receipt_queue[slot].attempts_total) {
+        memset(&ext->receipt_queue[slot], 0, sizeof(ext->receipt_queue[slot]));
+        return;
+    }
+
+    uint32_t retry_delay_ms;
+    if (res == BRIDGE_TX_SENT) {
+        /* Normal inter-attempt spacing (main/mesh_reliability.c:370):
+         * 500 + 700*i ms base, plus 0..(500 + 400*i) ms of jitter, both scaled
+         * by the receipt-budget pressure multiplier. */
+        uint32_t i = (uint32_t)(ext->receipt_queue[slot].attempts_sent - 1u);
+        uint32_t base_ms = bridge_receipt_scaled_ms(node, 500u + i * 700u);
+        uint32_t jitter_range = bridge_receipt_scaled_ms(node, 500u + i * 400u);
+        if (jitter_range == 0u)
+            jitter_range = 1u;
+        retry_delay_ms = base_ms + (uint32_t)(pcg32_random(rng) % jitter_range);
+    } else {
+        /* Deny/defer-exhaustion backoff (main/mesh_reliability.c:288 and
+         * :356, identical formula in both): 1000 + 2000*attempts_sent ms plus
+         * 0..999ms, scaled the same way. */
+        uint32_t raw_backoff_ms = 1000u +
+                                  ((uint32_t)ext->receipt_queue[slot].attempts_sent * 2000u) +
+                                  (uint32_t)(pcg32_random(rng) % 1000u);
+        retry_delay_ms = bridge_receipt_scaled_ms(node, raw_backoff_ms);
+    }
+
+    uint64_t from_us = (res == BRIDGE_TX_SENT) ? now_us : lbt_end_us;
+    ext->receipt_queue[slot].due_us = from_us + (uint64_t)retry_delay_ms * 1000ULL;
+    bridge_schedule_receipt_tx(node->addr, slot, ext->receipt_queue[slot].due_us, events);
+}
+
 static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint32_t pkt_src_addr,
                          int8_t rssi, int8_t snr, uint64_t now_us, uint32_t now_ms,
                          node_array_t* nodes, radio_config_t* radio, pcg32_state_t* rng,
@@ -1163,6 +1529,18 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
                     ",\"node\":\"%s\",\"packet_id\":\"0x%08X\"}\n",
                     (unsigned long long)now_us, rx->id, hdr.packet_id);
             fflush(stdout);
+
+            /* Receipt reliability campaign Task 1: this hearer just stored
+             * the broadcast, so it owes the origin a delivery receipt (see
+             * bridge_send_broadcast_delivery_receipt's doc comment). Guarded
+             * on orig_sender != 0 for the same defensive reason the unicast
+             * receipt build below is: a lookup miss must never address a
+             * receipt to 0. */
+            if (orig_sender != 0) {
+                g_ext_metrics.broadcast_receipts_expected++;
+                bridge_send_broadcast_delivery_receipt(rx, orig_sender, hdr.packet_id, nodes, rng,
+                                                       events, now_us);
+            }
         }
         return;
     }
@@ -2594,6 +2972,7 @@ void bridge_init(void) {
     sim_emitter_set_quiet(false);
 
     relay_path_init();
+    broadcast_receipt_seen_init();
 
     /* Mandatory-provisioning (Task 2): provision the shared default network key
      * for the whole sim fleet BEFORE any node originates, so control-plane

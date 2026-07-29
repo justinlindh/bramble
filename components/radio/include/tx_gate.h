@@ -21,17 +21,18 @@
 /* What is being transmitted. The gate maps each kind onto one of the four
  * existing airtime budget tiers; callers pick the kind, never the tier. */
 typedef enum {
-    TX_KIND_DATA = 0,       /* unicast/channel data, original send */
-    TX_KIND_DATA_BROADCAST, /* broadcast data (public channel, fragments) */
-    TX_KIND_DATA_RETRY,     /* ACK-driven retransmission of pending data */
-    TX_KIND_FORWARD,        /* relaying another node's data packet */
-    TX_KIND_MAILBOX,        /* mailbox flush of stored packets */
-    TX_KIND_BEACON,         /* periodic presence beacon */
-    TX_KIND_ROUTING,        /* RREQ / RREP / RERR control */
-    TX_KIND_ACK,            /* ACK send and ACK forward */
-    TX_KIND_RECEIPT,        /* broadcast delivery receipts (send + forward) */
-    TX_KIND_PROBE,          /* probe sweep rounds and probe forwards */
-    TX_KIND_PROBE_REPLY,    /* probe ACK send and forward */
+    TX_KIND_DATA = 0,        /* unicast/channel data, original send */
+    TX_KIND_DATA_BROADCAST,  /* broadcast data (public channel, fragments) */
+    TX_KIND_DATA_RETRY,      /* ACK-driven retransmission of pending data */
+    TX_KIND_FORWARD,         /* relaying another node's data packet */
+    TX_KIND_MAILBOX,         /* mailbox flush of stored packets */
+    TX_KIND_BEACON,          /* periodic presence beacon */
+    TX_KIND_ROUTING,         /* RREQ / RREP / RERR control */
+    TX_KIND_ACK,             /* ACK send and ACK forward */
+    TX_KIND_RECEIPT,         /* broadcast delivery receipt this node originated */
+    TX_KIND_RECEIPT_FORWARD, /* relaying another node's delivery receipt */
+    TX_KIND_PROBE,           /* probe sweep rounds and probe forwards */
+    TX_KIND_PROBE_REPLY,     /* probe ACK send and forward */
     TX_KIND_COUNT
 } tx_kind_t;
 
@@ -39,6 +40,10 @@ typedef enum {
 #define TX_GATE_OK 0
 #define TX_GATE_ERR_RADIO (-1)  /* radio driver rejected the transmit */
 #define TX_GATE_ERR_BUDGET (-2) /* airtime budget denied; nothing transmitted */
+/* Listen-Before-Talk found the channel busy for every attempt and this kind
+ * defers rather than transmitting anyway (see lbt_defers in tx_gate.c);
+ * nothing transmitted, nothing debited, the caller retries later. */
+#define TX_GATE_ERR_CHANNEL_BUSY (-3)
 
 /* Dependency injection surface. Host tests provide fakes; firmware glue
  * (tx_gate_esp.c) binds the real radio, timer, and RTOS primitives. */
@@ -104,7 +109,8 @@ uint8_t tx_gate_kind_tier(tx_kind_t kind);
 uint32_t tx_gate_cost_ms(tx_gate_t* g, uint8_t wire_len);
 
 /* Budget check -> LBT -> transmit -> debit. Returns TX_GATE_OK,
- * TX_GATE_ERR_BUDGET (denied, radio untouched) or TX_GATE_ERR_RADIO. */
+ * TX_GATE_ERR_BUDGET (denied, radio untouched), TX_GATE_ERR_CHANNEL_BUSY
+ * (deferring kinds only, radio untouched) or TX_GATE_ERR_RADIO. */
 int tx_gate_transmit(tx_gate_t* g, const uint8_t* buf, uint8_t len, tx_kind_t kind);
 
 /* Non-mutating pre-check: would a packet of wire_len pass the budget now?
