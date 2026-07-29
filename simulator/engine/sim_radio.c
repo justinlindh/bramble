@@ -416,6 +416,14 @@ radio_rx_outcome_t radio_check_reception(const radio_config_t* config, const sim
 void sim_radio_broadcast(sim_node_t* tx_node, const outbound_packet_t* pkt, node_array_t* nodes,
                          radio_config_t* radio, pcg32_state_t* rng, event_queue_t* events,
                          metrics_state_t* metrics, uint64_t now_us) {
+    sim_radio_broadcast_lbt(tx_node, pkt, nodes, radio, rng, events, metrics, now_us, false, NULL);
+}
+
+sim_tx_outcome_t sim_radio_broadcast_lbt(sim_node_t* tx_node, const outbound_packet_t* pkt,
+                                         node_array_t* nodes, radio_config_t* radio,
+                                         pcg32_state_t* rng, event_queue_t* events,
+                                         metrics_state_t* metrics, uint64_t now_us,
+                                         bool defer_on_busy, uint64_t* out_lbt_end_us) {
     uint32_t toa_us = radio_frame_airtime_us(radio, pkt->len);
     uint64_t air_start = now_us;
     if (radio->collisions_enabled && tx_node->tx_busy_until_us > air_start) {
@@ -423,13 +431,21 @@ void sim_radio_broadcast(sim_node_t* tx_node, const outbound_packet_t* pkt, node
         air_start = tx_node->tx_busy_until_us;
     }
 
-    /* Listen-before-talk, mirroring firmware transmit_packet: up to 3 CAD
-     * checks with randomized exponential backoff (50..300 ms base plus an
-     * equal random component), then transmit anyway to avoid starvation. */
+    /* Listen-before-talk, mirroring components/radio/tx_gate.c's LBT loop: up
+     * to 3 CAD checks with randomized exponential backoff (50..300 ms base
+     * plus an equal random component). `quiet` records whether a CAD actually
+     * found the channel free, exactly like the firmware loop's variable of
+     * the same name (tx_gate.c:158): a caller that defers needs to tell "the
+     * channel went quiet" apart from "the attempts ran out while it was still
+     * busy". */
+    bool quiet = true;
     if (radio->collisions_enabled && radio->lbt_enabled) {
+        quiet = false;
         for (int attempt = 0; attempt < SIM_LBT_MAX_ATTEMPTS; attempt++) {
-            if (!channel_busy_at(radio, tx_node, air_start))
+            if (!channel_busy_at(radio, tx_node, air_start)) {
+                quiet = true;
                 break;
+            }
             uint32_t backoff_ms = SIM_LBT_BACKOFF_BASE_MS << attempt;
             if (backoff_ms > SIM_LBT_BACKOFF_MAX_MS)
                 backoff_ms = SIM_LBT_BACKOFF_MAX_MS;
@@ -437,6 +453,16 @@ void sim_radio_broadcast(sim_node_t* tx_node, const outbound_packet_t* pkt, node
             air_start += (uint64_t)backoff_ms * 1000ULL;
             metrics->lbt_backoffs++;
         }
+    }
+
+    /* Attempts exhausted on a busy channel: deferring callers hand the
+     * decision back up with nothing transmitted and no airtime charged
+     * (tx_gate.c's TX_GATE_ERR_CHANNEL_BUSY return), every other caller
+     * transmits anyway to avoid starvation, as this function always did. */
+    if (!quiet && defer_on_busy) {
+        if (out_lbt_end_us)
+            *out_lbt_end_us = air_start;
+        return SIM_TX_CHANNEL_BUSY;
     }
 
     uint64_t air_end = air_start + toa_us;
@@ -527,4 +553,8 @@ void sim_radio_broadcast(sim_node_t* tx_node, const outbound_packet_t* pkt, node
 
         event_queue_push(events, &recv_evt);
     }
+
+    if (out_lbt_end_us)
+        *out_lbt_end_us = air_start;
+    return SIM_TX_SENT;
 }
