@@ -18,8 +18,29 @@ const receiptStormNodes = 10
 
 // receiptStormSeeds is the number of seeds each arm runs. Ten is enough to
 // separate the arms here (the per-seed table in the header comment shows the
-// spread) without turning one test into a minute of wall clock.
+// spread) without turning one test into a minute of wall clock. Both arms
+// over all ten seeds run in just over a second (`go test -run
+// TestReceiptStormLBTDeferBeatsBlindFire -v`, 2026-07-28), so this stays at
+// ten rather than dropping to a smaller count for CI speed: the means are
+// stable at this count (see the calibration table below) and a smaller
+// sample would buy no runtime that matters while making the >= 0.95 gate
+// more sensitive to which seeds happen to be included.
 const receiptStormSeeds = 10
+
+// receiptToaTolerancePct bounds how much the defer arm's receipt-tier ToA may
+// exceed the blind-fire arm's before the airtime-cost regression check below
+// fails. Calibration measured the two arms' receipt-tier ToA as bit-identical
+// (7658ms) on every one of the ten seeds: the fix changes WHEN a receipt
+// transmits (deferred off a busy channel, replayed later), never HOW MANY
+// transmit or at what frame size, so the packet count and per-packet size
+// behind this figure do not depend on RNG state or which seed runs. A tight
+// zero-tolerance check would therefore be defensible today, but this test
+// runs in CI forever and a future change to receipt framing, SF, or the
+// storm topology could introduce a few milliseconds of legitimate rounding
+// noise between arms without that being a regression. 2% is loose enough to
+// absorb that and tight enough that it would still catch the fix regressing
+// to spending materially more air than it did at calibration.
+const receiptToaTolerancePct = 0.02
 
 // receiptStormScenarioJSON builds one storm run: receiptStormNodes nodes
 // packed inside a single radio cell, left alone long enough for beacons to
@@ -189,9 +210,12 @@ func receiptStormMeans(rs []receiptStormResult) receiptStormResult {
 // both arms, merely at quieter instants. The defer arm buys 14.4 points of
 // receipt return for exactly zero extra air.
 //
-// This test asserts the metric plumbing on every run plus the two calibrated
-// facts: the blind-fire arm reproduces the defect, and the defer arm beats it.
-// The post-fix target rate (>= 0.95) is Task 5's assertion, not this one's.
+// This test asserts the metric plumbing on every run plus the campaign's exit
+// gate: the blind-fire arm reproduces the defect (mean rate < 0.95), the
+// defer arm clears the campaign's target (mean rate >= 0.95) and beats the
+// blind-fire arm outright, and the defer arm does not buy that reliability
+// with extra receipt-tier airtime (within receiptToaTolerancePct of the
+// blind-fire arm's ToA; calibration measured the two as bit-identical).
 func TestReceiptStormLBTDeferBeatsBlindFire(t *testing.T) {
 	blindFire := runReceiptStorm(t, "receipt_forward")
 	deferring := runReceiptStorm(t, "receipt")
@@ -219,5 +243,16 @@ func TestReceiptStormLBTDeferBeatsBlindFire(t *testing.T) {
 		t.Fatalf("defer arm mean receipt_return_rate = %.4f is not better than the blind-fire "+
 			"arm's %.4f; deferring an originated receipt off a busy channel must return more "+
 			"receipts than transmitting into it", deferMean.rate, blindMean.rate)
+	}
+	if deferMean.rate < 0.95 {
+		t.Fatalf("defer arm mean receipt_return_rate = %.4f, want >= 0.95: this is the receipt "+
+			"reliability campaign's exit gate, not just an improvement over blind-fire", deferMean.rate)
+	}
+	if maxToa := blindMean.receiptToaMs * (1 + receiptToaTolerancePct); deferMean.receiptToaMs > maxToa {
+		t.Fatalf("defer arm mean receipt-tier ToA = %.1fms exceeds the blind-fire arm's %.1fms "+
+			"by more than %.0f%%: the defer fix must not spend more airtime to reach its higher "+
+			"return rate, and a deferred attempt should never be charged more than a blind-fired "+
+			"one that flew at the same size", deferMean.receiptToaMs, blindMean.receiptToaMs,
+			receiptToaTolerancePct*100)
 	}
 }
