@@ -282,6 +282,11 @@ void mesh_process_receipt_tx_event(void) {
      * are exhausted. */
     if (rc == TX_GATE_ERR_BUDGET) {
         item->attempts_sent++;
+        /* This spends the attempt, so the consecutive channel-busy defer
+         * count starts over with the next one (the documented invariant on
+         * pending_receipt_t.defers). Reachable when a budget deny
+         * interleaves with channel-busy defers on the same attempt. */
+        item->defers = 0;
         if (item->attempts_sent >= item->attempts_total) {
             ESP_LOGW(TAG,
                      "Delivery receipt DROPPED for pkt=%08" PRIX32

@@ -1390,9 +1390,10 @@ void bridge_handle_receipt_tx(sim_event_t* event, node_array_t* nodes, radio_con
     }
 
     ext->receipt_queue[slot].attempts_sent++;
-    if (res == BRIDGE_TX_SENT) {
-        ext->receipt_queue[slot].defers = 0; /* attempt spent on the air */
-    }
+    /* Any spent attempt resets the consecutive-defer count, including a
+     * budget-denied one (mirrors main/mesh_reliability.c: the invariant is
+     * "reset whenever the attempt is finally spent", however it is spent). */
+    ext->receipt_queue[slot].defers = 0;
     if (ext->receipt_queue[slot].attempts_sent >= ext->receipt_queue[slot].attempts_total) {
         memset(&ext->receipt_queue[slot], 0, sizeof(ext->receipt_queue[slot]));
         return;

@@ -1371,13 +1371,6 @@ func confirmedDeliveryRate(confirmed, delivered, dropped, undelivered uint64) fl
 	return float64(confirmed) / float64(total)
 }
 
-// receiptReturnRate is registered / expected: of every (recipient,
-// broadcast) pair where a node other than the origin stored a broadcast
-// (expected), the fraction whose delivery receipt the origin actually saw
-// (registered). Unlike messageDeliveryRate/confirmedDeliveryRate, a
-// zero-denominator run reports 1.0, not 0.0: a scenario with no broadcasts
-// owes zero receipts, so nothing was missed, which is a passing result, not
-// a failing one.
 // receiptTxKindConfigJSON is the receipt reliability campaign's scenario-level
 // A/B switch for the tx_kind_t an originated broadcast delivery receipt is
 // transmitted as. A pointer so an omitted field (the shipped firmware kind)
@@ -1406,6 +1399,13 @@ func loadReceiptTxKindConfig(data []byte) int {
 	return int(C.TX_KIND_RECEIPT)
 }
 
+// receiptReturnRate is registered / expected: of every (recipient,
+// broadcast) pair where a node other than the origin stored a broadcast
+// (expected), the fraction whose delivery receipt the origin actually saw
+// (registered). Unlike messageDeliveryRate/confirmedDeliveryRate, a
+// zero-denominator run reports 1.0, not 0.0: a scenario with no broadcasts
+// owes zero receipts, so nothing was missed, which is a passing result, not
+// a failing one.
 func receiptReturnRate(expected, registered uint64) float64 {
 	if expected == 0 {
 		return 1.0

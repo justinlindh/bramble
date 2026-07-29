@@ -214,6 +214,37 @@ static void mirror_process_air_attempt(mirror_receipt_t* item) {
     item->defers = 0;
 }
 
+/* Mirrors the TX_GATE_ERR_BUDGET branch (main/mesh_reliability.c,
+ * mesh_process_receipt_tx_event, budget-deny path): a budget deny spends
+ * the attempt, and any spent attempt resets the consecutive-defer count,
+ * so a deny interleaved with channel-busy defers starts the next attempt
+ * with a fresh defer budget. */
+static void mirror_process_budget_deny(mirror_receipt_t* item) {
+    item->attempts_sent++;
+    item->defers = 0;
+    if (item->attempts_sent >= item->attempts_total) {
+        item->dropped = true;
+    }
+}
+
+void test_receipt_budget_deny_interleaved_with_defers_resets_defer_count(void) {
+    mirror_receipt_t item = {.attempts_total = 3, .attempts_sent = 0, .defers = 0};
+    s_mirror_rand = 0;
+
+    /* Two channel-busy defers on attempt 1, then a budget deny spends the
+     * attempt: the defer count must reset so attempt 2 gets the full
+     * RECEIPT_MAX_DEFERS budget rather than inheriting a nearly-spent one. */
+    mirror_process_channel_busy(&item, 1000u);
+    mirror_process_channel_busy(&item, 2000u);
+    TEST_ASSERT_EQUAL_UINT8(2, item.defers);
+    TEST_ASSERT_EQUAL_UINT8(0, item.attempts_sent);
+
+    mirror_process_budget_deny(&item);
+    TEST_ASSERT_EQUAL_UINT8(1, item.attempts_sent);
+    TEST_ASSERT_EQUAL_UINT8(0, item.defers);
+    TEST_ASSERT_FALSE(item.dropped);
+}
+
 void test_receipt_channel_busy_defer_reschedules_without_consuming_attempt(void) {
     mirror_receipt_t item = {.attempts_total = 3, .attempts_sent = 0, .defers = 0};
     s_mirror_rand = 0;
@@ -298,6 +329,7 @@ int main(void) {
     RUN_TEST(test_pending_ack_table_full);
     RUN_TEST(test_pending_ack_stores_full_frame_without_overrun);
     RUN_TEST(test_pending_ack_clamps_oversized_length);
+    RUN_TEST(test_receipt_budget_deny_interleaved_with_defers_resets_defer_count);
     RUN_TEST(test_receipt_channel_busy_defer_reschedules_without_consuming_attempt);
     RUN_TEST(test_receipt_channel_busy_jitter_window_bounds_250_999);
     RUN_TEST(test_receipt_channel_busy_defer_cap_consumes_one_attempt);
