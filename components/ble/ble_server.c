@@ -77,6 +77,14 @@ static char s_device_name[32] = "Bramble";
 /* Longest name that still fits an advertising PDU beside the flags and TX
  * power fields; see start_advertising. */
 #define BLE_ADV_NAME_MAX 23
+
+/* Boot-progress probe. Consoleless boards (nRF T1000-E) override this to
+ * record the advertising result in a host-readable flash page; everywhere
+ * else it stays a no-op. Stage value 0x10 is BT_ADV in nrf boot_trace.h. */
+__attribute__((weak)) void bramble_boot_probe(unsigned stage, int rc) {
+    (void)stage;
+    (void)rc;
+}
 static bool s_ble_authenticated = false;
 static uint8_t s_auth_fail_count = 0;
 
@@ -433,6 +441,7 @@ static void start_advertising(void) {
     /* S22: advertise with random address, not permanent public MAC */
     rc = ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER, &adv_params,
                            gap_event_handler, NULL);
+    bramble_boot_probe(0x10, rc);
     if (rc != 0) {
         ESP_LOGE(TAG, "adv_start failed: %d", rc);
     } else {

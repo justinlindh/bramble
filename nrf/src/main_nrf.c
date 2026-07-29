@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "app_init.h"
+#include "boot_trace.h"
 #include "console.h"
 #include "crypto.h"
 #include "esp_log.h"
@@ -38,24 +39,36 @@ void bramble_assert_failed(const char* file, int line) {
     }
     ESP_LOGE(TAG, "assert failed in task '%s': %s:%d (sched=%d icsr=0x%08lx)", who ? who : "?",
              file, line, (int)xTaskGetSchedulerState(), (unsigned long)SCB->ICSR);
+    /* Halting here would leave a consoleless board indistinguishable from a
+     * dead one; stamp the trace and return to the bootloader instead, where
+     * the host can read what happened. */
     taskDISABLE_INTERRUPTS();
-    for (;;) {
-    }
+    boot_trace_fail(BT_FAIL_ASSERT, (uint32_t)line);
+}
+
+void HardFault_Handler(void) {
+    /* The startup file's default handler is an infinite loop. Recover the
+     * stacked PC so the trace names the faulting instruction. */
+    uint32_t* frame;
+    __asm volatile("tst lr, #4\n"
+                   "ite eq\n"
+                   "mrseq %0, msp\n"
+                   "mrsne %0, psp\n"
+                   : "=r"(frame));
+    boot_trace_fail(BT_FAIL_HARDFAULT, frame[6]);
 }
 
 void vApplicationStackOverflowHook(TaskHandle_t task, char* name) {
     (void)task;
     ESP_LOGE(TAG, "stack overflow in task %s", name ? name : "?");
     taskDISABLE_INTERRUPTS();
-    for (;;) {
-    }
+    boot_trace_fail(BT_FAIL_STACK_OVF, 0);
 }
 
 void vApplicationMallocFailedHook(void) {
     ESP_LOGE(TAG, "FreeRTOS heap exhausted");
     taskDISABLE_INTERRUPTS();
-    for (;;) {
-    }
+    boot_trace_fail(BT_FAIL_MALLOC, 0);
 }
 
 // Boot-time crypto self-check: proves the minimal mbedtls config plus the
@@ -113,12 +126,51 @@ static void task_heartbeat(void* arg) {
 
 static void task_boot(void* arg) {
     (void)arg;
+    boot_trace_mark(BT_CRYPTO_CHECK, 0);
     crypto_self_check();
+    boot_trace_mark(BT_CRYPTO_OK, 0);
     app_init_stack();
     vTaskDelete(NULL);
 }
 
+#ifdef BRAMBLE_BOOT_DFU_RECOVERY
+/* Watchdog-of-last-resort for consoleless boards: if advertising is not up
+ * two minutes after boot, stamp the last stage reached and return to the
+ * bootloader so the trace page is host-readable. High priority so a
+ * busy-spinning boot task cannot starve it; it sleeps its whole life. */
+static void task_sentinel(void* arg) {
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(120000));
+    if (!boot_trace_adv_ok()) {
+        boot_trace_fail(BT_FAIL_SENTINEL, boot_trace_last());
+    }
+    vTaskDelete(NULL);
+}
+#endif
+
 int main(void) {
+    /* The dev kit image links at 0x0 and is flashed over SWD, so the reset
+     * value of VTOR (0) already points at our vector table. Behind the
+     * T1000-E's UF2 bootloader the app lives at 0x27000 and arrives here by
+     * a JUMP, not a reset: VTOR still points at Nordic's MBR, and the
+     * bootloader's NVIC state (USB et al) is still live. The first scheduler
+     * exception would vector through the MBR/bootloader table and the app
+     * dies before any task runs. Claim the vector table and quiesce the
+     * NVIC before anything can fire. */
+    extern uint32_t __isr_vector[];
+    __disable_irq();
+    for (unsigned i = 0; i < 8; i++) {
+        NVIC->ICER[i] = 0xFFFFFFFFu;
+        NVIC->ICPR[i] = 0xFFFFFFFFu;
+    }
+    SCB->VTOR = (uint32_t)__isr_vector;
+    __DSB();
+    __ISB();
+    __enable_irq();
+
+    boot_trace_init();
+    boot_trace_mark(BT_MAIN_ENTRY, SCB->VTOR);
+
     console_init();
     esp_random_nrf_init();
     bramble_mbedtls_platform_init();
@@ -132,6 +184,12 @@ int main(void) {
     configASSERT(ok == pdPASS);
     ok = xTaskCreate(task_heartbeat, "heartbeat", 512, NULL, 2, NULL);
     configASSERT(ok == pdPASS);
+#ifdef BRAMBLE_BOOT_DFU_RECOVERY
+    /* Same priority as the timer task: above every worker, below the BLE
+     * link layer. */
+    ok = xTaskCreate(task_sentinel, "sentinel", 256, NULL, configMAX_PRIORITIES - 2, NULL);
+    configASSERT(ok == pdPASS);
+#endif
 
     ESP_LOGI(TAG, "starting scheduler");
     vTaskStartScheduler();

@@ -306,6 +306,7 @@ target_link_libraries(nimble_lib PUBLIC mbedcrypto)
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
+  src/boot_trace.c
   src/radio_lr1110.c
   src/lr11xx_hal_nrf.c
   src/lfs_nvmc.c
@@ -386,6 +387,10 @@ set(BRAMBLE_UF2_BASE 0x27000)
 # note in scripts/make_uf2.py before changing it.
 if(BRAMBLE_NRF_LAYOUT STREQUAL "uf2")
   set(BRAMBLE_LD ${CMAKE_CURRENT_SOURCE_DIR}/ld/nrf52840_s140_app.ld)
+  # Behind the UF2 bootloader a dead board is unreachable (no console, no
+  # SWD on the bench); on boot failure the firmware stamps the boot-trace
+  # page and reboots into DFU so the host can read it back.
+  target_compile_definitions(bramble-nrf PRIVATE BRAMBLE_BOOT_DFU_RECOVERY=1)
 else()
   set(BRAMBLE_LD ${nrfx_SOURCE_DIR}/mdk/nrf52840_xxaa.ld)
 endif()

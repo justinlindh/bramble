@@ -20,6 +20,8 @@
  */
 #include "nimble_glue.h"
 
+#include "boot_trace.h"
+
 #include <nrfx.h>
 
 #include <hal/nrf_clock.h>
@@ -137,6 +139,8 @@ bool nimble_glue_start_lfclk(void) {
         while (!nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
         }
     }
+
+    boot_trace_mark(BT_HFXO_OK, 0);
 
     if (nrf_clock_lf_is_running(NRF_CLOCK)) {
         return nrf_clock_lf_actv_src_get(NRF_CLOCK) == NRF_CLOCK_LFCLK_XTAL;
