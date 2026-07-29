@@ -1028,8 +1028,9 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
  * mesh-side bookkeeping: TX telemetry, packet counters, and the shared
  * airtime snapshot for the UI/RPC.
  *
- * Returns TX_GATE_OK, TX_GATE_ERR_BUDGET (denied, nothing transmitted)
- * or TX_GATE_ERR_RADIO. Per-kind deny behavior lives at the call sites.
+ * Returns TX_GATE_OK, TX_GATE_ERR_BUDGET (denied, nothing transmitted),
+ * TX_GATE_ERR_CHANNEL_BUSY (LBT deferred, nothing transmitted) or
+ * TX_GATE_ERR_RADIO. Per-kind deny behavior lives at the call sites.
  */
 int mesh_tx(const uint8_t* buf, uint8_t len, tx_kind_t kind) {
     uint8_t pkt_type = (len >= 2) ? buf[1] : 0xFF;
