@@ -694,6 +694,26 @@ static int handle_reboot(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* bramble.enterDfu: no params. Reboots into the firmware-update bootloader
+ * on platforms that have one; the platform hook returns nonzero where the
+ * concept does not exist (ESP32, which updates over OTA instead). On the
+ * nRF UF2 boards this is the only reflash path that needs no physical
+ * button: the T1000-E is consoleless and its DFU button gesture is a
+ * timing-sensitive cable dance. */
+__attribute__((weak)) int bramble_platform_enter_dfu(void) { return -1; }
+
+static int handle_enter_dfu(const cJSON* params, cJSON* result) {
+    (void)params;
+    if (bramble_platform_enter_dfu() != 0) {
+        cJSON_AddStringToObject(result, "error", "DFU mode not supported on this platform");
+        return 0;
+    }
+    /* The hook schedules the reset with a delay so this response can flush
+     * to the client first. */
+    cJSON_AddBoolToObject(result, "ok", true);
+    return 0;
+}
+
 /* bramble.sendProbe: no params. Broadcasts a probe (mesh_send_probe takes no
  * destination); responses arrive as bramble.onProbeResult notifications,
  * followed by bramble.onProbeComplete. */
@@ -3304,6 +3324,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.sendMessage", handle_send_message);
     rpc_register("bramble.sendBroadcast", handle_send_broadcast);
     rpc_register("bramble.reboot", handle_reboot);
+    rpc_register("bramble.enterDfu", handle_enter_dfu);
     rpc_register("bramble.sendProbe", handle_send_probe);
     rpc_register("bramble.setRadio", handle_set_radio);
     rpc_register("bramble.setNodeName", handle_set_node_name);

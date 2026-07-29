@@ -41,7 +41,11 @@ extern uint32_t SystemCoreClock;
 // interrupt stack, less a small unallocated margin. Raising it further means
 // taking RAM the linker has already committed elsewhere, so grow the budget
 // gate and this together or not at all.
-#define configTOTAL_HEAP_SIZE ((size_t)(152 * 1024))
+/* 148KB: was 152KB until the NimBLE msys pool went 12 -> 24 blocks (3.9KB
+ * of statics) after a real phone session exhausted the smaller pool; the
+ * only place on a 256KB chip that margin can come from is here. Still 4KB
+ * above the 144KB floor the size gate enforces. */
+#define configTOTAL_HEAP_SIZE ((size_t)(148 * 1024))
 #define configUSE_MALLOC_FAILED_HOOK 1
 #define configCHECK_FOR_STACK_OVERFLOW 2
 

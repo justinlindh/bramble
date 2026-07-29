@@ -827,11 +827,16 @@
 #define MYNEWT_VAL_FLOAT_USER (0)
 #endif
 
-/* Bramble: 12 blocks of 292 is the ESP fleet's pool (ESP-IDF's NimBLE
- * defaults), carrying the same RPC traffic there. Widening the blocks below
- * without narrowing the count would have cost 3.2KB of a 1.7KB margin. */
+/* Bramble: 24 blocks. The pool is shared by ATT server buffering, SM, and
+ * the notify path, and 12 (the ESP fleet's count, where the controller has
+ * its own buffers) was exhausted by a real phone session on the T1000-E:
+ * the webapp polls while notification chunks are in flight, and an incoming
+ * write that finds the pool empty is rejected by the ATT server with
+ * "insufficient resources" (0x11), which Android surfaces as write status
+ * 17 and which cost real sendMessage RPCs on the bench. 24 costs 3.5KB of
+ * statics, priced into the size gate; the heap floor gate still holds. */
 #ifndef MYNEWT_VAL_MSYS_1_BLOCK_COUNT
-#define MYNEWT_VAL_MSYS_1_BLOCK_COUNT (12)
+#define MYNEWT_VAL_MSYS_1_BLOCK_COUNT (24)
 #endif
 
 /* Bramble: 88 (the upstream value) is too small for LE Secure Connections.
