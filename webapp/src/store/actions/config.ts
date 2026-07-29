@@ -107,7 +107,7 @@ export async function loadConfig(): Promise<void> {
 // ─── Config mutations ────────────────────────────────────────────────────
 
 /** Throw if an RPC result has ok:false with an error message */
-export function assertOk(result: unknown, fallback = 'Operation failed'): void {
+function assertOk(result: unknown, fallback: string): void {
   const r = result as Record<string, unknown> | null;
   if (r && r.ok === false) {
     throw new Error((r.error as string) || fallback);
