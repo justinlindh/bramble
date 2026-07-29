@@ -53,6 +53,16 @@ void tearDown(void) {}
 /* Suppress known OTA strdup leak in test environment */
 const char* __asan_default_options(void) { return "detect_leaks=0"; }
 
+/* Strong override of rpc_methods.c's weak bramble_platform_enter_dfu so both
+ * enterDfu paths are testable from one binary: the weak default (no DFU
+ * bootloader, the ESP case) and a platform that accepts (the nRF UF2 case). */
+static int s_enter_dfu_rc = -1;
+static int s_enter_dfu_calls = 0;
+int bramble_platform_enter_dfu(void) {
+    s_enter_dfu_calls++;
+    return s_enter_dfu_rc;
+}
+
 /* ── Helpers ──────────────────────────────────────────────────────── */
 
 static cJSON* dispatch_and_parse(const char* req) {
@@ -423,6 +433,35 @@ void test_phy_tx_routes_through_tx_gate_when_active(void) {
 
 /* ── main ─────────────────────────────────────────────────────────── */
 
+void test_enter_dfu_unsupported_platform_reports_ok_false(void) {
+    s_enter_dfu_rc = -1;
+    s_enter_dfu_calls = 0;
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"bramble.enterDfu\",\"params\":{}}");
+    cJSON* result = cJSON_GetObjectItem(resp, "result");
+    TEST_ASSERT_NOT_NULL(result);
+    /* OkResponse requires ok; the error path must carry ok:false + error. */
+    cJSON* ok = cJSON_GetObjectItem(result, "ok");
+    TEST_ASSERT_TRUE(cJSON_IsBool(ok));
+    TEST_ASSERT_FALSE(cJSON_IsTrue(ok));
+    TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItem(result, "error")));
+    TEST_ASSERT_EQUAL_INT(1, s_enter_dfu_calls);
+    cJSON_Delete(resp);
+}
+
+void test_enter_dfu_supported_platform_reports_ok_true(void) {
+    s_enter_dfu_rc = 0;
+    s_enter_dfu_calls = 0;
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"bramble.enterDfu\",\"params\":{}}");
+    cJSON* result = cJSON_GetObjectItem(resp, "result");
+    TEST_ASSERT_NOT_NULL(result);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(result, "ok")));
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(result, "error"));
+    TEST_ASSERT_EQUAL_INT(1, s_enter_dfu_calls);
+    cJSON_Delete(resp);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -462,6 +501,10 @@ int main(void) {
     /* phy.tx (RF-TX entrypoint gating + tx-gate routing) */
     RUN_TEST(test_phy_tx_refused_when_inactive);
     RUN_TEST(test_phy_tx_routes_through_tx_gate_when_active);
+
+    /* enterDfu */
+    RUN_TEST(test_enter_dfu_unsupported_platform_reports_ok_false);
+    RUN_TEST(test_enter_dfu_supported_platform_reports_ok_true);
 
     return UNITY_END();
 }

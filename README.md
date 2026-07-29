@@ -83,6 +83,7 @@ A desktop app (Linux, Windows, macOS) is also available, built from the same web
 | Heltec WiFi LoRa 32 V4 | ESP32-S3 | OLED + optional L76K GNSS | Buttons | SX1262 | N/A | Running target |
 | LilyGo T-Deck Plus | ESP32-S3 | ST7789 320x240 LCD with LVGL v9 UI | GT911 capacitive touch + I2C keyboard | SX1262 with TCXO (DIO3 1.8V, DC-DC) | I2S with NVS-persisted volume | Running target with full GUI |
 | Bramble Pager v1 (custom PCB) | ESP32-S3-WROOM-1 | 2.13" GDEY0213B74 e-paper (SSD1680, 250x122) | Buttons | SX1262 with TCXO and DIO2 RF switch (DC-DC) | Buzzer + vibra alerts | Design complete, boards not yet ordered |
+| Seeed SenseCAP T1000-E (card tracker) | nRF52840 | None (BLE-only interface) | Button | LR1110 | Buzzer | Experimental: boots, BLE RPC, joins the mesh; GNSS and power management not yet implemented ([nrf/](nrf/)) |
 
 The Bramble Pager v1 is a custom in-house board, not an off-the-shelf dev kit: its own 96x50mm 2-layer PCB (ESP32-S3-WROOM-1 + SX1262 with a DIO2 RF switch, GDEY0213B74 2.13" e-paper, ATGM336H GPS, buzzer, vibration motor, and status LED), JLCPCB-fabbable, in a 3D-printed case. The authoritative design tree (spec, schematic, PCB, BOM, case, and bring-up gates) is [hardware/pager/v1/](hardware/pager/v1/); build it with the `bramble-pager` board profile.
 

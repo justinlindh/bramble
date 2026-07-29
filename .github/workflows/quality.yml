@@ -274,7 +274,9 @@ jobs:
       - name: Restore pinned dependency sources
         uses: actions/cache@v4
         with:
-          path: nrf/build/_deps
+          path: |
+            nrf/build/_deps
+            nrf/build-t1000e/_deps
           key: nrf-deps-${{ hashFiles('nrf/CMakeLists.txt', 'components/crypto/crypto_deps.cmake') }}
           # The key hashes the whole CMakeLists, which changes for many
           # non-dependency reasons; the fallback restore lets FetchContent
@@ -287,6 +289,12 @@ jobs:
           key: nrf-ccache-${{ github.sha }}
           restore-keys: nrf-ccache-
       - name: Configure and build (includes the RAM budget gate)
+        # Both shipping configurations build: the dev kit (swd layout, the
+        # default) and the T1000-E (uf2 layout, its own board header and UF2
+        # packaging). Each build runs the RAM budget gate post-link, so a
+        # change that fits one board but blows the other's budget fails here
+        # instead of on someone's bench. ccache is shared across the two, so
+        # the second build recompiles only the board-conditional objects.
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: |
@@ -295,12 +303,20 @@ jobs:
             -DCMAKE_BUILD_TYPE=MinSizeRel \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_ASM_COMPILER_LAUNCHER=ccache
           cmake --build nrf/build
+          cmake -S nrf -B nrf/build-t1000e -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DBRAMBLE_NRF_BOARD=t1000e -DBRAMBLE_NRF_LAYOUT=uf2 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_ASM_COMPILER_LAUNCHER=ccache
+          cmake --build nrf/build-t1000e
           ccache -s | head -6
       - name: Upload memory report
         uses: actions/upload-artifact@v7
         with:
           name: nrf-size-report-${{ github.run_id }}-${{ github.run_attempt }}
-          path: nrf/build/size-report.json
+          path: |
+            nrf/build/size-report.json
+            nrf/build-t1000e/size-report.json
           retention-days: 14
 
   release-config:

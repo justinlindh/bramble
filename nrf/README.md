@@ -1,9 +1,13 @@
-# Bramble nRF52840 target (P2: BLE RPC + flash persistence)
+# Bramble nRF52840 target
 
-Experimental port of Bramble to the nRF52840 (Seeed Wio-WM1110 dev kit now,
-SenseCAP T1000-E later). Bare-metal FreeRTOS + nrfx, no ESP-IDF, no
-SoftDevice; the portable protocol components compile unchanged and the
-platform seams are shimmed (`shim/`).
+Experimental port of Bramble to the nRF52840: the Seeed Wio-WM1110 dev kit
+and the SenseCAP T1000-E card tracker. Bare-metal FreeRTOS + nrfx, no
+ESP-IDF, no SoftDevice; the portable protocol components compile unchanged
+and the platform seams are shimmed (`shim/`).
+
+The port landed in phases, and the measured tables below keep their phase
+labels: P0 protocol core on the dev kit, P1 LoRa radio, P2 BLE RPC + flash
+persistence, P3 (not yet started) GNSS and power management.
 
 Status, stated per the repo's honesty conventions: builds, boots, and runs
 as a live peer on the bench mesh from the Wio-WM1110 dev kit, with the
@@ -29,9 +33,16 @@ consecutive connected attempts reached encryption with zero link kills
 (the controller previously terminated ~20% of attempts; see
 `patches/nimble-dup-pdu-during-enc-start.patch`).
 
-Still absent: GNSS (P3), power management (P3, the 32MHz crystal stays on),
-UF2/T1000-E validation on the physical card (scheduled next). Not a
-supported device yet.
+T1000-E, verified on the physical card 2026-07-28: flashes through its
+stock Adafruit UF2 bootloader, boots, advertises over BLE under the
+address-derived default name, completes phone RPC sessions, exchanges LoRa
+mesh traffic with the ESP32 fleet, and reflashes remotely over BLE
+(`bramble.enterDfu` + `scripts/flash_ble.py`). The board is consoleless, so
+boot failures are diagnosed through the flash boot trace (below) instead of
+a UART.
+
+Still absent: GNSS (P3), power management (P3, the 32MHz crystal stays on,
+so battery life is untuned). Not a supported device yet.
 
 ## Build
 
@@ -50,12 +61,22 @@ cmake --build nrf/build
 
 Every build ends with `scripts/size_report.py`, which prints the memory
 report and fails the build on any of three limits: total RAM over
-252KB, static (non-heap) RAM over 100KB, or the heap below its 144KB floor.
+252KB, static (non-heap) RAM over 104KB, or the heap below its 144KB floor.
 
-Flash layouts: the default `swd` layout links at 0x0 for the dev kit. For
-the T1000-E's stock Adafruit UF2 bootloader, configure with
-`-DBRAMBLE_NRF_LAYOUT=uf2` to link at 0x27000 (the S140 v7.3.0 app base the T1000-E's stock bootloader expects; physical-card confirmation pending) and emit `bramble-nrf.uf2`
-(family 0xADA52840) for drag-and-drop flashing.
+Board selection: `-DBRAMBLE_NRF_BOARD=wm1110_devkit` (default) or
+`t1000e`. The board header (`boards/`) owns the pin map, the LR1110 RF
+switch truth table, and whether a console UART exists at all; the T1000-E
+has no USB-UART bridge, so it builds consoleless and BLE is the only
+interface.
+
+Flash layouts: the default `swd` layout links at 0x0 for the dev kit. The
+T1000-E build configures with `-DBRAMBLE_NRF_LAYOUT=uf2
+-DBRAMBLE_NRF_BOARD=t1000e` to link at 0x27000 (the app base under its
+stock bootloader's S140 v7.3.0 layout, confirmed on hardware) and emit
+`bramble-nrf.uf2`. The UF2 is padded to whole 256-byte blocks because the
+stock bootloader silently rejects a short final block and then never
+completes the download; see `scripts/make_uf2.py` for both that and why the
+family ID stays the generic nRF52840 one.
 
 ## Flash and debug (dev kit)
 
@@ -81,13 +102,53 @@ stty -F /dev/ttyUSB0 115200 raw -echo && cat /dev/ttyUSB0
 Note: logging uses newlib-nano printf, which has no `%lld`; keep 32-bit
 format specifiers in target logs.
 
+## Flash (T1000-E, UF2 bootloader)
+
+Two paths into the stock bootloader's UF2 volume:
+
+- First flash (device still running vendor firmware, or Bramble is dead):
+  the manual gesture from Seeed's user guide: hold the button and quickly
+  connect the USB cable twice; the green LED goes solid and a `T1000-E`
+  drive appears. Copy `bramble-nrf.uf2` onto it. Timing-sensitive, expect a
+  few attempts.
+- Every flash after that: `bramble.enterDfu` over BLE reboots the running
+  firmware straight into the bootloader. `scripts/flash_ble.py` drives the
+  whole loop (authenticate, request DFU, wait for the volume, copy, confirm
+  the app boots):
+
+```sh
+uv run --with bleak python nrf/scripts/flash_ble.py <BLE name> \
+  nrf/build-t1000e/bramble-nrf.uf2 --token <device RPC token>
+```
+
+The bootloader flashes the image but never resets by itself; the firmware's
+first job on this board is claiming VTOR and quiescing the NVIC, because the
+bootloader enters the app by a jump, not a reset (see `src/main_nrf.c`).
+
+## Boot trace (consoleless diagnostics)
+
+Consoleless boards record boot progress as (tag, aux) word pairs in a
+reserved flash page (`src/boot_trace.h`, page 0xBF000). Every fatal path
+(assert, hard fault, stack overflow, heap exhaustion, and a two-minute
+no-advertising sentinel on UF2 builds) stamps the trace and reboots into the
+bootloader instead of halting, because a halted consoleless board is
+indistinguishable from a dead one. From the bootloader, the trace reads back
+through the `CURRENT.UF2` flash dump with no debugger attached:
+
+```sh
+python3 nrf/scripts/read_boot_trace.py /run/media/$USER/T1000-E/CURRENT.UF2
+```
+
 ## Dev network key (bench only)
 
-The target has no RPC transport until P2, so bench builds may seed the
-network key at configure time: `cmake ... -DBRAMBLE_NRF_DEV_NETKEY=<64 hex>`
-(the emulator's `EMU_NETWORK_KEY` pattern, compile-time edition). The key
-value must never be committed; without the define the node boots INERT
-exactly like an unprovisioned fleet node.
+Bench builds may seed the network key at configure time:
+`cmake ... -DBRAMBLE_NRF_DEV_NETKEY=<64 hex>` (the emulator's
+`EMU_NETWORK_KEY` pattern, compile-time edition). Consoleless boards have
+the same problem with the RPC auth token (it is minted once and logged to a
+UART that does not exist), so `-DBRAMBLE_NRF_DEV_AUTH_TOKEN=<token>` seeds
+one at first boot when none is stored. Neither value is ever committed;
+without the netkey define the node boots INERT exactly like an
+unprovisioned fleet node.
 
 ## Measured memory (P0 exit gate)
 

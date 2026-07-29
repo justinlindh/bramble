@@ -5,6 +5,8 @@
 // there is what keeps the two fleets running the same boot code.
 #include "app_init.h"
 
+#include "boot_trace.h"
+
 #include <FreeRTOS.h>
 
 #include "esp_log.h"
@@ -25,39 +27,57 @@ static bramble_identity_t s_identity;
 void app_init_stack(void) {
     /* Mounts the LittleFS settings partition; identity, network key and
      * channel state live here now and survive a reboot. */
-    ESP_LOGI(TAG, "nvs_flash_init: %d", nvs_flash_init());
+    int nvs_rc = nvs_flash_init();
+    ESP_LOGI(TAG, "nvs_flash_init: %d", nvs_rc);
+    boot_trace_mark(BT_NVS_INIT, (uint32_t)nvs_rc);
 
     if (identity_load(&s_identity) == 0) {
         ESP_LOGI(TAG, "identity loaded: addr %08lx", (unsigned long)s_identity.address);
+        boot_trace_mark(BT_IDENTITY, 0);
     } else {
         int rc = identity_generate_and_save(&s_identity);
         if (rc != 0) {
             ESP_LOGE(TAG, "identity generation FAILED (rc %d), mesh not started", rc);
+            boot_trace_fail(BT_IDENTITY, (uint32_t)rc);
             return;
         }
         ESP_LOGI(TAG, "identity generated: addr %08lx", (unsigned long)s_identity.address);
+        boot_trace_mark(BT_IDENTITY, 1);
     }
+    boot_trace_mark(BT_IDENTITY_ADDR, s_identity.address);
 
     /* Restores persisted messages before the mesh starts, matching the ESP
      * boot order (main.c calls this before mesh_task_start). */
     msg_store_init_with_persistence();
+    boot_trace_mark(BT_MSG_STORE, 0);
 
     /* The dispatcher and its method table must exist before any transport
      * registers, because rpc_init() clears both tables. */
     rpc_init();
     rpc_methods_init(&s_identity);
+    boot_trace_mark(BT_RPC_READY, 0);
 
     mesh_task_start(&s_identity);
+    boot_trace_mark(BT_MESH_STARTED, 0);
 
     /* BLE last: the mesh owns the node's identity and RPC state, and the
      * transport should not accept a connection before they exist. */
+    /* Consoleless boards cannot surface a minted token (the mint is logged
+     * once, over a UART the T1000-E does not have), so a build-time token is
+     * seeded first when one was provided. Seeds only if none is stored, and
+     * must precede ws_server_load_token, which mints when it finds none. */
+    extern int nrf_seed_auth_token_from_build(void);
+    boot_trace_mark(BT_TOKEN_SEED, (uint32_t)nrf_seed_auth_token_from_build());
+
     /* Mints or loads the per-device RPC auth token. The entropy gate is
      * already open here (the hardware RNG opened it at boot), so unlike the
      * ESP boot path this cannot be deferred. */
     ws_server_load_token();
+    boot_trace_mark(BT_TOKEN_LOADED, 0);
 
     if (ble_host_start() != 0) {
         ESP_LOGE(TAG, "BLE did not start; the node is mesh-only this boot");
     }
+    boot_trace_mark(BT_BOOT_DONE, (uint32_t)xPortGetFreeHeapSize());
     ESP_LOGI(TAG, "mesh_task_start returned; free heap %u bytes", (unsigned)xPortGetFreeHeapSize());
 }

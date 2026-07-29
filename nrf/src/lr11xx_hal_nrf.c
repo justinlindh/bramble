@@ -22,7 +22,7 @@
 
 #include "esp_log.h"
 #include "lr11xx_hal.h"
-#include "wio_wm1110_devkit.h"
+#include "bramble_board.h"
 
 static const char* TAG = "lr11xx_hal";
 
