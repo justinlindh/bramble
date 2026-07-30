@@ -217,15 +217,15 @@ Bramble uses a three-layer approach to prevent receipt collisions:
 **Layer 1, slotted response timing:** Each recipient is assigned a deterministic time slot based on a hash of its address and the original packet ID:
 
 ```text
-SLOT_BUCKETS    = 32
-SLOT_SPACING_MS = 200
-SLOT_BASE_MS    = 200
+SLOT_SPACING_MS = 1000
+SLOT_BASE_MS    = 300
+SLOT_BUCKETS    = clamp(2 × peer_count, 4, 32)
 
-slot = (local_addr XOR original_packet_id) % SLOT_BUCKETS
-delay = SLOT_BASE_MS + (slot × SLOT_SPACING_MS) + random(0, 139)
+slot  = (local_addr XOR original_packet_id) % SLOT_BUCKETS
+delay = SLOT_BASE_MS + (slot × SLOT_SPACING_MS) + random(0, 400)
 ```
 
-This spreads receipt transmissions across a ~6.4-second window. With 32 buckets and typical mesh sizes (5–20 nodes), birthday-problem collisions are rare.
+The bucket count scales to the mesh actually heard: two slots per peer, clamped to [4, 32] (`mesh_broadcast_receipt_slot_delay_ms`), so the window grows with the number of nodes that could answer the same broadcast. A tiny bench confirms in under ~2s while a dense mesh keeps the full anti-collision spread of up to ~32 seconds, keeping birthday-problem collisions rare across typical mesh sizes.
 
 **Layer 2, LBT (§3.3):** Each receipt transmission passes through the CAD check, providing a second chance to detect and avoid an in-progress transmission.
 
