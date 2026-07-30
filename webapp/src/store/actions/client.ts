@@ -12,3 +12,12 @@ export const LAST_NODE_ADDR_KEY = 'bramble:last-node-addr';
 export function getClient(): BrambleClient | null {
   return session.client;
 }
+
+// Assert a live client and return it non-null. Action functions that must talk
+// to the device call this instead of hand-rolling the `if (!session.client)
+// throw new Error('Not connected')` guard, so the guard message lives in one
+// place and callers get a typed BrambleClient without a null assertion.
+export function requireClient(): BrambleClient {
+  if (!session.client) throw new Error('Not connected');
+  return session.client;
+}

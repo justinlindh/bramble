@@ -1,6 +1,6 @@
 // Read-side telemetry: status, airtime, neighbors, routes, peer locations,
 // and the traffic monitor (debug status, event decode, live event feed).
-import { session } from './client';
+import { session, requireClient } from './client';
 import { parseAddr } from '../../lib/addr';
 import { useStore } from '../index';
 import type { NodeStatus, AirtimeStatus, AirtimeTier, Neighbor, Route, PeerLocation, TrafficEvent, TrafficDebugStatus } from '../../types/bramble';
@@ -242,14 +242,14 @@ export async function setTrafficDebugConfig(config: {
   includeRx?: boolean;
   sampleRate?: number;
 }): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
+  const client = requireClient();
   const params: Record<string, unknown> = {};
   if (config.enabled !== undefined) params.enabled = config.enabled;
   if (config.includeTx !== undefined) params.include_tx = config.includeTx;
   if (config.includeRx !== undefined) params.include_rx = config.includeRx;
   if (config.sampleRate !== undefined) params.sample_rate = config.sampleRate;
   
-  await session.client.rpc('bramble.setTrafficDebug', params);
+  await client.rpc('bramble.setTrafficDebug', params);
   await loadTrafficDebugStatus();
 }
 

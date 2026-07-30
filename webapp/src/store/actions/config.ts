@@ -1,7 +1,7 @@
 // Node configuration: the getConfig loader with its normalizer, and every
 // config-mutating RPC (radio, name, channels, mailbox, default channel,
 // location config and contacts).
-import { session } from './client';
+import { session, requireClient } from './client';
 import { useStore } from '../index';
 import { formatAddrHex } from '../../utils/address';
 import { parseAddr } from '../../lib/addr';
@@ -115,21 +115,21 @@ export function assertOk(result: unknown, fallback = 'Operation failed'): void {
 }
 
 export async function saveRadio(radio: import('../../types/bramble').RadioConfig): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.setRadio', radio as unknown as Record<string, unknown>);
+  const client = requireClient();
+  const result = await client.rpc('bramble.setRadio', radio as unknown as Record<string, unknown>);
   assertOk(result, 'Radio config failed');
   await loadConfig();
 }
 
 export async function saveNodeName(name: string): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  await session.client.rpc('bramble.setNodeName', { name });
+  const client = requireClient();
+  await client.rpc('bramble.setNodeName', { name });
   await loadConfig();
 }
 
 export async function addChannel(name: string, psk?: string): Promise<number> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc<{ ok: boolean; index: number; error?: string }>('bramble.addChannel', {
+  const client = requireClient();
+  const result = await client.rpc<{ ok: boolean; index: number; error?: string }>('bramble.addChannel', {
     name,
     ...(psk ? { psk } : {}),
   });
@@ -139,29 +139,29 @@ export async function addChannel(name: string, psk?: string): Promise<number> {
 }
 
 export async function removeChannel(index: number): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.removeChannel', { index });
+  const client = requireClient();
+  const result = await client.rpc('bramble.removeChannel', { index });
   assertOk(result, 'Failed to remove channel');
   await loadConfig();
 }
 
 export async function setMailbox(enabled: boolean): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.setMailbox', { enabled });
+  const client = requireClient();
+  const result = await client.rpc('bramble.setMailbox', { enabled });
   assertOk(result, 'Failed to set mailbox');
   await loadConfig();
 }
 
 export async function setDefaultChannel(index: number): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.setDefaultChannel', { index });
+  const client = requireClient();
+  const result = await client.rpc('bramble.setDefaultChannel', { index });
   assertOk(result, 'Failed to set default channel');
   await loadConfig();
 }
 
 export async function setLocationConfig(config: Partial<LocationConfig>): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.setLocationConfig', config as unknown as Record<string, unknown>);
+  const client = requireClient();
+  const result = await client.rpc('bramble.setLocationConfig', config as unknown as Record<string, unknown>);
   assertOk(result, 'Failed to save location config');
   await loadConfig();
   await loadPeerLocations().catch(() => {});
@@ -173,27 +173,27 @@ export async function setLocationContact(
   intervalSec?: number,
   distanceTriggerM?: number
 ): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
+  const client = requireClient();
   // Firmware expects address as a hex string, not a numeric addr.
   const params: Record<string, unknown> = { address: formatAddrHex(addr), tier };
   if (intervalSec !== undefined) params.intervalSec = intervalSec;
   if (distanceTriggerM !== undefined) params.distanceTriggerM = distanceTriggerM;
-  const result = await session.client.rpc('bramble.setLocationContact', params);
+  const result = await client.rpc('bramble.setLocationContact', params);
   assertOk(result, 'Failed to set location contact');
   await loadConfig();
 }
 
 export async function removeLocationContact(addr: number): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.removeLocationContact', { address: formatAddrHex(addr) });
+  const client = requireClient();
+  const result = await client.rpc('bramble.removeLocationContact', { address: formatAddrHex(addr) });
   assertOk(result, 'Failed to remove location contact');
   await loadConfig();
 }
 
 export async function shareLocationOnce(addr: number, tier?: LocationTier): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
+  const client = requireClient();
   const params: Record<string, unknown> = { address: formatAddrHex(addr) };
   if (tier !== undefined) params.tier = tier;
-  const result = await session.client.rpc('bramble.shareLocationOnce', params);
+  const result = await client.rpc('bramble.shareLocationOnce', params);
   assertOk(result, 'Failed to share location');
 }
