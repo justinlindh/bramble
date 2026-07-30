@@ -44,12 +44,6 @@ typedef enum {
 ota_rollback_decision_t ota_rollback_decide(const char* new_version, const char* floor_version,
                                             bool allow_downgrade);
 
-/** True if the decision accepts the image. */
-static inline bool ota_rollback_decision_accepts(ota_rollback_decision_t d) {
-    return d == OTA_ROLLBACK_ACCEPT || d == OTA_ROLLBACK_ACCEPT_UNPARSEABLE ||
-           d == OTA_ROLLBACK_ACCEPT_LOWER_FLOOR;
-}
-
 /**
  * Decide whether booting @p running_version should raise the stored floor.
  * Returns true when the floor should be rewritten to the running version.

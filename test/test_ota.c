@@ -10,6 +10,14 @@
 #include "ota_rollback.h"
 #include "ota_rollback_policy.h"
 
+/* Accept predicate over the decision enum. Test-only: production
+ * ota_rollback_gate() switches on the enum directly, so this helper exists
+ * purely to assert the accept/reject partition below. */
+static inline bool ota_rollback_decision_accepts(ota_rollback_decision_t d) {
+    return d == OTA_ROLLBACK_ACCEPT || d == OTA_ROLLBACK_ACCEPT_UNPARSEABLE ||
+           d == OTA_ROLLBACK_ACCEPT_LOWER_FLOOR;
+}
+
 /* ── Controllable stubs for the advanced esp_https_ota API ─────────── */
 
 static esp_err_t g_begin_result;
