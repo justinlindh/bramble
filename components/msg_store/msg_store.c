@@ -313,13 +313,6 @@ bool msg_store_get_copy(int index, stored_msg_t* out) {
     return ok;
 }
 
-void msg_store_clear(void) {
-    MSG_LOCK();
-    s_head = 0;
-    s_count = 0;
-    MSG_UNLOCK();
-}
-
 void msg_store_init_with_persistence(void) {
     msg_store_init();
 
