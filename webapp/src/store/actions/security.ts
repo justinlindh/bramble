@@ -1,7 +1,7 @@
 // Security surfaces: peer verification (SAS), network key provisioning, and
 // the trust anchor. All of these are RPC pass-throughs: key material handling
 // stays on the firmware side.
-import { session } from './client';
+import { session, requireClient } from './client';
 import { useStore } from '../index';
 import { formatAddrHex } from '../../utils/address';
 
@@ -15,8 +15,8 @@ import { formatAddrHex } from '../../utils/address';
 export async function loadPeerVerification(
   addr: number,
 ): Promise<import('../../types/bramble').PeerVerification> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.getPeerVerification', { address: formatAddrHex(addr) });
+  const client = requireClient();
+  const result = await client.rpc('bramble.getPeerVerification', { address: formatAddrHex(addr) });
   const v: import('../../types/bramble').PeerVerification = {
     sas: result.sas ?? '',
     verified: !!result.verified,
@@ -28,8 +28,8 @@ export async function loadPeerVerification(
 
 /** Mark (or unmark) a peer verified. Refreshes the cached state on success. */
 export async function setPeerVerified(addr: number, verified: boolean): Promise<boolean> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.setPeerVerified', {
+  const client = requireClient();
+  const result = await client.rpc('bramble.setPeerVerified', {
     address: formatAddrHex(addr),
     verified,
   });
@@ -48,8 +48,8 @@ export async function setPeerVerified(addr: number, verified: boolean): Promise<
  * callers can show an inline error instead of an unhandled promise rejection.
  */
 export async function setNetworkKey(keyHex: string): Promise<boolean> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.setNetworkKey', { key: keyHex });
+  const client = requireClient();
+  const result = await client.rpc('bramble.setNetworkKey', { key: keyHex });
   return !!result?.ok;
 }
 
@@ -61,8 +61,8 @@ export async function setNetworkKey(keyHex: string): Promise<boolean> {
  * confirm first. The returned key is a secret: never log it.
  */
 export async function generateNetworkKey(): Promise<{ key: string; fingerprint: string }> {
-  if (!session.client) throw new Error('Not connected');
-  return await session.client.rpc('bramble.generateNetworkKey');
+  const client = requireClient();
+  return await client.rpc('bramble.generateNetworkKey');
 }
 
 /**
@@ -84,14 +84,14 @@ export async function loadNetworkKeyStatus(): Promise<void> {
  * so callers can show an inline error.
  */
 export async function setAnchor(anchorPubHex: string): Promise<boolean> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.setAnchor', { anchor_pubkey: anchorPubHex });
+  const client = requireClient();
+  const result = await client.rpc('bramble.setAnchor', { anchor_pubkey: anchorPubHex });
   return !!result?.ok;
 }
 
 export async function getIdentity(): Promise<import('../../types/bramble').NodeIdentityWire> {
-  if (!session.client) throw new Error('Not connected');
-  return await session.client.rpc('bramble.getIdentity');
+  const client = requireClient();
+  return await client.rpc('bramble.getIdentity');
 }
 
 /**
@@ -101,8 +101,8 @@ export async function getIdentity(): Promise<import('../../types/bramble').NodeI
  * than throwing on rejection.
  */
 export async function setEndorsement(notAfterHex: string, sigHex: string): Promise<boolean> {
-  if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc('bramble.setEndorsement', {
+  const client = requireClient();
+  const result = await client.rpc('bramble.setEndorsement', {
     not_after: notAfterHex,
     endorsement_sig: sigHex,
   });

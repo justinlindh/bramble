@@ -1,6 +1,6 @@
 // Device management: auth token, allowed origins, and OTA origin/update/status
 // (issue #95).
-import { session } from './client';
+import { session, requireClient } from './client';
 import type { RpcSchemas, WirePartial } from '../../types/rpc';
 
 // ─── Device management (auth token, allowed origins, OTA): issue #95 ───────
@@ -8,25 +8,25 @@ import type { RpcSchemas, WirePartial } from '../../types/rpc';
 export interface AuthTokenInfo { token: string; enabled: boolean; }
 
 export async function getAuthToken(): Promise<AuthTokenInfo> {
-  if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc('bramble.getAuthToken');
+  const client = requireClient();
+  const r = await client.rpc('bramble.getAuthToken');
   return { token: r.token ?? '', enabled: !!r.enabled };
 }
 
 export async function setAuthToken(token: string): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  await session.client.rpc('bramble.setAuthToken', { token });
+  const client = requireClient();
+  await client.rpc('bramble.setAuthToken', { token });
 }
 
 export async function getAllowedOrigins(): Promise<string[]> {
-  if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc('bramble.getAllowedOrigins');
+  const client = requireClient();
+  const r = await client.rpc('bramble.getAllowedOrigins');
   return Array.isArray(r.origins) ? r.origins : [];
 }
 
 export async function setAllowedOrigins(origins: string[]): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  await session.client.rpc('bramble.setAllowedOrigins', { origins });
+  const client = requireClient();
+  await client.rpc('bramble.setAllowedOrigins', { origins });
 }
 
 export interface OtaOriginInfo {
@@ -59,8 +59,8 @@ type OtaGetOriginWire = WirePartial<RpcSchemas['OtaGetOriginResponse']> & OtaVer
 };
 
 export async function getOtaOrigin(): Promise<OtaOriginInfo> {
-  if (!session.client) throw new Error('Not connected');
-  const r: OtaGetOriginWire = await session.client.rpc('bramble.otaGetOrigin');
+  const client = requireClient();
+  const r: OtaGetOriginWire = await client.rpc('bramble.otaGetOrigin');
   return {
     origin: r.origin ?? '',
     defaultOrigin: r.default_origin ?? r.defaultOrigin ?? '',
@@ -70,19 +70,19 @@ export async function getOtaOrigin(): Promise<OtaOriginInfo> {
 }
 
 export async function setOtaOrigin(origin: string): Promise<{ ok: boolean; error?: string }> {
-  if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc('bramble.otaSetOrigin', { origin });
+  const client = requireClient();
+  const r = await client.rpc('bramble.otaSetOrigin', { origin });
   return { ok: !!r.ok, error: r.error };
 }
 
 export async function resetOtaOrigin(): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
-  await session.client.rpc('bramble.otaSetOrigin', { reset: true });
+  const client = requireClient();
+  await client.rpc('bramble.otaSetOrigin', { reset: true });
 }
 
 export async function startOtaUpdate(path: string, allowDowngrade = false): Promise<{ ok: boolean; note?: string; url?: string; error?: string; lastError?: string }> {
-  if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc('bramble.otaUpdate', { path, allow_downgrade: allowDowngrade });
+  const client = requireClient();
+  const r = await client.rpc('bramble.otaUpdate', { path, allow_downgrade: allowDowngrade });
   return { ok: !!r.ok, note: r.note, url: r.url, error: r.error, lastError: r.last_error };
 }
 
@@ -112,8 +112,8 @@ function otaStatusFrom(r: OtaStatusWire): OtaStatus {
 }
 
 export async function getOtaStatus(): Promise<OtaStatus> {
-  if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc('bramble.otaStatus');
+  const client = requireClient();
+  const r = await client.rpc('bramble.otaStatus');
   return otaStatusFrom(r);
 }
 

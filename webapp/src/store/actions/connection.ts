@@ -2,7 +2,7 @@
 // push-event subscriptions, the initial data load, and disconnect. This module
 // is the fan-out hub: it imports from every sibling seam and nothing imports
 // from it (except the barrel).
-import { session, LAST_NODE_ADDR_KEY } from './client';
+import { session, requireClient, LAST_NODE_ADDR_KEY } from './client';
 import { useStore } from '../index';
 import { createTransport, BrambleClient } from '../../transport';
 import { fetchConnectionCapabilities } from '../../lib/connectionMode';
@@ -59,14 +59,14 @@ function isUnknownMethodError(error: unknown): boolean {
 }
 
 async function probeRpcReadiness(): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
+  const client = requireClient();
   try {
-    await session.client.rpc('bramble.ping', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
+    await client.rpc('bramble.ping', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
     return;
   } catch (error) {
     if (!isUnknownMethodError(error)) throw error;
   }
-  await session.client.rpc('bramble.getStatus', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
+  await client.rpc('bramble.getStatus', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
 }
 
 const NODE_VERIFY_ATTEMPTS = 2;

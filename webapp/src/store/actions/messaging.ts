@@ -1,7 +1,7 @@
 // Messaging: the message store lifecycle, firmware message merge, send paths,
 // delivery-event replay and correlation, broadcast telemetry, probe flows,
 // incoming-message handling, and native notifications.
-import { session, LAST_NODE_ADDR_KEY } from './client';
+import { session, requireClient, LAST_NODE_ADDR_KEY } from './client';
 import { useStore, conversationIdForMessage } from '../index';
 import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
@@ -581,7 +581,7 @@ export async function sendMessage(
   tier: MessageTier = 'normal',
   channelIndex?: number
 ): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
+  const client = requireClient();
   const store = useStore.getState();
 
   const messageBytes = utf8ByteLength(text);
@@ -627,7 +627,7 @@ export async function sendMessage(
           text,
           ...(isChannelScoped ? { channel: channelIndex } : {}),
         };
-    const result = await session.client.rpc<{
+    const result = await client.rpc<{
       message_id?: string;
       status?: string;
       packetId?: string;
@@ -824,10 +824,10 @@ export function upsertProbeResponse(responses: ProbeResponse[], next: ProbeRespo
 }
 
 export async function sendProbe(): Promise<void> {
-  if (!session.client) throw new Error('Not connected');
+  const client = requireClient();
   const store = useStore.getState();
 
-  const raw = await session.client.rpc<Record<string, unknown>>('bramble.sendProbe');
+  const raw = await client.rpc<Record<string, unknown>>('bramble.sendProbe');
   /* Firmware returns probe_id (snake_case hex string), no ackWindow */
   const probeIdStr = (raw.probeId ?? raw.probe_id) as string | undefined;
   const probeId = probeIdStr ? parseInt(probeIdStr, 16) : Math.floor(Math.random() * 0xFFFFFFFF);
