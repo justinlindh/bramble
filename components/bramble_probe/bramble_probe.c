@@ -188,25 +188,6 @@ const probe_result_t* bramble_probe_get_result(const bramble_probe_state_t* stat
     return &state->result;
 }
 
-bool bramble_probe_can_send(const bramble_probe_state_t* state, uint32_t now_ms) {
-    /* Check tokens without modifying state - cast away const for refill check */
-    probe_rate_limit_t tmp = state->send_limiter;
-    rate_limit_refill(&tmp, now_ms);
-    return tmp.tokens > 0;
-}
-
-uint32_t bramble_probe_get_rate_limit_remaining_sec(const bramble_probe_state_t* state,
-                                                    uint32_t now_ms) {
-    probe_rate_limit_t tmp = state->send_limiter;
-    rate_limit_refill(&tmp, now_ms);
-    if (tmp.tokens > 0)
-        return 0;
-    uint32_t elapsed = now_ms - tmp.last_refill_ms;
-    if (elapsed >= tmp.refill_interval_ms)
-        return 0;
-    return (tmp.refill_interval_ms - elapsed + 999) / 1000;
-}
-
 void bramble_probe_tick(bramble_probe_state_t* state, uint32_t now_ms) {
     /* Send pending delayed ACK */
     if (state->pending_ack.active && now_ms >= state->pending_ack.send_at_ms) {
