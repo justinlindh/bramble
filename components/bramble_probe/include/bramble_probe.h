@@ -115,9 +115,6 @@ void bramble_probe_handle_probe(bramble_probe_state_t* state, const uint8_t* dat
 void bramble_probe_handle_ack(bramble_probe_state_t* state, const uint8_t* data, uint16_t len,
                               uint32_t now_ms);
 const probe_result_t* bramble_probe_get_result(const bramble_probe_state_t* state);
-bool bramble_probe_can_send(const bramble_probe_state_t* state, uint32_t now_ms);
-uint32_t bramble_probe_get_rate_limit_remaining_sec(const bramble_probe_state_t* state,
-                                                    uint32_t now_ms);
 void bramble_probe_tick(bramble_probe_state_t* state, uint32_t now_ms);
 
 #endif /* BRAMBLE_PROBE_H */

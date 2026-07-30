@@ -38,14 +38,16 @@ void test_slot_delay_is_bounded_and_identity_sensitive(void) {
     uint32_t d1 =
         mesh_broadcast_receipt_slot_delay_ms(0x01020304u, pkt_id, 40u /* dense: full 32 buckets */);
 
+    /* Bounds track the 1000ms slot pitch (was 500ms; widened after bench
+     * telemetry measured storm-window saturation). */
     TEST_ASSERT_TRUE(d1 >= 300u);
-    TEST_ASSERT_TRUE(d1 <= (300u + 500u * 31u));
+    TEST_ASSERT_TRUE(d1 <= (300u + 1000u * 31u));
 
     bool found_different_slot = false;
     for (uint32_t i = 1; i <= 16u; i++) {
         uint32_t d = mesh_broadcast_receipt_slot_delay_ms(0x01020304u + i, pkt_id, 40u);
         TEST_ASSERT_TRUE(d >= 300u);
-        TEST_ASSERT_TRUE(d <= (300u + 500u * 31u));
+        TEST_ASSERT_TRUE(d <= (300u + 1000u * 31u));
         if (d != d1) {
             found_different_slot = true;
             break;
@@ -63,7 +65,7 @@ void test_slot_window_scales_down_for_small_mesh(void) {
     /* A small mesh must confirm fast: with 1 neighbor the window is clamped
      * to the 4-bucket minimum, so the worst-case slot delay is far below the
      * dense-mesh ceiling. */
-    uint32_t max_small = 300u + 500u * 3u; /* 4 buckets => slots 0..3 */
+    uint32_t max_small = 300u + 1000u * 3u; /* 4 buckets => slots 0..3, 1000ms pitch */
     for (uint32_t i = 0; i < 64u; i++) {
         uint32_t d = mesh_broadcast_receipt_slot_delay_ms(0x01020304u + i, 0xCAFEBABEu, 1u);
         TEST_ASSERT_TRUE(d >= 300u);
@@ -106,21 +108,31 @@ void test_slot_distribution_no_collision_for_typical_mesh(void) {
     TEST_ASSERT_TRUE(collision_count < 500);
 }
 
+/* The retry paths in mesh_reliability.c read the scale once via
+ * mesh_broadcast_receipt_retry_scale and apply (raw * num) / den to each delay
+ * they compute, so exercise that num/den mapping and the same arithmetic here. */
 void test_retry_delay_scaling_from_airtime_utilization(void) {
     const uint32_t raw_base = 500u;
+    uint32_t num = 1u;
+    uint32_t den = 1u;
 
-    TEST_ASSERT_EQUAL_UINT32(
-        raw_base / 2u, mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS));
-    TEST_ASSERT_EQUAL_UINT32(
-        raw_base, mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 2u));
-    TEST_ASSERT_EQUAL_UINT32(
-        raw_base * 2u, mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 5u));
+    mesh_broadcast_receipt_retry_scale(RECEIPT_BUDGET_MAX_MS, &num, &den);
+    TEST_ASSERT_EQUAL_UINT32(raw_base / 2u, (raw_base * num) / den);
+
+    mesh_broadcast_receipt_retry_scale(RECEIPT_BUDGET_MAX_MS / 2u, &num, &den);
+    TEST_ASSERT_EQUAL_UINT32(raw_base, (raw_base * num) / den);
+
+    mesh_broadcast_receipt_retry_scale(RECEIPT_BUDGET_MAX_MS / 5u, &num, &den);
+    TEST_ASSERT_EQUAL_UINT32(raw_base * 2u, (raw_base * num) / den);
 }
 
 void test_retry_delay_scaling_integer_math_bounds(void) {
-    uint32_t raw_delay = 7999u;
-    uint32_t scaled = mesh_broadcast_receipt_scale_delay_ms(raw_delay, RECEIPT_BUDGET_MAX_MS / 10u);
-    TEST_ASSERT_EQUAL_UINT32(15998u, scaled);
+    const uint32_t raw_delay = 7999u;
+    uint32_t num = 1u;
+    uint32_t den = 1u;
+
+    mesh_broadcast_receipt_retry_scale(RECEIPT_BUDGET_MAX_MS / 10u, &num, &den);
+    TEST_ASSERT_EQUAL_UINT32(15998u, (raw_delay * num) / den);
 }
 
 void test_build_delivery_receipt_targets_original_sender_with_expected_fields(void) {

@@ -83,6 +83,12 @@
 
 #define MESH_TASK_PRIORITY 5
 #define RECEIPT_QUEUE_CAPACITY 8
+/* How many times one delivery-receipt attempt may be re-scheduled because
+ * tx_gate found the channel busy (TX_GATE_ERR_CHANNEL_BUSY) before the
+ * attempt is counted as spent. Bounds the wait on a permanently jammed
+ * channel: 8 defers at 250-999ms each is under 8s per attempt, so a
+ * receipt still terminates on roughly the timescale it does today. */
+#define RECEIPT_MAX_DEFERS 8u
 #define RECENT_BROADCAST_RING_SIZE 8
 #define MAILBOX_BEACON_FLAG 0x01
 #define PROBE_SWEEP_ROUNDS 3
@@ -142,6 +148,9 @@ typedef struct {
     uint8_t wire_len;
     uint8_t attempts_total;
     uint8_t attempts_sent;
+    /* Consecutive channel-busy deferrals of the CURRENT attempt (see
+     * RECEIPT_MAX_DEFERS). Reset whenever the attempt is finally spent. */
+    uint8_t defers;
     uint32_t due_at_ms;
 } pending_receipt_t;
 
@@ -239,7 +248,6 @@ extern bool s_channel_has_psk[MAX_CHANNELS];
 extern int s_num_channels;
 extern int s_default_channel_idx;
 extern uint32_t s_last_broadcast_id;
-extern uint16_t s_last_broadcast_frag_msg_id;
 extern uint32_t s_recent_broadcast_ids[RECENT_BROADCAST_RING_SIZE];
 extern int s_recent_broadcast_idx;
 extern broadcast_telemetry_mode_t s_broadcast_telemetry_mode;

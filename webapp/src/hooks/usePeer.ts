@@ -33,7 +33,7 @@ export function usePeerInfo(addr: number) {
     lastSeen = formatAge(neighbor.lastHeardMs);
   }
 
-  return { name: resolvedName, displayName, shortHex, fullHex, status, lastSeen };
+  return { displayName, fullHex, status, lastSeen };
 }
 
 /** Cached SAS-verification state for a peer, lazily loaded once per peer

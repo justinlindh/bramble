@@ -134,6 +134,192 @@ void test_pending_ack_clamps_oversized_length(void) {
     TEST_ASSERT_EQUAL_UINT16(PENDING_ACK_MAX_FRAME, table.entries[idx].packet_len);
 }
 
+/*
+ * Receipt LBT-defer contract mirror (fix/receipt-lbt-defer).
+ *
+ * mesh_process_receipt_tx_event lives in main/mesh_reliability.c, which
+ * pulls in mesh_internal.h and, through it, the full mesh_task.c
+ * FreeRTOS/ESP-IDF global-state graph (neighbor table, dedup, replay,
+ * identity store, dm table, routing table, ...). mesh_task.c and its
+ * split-out siblings (mesh_reliability.c among them) are never
+ * host-compiled; test_data_auth.c, test_unicast_flood.c, and
+ * test_flooded_ack.c all mirror real decision logic out of that family
+ * for the same reason, and test_flooded_ack.c already mirrors a function
+ * out of this exact file (handle_ack). This mirrors the
+ * TX_GATE_ERR_CHANNEL_BUSY defer/attempt bookkeeping in
+ * mesh_process_receipt_tx_event byte for byte, against the real tx_gate
+ * return codes, so a change to the real decision logic that this file does
+ * not reflect is a divergence a reviewer must resolve, not a silently
+ * still-green gap.
+ *
+ * Verified against main/mesh_reliability.c (mesh_process_receipt_tx_event,
+ * TX_GATE_ERR_CHANNEL_BUSY branch) and main/mesh_internal.h
+ * (RECEIPT_MAX_DEFERS) as of commit 309442e1. The two branches mirrored
+ * here (channel-busy defer, and any attempt reaching the air) are named
+ * after tx_gate's TX_GATE_ERR_CHANNEL_BUSY / TX_GATE_OK / TX_GATE_ERR_RADIO
+ * return codes (components/radio/include/tx_gate.h) but do not need that
+ * header: each mirror function corresponds to exactly one branch, so the
+ * return code itself is not tested here, only the bookkeeping it drives.
+ */
+
+/* main/mesh_internal.h:91 */
+#define MIRROR_RECEIPT_MAX_DEFERS 8u
+
+typedef struct {
+    uint8_t attempts_total;
+    uint8_t attempts_sent;
+    uint8_t defers;
+    uint32_t due_at_ms;
+    bool dropped;
+} mirror_receipt_t;
+
+static uint32_t s_mirror_rand;
+static uint32_t mirror_random_u32(void) { return s_mirror_rand; }
+
+/* Mirrors the TX_GATE_ERR_CHANNEL_BUSY branch (main/mesh_reliability.c,
+ * mesh_process_receipt_tx_event, around lines 318-356): a channel-busy
+ * defer reschedules the SAME attempt with fresh jitter and does not spend
+ * an attempt, up to RECEIPT_MAX_DEFERS consecutive defers; at the cap the
+ * attempt counts as spent and the item either drops (attempts exhausted)
+ * or reschedules with the budget-path backoff shape. */
+static void mirror_process_channel_busy(mirror_receipt_t* item, uint32_t t_now) {
+    item->defers++;
+    if (item->defers < MIRROR_RECEIPT_MAX_DEFERS) {
+        uint32_t defer_delay_ms = 250u + (mirror_random_u32() % 750u);
+        item->due_at_ms = t_now + defer_delay_ms;
+        return;
+    }
+
+    item->defers = 0;
+    item->attempts_sent++;
+    if (item->attempts_sent >= item->attempts_total) {
+        item->dropped = true;
+        return;
+    }
+    /* Budget-path backoff shape: 1000 + attempts_sent*2000 + jitter(0..999),
+     * scaled by remaining receipt-lane budget (scale 1/1 with no pressure).
+     * The scale factor itself is airtime-budget state outside this
+     * contract's scope and is not reproduced here. */
+    uint32_t raw_backoff_ms =
+        1000u + ((uint32_t)item->attempts_sent * 2000u) + (mirror_random_u32() % 1000u);
+    item->due_at_ms = t_now + raw_backoff_ms;
+}
+
+/* Mirrors the TX_GATE_OK / TX_GATE_ERR_RADIO tail (main/mesh_reliability.c,
+ * mesh_process_receipt_tx_event, lines 366-367): any attempt that reaches
+ * the air, successfully or not, spends an attempt and resets the defer
+ * counter (defers are per-attempt, not per-receipt). */
+static void mirror_process_air_attempt(mirror_receipt_t* item) {
+    item->attempts_sent++;
+    item->defers = 0;
+}
+
+/* Mirrors the TX_GATE_ERR_BUDGET branch (main/mesh_reliability.c,
+ * mesh_process_receipt_tx_event, budget-deny path): a budget deny spends
+ * the attempt, and any spent attempt resets the consecutive-defer count,
+ * so a deny interleaved with channel-busy defers starts the next attempt
+ * with a fresh defer budget. */
+static void mirror_process_budget_deny(mirror_receipt_t* item) {
+    item->attempts_sent++;
+    item->defers = 0;
+    if (item->attempts_sent >= item->attempts_total) {
+        item->dropped = true;
+    }
+}
+
+void test_receipt_budget_deny_interleaved_with_defers_resets_defer_count(void) {
+    mirror_receipt_t item = {.attempts_total = 3, .attempts_sent = 0, .defers = 0};
+    s_mirror_rand = 0;
+
+    /* Two channel-busy defers on attempt 1, then a budget deny spends the
+     * attempt: the defer count must reset so attempt 2 gets the full
+     * RECEIPT_MAX_DEFERS budget rather than inheriting a nearly-spent one. */
+    mirror_process_channel_busy(&item, 1000u);
+    mirror_process_channel_busy(&item, 2000u);
+    TEST_ASSERT_EQUAL_UINT8(2, item.defers);
+    TEST_ASSERT_EQUAL_UINT8(0, item.attempts_sent);
+
+    mirror_process_budget_deny(&item);
+    TEST_ASSERT_EQUAL_UINT8(1, item.attempts_sent);
+    TEST_ASSERT_EQUAL_UINT8(0, item.defers);
+    TEST_ASSERT_FALSE(item.dropped);
+}
+
+void test_receipt_channel_busy_defer_reschedules_without_consuming_attempt(void) {
+    mirror_receipt_t item = {.attempts_total = 3, .attempts_sent = 0, .defers = 0};
+    s_mirror_rand = 0;
+
+    mirror_process_channel_busy(&item, 1000u);
+
+    TEST_ASSERT_EQUAL_UINT8(0, item.attempts_sent);
+    TEST_ASSERT_EQUAL_UINT8(1, item.defers);
+    TEST_ASSERT_EQUAL_UINT32(1250u, item.due_at_ms); /* 1000 + (250 + 0) */
+    TEST_ASSERT_FALSE(item.dropped);
+}
+
+/* Re-jitter window is 250 + (random % 750), i.e. 250..999ms inclusive.
+ * random=0 and random=749 hit both endpoints of that window exactly
+ * (749 % 750 == 749, the largest value the modulo can produce); UINT32_MAX
+ * would NOT hit the true maximum (UINT32_MAX % 750 == 45), so the endpoint
+ * is driven directly rather than through a wraparound value. */
+void test_receipt_channel_busy_jitter_window_bounds_250_999(void) {
+    mirror_receipt_t low = {.attempts_total = 3};
+    s_mirror_rand = 0;
+    mirror_process_channel_busy(&low, 5000u);
+    TEST_ASSERT_EQUAL_UINT32(5250u, low.due_at_ms); /* window minimum: 250ms */
+
+    mirror_receipt_t high = {.attempts_total = 3};
+    s_mirror_rand = 749u;
+    mirror_process_channel_busy(&high, 5000u);
+    TEST_ASSERT_EQUAL_UINT32(5999u, high.due_at_ms); /* window maximum: 999ms */
+}
+
+void test_receipt_channel_busy_defer_cap_consumes_one_attempt(void) {
+    mirror_receipt_t item = {.attempts_total = 3, .attempts_sent = 0, .defers = 0};
+    s_mirror_rand = 0;
+    uint32_t t_now = 0u;
+
+    for (int i = 0; i < (int)MIRROR_RECEIPT_MAX_DEFERS; i++) {
+        mirror_process_channel_busy(&item, t_now);
+        t_now += 250u;
+    }
+
+    /* The 8th consecutive channel-busy defer converts to a consumed
+     * attempt: defers resets, attempts_sent advances, and (with 1 of 3
+     * attempts spent) the item reschedules rather than dropping. */
+    TEST_ASSERT_EQUAL_UINT8(0, item.defers);
+    TEST_ASSERT_EQUAL_UINT8(1, item.attempts_sent);
+    TEST_ASSERT_FALSE(item.dropped);
+    TEST_ASSERT_TRUE(item.due_at_ms > t_now - 250u);
+}
+
+void test_receipt_channel_busy_three_consumed_attempts_drops_receipt(void) {
+    mirror_receipt_t item = {.attempts_total = 3, .attempts_sent = 0, .defers = 0};
+    s_mirror_rand = 0;
+    uint32_t t_now = 0u;
+
+    /* 3 attempts * RECEIPT_MAX_DEFERS defers each: every attempt is spent
+     * purely on channel-busy exhaustion, never reaching the air. */
+    for (int attempt = 0; attempt < 3; attempt++) {
+        for (int i = 0; i < (int)MIRROR_RECEIPT_MAX_DEFERS; i++) {
+            mirror_process_channel_busy(&item, t_now);
+            t_now += 250u;
+        }
+    }
+
+    TEST_ASSERT_EQUAL_UINT8(3, item.attempts_sent);
+    TEST_ASSERT_TRUE(item.dropped);
+}
+
+void test_receipt_air_attempt_resets_defers_and_increments_attempts(void) {
+    mirror_receipt_t item = {.attempts_total = 3, .attempts_sent = 0, .defers = 5};
+
+    mirror_process_air_attempt(&item);
+
+    TEST_ASSERT_EQUAL_UINT8(1, item.attempts_sent);
+    TEST_ASSERT_EQUAL_UINT8(0, item.defers);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tier_max_retries);
@@ -143,5 +329,11 @@ int main(void) {
     RUN_TEST(test_pending_ack_table_full);
     RUN_TEST(test_pending_ack_stores_full_frame_without_overrun);
     RUN_TEST(test_pending_ack_clamps_oversized_length);
+    RUN_TEST(test_receipt_budget_deny_interleaved_with_defers_resets_defer_count);
+    RUN_TEST(test_receipt_channel_busy_defer_reschedules_without_consuming_attempt);
+    RUN_TEST(test_receipt_channel_busy_jitter_window_bounds_250_999);
+    RUN_TEST(test_receipt_channel_busy_defer_cap_consumes_one_attempt);
+    RUN_TEST(test_receipt_channel_busy_three_consumed_attempts_drops_receipt);
+    RUN_TEST(test_receipt_air_attempt_resets_defers_and_increments_attempts);
     return UNITY_END();
 }

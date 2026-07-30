@@ -1,5 +1,11 @@
-// ESP32 crypto implementation using mbedtls (hardware-accelerated on ESP32-S3)
-#ifdef ESP_PLATFORM
+// Device crypto implementation using mbedtls. Two device platforms share
+// this file: ESP32 (ESP-IDF mbedtls, hardware-accelerated on ESP32-S3) and
+// nRF52840 (upstream mbedtls, software). Ed25519 comes from the link-time
+// provider seam in bramble_ed25519_provider.h (ed25519_sodium.c on ESP,
+// ed25519_monocypher.c on nRF); everything else is identical on purpose: the
+// DH contributory check, the fail-closed identity commit, and the derive
+// functions must never diverge between fleets.
+#if defined(ESP_PLATFORM) || defined(BRAMBLE_PLATFORM_NRF)
 
 #include "crypto.h"
 #include "mbedtls/gcm.h"
@@ -12,7 +18,7 @@
 #include "esp_random.h"
 #include "esp_log.h"
 #include "crypto_entropy.h"
-#include "sodium.h"
+#include "bramble_ed25519_provider.h"
 #include <string.h>
 
 /* RNG callback for mbedtls_ecp_mul (required for side-channel blinding) */
@@ -20,6 +26,14 @@ static int crypto_rng_callback(void* ctx, unsigned char* buf, size_t len) {
     (void)ctx;
     esp_fill_random(buf, len);
     return 0;
+}
+
+/* RFC 7748 decodeScalar25519 clamp; shared by DH and keygen so the two
+ * copies of this security-relevant bit-twiddling cannot diverge. */
+static void x25519_clamp(uint8_t k[32]) {
+    k[0] &= 248;
+    k[31] &= 127;
+    k[31] |= 64;
 }
 
 int crypto_sha256(const uint8_t* data, size_t data_len, uint8_t* hash) {
@@ -104,8 +118,20 @@ int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
     mbedtls_ecp_point_init(&Qp);
     mbedtls_ecp_point_init(&R);
 
+    /* X25519 clamps the scalar by definition (RFC 7748 decodeScalar25519),
+     * and the host backend's OpenSSL does so internally. mbedtls does not:
+     * mbedtls_ecp_mul REJECTS an unclamped Curve25519 scalar outright. Clamp
+     * a local copy here so both backends compute the same function over the
+     * same domain; for fleet keys (clamped at generation) this is a no-op.
+     * Pinned by the RFC 7748 vector in test_crypto_vectors.c, which uses the
+     * RFC's raw (unclamped) scalar. */
+    uint8_t clamped[32];
+    memcpy(clamped, private_key, 32);
+    x25519_clamp(clamped);
+
     mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_CURVE25519);
-    mbedtls_mpi_read_binary_le(&d, private_key, 32);
+    mbedtls_mpi_read_binary_le(&d, clamped, 32);
+    mbedtls_platform_zeroize(clamped, sizeof(clamped));
     mbedtls_mpi_read_binary_le(&Qp.MBEDTLS_PRIVATE(X), peer_public_key, 32);
     mbedtls_mpi_lset(&Qp.MBEDTLS_PRIVATE(Z), 1);
 
@@ -136,9 +162,7 @@ int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
 int crypto_ed25519_keypair_from_seed(const uint8_t seed[32],
                                      uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
                                      uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]) {
-    if (sodium_init() < 0)
-        return -1;
-    return (crypto_sign_seed_keypair(public_key, private_key, seed) == 0) ? 0 : -1;
+    return bramble_ed25519_impl_keypair_from_seed(seed, public_key, private_key);
 }
 
 int crypto_ed25519_keypair(uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
@@ -159,17 +183,13 @@ int crypto_ed25519_keypair(uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
 
 int crypto_ed25519_sign(const uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE], const uint8_t* msg,
                         size_t msg_len, uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]) {
-    if (sodium_init() < 0)
-        return -1;
-    return (crypto_sign_detached(sig, NULL, msg, msg_len, private_key) == 0) ? 0 : -1;
+    return bramble_ed25519_impl_sign(private_key, msg, msg_len, sig);
 }
 
 bool crypto_ed25519_verify(const uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
                            const uint8_t* msg, size_t msg_len,
                            const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]) {
-    if (sodium_init() < 0)
-        return false;
-    return crypto_sign_verify_detached(sig, msg, msg_len, public_key) == 0;
+    return bramble_ed25519_impl_verify(public_key, msg, msg_len, sig);
 }
 
 int crypto_generate_identity(bramble_identity_t* id) {
@@ -192,9 +212,7 @@ int crypto_generate_identity(bramble_identity_t* id) {
         return -1;
     }
     // Clamp per X25519 spec
-    tmp.private_key[0] &= 248;
-    tmp.private_key[31] &= 127;
-    tmp.private_key[31] |= 64;
+    x25519_clamp(tmp.private_key);
 
     // Compute public key = private_key * basepoint
     mbedtls_ecp_group grp;
@@ -238,4 +256,4 @@ int crypto_generate_identity(bramble_identity_t* id) {
     return ok ? 0 : -1;
 }
 
-#endif // ESP_PLATFORM
+#endif // ESP_PLATFORM || BRAMBLE_PLATFORM_NRF

@@ -56,9 +56,9 @@ func TestFloodModeMultiHopDeliveryAndConfirmation(t *testing.T) {
 	}
 
 	var reachedE, confirmedA bool
-	var finalMetrics map[string]interface{}
+	var finalMetrics map[string]any
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
@@ -140,7 +140,7 @@ func TestFloodModeHopLimitExpiryStopsRelay(t *testing.T) {
 
 	var reachedD bool
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}

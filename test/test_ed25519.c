@@ -19,7 +19,7 @@
  * only differs for attacker-chosen keys and is documented in the phase report.
  */
 #include "unity.h"
-#include "../components/crypto/crypto_host.c"
+#include "crypto_backend_under_test.h"
 
 void setUp(void) {}
 void tearDown(void) {}

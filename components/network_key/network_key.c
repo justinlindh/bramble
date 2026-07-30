@@ -1,4 +1,5 @@
 #include "include/network_key.h"
+#include "bramble_storage.h"
 #include "crypto.h"
 #include <string.h>
 
@@ -13,7 +14,7 @@ static int s_provisioned = 0;
 static int netkey_store_read(uint8_t key_out[32]);
 static int netkey_store_write(const uint8_t key[32]);
 
-#ifdef ESP_PLATFORM
+#ifdef BRAMBLE_HAS_NVS
 #include "nvs.h"
 #include "nvs_keys.h"
 
@@ -102,6 +103,30 @@ int network_key_generate_provision(uint8_t key_out[32]) {
         return -1; /* entropy gate shut: provision nothing */
     network_key_set_provisioned(key);
     memcpy(key_out, key, sizeof(key));
+    return 0;
+}
+
+int network_key_set_from_hex(const char* hex) {
+    if (hex == NULL || strlen(hex) != 64)
+        return -1;
+    uint8_t key[32];
+    for (size_t i = 0; i < 32; i++) {
+        int hi, lo;
+        char a = hex[2 * i], b = hex[2 * i + 1];
+        hi = (a >= '0' && a <= '9')   ? a - '0'
+             : (a >= 'a' && a <= 'f') ? a - 'a' + 10
+             : (a >= 'A' && a <= 'F') ? a - 'A' + 10
+                                      : -1;
+        lo = (b >= '0' && b <= '9')   ? b - '0'
+             : (b >= 'a' && b <= 'f') ? b - 'a' + 10
+             : (b >= 'A' && b <= 'F') ? b - 'A' + 10
+                                      : -1;
+        if (hi < 0 || lo < 0)
+            return -1;
+        key[i] = (uint8_t)((hi << 4) | lo);
+    }
+    network_key_set_provisioned(key);
+    memset(key, 0, sizeof(key));
     return 0;
 }
 

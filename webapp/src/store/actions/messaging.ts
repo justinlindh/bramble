@@ -5,7 +5,7 @@ import { session, requireClient, LAST_NODE_ADDR_KEY } from './client';
 import { useStore, conversationIdForMessage } from '../index';
 import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
-import { formatAddrHex } from '../../utils/address';
+import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { parseAddr } from '../../lib/addr';
 import { isAndroidShell } from '../../utils/platform';
 import type { RelayHop, MessageTier, ProbeResponse, Message } from '../../types/bramble';
@@ -319,9 +319,7 @@ function normalizeReplayDeliveryEvent(raw: DeliveryReplayEventWire): DeliveryEve
     eventId,
     messageId,
     packetId: packetId || undefined,
-    conversationKey: `msg:${messageId}`,
     ts,
-    nodeAddr: currentNodeAddrHex(),
     eventType,
     payload,
   };
@@ -524,13 +522,10 @@ function applyBroadcastDelivery(event: BroadcastDeliveryNotification): void {
     deliveredAtMs: event.deliveredAtMs ?? Date.now(),
   };
 
-  const message = useStore.getState().messages.find(m => m.id === msgId);
   deliveryEventStore.upsertDeliveryEvent({
     eventId: `broadcast:${event.broadcastId}:${recipient.addr}`,
     messageId: msgId,
-    conversationKey: message ? conversationIdForMessage(message) : 'broadcast',
     ts: recipient.deliveredAtMs,
-    nodeAddr: currentNodeAddrHex(),
     eventType: 'broadcast_delivery',
     payload: recipient,
   }).catch(() => {});
@@ -690,14 +685,11 @@ export function handleAck(params: unknown): void {
     const newStatus = status === 'delivered' ? 'delivered' : 'failed';
     const nowTs = Date.now();
 
-    const message = useStore.getState().messages.find(m => m.id === msgId);
     deliveryEventStore.upsertDeliveryEvent({
       eventId: `ack:${packetId}:${newStatus}`,
       messageId: msgId,
       packetId,
-      conversationKey: message ? conversationIdForMessage(message) : `dm:${msgId}`,
       ts: nowTs,
-      nodeAddr: currentNodeAddrHex(),
       eventType: 'ack',
       payload: { status: newStatus, relayPath },
     }).catch(() => {});
@@ -773,7 +765,7 @@ function maybeNotifyIncoming(msg: Message): void {
   const appVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
   if (appVisible && store.activeConversationId === conversationId) return;
 
-  const senderName = store.peerNames.get(msg.from) ?? `0x${(msg.from >>> 0).toString(16).toUpperCase()}`;
+  const senderName = store.peerNames.get(msg.from) ?? formatAddr0x(msg.from);
   const conversationTitle = conversationTitleFor(conversationId, senderName, store);
 
   const payload: NativeMessageNotification = {
@@ -851,8 +843,11 @@ export async function sendProbe(): Promise<void> {
   });
   store.setProbeCollecting(true);
 
-  /* Firmware currently emits onProbeResult but not onProbeComplete.
-   * Auto-finalize at ack-window expiry to avoid stuck Collecting state. */
+  /* Firmware emits bramble.onProbeComplete once its collection window
+   * elapses (mesh_task.c), and handleProbeComplete finalizes on it. This
+   * auto-finalize at ack-window expiry is the fallback for when that
+   * notification never arrives (dropped push, session reconnect), so the UI
+   * cannot get stuck in Collecting. */
   setTimeout(() => {
     const s = useStore.getState();
     const cur = s.probeResult;
@@ -864,10 +859,11 @@ export async function sendProbe(): Promise<void> {
   }, Math.max(1, ackWindow) * 1000 + 150);
 }
 
-// Probe push payloads (bramble.onProbeAck / onProbeComplete). Not in the
-// OpenAPI contract (they are notifications, not RPC responses), so the wire
-// shape is declared here: contract-style snake_case plus the camelCase
-// fallbacks in case a bridge normalizes keys.
+// Probe push payloads (bramble.onProbeResult / bramble.onProbeComplete). The
+// contract does declare these as OnProbeResultPayload and
+// OnProbeCompletePayload, but those schemas are strict and snake_case only,
+// so the tolerant shape is declared here: every field optional, contract-style
+// snake_case plus camelCase fallbacks in case a bridge normalizes keys.
 interface ProbeResponderWire {
   address?: string;
   responderAddr?: number;
@@ -897,24 +893,28 @@ interface ProbeCompleteWire {
   responders?: ProbeResponderWire[];
 }
 
-export function handleProbeAck(params: unknown): void {
-  const raw = params as ProbeAckWire;
-  const parsedAddr = typeof raw.address === 'string'
-    ? parseInt(raw.address.replace(/^0x/i, ''), 16)
-    : (raw.responderAddr ?? 0);
-
-  const roundsTotal = Math.max(1, Number(raw.rounds_total ?? raw.roundsTotal ?? (raw.seen_rounds ? 3 : 1)));
-  const seenRounds = Math.max(1, Math.min(roundsTotal, raw.seen_rounds ?? raw.seenRounds ?? 1));
-  const ack: ProbeResponse = {
-    responderAddr: Number.isFinite(parsedAddr) ? parsedAddr : 0,
-    hopCount: raw.hops ?? raw.hopCount ?? 0,
-    rssi: raw.rssi ?? 0,
-    snr: raw.snr ?? 0,
-    pathLen: raw.hops ?? raw.pathLen ?? 0,
-    latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
+// Map a tolerant responder payload to a ProbeResponse. Shared by the per-ack
+// (handleProbeAck) and batch (handleProbeComplete) paths, which otherwise drift
+// apart on the field fallbacks and the seenRounds/confidence math.
+function normalizeProbeResponder(r: ProbeResponderWire, roundsTotal: number): ProbeResponse {
+  const seenRounds = Math.max(1, Math.min(roundsTotal, Number(r.seen_rounds ?? r.seenRounds ?? 1)));
+  return {
+    responderAddr: parseAddr(r.address ?? r.responderAddr),
+    hopCount: r.hops ?? r.hopCount ?? 0,
+    rssi: r.rssi ?? 0,
+    snr: r.snr ?? 0,
+    pathLen: r.hops ?? r.pathLen ?? 0,
+    latencyMs: r.latency_ms ?? r.latencyMs ?? 0,
     seenRounds,
     confidence: seenRounds / roundsTotal,
   };
+}
+
+export function handleProbeAck(params: unknown): void {
+  const raw = params as ProbeAckWire;
+
+  const roundsTotal = Math.max(1, Number(raw.rounds_total ?? raw.roundsTotal ?? (raw.seen_rounds ? 3 : 1)));
+  const ack = normalizeProbeResponder(raw, roundsTotal);
   const probeId = typeof raw.probeId === 'string'
     ? parseInt(raw.probeId, 16)
     : typeof raw.probe_id === 'string'
@@ -952,31 +952,26 @@ export function handleProbeComplete(params: unknown): void {
 
   let responses = prev.responses;
   for (const r of responders) {
-    const addr = typeof r.address === 'string'
-      ? parseInt(r.address.replace(/^0x/i, ''), 16)
-      : (r.responderAddr ?? 0);
-    const seenRounds = Math.max(1, Math.min(roundsTotal, Number(r.seen_rounds ?? r.seenRounds ?? 1)));
-    responses = upsertProbeResponse(responses, {
-      responderAddr: Number.isFinite(addr) ? addr : 0,
-      hopCount: r.hops ?? r.hopCount ?? 0,
-      rssi: r.rssi ?? 0,
-      snr: r.snr ?? 0,
-      pathLen: r.hops ?? r.pathLen ?? 0,
-      latencyMs: r.latency_ms ?? r.latencyMs ?? 0,
-      seenRounds,
-      confidence: seenRounds / roundsTotal,
-    });
+    responses = upsertProbeResponse(responses, normalizeProbeResponder(r, roundsTotal));
   }
 
   store.setProbeResult({ ...prev, responses, complete: true });
   store.setProbeCollecting(false);
 }
 
-export function __resetBroadcastTelemetryForTests(): void {
+// Clears every module-level correlation singleton (the packet/broadcast id
+// maps, the pending broadcast telemetry, and the sent-status timers). Shared by
+// the test-reset entry points so a new correlation map only has to be added
+// here, not in each of them.
+function resetCorrelationState(): void {
   packetIdToMsgId.clear();
   broadcastIdToMsgId.clear();
   pendingBroadcastTelemetry.clear();
   clearAllSentStatusTimers();
+}
+
+export function __resetBroadcastTelemetryForTests(): void {
+  resetCorrelationState();
 }
 
 // Test isolation: actions.ts holds several module-level singletons (the
@@ -986,10 +981,7 @@ export function __resetBroadcastTelemetryForTests(): void {
 // this from test/setup.ts's afterEach.
 export function __resetActionsForTests(): void {
   session.client = null;
-  packetIdToMsgId.clear();
-  broadcastIdToMsgId.clear();
-  pendingBroadcastTelemetry.clear();
-  clearAllSentStatusTimers();
+  resetCorrelationState();
 }
 
 export function __normalizeReplayDeliveryEventForTests(raw: DeliveryReplayEventWire): DeliveryEventRecord | null {
@@ -997,10 +989,7 @@ export function __normalizeReplayDeliveryEventForTests(raw: DeliveryReplayEventW
 }
 
 export function __clearDeliveryEventSyncStateForTests(nodeAddr?: string): void {
-  packetIdToMsgId.clear();
-  broadcastIdToMsgId.clear();
-  pendingBroadcastTelemetry.clear();
-  clearAllSentStatusTimers();
+  resetCorrelationState();
 
   try {
     if (nodeAddr) {

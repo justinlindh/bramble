@@ -437,8 +437,9 @@ paths:
       operationId: sendProbe
       summary: Send a network probe
       description: >
-        Broadcasts a probe packet. Responses arrive asynchronously as
-        probe.ack notifications, followed by a probe.complete notification.
+        Broadcasts a probe packet. Takes no parameters. Responses arrive
+        asynchronously as bramble.onProbeResult notifications, followed by a
+        bramble.onProbeComplete notification.
       tags: [action]
       requestBody:
         content:
@@ -717,6 +718,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ShareLocationOnceResponse'
+
+  /rpc/bramble.enterDfu:
+    post:
+      operationId: enterDfu
+      summary: Reboot into the firmware-update bootloader
+      description: >-
+        Reboots the node into its firmware-update bootloader (UF2 mass-storage
+        DFU on nRF52 boards). Returns an error object on platforms without a
+        DFU bootloader (ESP32, which updates over OTA instead). On success the
+        node drops the connection about half a second after responding.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: DFU reboot scheduled, or error on unsupported platforms
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
 
   /rpc/bramble.reboot:
     post:

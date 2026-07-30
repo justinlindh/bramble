@@ -1,3 +1,5 @@
+#include <stdio.h> /* sscanf */
+
 #include "rpc_methods.h"
 #include "esp_app_desc.h"
 #include "util.h"
@@ -33,9 +35,11 @@
 #include "wifi_manager.h"
 #include "ws_server.h"
 #include "network_key.h"
-/* Deep sleep, GPIO wake, esp_wifi and mDNS do not exist on the POSIX/Linux
- * simulator; the affected RPC handlers degrade there (see the gates below). */
-#ifndef CONFIG_IDF_TARGET_LINUX
+/* Deep sleep, GPIO wake, esp_wifi and mDNS exist only on the ESP32 targets:
+ * not on the POSIX/Linux simulator, and not on the nRF52840 (which has no
+ * Wi-Fi at all). The affected RPC handlers degrade on both; see the gates
+ * below, which share this condition. */
+#if !defined(CONFIG_IDF_TARGET_LINUX) && !defined(BRAMBLE_PLATFORM_NRF)
 #include "esp_sleep.h"
 #include "driver/gpio.h"
 #include "esp_wifi.h"
@@ -250,7 +254,7 @@ static int handle_get_wifi_status(const cJSON* params, cJSON* result) {
 
     uint8_t mac[6] = {0};
     int clients = 0;
-#ifndef CONFIG_IDF_TARGET_LINUX
+#if !defined(CONFIG_IDF_TARGET_LINUX) && !defined(BRAMBLE_PLATFORM_NRF)
     esp_err_t mac_rc =
         esp_wifi_get_mac(status.mode == BRAMBLE_WIFI_AP ? WIFI_IF_AP : WIFI_IF_STA, mac);
 
@@ -690,7 +694,30 @@ static int handle_reboot(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.sendProbe (stub): params {"dest":"HEXADDR"} */
+/* bramble.enterDfu: no params. Reboots into the firmware-update bootloader
+ * on platforms that have one; the platform hook returns nonzero where the
+ * concept does not exist (ESP32, which updates over OTA instead). On the
+ * nRF UF2 boards this is the only reflash path that needs no physical
+ * button: the T1000-E is consoleless and its DFU button gesture is a
+ * timing-sensitive cable dance. */
+__attribute__((weak)) int bramble_platform_enter_dfu(void) { return -1; }
+
+static int handle_enter_dfu(const cJSON* params, cJSON* result) {
+    (void)params;
+    if (bramble_platform_enter_dfu() != 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "DFU mode not supported on this platform");
+        return 0;
+    }
+    /* The hook schedules the reset with a delay so this response can flush
+     * to the client first. */
+    cJSON_AddBoolToObject(result, "ok", true);
+    return 0;
+}
+
+/* bramble.sendProbe: no params. Broadcasts a probe (mesh_send_probe takes no
+ * destination); responses arrive as bramble.onProbeResult notifications,
+ * followed by bramble.onProbeComplete. */
 static int handle_send_probe(const cJSON* params, cJSON* result) {
     (void)params;
     uint32_t probe_id = mesh_send_probe();
@@ -706,7 +733,6 @@ static int handle_send_probe(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.setRadio (stub): params {"sf":9, "bw_hz":125000, "tx_power":17, "freq_mhz":915.0} */
 /* Commits pending nvs_set_* writes (only if every prior one succeeded) and
  * closes the handle. Returns the resulting esp_err_t. Shared by the RPC
  * handlers below that accumulate esp_err_t across a chain of nvs_set_*
@@ -723,10 +749,9 @@ static esp_err_t rpc_nvs_commit_close(nvs_handle_t nvs, esp_err_t err) {
  * client as {"ok":false,"error":client_msg}. Returns rpc_rc so callers can
  * `return rpc_report_persist_failure(...)` directly. Centralizes the log and
  * report shape repeated across the RPC handlers that persist to NVS. */
-static int rpc_report_persist_failure(cJSON* result, const char* tag, const char* what,
-                                      esp_err_t err, bool set_result, const char* client_msg,
-                                      int rpc_rc) {
-    ESP_LOGE(tag, "%s: %d", what, err);
+static int rpc_report_persist_failure(cJSON* result, const char* what, esp_err_t err,
+                                      bool set_result, const char* client_msg, int rpc_rc) {
+    ESP_LOGE(TAG, "%s: %d", what, err);
     if (set_result) {
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", client_msg);
@@ -734,6 +759,10 @@ static int rpc_report_persist_failure(cJSON* result, const char* tag, const char
     return rpc_rc;
 }
 
+/* bramble.setRadio: a params object is required, every field in it is
+ * optional (omitted fields keep their current value):
+ * {"frequency_mhz":915.0, "sf":9, "bw_hz":125000, "tx_power_dbm":17,
+ * "coding_rate":5} */
 static int handle_set_radio(const cJSON* params, cJSON* result) {
     if (!params)
         return RPC_ERR_INVALID_PARAMS;
@@ -807,7 +836,7 @@ static int handle_set_radio(const cJSON* params, cJSON* result) {
     if (err != ESP_OK) {
         /* Radio was already reconfigured live above; only persistence
          * failed, so the change is real until the next reboot. */
-        return rpc_report_persist_failure(result, TAG, "radio config persist failed", err, true,
+        return rpc_report_persist_failure(result, "radio config persist failed", err, true,
                                           "failed to persist; setting lost on reboot", 0);
     }
 
@@ -856,7 +885,7 @@ static int handle_set_node_name(const cJSON* params, cJSON* result) {
     /* Best-effort: reflect the new name in the mDNS TXT record so discovery
      * shows it without a reboot. Fails harmlessly when mDNS is not running
      * (AP mode / WiFi off). */
-#ifndef CONFIG_IDF_TARGET_LINUX
+#if !defined(CONFIG_IDF_TARGET_LINUX) && !defined(BRAMBLE_PLATFORM_NRF)
     (void)mdns_service_txt_item_set("_bramble", "_tcp", "name", name);
 #endif
 
@@ -909,8 +938,8 @@ static int rpc_set_auth_token(const cJSON* params, cJSON* result) {
     err = rpc_nvs_commit_close(h, err);
 
     if (err != ESP_OK) {
-        return rpc_report_persist_failure(result, TAG, "auth token persist failed", err, false,
-                                          NULL, RPC_ERR_INTERNAL);
+        return rpc_report_persist_failure(result, "auth token persist failed", err, false, NULL,
+                                          RPC_ERR_INTERNAL);
     }
 
     ws_server_load_token(); /* reload immediately */
@@ -1384,7 +1413,7 @@ static int handle_set_mailbox(const cJSON* params, cJSON* result) {
     }
 
     if (err != ESP_OK) {
-        return rpc_report_persist_failure(result, "rpc", "mailbox persist failed", err, true,
+        return rpc_report_persist_failure(result, "mailbox persist failed", err, true,
                                           "nvs write failed", 0);
     }
 
@@ -1415,8 +1444,8 @@ static int handle_set_flood_transport(const cJSON* params, cJSON* result) {
     }
 
     if (err != ESP_OK) {
-        return rpc_report_persist_failure(result, "rpc", "flood transport persist failed", err,
-                                          true, "nvs write failed", 0);
+        return rpc_report_persist_failure(result, "flood transport persist failed", err, true,
+                                          "nvs write failed", 0);
     }
 
     bool en = cJSON_IsTrue(enabled);
@@ -1456,8 +1485,8 @@ static int handle_set_flood_hop_limit(const cJSON* params, cJSON* result) {
     if (err != ESP_OK) {
         /* Hop limit is already applied live above; only persistence
          * failed, so the change is real until the next reboot. */
-        return rpc_report_persist_failure(result, "rpc", "flood hop limit persist failed", err,
-                                          true, "failed to persist; setting lost on reboot", 0);
+        return rpc_report_persist_failure(result, "flood hop limit persist failed", err, true,
+                                          "failed to persist; setting lost on reboot", 0);
     }
 
     ESP_LOGI("rpc", "Flood hop limit set to %u", (unsigned)applied);
@@ -1718,7 +1747,7 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
     err = rpc_nvs_commit_close(nvs, err);
 
     if (err != ESP_OK) {
-        return rpc_report_persist_failure(result, TAG, "location config persist failed", err, true,
+        return rpc_report_persist_failure(result, "location config persist failed", err, true,
                                           "nvs write failed", 0);
     }
 
@@ -1763,7 +1792,7 @@ static int handle_set_location_contact(const cJSON* params, cJSON* result) {
     err = rpc_nvs_commit_close(nvs, err);
 
     if (err != ESP_OK) {
-        return rpc_report_persist_failure(result, TAG, "location contact persist failed", err, true,
+        return rpc_report_persist_failure(result, "location contact persist failed", err, true,
                                           "nvs write failed", 0);
     }
 
@@ -1794,7 +1823,7 @@ static int handle_remove_location_contact(const cJSON* params, cJSON* result) {
     err = rpc_nvs_commit_close(nvs, err);
 
     if (err != ESP_OK) {
-        return rpc_report_persist_failure(result, TAG, "location contact remove failed", err, true,
+        return rpc_report_persist_failure(result, "location contact remove failed", err, true,
                                           "nvs write failed", 0);
     }
 
@@ -2542,7 +2571,7 @@ static int handle_sleep(const cJSON* params, cJSON* result) {
     /* Delay to let RPC response flush, then sleep */
     vTaskDelay(pdMS_TO_TICKS(500));
 
-#ifdef CONFIG_IDF_TARGET_LINUX
+#if defined(CONFIG_IDF_TARGET_LINUX) || defined(BRAMBLE_PLATFORM_NRF)
     /* No deep sleep on the POSIX/Linux simulator. */
     ESP_LOGW(TAG, "bramble.sleep: deep sleep not supported on the simulator");
 #else
@@ -2715,7 +2744,8 @@ static int handle_get_audio_status(const cJSON* params, cJSON* result) {
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
 /* Standard base64 alphabet, padded. Self-contained (no mbedtls dep), same
- * approach as display_virt.c's fb_to_b64, but chunk-oriented: each call
+ * approach as the display backends' fb_base64_encode
+ * (components/display/include/fb_base64.h), but chunk-oriented: each call
  * encodes an independent, self-contained base64 string (its own padding),
  * so a caller can decode chunks one at a time and concatenate the raw
  * bytes without needing to track bit alignment across chunks. */
@@ -3295,6 +3325,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.sendMessage", handle_send_message);
     rpc_register("bramble.sendBroadcast", handle_send_broadcast);
     rpc_register("bramble.reboot", handle_reboot);
+    rpc_register("bramble.enterDfu", handle_enter_dfu);
     rpc_register("bramble.sendProbe", handle_send_probe);
     rpc_register("bramble.setRadio", handle_set_radio);
     rpc_register("bramble.setNodeName", handle_set_node_name);

@@ -23,7 +23,7 @@
 
 #define MAX_WS_CLIENTS 4
 #define WS_BUF_SIZE 2048
-#define AUTH_TOKEN_MAX 128
+#define AUTH_TOKEN_MAX WS_AUTH_TOKEN_MAX
 
 static const char* TAG = "ws";
 static httpd_handle_t s_server = NULL;
@@ -35,16 +35,7 @@ static ws_client_t s_clients[MAX_WS_CLIENTS];
 static int s_client_count = 0;
 static portMUX_TYPE s_client_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_server_running = false;
-static char s_auth_token[AUTH_TOKEN_MAX] = {0};
-/* True when the token could not be provided or persisted. Fail CLOSED: full
- * RPC access is impossible until the condition clears; only the
- * unauthenticated pairing allowlist is served. */
-static bool s_token_unavailable = false;
-/* True when the ONLY thing blocking a first-boot mint was the SEC-L1 entropy
- * gate. That is a transient, recoverable condition (the gate opens at RF
- * bring-up), unlike an NVS fault, so the mint is retried lazily on the next
- * auth evaluation instead of leaving the node permanently unreachable. */
-static bool s_token_pending_entropy = false;
+/* Token state lives in rpc_token.c (shared with the BLE/serial transports). */
 /* Comma-separated extra allowed origins (NVS-backed, set via the
  * authenticated bramble.setAllowedOrigins RPC). */
 #define WS_ORIGINS_MAX 256
@@ -136,13 +127,13 @@ static ws_auth_result_t auth_eval(httpd_req_t* req) {
      * first requested. Retry now. Any request reaching here arrived over a
      * transport that only exists after RF bring-up, so the gate is open and
      * this succeeds on the first attempt in practice. */
-    if (s_token_pending_entropy)
+    if (ws_token_pending_entropy())
         ws_server_load_token();
 
     /* Explicit opt-out (auth_off in NVS) loads as an empty token. The
      * token-unavailable failure mode does NOT take this branch: that state
      * fails closed below. */
-    if (!s_token_unavailable && s_auth_token[0] == '\0')
+    if (ws_server_auth_disabled())
         return WS_AUTH_OK;
 
     /* Header-based credentials only. The ?token= query-string path was removed
@@ -159,8 +150,7 @@ static ws_auth_result_t auth_eval(httpd_req_t* req) {
         return WS_AUTH_NO_CREDS;
     }
 
-    bool ok = !s_token_unavailable && ct_strcmp(token, s_auth_token) == 0;
-    return ok ? WS_AUTH_OK : WS_AUTH_BAD;
+    return ws_token_matches(token) ? WS_AUTH_OK : WS_AUTH_BAD;
 }
 
 static esp_err_t send_401_http(httpd_req_t* req) {
@@ -563,8 +553,7 @@ static esp_err_t config_post_handler(httpd_req_t* req) {
      * were presented; the auth-opt-out open state does NOT count. */
     bool open_access = ws_server_auth_disabled();
     bool token_proven = !open_access && (auth_eval(req) == WS_AUTH_OK);
-    if (!token_proven && form_token[0] != '\0' && !s_token_unavailable &&
-        ct_strcmp(form_token, s_auth_token) == 0) {
+    if (!token_proven && form_token[0] != '\0' && ws_token_matches(form_token)) {
         token_proven = true;
     }
 
@@ -683,41 +672,6 @@ static const httpd_uri_t ws_uri = {
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
-void ws_server_load_token(void) {
-    int rc = identity_ensure_ws_auth_token(s_auth_token, sizeof(s_auth_token));
-    if (rc == IDENTITY_TOKEN_ERR_ENTROPY) {
-        /* First boot, entropy gate still shut. Nothing was minted and nothing
-         * was persisted, so this is retryable: stay fail CLOSED for now and
-         * mint on the next auth evaluation (auth_eval), by which point an RF
-         * subsystem is necessarily up and the gate is open. Loud on purpose:
-         * a node that stays in this state is one nobody can pair with. */
-        s_auth_token[0] = '\0';
-        s_token_unavailable = true;
-        s_token_pending_entropy = true;
-        ESP_LOGW(TAG, "Auth token not minted yet (entropy gate shut); RPC limited to pairing "
-                      "allowlist until entropy is ready");
-        return;
-    }
-    if (rc < 0) {
-        /* NVS could not provide or persist a token. Fail CLOSED: no
-         * credentials can match, so only the pairing allowlist is
-         * reachable until the token store recovers. Not retried: an NVS
-         * fault does not clear on its own. */
-        s_auth_token[0] = '\0';
-        s_token_unavailable = true;
-        s_token_pending_entropy = false;
-        ESP_LOGE(TAG, "Auth token unavailable (NVS error); RPC limited to pairing allowlist");
-        return;
-    }
-    s_token_unavailable = false;
-    s_token_pending_entropy = false;
-    if (s_auth_token[0] != '\0') {
-        ESP_LOGI(TAG, "RPC auth enabled (per-device token)");
-    } else {
-        ESP_LOGW(TAG, "RPC auth disabled by explicit opt-out (open access)");
-    }
-}
-
 void ws_server_load_origins(void) {
     s_extra_origins[0] = '\0';
     nvs_handle_t h;
@@ -732,10 +686,6 @@ void ws_server_load_origins(void) {
 }
 
 const char* ws_server_get_extra_origins(void) { return s_extra_origins; }
-
-const char* ws_server_get_token(void) { return s_auth_token; }
-
-bool ws_server_auth_disabled(void) { return !s_token_unavailable && s_auth_token[0] == '\0'; }
 
 int ws_server_start(void) {
     ws_server_load_token();

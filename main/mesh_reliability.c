@@ -282,6 +282,11 @@ void mesh_process_receipt_tx_event(void) {
      * are exhausted. */
     if (rc == TX_GATE_ERR_BUDGET) {
         item->attempts_sent++;
+        /* This spends the attempt, so the consecutive channel-busy defer
+         * count starts over with the next one (the documented invariant on
+         * pending_receipt_t.defers). Reachable when a budget deny
+         * interleaves with channel-busy defers on the same attempt. */
+        item->defers = 0;
         if (item->attempts_sent >= item->attempts_total) {
             ESP_LOGW(TAG,
                      "Delivery receipt DROPPED for pkt=%08" PRIX32
@@ -306,6 +311,61 @@ void mesh_process_receipt_tx_event(void) {
         return;
     }
 
+    /* Channel-busy deferral: LBT never found a quiet channel, so nothing
+     * went out and nothing was debited. Blind-firing here is exactly what
+     * lost 20-25% of broadcast receipts on the bench (every node answers
+     * the same origin at once, so a busy channel means another receipt is
+     * in flight), so re-run the SAME attempt after a short jittered wait
+     * rather than spending it. Bounded by RECEIPT_MAX_DEFERS so a
+     * permanently jammed channel still terminates: at the cap the attempt
+     * counts as spent and the receipt rejoins the normal retry/exhaustion
+     * path, which is what a blind-fired-and-lost attempt did before. */
+    if (rc == TX_GATE_ERR_CHANNEL_BUSY) {
+        /* Re-read the clock: t_now predates mesh_tx, whose LBT loop blocks
+         * through up to three real backoff delays before giving up. Anchoring
+         * the defer on the stale value would silently spend most of the
+         * 250-999ms window inside the call that just failed, re-firing into
+         * the same busy channel the defer exists to avoid. */
+        uint32_t t_after_lbt = now_ms();
+        item->defers++;
+        if (item->defers < RECEIPT_MAX_DEFERS) {
+            uint32_t defer_delay_ms = 250u + (esp_random() % 750u);
+            item->due_at_ms = t_after_lbt + defer_delay_ms;
+            ESP_LOGD(TAG,
+                     "Delivery receipt deferred for pkt=%08" PRIX32
+                     " (attempt=%u/%u defer=%u/%u): channel busy, retry in %" PRIu32 "ms",
+                     item->original_packet_id, (unsigned)attempt_no, (unsigned)item->attempts_total,
+                     (unsigned)item->defers, (unsigned)RECEIPT_MAX_DEFERS, defer_delay_ms);
+            mesh_schedule_next_receipt_timer();
+            return;
+        }
+
+        item->defers = 0;
+        item->attempts_sent++;
+        if (item->attempts_sent >= item->attempts_total) {
+            ESP_LOGW(TAG,
+                     "Delivery receipt DROPPED for pkt=%08" PRIX32
+                     " (all %u attempts channel-blocked)",
+                     item->original_packet_id, (unsigned)item->attempts_total);
+            memset(item, 0, sizeof(*item));
+        } else {
+            uint32_t scale_num = 1u;
+            uint32_t scale_den = 1u;
+            receipt_retry_scale(&scale_num, &scale_den);
+            uint32_t raw_backoff_ms =
+                1000u + ((uint32_t)item->attempts_sent * 2000u) + (esp_random() % 1000u);
+            uint32_t backoff_ms = (raw_backoff_ms * scale_num) / scale_den;
+            item->due_at_ms = t_after_lbt + backoff_ms;
+            ESP_LOGW(TAG,
+                     "Delivery receipt deferred for pkt=%08" PRIX32
+                     " (attempt=%u/%u): channel busy for %u defers, retry in %" PRIu32 "ms",
+                     item->original_packet_id, (unsigned)(item->attempts_sent),
+                     (unsigned)item->attempts_total, (unsigned)RECEIPT_MAX_DEFERS, backoff_ms);
+        }
+        mesh_schedule_next_receipt_timer();
+        return;
+    }
+
     if (rc == TX_GATE_OK) {
         ESP_LOGI(TAG,
                  "TX delivery receipt for broadcast pkt=%08" PRIX32 " to %08" PRIX32
@@ -315,25 +375,36 @@ void mesh_process_receipt_tx_event(void) {
     }
 
     item->attempts_sent++;
+    item->defers = 0; /* the attempt was spent on the air; defers are per-attempt */
     if (item->attempts_sent >= item->attempts_total) {
         memset(item, 0, sizeof(*item));
         mesh_schedule_next_receipt_timer();
         return;
     }
 
-    uint8_t i = (uint8_t)(item->attempts_sent - 1u);
     uint32_t scale_num = 1u;
     uint32_t scale_den = 1u;
     receipt_retry_scale(&scale_num, &scale_den);
 
-    uint32_t raw_base_ms = 500u + ((uint32_t)i * 700u);
-    uint32_t raw_jitter_range = 500u + ((uint32_t)i * 400u);
-    uint32_t base_ms = (raw_base_ms * scale_num) / scale_den;
-    uint32_t jitter_range = (raw_jitter_range * scale_num) / scale_den;
-    if (jitter_range == 0u) {
-        jitter_range = 1u;
+    /* Retry spacing re-draws a FULL contention slot, salted by the attempt
+     * number, instead of the old short fixed backoff (500+700i ms plus small
+     * jitter). Bench telemetry showed why the old shape lost receipts: first
+     * attempts are slot-spread across a window sized to the peer count, but
+     * short-backoff retries folded attempts 2 and 3 back into OTHER nodes'
+     * first-attempt slots, so during a 9-receipt storm each transmission was
+     * received by fewer than half the nodes in range and some receipts lost
+     * every copy at the origin. Salting the slot hash with the attempt
+     * number scatters each retry into a fresh pseudo-random slot of the
+     * next window, decorrelated from every other sender's attempts, at
+     * unchanged TX volume. The budget-pressure scale still stretches the
+     * result when the receipt lane is under pressure. */
+    uint32_t reslot_ms = mesh_broadcast_receipt_slot_delay_ms(
+        s_identity->address, item->original_packet_id ^ ((uint32_t)item->attempts_sent << 28),
+        (uint8_t)neighbor_count(&s_neighbors));
+    uint32_t retry_delay_ms = ((reslot_ms + (esp_random() % 400u)) * scale_num) / scale_den;
+    if (retry_delay_ms == 0u) {
+        retry_delay_ms = 1u;
     }
-    uint32_t retry_delay_ms = base_ms + (esp_random() % jitter_range);
     item->due_at_ms = now_ms() + retry_delay_ms;
 
     mesh_schedule_next_receipt_timer();
@@ -644,8 +715,15 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t* receipt) {
              "Forwarding delivery receipt for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
              receipt->orig_packet_id, receipt->header.dest_addr, receipt->hop_count);
     /* Deny behavior: a forwarded receipt is best-effort on behalf of a
-     * remote sender; suppress when the RECEIPT lane is exhausted. */
-    if (mesh_tx(buf, (uint8_t)wire_len, TX_KIND_RECEIPT) == TX_GATE_ERR_BUDGET) {
+     * remote sender; suppress when the RECEIPT lane is exhausted.
+     *
+     * TX_KIND_RECEIPT_FORWARD, not TX_KIND_RECEIPT: a relay has no retry
+     * structure to defer into and cannot re-originate these bytes (the seq
+     * is the originator's, so a later copy is replay-rejected downstream
+     * once this hop has passed one on). It therefore keeps the blind-fire
+     * behavior on LBT exhaustion, and can never see
+     * TX_GATE_ERR_CHANNEL_BUSY. Same RECEIPT airtime lane either way. */
+    if (mesh_tx(buf, (uint8_t)wire_len, TX_KIND_RECEIPT_FORWARD) == TX_GATE_ERR_BUDGET) {
         ESP_LOGW(TAG,
                  "Forwarded delivery receipt suppressed for pkt=%08" PRIX32
                  ": receipt airtime budget exhausted",
@@ -740,10 +818,7 @@ size_t mesh_delivery_events_list_since(uint32_t since_event_seq, delivery_event_
     return count;
 }
 
-uint32_t mesh_get_last_broadcast_id(void) {
-    (void)s_last_broadcast_frag_msg_id;
-    return s_last_broadcast_id;
-}
+uint32_t mesh_get_last_broadcast_id(void) { return s_last_broadcast_id; }
 
 void mesh_set_broadcast_telemetry_mode(broadcast_telemetry_mode_t mode) {
     if (mode < BROADCAST_TELEMETRY_OFF || mode > BROADCAST_TELEMETRY_PATH_SAMPLED) {

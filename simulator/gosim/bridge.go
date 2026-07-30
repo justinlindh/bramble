@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unsafe"
 )
@@ -155,14 +154,6 @@ const (
 	rxOutcomeCaptured   = int(C.RADIO_RX_CAPTURED)
 )
 
-func radioFrameAirtimeUs(config *C.radio_config_t, frameBytes int) uint32 {
-	return uint32(C.radio_frame_airtime_us(config, C.uint16_t(frameBytes)))
-}
-
-func radioPreambleUs(config *C.radio_config_t) uint64 {
-	return uint64(C.radio_preamble_us(config))
-}
-
 // --- Metrics ---
 
 func metricsInit(m *C.metrics_state_t) {
@@ -254,6 +245,7 @@ func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
 	sim.mu.Unlock()
 
 	if sim.State() != StateLoaded {
+		sim.restoreStdout(0)
 		return nil, fmt.Errorf("runScenarioHeadless: failed to load scenario %s", scenarioPath)
 	}
 
@@ -276,10 +268,7 @@ func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
 	sim.complete()
 	sim.mu.Unlock()
 
-	sim.pipeW.Close()
-	syscall.Dup2(sim.origStdout, 1)
-	syscall.Close(sim.origStdout)
-	time.Sleep(50 * time.Millisecond) // let readPipe drain
+	sim.restoreStdout(50 * time.Millisecond)
 
 	return &scenarioRunResult{lines: lines, sim: sim}, nil
 }

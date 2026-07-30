@@ -3,11 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-#ifdef UNIT_TEST
-#include "esp_stubs.h"
-#else
+/* Resolved by include path per build; see packet.h. */
 #include "esp_err.h"
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,10 +42,6 @@ uint8_t mesh_broadcast_receipt_retry_count(void);
  */
 void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms, uint32_t* scale_num,
                                         uint32_t* scale_den);
-
-/* Scale an arbitrary delay value by current receipt airtime utilization. */
-uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
-                                               uint32_t receipt_budget_remaining_ms);
 
 /*
  * seq (ws 1.3b): the 48-bit control-plane origin sequence, drawn by the

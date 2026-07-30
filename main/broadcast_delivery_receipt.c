@@ -9,7 +9,13 @@
  * simultaneously.  At SF10/125kHz a receipt packet takes ~150-200ms
  * airtime, so slots need to be wider than that. */
 #define BROADCAST_RECEIPT_DELAY_BASE_MS 300u
-#define BROADCAST_RECEIPT_SLOT_SPACING_MS 500u
+/* 1000, was 500: bench telemetry measured ~30-40% per-transmission
+ * reception during receipt storms because the contention window carried
+ * roughly 12s of mandatory airtime (receipts plus the broadcast's own
+ * data relays) in a 15-20s window. Doubling the slot pitch halves the
+ * occupancy; the receipt airtime budget is unchanged and the cost is
+ * confirmation latency, which broadcasts can afford. */
+#define BROADCAST_RECEIPT_SLOT_SPACING_MS 1000u
 #define BROADCAST_RECEIPT_SLOT_BUCKETS_MIN 4u
 #define BROADCAST_RECEIPT_SLOT_BUCKETS_MAX 32u
 #define BROADCAST_RECEIPT_RETRY_COUNT 3u
@@ -76,15 +82,6 @@ void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms, ui
         *scale_num = 1u;
         *scale_den = 1u;
     }
-}
-
-uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
-                                               uint32_t receipt_budget_remaining_ms) {
-    uint32_t scale_num = 1u;
-    uint32_t scale_den = 1u;
-
-    mesh_broadcast_receipt_retry_scale(receipt_budget_remaining_ms, &scale_num, &scale_den);
-    return (raw_delay_ms * scale_num) / scale_den;
 }
 
 esp_err_t mesh_build_broadcast_delivery_receipt_packet(

@@ -107,7 +107,7 @@ export async function loadConfig(): Promise<void> {
 // ─── Config mutations ────────────────────────────────────────────────────
 
 /** Throw if an RPC result has ok:false with an error message */
-export function assertOk(result: unknown, fallback = 'Operation failed'): void {
+function assertOk(result: unknown, fallback: string): void {
   const r = result as Record<string, unknown> | null;
   if (r && r.ok === false) {
     throw new Error((r.error as string) || fallback);
@@ -165,29 +165,6 @@ export async function setLocationConfig(config: Partial<LocationConfig>): Promis
   assertOk(result, 'Failed to save location config');
   await loadConfig();
   await loadPeerLocations().catch(() => {});
-}
-
-export async function setLocationContact(
-  addr: number,
-  tier: LocationTier,
-  intervalSec?: number,
-  distanceTriggerM?: number
-): Promise<void> {
-  const client = requireClient();
-  // Firmware expects address as a hex string, not a numeric addr.
-  const params: Record<string, unknown> = { address: formatAddrHex(addr), tier };
-  if (intervalSec !== undefined) params.intervalSec = intervalSec;
-  if (distanceTriggerM !== undefined) params.distanceTriggerM = distanceTriggerM;
-  const result = await client.rpc('bramble.setLocationContact', params);
-  assertOk(result, 'Failed to set location contact');
-  await loadConfig();
-}
-
-export async function removeLocationContact(addr: number): Promise<void> {
-  const client = requireClient();
-  const result = await client.rpc('bramble.removeLocationContact', { address: formatAddrHex(addr) });
-  assertOk(result, 'Failed to remove location contact');
-  await loadConfig();
 }
 
 export async function shareLocationOnce(addr: number, tier?: LocationTier): Promise<void> {

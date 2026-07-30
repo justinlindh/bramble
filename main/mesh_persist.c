@@ -11,10 +11,6 @@
 
 static const char* TAG = "mesh";
 
-/* Forward declarations for intra-module static helpers. */
-static void mesh_replay_store_save_one(nvs_handle_t h, const char* key, replay_table_t* t);
-static void mesh_replay_store_load_one(nvs_handle_t h, const char* key, replay_table_t* t);
-
 /* Nonce counter NVS persistence: reserve-ahead ceiling under NVS_NS_NONCE.
  * Not-found (first boot) resumes from ceiling 0, matching nonce_counter's own
  * zero-initialized static state. */
@@ -236,6 +232,13 @@ void mesh_load_network_key(void) {
      * linked only on the linux target; a device build never sees this. */
     extern int emu_node_seed_network_key_from_env(void);
     emu_node_seed_network_key_from_env();
+#endif
+#ifdef BRAMBLE_PLATFORM_NRF
+    /* Bench only: the nRF target has no RPC transport until P2, so a local
+     * build may seed the key at compile time (nrf/src/nrf_provision.c). No-op
+     * without the define; the key value is never committed. */
+    extern int nrf_seed_network_key_from_build(void);
+    nrf_seed_network_key_from_build();
 #endif
     if (network_key_load_from_nvs() == 0) {
         ESP_LOGI(TAG, "Network key loaded from NVS (provisioned)");

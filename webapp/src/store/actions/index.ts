@@ -39,8 +39,6 @@ export {
   setMailbox,
   setDefaultChannel,
   setLocationConfig,
-  setLocationContact,
-  removeLocationContact,
   shareLocationOnce,
 } from './config';
 export {
@@ -86,4 +84,3 @@ export {
   forgetSavedDevice,
   renameSavedDevice,
 } from './deviceBook';
-export { getClient } from './client';

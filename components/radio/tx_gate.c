@@ -4,7 +4,9 @@
 /*
  * Listen-Before-Talk policy (moved here from mesh_task so it sits behind
  * the budget check): up to 3 CAD attempts with randomized exponential
- * backoff; after that, transmit anyway to avoid starvation.
+ * backoff. What happens when all three find the channel busy is per-kind:
+ * most kinds transmit anyway to avoid starvation, the kinds in lbt_defers()
+ * give the caller TX_GATE_ERR_CHANNEL_BUSY back instead.
  */
 #define TX_GATE_LBT_MAX_ATTEMPTS 3u
 #define TX_GATE_LBT_BACKOFF_BASE_MS 50u
@@ -41,8 +43,9 @@ void tx_gate_init(tx_gate_t* g, const tx_gate_ops_t* ops, uint8_t max_duty_cycle
  *              packet in the mesh: the peer retransmits at full data size.
  *   BROADCAST  beacons, broadcast data, probe sweeps: one lane for all
  *              traffic addressed to everyone, per the existing tier model.
- *   RECEIPT    broadcast delivery receipts (lowest priority, own lane so
- *              receipt storms cannot crowd out anything else).
+ *   RECEIPT    broadcast delivery receipts, originated and relayed alike
+ *              (lowest priority, own lane so receipt storms cannot crowd
+ *              out anything else).
  */
 uint8_t tx_gate_kind_tier(tx_kind_t kind) {
     switch (kind) {
@@ -54,6 +57,7 @@ uint8_t tx_gate_kind_tier(tx_kind_t kind) {
     case TX_KIND_PROBE:
         return AIRTIME_TIER_BROADCAST;
     case TX_KIND_RECEIPT:
+    case TX_KIND_RECEIPT_FORWARD:
         return AIRTIME_TIER_RECEIPT;
     case TX_KIND_DATA:
     case TX_KIND_DATA_RETRY:
@@ -100,6 +104,44 @@ static bool beacon_exempt(const tx_gate_t* g, tx_kind_t kind) {
     return g->beacon_budget_exempt && kind == TX_KIND_BEACON;
 }
 
+/*
+ * Which kinds refuse to blind-fire when LBT never finds a quiet channel.
+ *
+ * TX_KIND_RECEIPT only. An originated broadcast delivery receipt is the one
+ * kind that can genuinely afford to wait: the app layer already gives it
+ * three jittered attempts and its own 12s/hour airtime lane, and nothing
+ * downstream blocks on it. It is also the kind that suffers most from
+ * blind-firing, because receipts arrive as a storm: every node that stored
+ * a broadcast answers the same origin at once, so "channel busy" here means
+ * "another receipt is on the air right now", and transmitting into it loses
+ * the capture battle at the origin. That is the measured defect: bench
+ * traces put broadcast receipt loss at 20-25%, and the app-layer retry
+ * jitter could not fix it because all three attempts blind-fired the same
+ * way. Deferring turns a near-certain collision into a later, quiet send.
+ *
+ * Nothing else defers, deliberately:
+ *   - DATA / DATA_RETRY / FORWARD / MAILBOX / DATA_BROADCAST: the workhorse
+ *     lanes. A busy channel is the normal state under load, and a deferring
+ *     data path starves exactly when the mesh is busiest.
+ *   - ACK / ROUTING: an undelivered ACK costs a full-size retransmission and
+ *     an undelivered RREP costs a route; these must never yield the channel.
+ *   - BEACON / PROBE / PROBE_REPLY: cadence-driven, no retry structure to
+ *     defer into, and beacons are the liveness backbone.
+ *   - RECEIPT_FORWARD: a relayed receipt carries the originator's bytes and
+ *     seq, so it cannot be re-originated here, and the originator's own
+ *     retries are replay-rejected downstream once this hop has passed one
+ *     copy on. There is no retry structure to defer into (sharing the 8-slot
+ *     receipt queue would let relay traffic starve this node's own receipts
+ *     in precisely the storm this change targets), so relays keep the
+ *     existing blind-fire behavior.
+ *
+ * The defer set being receipt-only is also what keeps TX_GATE_ERR_CHANNEL_BUSY
+ * safe for every existing caller: the only call sites that pass
+ * TX_KIND_RECEIPT are in main/mesh_reliability.c and both handle it. Every
+ * other call site can only ever see the return codes it sees today.
+ */
+static bool lbt_defers(tx_kind_t kind) { return kind == TX_KIND_RECEIPT; }
+
 int tx_gate_transmit(tx_gate_t* g, const uint8_t* buf, uint8_t len, tx_kind_t kind) {
     uint8_t tier = tx_gate_kind_tier(kind);
     uint32_t cost_ms = tx_gate_cost_ms(g, len);
@@ -111,19 +153,30 @@ int tx_gate_transmit(tx_gate_t* g, const uint8_t* buf, uint8_t len, tx_kind_t ki
         return TX_GATE_ERR_BUDGET;
     }
 
-    /* Listen-Before-Talk: budget approved, now wait for a quiet channel. */
+    /* Listen-Before-Talk: budget approved, now wait for a quiet channel.
+     * `quiet` records whether a CAD actually found the channel free, which
+     * is what separates "the channel went quiet" from "the attempts ran
+     * out while it was still busy". Tracking it costs nothing: the quiet
+     * path still spends exactly one CAD, as it always did. */
+    bool quiet = false;
     for (uint8_t attempt = 0; attempt < TX_GATE_LBT_MAX_ATTEMPTS; attempt++) {
         if (g->ops.wdt_feed)
             g->ops.wdt_feed();
-        if (!g->ops.channel_busy())
+        if (!g->ops.channel_busy()) {
+            quiet = true;
             break;
+        }
         uint32_t backoff_ms = TX_GATE_LBT_BACKOFF_BASE_MS * (1u << attempt);
         if (backoff_ms > TX_GATE_LBT_BACKOFF_MAX_MS)
             backoff_ms = TX_GATE_LBT_BACKOFF_MAX_MS;
         backoff_ms += g->ops.random_u32() % backoff_ms;
         g->ops.delay_ms(backoff_ms);
     }
-    /* After TX_GATE_LBT_MAX_ATTEMPTS, transmit anyway to avoid starvation. */
+    /* Attempts exhausted on a busy channel: deferring kinds hand the
+     * decision back to the caller, every other kind transmits anyway to
+     * avoid starvation. */
+    if (!quiet && lbt_defers(kind))
+        return TX_GATE_ERR_CHANNEL_BUSY;
 
     if (g->ops.wdt_feed)
         g->ops.wdt_feed();

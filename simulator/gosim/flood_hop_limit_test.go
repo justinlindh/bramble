@@ -21,18 +21,18 @@ import (
 // lets a flood reach a farther node the default could not".
 func floodHopLimitLineScenario(nodeCount, dest, floodHopLimit int) string {
 	type scenario struct {
-		Name          string        `json:"name"`
-		Mode          string        `json:"mode"`
-		DurationMs    int           `json:"duration_ms"`
-		FloodTranspt  bool          `json:"flood_transport"`
-		FloodHopLimit *int          `json:"flood_hop_limit,omitempty"`
-		Nodes         []interface{} `json:"nodes"`
-		Radio         interface{}   `json:"radio"`
-		Events        []interface{} `json:"events"`
+		Name          string `json:"name"`
+		Mode          string `json:"mode"`
+		DurationMs    int    `json:"duration_ms"`
+		FloodTranspt  bool   `json:"flood_transport"`
+		FloodHopLimit *int   `json:"flood_hop_limit,omitempty"`
+		Nodes         []any  `json:"nodes"`
+		Radio         any    `json:"radio"`
+		Events        []any  `json:"events"`
 	}
-	var nodes []interface{}
+	var nodes []any
 	for i := 0; i < nodeCount; i++ {
-		nodes = append(nodes, map[string]interface{}{
+		nodes = append(nodes, map[string]any{
 			"id": fmt.Sprintf("N%d", i), "x": float64(i * 100), "y": 0.0,
 		})
 	}
@@ -42,13 +42,13 @@ func floodHopLimitLineScenario(nodeCount, dest, floodHopLimit int) string {
 		DurationMs:   120000,
 		FloodTranspt: true,
 		Nodes:        nodes,
-		Radio: map[string]interface{}{
+		Radio: map[string]any{
 			"loss_pct":                      0,
 			"propagation_speed_ms_per_unit": 0.1,
 			"collisions":                    false,
 		},
-		Events: []interface{}{
-			map[string]interface{}{
+		Events: []any{
+			map[string]any{
 				"at_ms": 1000, "type": "send_message",
 				"src": "N0", "dest": fmt.Sprintf("N%d", dest),
 			},
@@ -91,7 +91,7 @@ func runFloodHopLimitScenario(t *testing.T, nodeCount, dest, floodHopLimit int) 
 	var packetIDHex string
 	delivered := false
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}

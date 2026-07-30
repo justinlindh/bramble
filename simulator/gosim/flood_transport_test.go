@@ -34,34 +34,34 @@ import (
 // point the DATA is actually relayed.
 func floodTransportLineScenario(floodTransport bool) string {
 	type scenario struct {
-		Name           string        `json:"name"`
-		Mode           string        `json:"mode"`
-		DurationMs     int           `json:"duration_ms"`
-		FloodTransport *bool         `json:"flood_transport,omitempty"`
-		Nodes          []interface{} `json:"nodes"`
-		Radio          interface{}   `json:"radio"`
-		Events         []interface{} `json:"events"`
+		Name           string `json:"name"`
+		Mode           string `json:"mode"`
+		DurationMs     int    `json:"duration_ms"`
+		FloodTransport *bool  `json:"flood_transport,omitempty"`
+		Nodes          []any  `json:"nodes"`
+		Radio          any    `json:"radio"`
+		Events         []any  `json:"events"`
 	}
-	node := func(id string, x, y float64) map[string]interface{} {
-		return map[string]interface{}{"id": id, "x": x, "y": y}
+	node := func(id string, x, y float64) map[string]any {
+		return map[string]any{"id": id, "x": x, "y": y}
 	}
 	s := scenario{
 		Name:       "flood-transport-line",
 		Mode:       "deterministic",
 		DurationMs: 30000,
-		Nodes: []interface{}{
+		Nodes: []any{
 			node("A", 0, 0),
 			node("B", 100, 0),
 			node("C", 200, 0),
 			node("D", 300, 0),
 		},
-		Radio: map[string]interface{}{
+		Radio: map[string]any{
 			"loss_pct":                      0,
 			"propagation_speed_ms_per_unit": 0.1,
 			"collisions":                    false,
 		},
-		Events: []interface{}{
-			map[string]interface{}{"at_ms": 1000, "type": "send_message", "src": "A", "dest": "D"},
+		Events: []any{
+			map[string]any{"at_ms": 1000, "type": "send_message", "src": "A", "dest": "D"},
 		},
 	}
 	// Only set the field when explicitly turning it on, so the "off" run
@@ -109,7 +109,7 @@ func runFloodTransportScenario(t *testing.T, namePrefix string, floodTransport b
 
 	var packetIDHex string
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}

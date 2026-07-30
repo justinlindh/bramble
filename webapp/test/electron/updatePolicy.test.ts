@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  GITHUB_OWNER,
-  GITHUB_REPO,
   compareSemver,
   decideUpdate,
   feedBaseUrl,
@@ -83,7 +81,7 @@ describe('pickLatestWebappRelease', () => {
 
   it('falls back to a constructed release page URL when html_url is absent', () => {
     const latest = pickLatestWebappRelease([{ tag_name: 'webapp-v1.5.0' }]);
-    expect(latest?.htmlUrl).toBe(releaseHtmlUrl(GITHUB_OWNER, GITHUB_REPO, 'webapp-v1.5.0'));
+    expect(latest?.htmlUrl).toBe(releaseHtmlUrl('webapp-v1.5.0'));
   });
 });
 
@@ -104,7 +102,7 @@ describe('updateCapability', () => {
 
 describe('feedBaseUrl', () => {
   it('points at the per-tag release asset directory', () => {
-    expect(feedBaseUrl('justinlindh', 'bramble', 'webapp-v1.5.0')).toBe(
+    expect(feedBaseUrl('webapp-v1.5.0')).toBe(
       'https://github.com/justinlindh/bramble/releases/download/webapp-v1.5.0/',
     );
   });

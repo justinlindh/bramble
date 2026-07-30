@@ -26,6 +26,11 @@
  * survives reboot. Called by generate_provision and the setNetworkKey RPC. */
 void network_key_set_provisioned(const uint8_t key[32]);
 
+/* Parse a 64-hex-char key and provision it; returns 0 on success, -1 on a
+ * malformed string (node state unchanged). Shared by the dev/bench seeding
+ * paths so key parsing exists once. */
+int network_key_set_from_hex(const char* hex);
+
 /* Reverts to unprovisioned IN MEMORY (does NOT erase persisted storage).
  * After this, network_key_get() fails closed until a key is set, generated,
  * or loaded again. */

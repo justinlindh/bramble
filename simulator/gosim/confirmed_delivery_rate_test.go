@@ -135,7 +135,7 @@ func TestConfirmedDeliveryRateHonestUnderLoad(t *testing.T) {
 
 // runAndGetFinalMetrics writes scenarioJSON to a temp file, runs it
 // headlessly, and returns the single final_metrics event's fields.
-func runAndGetFinalMetrics(t *testing.T, namePrefix, scenarioJSON string) map[string]interface{} {
+func runAndGetFinalMetrics(t *testing.T, namePrefix, scenarioJSON string) map[string]any {
 	t.Helper()
 	tmp, err := os.CreateTemp("", namePrefix+"-*.json")
 	if err != nil {
@@ -152,9 +152,9 @@ func runAndGetFinalMetrics(t *testing.T, namePrefix, scenarioJSON string) map[st
 		t.Fatalf("runScenarioHeadless: %v", err)
 	}
 
-	var finalMetrics map[string]interface{}
+	var finalMetrics map[string]any
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}

@@ -25,36 +25,36 @@ import (
 // ordinary flood.
 func intermediateRREPStarScenario(intermediateRREP bool) string {
 	type scenario struct {
-		Name             string        `json:"name"`
-		Mode             string        `json:"mode"`
-		DurationMs       int           `json:"duration_ms"`
-		IntermediateRREP *bool         `json:"intermediate_rrep,omitempty"`
-		Nodes            []interface{} `json:"nodes"`
-		Radio            interface{}   `json:"radio"`
-		Events           []interface{} `json:"events"`
+		Name             string `json:"name"`
+		Mode             string `json:"mode"`
+		DurationMs       int    `json:"duration_ms"`
+		IntermediateRREP *bool  `json:"intermediate_rrep,omitempty"`
+		Nodes            []any  `json:"nodes"`
+		Radio            any    `json:"radio"`
+		Events           []any  `json:"events"`
 	}
-	node := func(id string, x, y float64) map[string]interface{} {
-		return map[string]interface{}{"id": id, "x": x, "y": y}
+	node := func(id string, x, y float64) map[string]any {
+		return map[string]any{"id": id, "x": x, "y": y}
 	}
-	sendEvt := func(atMs int, src, dest string) map[string]interface{} {
-		return map[string]interface{}{"at_ms": atMs, "type": "send_message", "src": src, "dest": dest}
+	sendEvt := func(atMs int, src, dest string) map[string]any {
+		return map[string]any{"at_ms": atMs, "type": "send_message", "src": src, "dest": dest}
 	}
 	s := scenario{
 		Name:       "intermediate-rrep-star",
 		Mode:       "deterministic",
 		DurationMs: 30000,
-		Nodes: []interface{}{
+		Nodes: []any{
 			node("I", 0, 0),
 			node("D", 140, 0),
 			node("E", -140, 0),
 			node("F", 0, 140),
 		},
-		Radio: map[string]interface{}{
+		Radio: map[string]any{
 			"loss_pct":                      0,
 			"propagation_speed_ms_per_unit": 0.1,
 			"collisions":                    false,
 		},
-		Events: []interface{}{
+		Events: []any{
 			sendEvt(1000, "E", "D"),
 			sendEvt(5000, "F", "D"),
 		},

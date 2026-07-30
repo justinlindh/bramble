@@ -20,7 +20,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/timers.h"
+/* ESP-IDF's HCI shim: on that platform nimble_port_init() also brings up the
+ * ESP controller through it. Bare-metal builds link NimBLE's own nRF52
+ * controller instead, so there is no HCI transport to initialize (and no
+ * symbol from this header is used anywhere in the file). */
+#ifdef ESP_PLATFORM
 #include "esp_nimble_hci.h"
+#endif
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
@@ -29,7 +36,9 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "nvs_flash.h"
 #include "nvs_keys.h"
+#include "mesh_task.h"
 #include "ws_server.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -65,6 +74,18 @@ static uint16_t s_mtu = BLE_MTU_DEFAULT + 3; /* negotiated ATT MTU */
 static char s_line_buf[BLE_RPC_BUF_SIZE];
 static size_t s_line_len = 0;
 static char s_device_name[32] = "Bramble";
+
+/* Longest name that still fits an advertising PDU beside the flags and TX
+ * power fields; see start_advertising. */
+#define BLE_ADV_NAME_MAX 23
+
+/* Boot-progress probe. Consoleless boards (nRF T1000-E) override this to
+ * record the advertising result in a host-readable flash page; everywhere
+ * else it stays a no-op. Stage value 0x10 is BT_ADV in nrf boot_trace.h. */
+__attribute__((weak)) void bramble_boot_probe(unsigned stage, int rc) {
+    (void)stage;
+    (void)rc;
+}
 static bool s_ble_authenticated = false;
 static uint8_t s_auth_fail_count = 0;
 
@@ -146,10 +167,26 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
         if (n > max_chunk)
             n = max_chunk;
 
-        struct os_mbuf* om = NULL;
-        /* Bounded retry: the msys pool refills as the stack drains queued
-         * notifications; dropping a chunk would corrupt the JSON stream. */
-        for (int attempt = 0; attempt < 10 && om == NULL; attempt++) {
+        /*
+         * Bounded retry covering BOTH the allocation and the send. The msys
+         * pool refills as the stack drains queued notifications, and an
+         * ENOMEM out of notify_custom means the same "momentarily empty" as a
+         * NULL allocation: a 253-byte chunk needs two 292-byte blocks, so a
+         * response of a few chunks can outrun a 12-block pool and then
+         * recover a few milliseconds later. Retrying the send matters as much
+         * as retrying the alloc, because giving up mid-response truncates the
+         * JSON stream, which is the corruption the chunking exists to avoid.
+         * Observed on the nRF bench: an 895-byte getNeighbors reply died at
+         * 759/896 with rc=6.
+         *
+         * Each attempt must build a fresh mbuf: ble_att_clt_tx_notify
+         * consumes the one it is given on every path, failures included.
+         * Only ENOMEM is worth retrying; ENOTCONN and friends will not
+         * improve with time.
+         */
+        int rc = BLE_HS_ENOMEM;
+        for (int attempt = 0; attempt < 25 && rc == BLE_HS_ENOMEM; attempt++) {
+            struct os_mbuf* om;
             if (off + n <= len) {
                 om = ble_hs_mbuf_from_flat(json + off, n);
             } else if (off < len) {
@@ -164,17 +201,16 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
             }
             if (om == NULL) {
                 vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
+            rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
+            if (rc == BLE_HS_ENOMEM) {
+                vTaskDelay(pdMS_TO_TICKS(20));
             }
         }
-        if (om == NULL) {
-            ESP_LOGW(TAG, "Notify chunk alloc failed at %u/%u; dropping rest", (unsigned)off,
-                     (unsigned)total);
-            return;
-        }
-
-        int rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
         if (rc != 0) {
-            ESP_LOGW(TAG, "Notify chunk failed: %d at %u/%u", rc, (unsigned)off, (unsigned)total);
+            ESP_LOGW(TAG, "Notify chunk failed: %d at %u/%u; dropping rest", rc, (unsigned)off,
+                     (unsigned)total);
             return;
         }
         off += n;
@@ -359,6 +395,37 @@ static const struct ble_gatt_svc_def s_gatt_svcs[] = {
 /* ── GAP event handler ───────────────────────────────────────────────── */
 
 static int gap_event_handler(struct ble_gap_event* event, void* arg);
+static void start_advertising(void);
+
+/* Advertising restart retry. start_advertising used to be fire-and-forget:
+ * called once per disconnect, and if the host returned any transient error
+ * (busy during a host reset, EPREEMPTED, momentary pool pressure) the
+ * failure was logged and the device simply never advertised again while the
+ * mesh kept running. On a consoleless board that is indistinguishable from
+ * a dead node, and it is reachable in practice: a client that drops the
+ * link mid-pairing can race the restart against SMP teardown. Reproduced on
+ * the bench (T1000-E, killed bleak sessions) and seen once on the dev kit
+ * after 11.7h. Any failed start now arms a one-shot retry timer; the timer
+ * re-arms until advertising is up or a connection exists. */
+#define BLE_ADV_RETRY_MS 1000
+
+static TimerHandle_t s_adv_retry_timer;
+
+static void adv_retry_cb(TimerHandle_t t) {
+    (void)t;
+    if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE && !ble_gap_adv_active()) {
+        start_advertising();
+    }
+}
+
+static void schedule_adv_retry(void) {
+    /* Created once in ble_server_init, so no lazy-create race between the
+     * host task and the timer task; NULL only if creation failed at init,
+     * in which case the old fire-and-forget behavior is what remains. */
+    if (s_adv_retry_timer != NULL) {
+        xTimerStart(s_adv_retry_timer, 0);
+    }
+}
 
 static void start_advertising(void) {
     struct ble_gap_adv_params adv_params = {
@@ -370,15 +437,25 @@ static void start_advertising(void) {
 
     struct ble_hs_adv_fields fields = {0};
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    /* The advertising PDU is 31 bytes: flags (3) and TX power (3) leave
+     * 23 for the name after its own 2 byte header. setNodeName accepts up to
+     * BRAMBLE_NODE_NAME_MAX (32), and an over-long name made
+     * ble_gap_adv_set_fields return BLE_HS_EMSGSIZE, which aborted this
+     * function and left the node advertising NOTHING: undiscoverable until
+     * someone renamed it over a transport they could no longer reach. Send
+     * the shortened-name form instead, which is exactly what it is for; the
+     * complete name is still readable from the GAP characteristic. */
+    size_t name_len = strlen(s_device_name);
     fields.name = (uint8_t*)s_device_name;
-    fields.name_len = strlen(s_device_name);
-    fields.name_is_complete = 1;
+    fields.name_is_complete = name_len <= BLE_ADV_NAME_MAX;
+    fields.name_len = (uint8_t)(fields.name_is_complete ? name_len : BLE_ADV_NAME_MAX);
     fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
     fields.tx_pwr_lvl_is_present = 1;
 
     int rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
         ESP_LOGE(TAG, "adv_set_fields failed: %d", rc);
+        schedule_adv_retry();
         return;
     }
 
@@ -391,15 +468,18 @@ static void start_advertising(void) {
     rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
     if (rc != 0) {
         ESP_LOGE(TAG, "adv_rsp_set_fields failed: %d", rc);
+        schedule_adv_retry();
         return;
     }
 
     /* S22: advertise with random address, not permanent public MAC */
     rc = ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER, &adv_params,
                            gap_event_handler, NULL);
-    if (rc != 0) {
+    bramble_boot_probe(0x10, rc);
+    if (rc != 0 && rc != BLE_HS_EALREADY) {
         ESP_LOGE(TAG, "adv_start failed: %d", rc);
-    } else {
+        schedule_adv_retry();
+    } else if (rc == 0) {
         ESP_LOGI(TAG, "BLE advertising started as '%s' (random addr)", s_device_name);
     }
 }
@@ -511,8 +591,14 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
 static void ble_host_task(void* param) {
     (void)param;
     ESP_LOGI(TAG, "NimBLE host task started");
-    nimble_port_run(); /* blocks until nimble_port_stop() */
+    nimble_port_run(); /* blocks until the stack is stopped */
+#ifdef ESP_PLATFORM
     nimble_port_freertos_deinit();
+#else
+    /* Upstream NimBLE has no freertos_deinit; the port's own task function
+     * returns only at shutdown, so end the task explicitly. */
+    vTaskDelete(NULL);
+#endif
 }
 
 static void on_sync(void) {
@@ -538,16 +624,42 @@ static void on_reset(int reason) { ESP_LOGW(TAG, "BLE host reset: reason=%d", re
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
+/* Default BLE name when the operator has not named the node: "Bramble-XXXX"
+ * carrying the low 16 bits of the node address, the same short form the mDNS
+ * hostname (bramble-%04x) and the webapp's formatAddrShort already use. A
+ * fleet of unnamed nodes otherwise advertises one indistinguishable
+ * "Bramble", and on a consoleless board (T1000-E) the advertisement is the
+ * only place the address is legible before connecting. Identity is started
+ * before the transport on both platforms, so the lookup normally succeeds;
+ * the bare name remains the fallback if it ever does not. */
+static void set_default_device_name(void) {
+    uint32_t addr = 0;
+    uint8_t pubkey[32];
+    if (mesh_get_identity(&addr, pubkey) == 0) {
+        snprintf(s_device_name, sizeof(s_device_name), "Bramble-%04" PRIX32, addr & 0xFFFFu);
+    } else {
+        strncpy(s_device_name, "Bramble", sizeof(s_device_name) - 1);
+        s_device_name[sizeof(s_device_name) - 1] = '\0';
+    }
+}
+
 int ble_server_init(void) {
     /* Read node name for BLE device name */
+    bool named = false;
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &nvs) == ESP_OK) {
         size_t len = sizeof(s_device_name);
-        if (nvs_get_str(nvs, "node_name", s_device_name, &len) != ESP_OK) {
-            strncpy(s_device_name, "Bramble", sizeof(s_device_name));
-        }
+        named = nvs_get_str(nvs, "node_name", s_device_name, &len) == ESP_OK && s_device_name[0];
         nvs_close(nvs);
     }
+    if (!named) {
+        set_default_device_name();
+    }
+
+    /* Advertising restart retry timer; see schedule_adv_retry. Created
+     * here once so no two tasks ever race the creation. */
+    s_adv_retry_timer =
+        xTimerCreate("ble_adv_retry", pdMS_TO_TICKS(BLE_ADV_RETRY_MS), pdFALSE, NULL, adv_retry_cb);
 
     /* Create RPC processing queue and task */
     s_rpc_queue = xQueueCreate(4, sizeof(ble_rpc_msg_t));
@@ -562,11 +674,19 @@ int ble_server_init(void) {
      * size it for their worst case plus interrupt frames, not the average. */
     xTaskCreate(ble_rpc_task, "ble_rpc", 16384, NULL, 5, NULL);
 
+#ifdef ESP_PLATFORM
+    /* On ESP-IDF this also starts the Bluetooth controller and can fail. */
     int rc = nimble_port_init();
     if (rc != 0) {
         ESP_LOGE(TAG, "nimble_port_init failed: %d", rc);
         return -1;
     }
+#else
+    /* Upstream initializes host plus the built-in controller and returns
+     * void; failures assert inside the stack. */
+    nimble_port_init();
+    int rc = 0;
+#endif
 
     /* Configure NimBLE host */
     ble_hs_cfg.reset_cb = on_reset;
@@ -640,11 +760,24 @@ int ble_server_start(void) {
 }
 
 void ble_server_stop(void) {
+    /* A retry armed just before shutdown must not fire into a deinitialized
+     * host. Delete waits for the timer command queue, so after this returns
+     * the callback can no longer run. */
+    if (s_adv_retry_timer != NULL) {
+        xTimerDelete(s_adv_retry_timer, portMAX_DELAY);
+        s_adv_retry_timer = NULL;
+    }
+#ifdef ESP_PLATFORM
     int rc = nimble_port_stop();
     if (rc == 0) {
         nimble_port_deinit();
-        ESP_LOGI(TAG, "BLE server stopped");
     }
+#else
+    /* Upstream NimBLE exposes no stop/deinit in the porting layer; this
+     * target never tears the stack down (there is no Wi-Fi mode to switch
+     * to), so the honest thing is to say so rather than pretend. */
+    ESP_LOGW(TAG, "ble_server_stop is not supported on this platform");
+#endif
 }
 
 bool ble_server_connected(void) { return s_conn_handle != BLE_HS_CONN_HANDLE_NONE; }

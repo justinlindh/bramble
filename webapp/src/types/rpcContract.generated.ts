@@ -355,7 +355,7 @@ export interface paths {
         put?: never;
         /**
          * Send a network probe
-         * @description Broadcasts a probe packet. Responses arrive asynchronously as probe.ack notifications, followed by a probe.complete notification.
+         * @description Broadcasts a probe packet. Takes no parameters. Responses arrive asynchronously as bramble.onProbeResult notifications, followed by a bramble.onProbeComplete notification.
          */
         post: operations["sendProbe"];
         delete?: never;
@@ -598,6 +598,26 @@ export interface paths {
          * @description Sends a one-time location update to the specified address.
          */
         post: operations["shareLocationOnce"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rpc/bramble.enterDfu": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reboot into the firmware-update bootloader
+         * @description Reboots the node into its firmware-update bootloader (UF2 mass-storage DFU on nRF52 boards). Returns an error object on platforms without a DFU bootloader (ESP32, which updates over OTA instead). On success the node drops the connection about half a second after responding.
+         */
+        post: operations["enterDfu"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3401,6 +3421,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ShareLocationOnceResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    enterDfu: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description DFU reboot scheduled, or error on unsupported platforms */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */

@@ -204,11 +204,6 @@ const stored_msg_t* msg_store_get(int index);
 bool msg_store_get_copy(int index, stored_msg_t* out);
 
 /**
- * Clear all stored messages.
- */
-void msg_store_clear(void);
-
-/**
  * Initialize message store with SPIFFS persistence.
  * If persistence is enabled and messages are found, loads recent messages into RAM.
  * Call this instead of msg_store_init() to enable persistence.

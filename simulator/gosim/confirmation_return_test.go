@@ -100,7 +100,7 @@ func TestPhase1ConfirmationReachesOriginatorAcrossMultiHopLine(t *testing.T) {
 	destDelivered := false
 	sourceConfirmed := false
 	for _, line := range result.Lines() {
-		var evt map[string]interface{}
+		var evt map[string]any
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}

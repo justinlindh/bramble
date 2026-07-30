@@ -81,10 +81,10 @@ func (g *Gateway) nextID() uint64 { return atomic.AddUint64(&g.idc, 1) }
 // --- JSON-RPC (serial) wire types ---
 
 type rpcRequest struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      uint64      `json:"id"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params,omitempty"`
+	JSONRPC string `json:"jsonrpc"`
+	ID      uint64 `json:"id"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitempty"`
 }
 
 type rpcError struct {
@@ -206,7 +206,7 @@ func (g *Gateway) enable(nr *bufio.Reader, force bool) error {
 	id := g.nextID()
 	if err := g.sendNode(rpcRequest{
 		JSONRPC: "2.0", ID: id, Method: "phy.enable",
-		Params: map[string]interface{}{"ttl_s": gatewayTTLSec, "force": force},
+		Params: map[string]any{"ttl_s": gatewayTTLSec, "force": force},
 	}); err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func (g *Gateway) enable(nr *bufio.Reader, force bool) error {
 // etherHello performs the emu-link handshake and waits for the broker's time
 // acknowledgement, which confirms the gateway has attached and bound a slot.
 func (g *Gateway) etherHello(er *bufio.Reader) error {
-	if err := g.sendEther(map[string]interface{}{
+	if err := g.sendEther(map[string]any{
 		"t": "hello", "node": g.nodeName, "version": EmuLinkVersion,
 	}); err != nil {
 		return err
@@ -277,7 +277,7 @@ func (g *Gateway) pumpSerialToEther(nr *bufio.Reader) {
 		}
 		// Inject as a broadcast transmission from the gateway's position; the
 		// broker prices airtime and delivers to every in-range virtual node.
-		if err := g.sendEther(map[string]interface{}{
+		if err := g.sendEther(map[string]any{
 			"t": "tx", "payload": base64.StdEncoding.EncodeToString(raw),
 			"freq": p.Freq, "sf": 10, "bw": 125000, "cr": 1, "power": 22,
 		}); err != nil {
@@ -304,7 +304,7 @@ func (g *Gateway) pumpEtherToSerial(er *bufio.Reader) {
 		}
 		if err := g.sendNode(rpcRequest{
 			JSONRPC: "2.0", ID: g.nextID(), Method: "phy.tx",
-			Params: map[string]interface{}{"frame": hex.EncodeToString(raw)},
+			Params: map[string]any{"frame": hex.EncodeToString(raw)},
 		}); err != nil {
 			return
 		}
@@ -323,7 +323,7 @@ func (g *Gateway) keepalive(stop <-chan struct{}) {
 		case <-tick.C:
 			_ = g.sendNode(rpcRequest{
 				JSONRPC: "2.0", ID: g.nextID(), Method: "phy.enable",
-				Params: map[string]interface{}{"ttl_s": gatewayTTLSec, "force": g.force},
+				Params: map[string]any{"ttl_s": gatewayTTLSec, "force": g.force},
 			})
 		}
 	}
@@ -331,7 +331,7 @@ func (g *Gateway) keepalive(stop <-chan struct{}) {
 
 // sendNode writes one JSON-RPC line to the serial link (guarded: phy.tx and
 // keepalive both write).
-func (g *Gateway) sendNode(v interface{}) error {
+func (g *Gateway) sendNode(v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -347,7 +347,7 @@ func (g *Gateway) sendNode(v interface{}) error {
 }
 
 // sendEther writes one emu-link line to the broker (guarded).
-func (g *Gateway) sendEther(v interface{}) error {
+func (g *Gateway) sendEther(v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

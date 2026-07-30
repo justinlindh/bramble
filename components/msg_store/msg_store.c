@@ -1,6 +1,13 @@
 #include "msg_store.h"
 #include <string.h>
 
+/* The CONFIG_BRAMBLE_MSG_PERSIST_* values below come from here. Include it
+ * explicitly rather than relying on esp_log.h to drag it in: that transitive
+ * path only exists inside the ESP_PLATFORM branch, so on other platforms
+ * persistence silently compiled itself out (found on the nRF target, where
+ * the message store looked healthy and simply never wrote to flash). */
+#include "sdkconfig.h"
+
 #ifdef ESP_PLATFORM
 #include "esp_timer.h"
 #endif
@@ -20,7 +27,40 @@ static stored_msg_t* s_msgs = NULL;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 #define MSG_LOCK() portENTER_CRITICAL(&s_lock)
 #define MSG_UNLOCK() portEXIT_CRITICAL(&s_lock)
+#elif defined(BRAMBLE_PLATFORM_NRF)
+#include <FreeRTOS.h>
+#include <semphr.h>
+#include <task.h>
+/* The mesh task writes this ring while the RPC transport task reads it
+ * (bramble.getMessages over BLE), and a record is ~700 bytes, so an
+ * unsynchronized reader can observe a half-written slot. ESP uses a
+ * cross-core spinlock; a mutex is the single-core equivalent. Nothing here
+ * runs in ISR context. */
+static stored_msg_t s_msgs_storage[MSG_STORE_MAX];
+static stored_msg_t* s_msgs = s_msgs_storage;
+static SemaphoreHandle_t s_msg_lock;
+static StaticSemaphore_t s_msg_lock_buf;
+static void msg_lock_init(void) {
+    if (s_msg_lock == NULL) {
+        s_msg_lock = xSemaphoreCreateMutexStatic(&s_msg_lock_buf);
+    }
+}
+static void msg_lock(void) {
+    msg_lock_init();
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        xSemaphoreTake(s_msg_lock, portMAX_DELAY);
+    }
+}
+static void msg_unlock(void) {
+    if (s_msg_lock != NULL && xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        xSemaphoreGive(s_msg_lock);
+    }
+}
+#define MSG_LOCK() msg_lock()
+#define MSG_UNLOCK() msg_unlock()
+
 #else
+
 static stored_msg_t s_msgs_storage[MSG_STORE_MAX];
 static stored_msg_t* s_msgs = s_msgs_storage;
 /* Host build is single-threaded test code; no locking needed. */
@@ -271,13 +311,6 @@ bool msg_store_get_copy(int index, stored_msg_t* out) {
     }
     MSG_UNLOCK();
     return ok;
-}
-
-void msg_store_clear(void) {
-    MSG_LOCK();
-    s_head = 0;
-    s_count = 0;
-    MSG_UNLOCK();
 }
 
 void msg_store_init_with_persistence(void) {
