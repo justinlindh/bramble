@@ -19,12 +19,6 @@
 int sleep_manager_init(void);
 
 /**
- * Deinitialize sleep manager.
- * Stops timer and releases resources.
- */
-void sleep_manager_deinit(void);
-
-/**
  * Signal user activity (keypress, touch, etc.).
  * Resets sleep timer and wakes display if asleep.
  */
@@ -37,12 +31,6 @@ void sleep_manager_activity(void);
  * the UI/LVGL task and never from the timer callback. Call periodically.
  */
 void sleep_manager_process(void);
-
-/**
- * Check if display is currently in sleep mode.
- * Returns true if asleep, false if awake.
- */
-bool sleep_manager_is_asleep(void);
 
 /**
  * Enable or disable automatic sleep mode.
