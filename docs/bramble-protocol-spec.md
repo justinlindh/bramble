@@ -225,7 +225,7 @@ slot  = (local_addr XOR original_packet_id) % SLOT_BUCKETS
 delay = SLOT_BASE_MS + (slot × SLOT_SPACING_MS) + random(0, 400)
 ```
 
-The bucket count scales to the mesh actually heard: two slots per peer, clamped to [4, 32] (`mesh_broadcast_receipt_slot_delay_ms`), so the window grows with the number of nodes that could answer the same broadcast. A tiny bench confirms in under ~2s while a dense mesh keeps the full anti-collision spread of up to ~32 seconds, keeping birthday-problem collisions rare across typical mesh sizes.
+The bucket count scales to the mesh actually heard: two slots per peer, clamped to [4, 32] (`mesh_broadcast_receipt_slot_delay_ms`), so the window grows with the number of nodes that could answer the same broadcast. A tiny bench sits at the 4-bucket floor and confirms in 0.3-3.7s (about 2s on average), while a dense mesh keeps the full 32-bucket anti-collision spread of 0.3-31.7s, keeping birthday-problem collisions rare across typical mesh sizes.
 
 **Layer 2, LBT (§3.3):** Each receipt transmission passes through the CAD check, providing a second chance to detect and avoid an in-progress transmission.
 

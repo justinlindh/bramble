@@ -43,10 +43,12 @@ uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t orig
     /* Scale the contention window to the mesh actually present: the number
      * of nodes that can answer the same broadcast is bounded by how many
      * peers this node hears (its neighbor count is a proxy with the right
-     * order of magnitude). The fixed 32-bucket window put 0.3-15.8s of dead
-     * air before every delivery confirmation even on a 2-node bench. Two
-     * slots per peer, clamped to [4, 32]: a small mesh confirms in under
-     * ~2s while dense meshes keep the full anti-collision spread. */
+     * order of magnitude). A fixed 32-bucket window would put the full
+     * 0.3-31.7s spread (including the caller's 0-399ms jitter) of dead air
+     * before every delivery confirmation even on a 2-node bench. Two slots
+     * per peer, clamped to [4, 32]: a small mesh sits at the 4-bucket floor
+     * and confirms in 0.3-3.7s, about 2s on average, while dense meshes
+     * keep the full anti-collision spread. */
     uint32_t buckets = 2u * (uint32_t)peer_count;
     if (buckets < BROADCAST_RECEIPT_SLOT_BUCKETS_MIN)
         buckets = BROADCAST_RECEIPT_SLOT_BUCKETS_MIN;
