@@ -295,7 +295,35 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
     pos.timestamp = t / 1000;
     pos.valid = true;
 
-    uint32_t sent_count = 0;
+    /* Two phases on purpose: COLLECT the targets under the NVS iterator, then
+     * release everything and only then TRANSMIT.
+     *
+     * The iterator holds the NVS shim's mutex for the whole iteration, so
+     * calling mesh_send_location_packet() from inside the loop would make
+     * NVS the outer lock over everything that send path touches. Two
+     * reverse orderings exist and each one is a deadlock:
+     *   - s_state_mutex then NVS, via mesh_add_channel() ->
+     *     channel_storage_save() (mesh_channels.c), on the ble_rpc task. An
+     *     addChannel landing during a share round wedges both tasks.
+     *   - s_dm_mutex then s_nonce_mutex then NVS, via
+     *     nonce_counter_next()'s reserve-ceiling flush ->
+     *     mesh_nonce_write() (nonce_counter.c, mesh_persist.c), on any
+     *     sendMessage. The NVS call is two frames below the mutex, which is
+     *     why a textual scan of the critical sections does not show it.
+     * Hoisting the transmit out keeps the shim mutex strictly below every
+     * other lock in the system: it is taken while holding nothing else, and
+     * nothing else is taken while holding it.
+     *
+     * It also stops the NVS mutex being pinned across synchronous LBT radio
+     * transmits (up to about a second per contact in the worst case), which
+     * was starving the gnss drain task and the bond writer. */
+    struct {
+        uint32_t addr;
+        uint8_t tier;
+    } targets[LOCATION_MAX_CONTACTS];
+    size_t target_count = 0;
+    size_t skipped = 0;
+
     nvs_iterator_t it = NULL;
     if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) == ESP_OK) {
         while (it != NULL) {
@@ -320,10 +348,20 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
                 }
 
                 if (enabled) {
-                    uint32_t pkt_id =
-                        mesh_send_location_packet((uint32_t)strtoul(addr, NULL, 16), &pos, tier);
-                    if (pkt_id != 0) {
-                        sent_count++;
+                    if (target_count < LOCATION_MAX_CONTACTS) {
+                        targets[target_count].addr = (uint32_t)strtoul(addr, NULL, 16);
+                        targets[target_count].tier = tier;
+                        target_count++;
+                    } else {
+                        /* Nothing caps how many lcr_ keys the setLocationRule
+                         * RPC can write (LOCATION_MAX_CONTACTS bounds the
+                         * in-RAM location_manager_t, not the NVS namespace),
+                         * so this really is reachable. Count and log rather
+                         * than truncate quietly: the previous in-loop send
+                         * had no bound at all, and silently dropping a
+                         * contact from a share round is exactly the kind of
+                         * thing that should be visible. */
+                        skipped++;
                     }
                 }
             }
@@ -336,6 +374,19 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
     }
 
     nvs_close(nvs);
+
+    if (skipped > 0) {
+        ESP_LOGW(TAG, "location share: %u contacts over the %d-target cap were not sent",
+                 (unsigned)skipped, LOCATION_MAX_CONTACTS);
+    }
+
+    /* Transmit phase: no NVS lock, no iterator, nothing held. */
+    uint32_t sent_count = 0;
+    for (size_t i = 0; i < target_count; i++) {
+        if (mesh_send_location_packet(targets[i].addr, &pos, targets[i].tier) != 0) {
+            sent_count++;
+        }
+    }
 
     if (sent_count > 0) {
         mesh_emit_location_event("sent", 0, policy->default_tier, t, 0, 0, sent_count);
@@ -570,6 +621,16 @@ void mesh_location_policy_tick(uint32_t t) {
     }
 }
 
+/* Cache window for the NVS-backed half of the share state. The gnss task
+ * calls this once a second for its duty-cycle decision, and answering it
+ * meant an nvs_open plus a policy load plus a full directory iteration every
+ * time: a second 1Hz NVS reader alongside the mesh task's policy tick, which
+ * is the traffic that made the iterator race reachable at all. The policy is
+ * operator configuration that changes on human timescales, so re-reading it
+ * every 10s instead of every 1s costs nothing real and cuts this caller's
+ * share of the NVS load by 90%. */
+#define LOCATION_SHARE_STATE_CACHE_MS 10000U
+
 /* Feeds the GNSS duty-cycling decision (gps_duty_should_power). Reads the
  * policy exactly like mesh_location_policy_tick above (its own NVS handle,
  * not shared state), because the caller here is the nRF GNSS task, not the
@@ -581,17 +642,11 @@ void mesh_location_policy_tick(uint32_t t) {
  * case is a snapshot up to one policy tick stale, the same lock-free
  * cross-task reasoning mesh_get_location_state uses for my_position. No
  * lock is taken here on purpose. */
-/* Cache window for the NVS-backed half of the share state. The gnss task
- * calls this once a second for its duty-cycle decision, and answering it
- * meant an nvs_open plus a policy load plus a full directory iteration every
- * time: a second 1Hz NVS reader alongside the mesh task's policy tick, which
- * is the traffic that made the iterator race reachable at all. The policy is
- * operator configuration that changes on human timescales, so re-reading it
- * every 10s instead of every 1s costs nothing real and cuts this caller's
- * share of the NVS load by 90%. */
-#define LOCATION_SHARE_STATE_CACHE_MS 10000U
-
 void mesh_location_get_share_state(mesh_location_share_state_t* out) {
+    /* Unsynchronized on purpose: these are only ever touched from this
+     * function, and on every target it has exactly one caller (the nRF GNSS
+     * task's duty tick), so there is no second writer to race. If a second
+     * caller is ever added, this cache needs a lock. */
     static bool s_cached_valid;
     static bool s_cached_sharing_active;
     static uint32_t s_cached_interval_s;
