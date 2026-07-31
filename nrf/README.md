@@ -7,7 +7,7 @@ and the platform seams are shimmed (`shim/`).
 
 The port landed in phases, and the measured tables below keep their phase
 labels: P0 protocol core on the dev kit, P1 LoRa radio, P2 BLE RPC + flash
-persistence, P3 (not yet started) GNSS and power management.
+persistence, P3 GNSS (below; power management within P3 not yet started).
 
 Status, stated per the repo's honesty conventions: builds, boots, and runs
 as a live peer on the bench mesh from the Wio-WM1110 dev kit, with the
@@ -41,8 +41,10 @@ mesh traffic with the ESP32 fleet, and reflashes remotely over BLE
 boot failures are diagnosed through the flash boot trace (below) instead of
 a UART.
 
-Still absent: GNSS (P3), power management (P3, the 32MHz crystal stays on,
-so battery life is untuned). Not a supported device yet.
+GNSS (P3) is implemented for the AG3335 module (see below), but it has not
+run on hardware yet: the driver is build-verified only, pending a bench
+validation pass. Still absent: power management (P3, the 32MHz crystal
+stays on, so battery life is untuned). Not a supported device yet.
 
 ## Build
 
@@ -139,6 +141,79 @@ through the `CURRENT.UF2` flash dump with no debugger attached:
 python3 nrf/scripts/read_boot_trace.py /run/media/$USER/T1000-E/CURRENT.UF2
 ```
 
+## GNSS (T1000-E)
+
+The T1000-E carries an Airoha AG3335 GNSS module wired to the nRF's UARTE1
+(the board has no console UART, see above). The driver
+(`shim/gps_t1000e.c`) satisfies the same `components/gps/include/gps.h`
+contract as the ESP32 fleet and the emulator's virtual GPS: an nrfx event
+handler double-buffers EasyDMA bytes into a 512B FreeRTOS stream buffer, a
+dedicated "gnss" task drains that buffer into `components/gps/gps_feed.c`
+(the platform-free NMEA parser shared by every backend), and the feed's fix
+callback emits the same `bramble.onGpsEvent` shape regardless of which
+fleet the node runs on. Every power transition (the initial power-on and
+every later toggle) also runs on that task, never on the caller, so neither
+the boot path nor the RPC handler behind `bramble.setGpsEnabled` ever blocks
+on the module's power-on sequence.
+
+Pin map: `boards/t1000e.h`, sourced from Meshtastic's `tracker-t1000-e`
+board variant, the field-proven community map for this hardware (EN,
+RESET, VRTC_EN, SLEEP_INT, RTC_INT, RESETB, plus TX/RX on UARTE1 at
+115200 8N1).
+
+Power-on sequence: EN high, a reset pulse, an RTC_INT wake pulse followed
+by about a second of `$PAIR382` wake commands (Meshtastic treats this as
+required on this module), then a `$PAIR0xx` configuration burst that
+enables GPS, GLONASS, Galileo, and BeiDou and turns on GGA, RMC, and GSV
+sentences (GLL, GSA, VTG, and ZDA stay off), saved to the module's flash
+with `$PAIR513`. GSV is a deliberate deviation from Meshtastic's variant:
+it is the only sentence carrying satellites-in-view, which the diagnostics
+below expose for a "searching" UI before the first fix. The whole sequence
+blocks the gnss task for close to two seconds while the module is already
+talking; VRTC_EN is driven high once at boot and never cleared, so the
+module keeps backup power across `gps_set_enabled()` toggles and gets a
+warm start on the next power-on.
+
+Enable preference and RPC toggle: `components/gps/gps_pref.c` persists a
+boolean (`bramble/gps_en` NVS key, default on). `bramble.setGpsEnabled`
+flips it and applies it live through `gps_set_enabled()`;
+`bramble.getStatus` reports the current value as `gps_enabled`, independent
+of the `gps_available` capability flag, and the webapp's Settings screen
+exposes it as a toggle.
+
+Duty-cycling: `components/gps/gps_duty.c` is a pure, host-tested policy
+(`test/test_gps_duty.c`) that the gnss task evaluates once a second against
+the mesh's location-share state. GNSS stays off outright if the user
+preference is off; otherwise it stays powered continuously unless the node
+is actively sharing location on an interval of at least
+`GPS_DUTY_MIN_INTERVAL_S` (120s; below that, cycling saves nothing against
+the margin cost). When sharing on a longer interval, it powers down between
+fixes and wakes `GPS_DUTY_WARM_MARGIN_S` before the next scheduled send to
+leave time for a warm reacquisition. That margin defaults to 60s and is
+deliberately generous: it has not been tuned against a bench-measured warm
+TTFF, so it is documented here as a default awaiting that measurement, not
+a validated figure.
+
+Diagnostics: `bramble.getDiagnostics` reports `gps_rx_bytes` and
+`gps_rx_lines` (total bytes and NMEA-ish lines seen since the driver last
+started), `gps_chip` (the first `$PAIR021*` chip-identification banner
+line, empty if none seen), and `gps_rx_overruns` / `gps_rx_errors` (bytes
+dropped when the stream buffer was full, and UARTE error events), present
+only on GPS-capable boards. Zero rx bytes with the driver running means the
+UART link is dead; nonzero bytes with zero lines means data is flowing but
+not parsing.
+
+Verification status: the shared NMEA feed (`components/gps/gps_feed.c`)
+and the duty-cycling policy (`components/gps/gps_duty.c`) are host-tested
+via `bash test/run_all_tests.sh`. The T1000-E driver itself
+(`shim/gps_t1000e.c`) is build-verified only; it has not yet run against a
+live AG3335 module on hardware. Airoha's published AG3335 chip
+specification states a cold-start time to first fix under 25 seconds and a
+tracking sensitivity of -167 dBm; Airoha does not publish current
+consumption figures for the chip, so none are cited here. Both TTFF and
+current draw on the actual T1000-E hardware are bench measurements yet to
+be taken, not figures this port has verified.
+
 ## Dev network key (bench only)
 
 Bench builds may seed the network key at configure time:
@@ -186,3 +261,9 @@ the FreeRTOS heap at 96KB and the MSP stack/libc heap tuned to 8KB/4KB;
 flash 151,912 bytes (14.5%). On-air: first beacon TX 230 bytes; 10 beacons
 per 10-minute soak at the adaptive interval; LR1110 TCXO runs at 1.6V/164
 ticks (the vendor SDK's 3.0V was not needed; no calibration errors).
+
+Neither table above includes the T1000-E's GNSS driver (see the GNSS
+section above): both were measured on the Wio-WM1110 dev kit build, which
+has no GPS hardware and compiles it out. A T1000-E image size, including
+the GNSS driver, has not been measured yet; that figure is part of the
+pending bench validation pass.
