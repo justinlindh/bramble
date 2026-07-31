@@ -581,21 +581,51 @@ void mesh_location_policy_tick(uint32_t t) {
  * case is a snapshot up to one policy tick stale, the same lock-free
  * cross-task reasoning mesh_get_location_state uses for my_position. No
  * lock is taken here on purpose. */
+/* Cache window for the NVS-backed half of the share state. The gnss task
+ * calls this once a second for its duty-cycle decision, and answering it
+ * meant an nvs_open plus a policy load plus a full directory iteration every
+ * time: a second 1Hz NVS reader alongside the mesh task's policy tick, which
+ * is the traffic that made the iterator race reachable at all. The policy is
+ * operator configuration that changes on human timescales, so re-reading it
+ * every 10s instead of every 1s costs nothing real and cuts this caller's
+ * share of the NVS load by 90%. */
+#define LOCATION_SHARE_STATE_CACHE_MS 10000U
+
 void mesh_location_get_share_state(mesh_location_share_state_t* out) {
-    nvs_handle_t nvs;
-    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK) {
-        out->sharing_active = false;
-        out->interval_s = 0;
-        out->last_send_ms = s_location_last_send_ms;
-        return;
+    static bool s_cached_valid;
+    static bool s_cached_sharing_active;
+    static uint32_t s_cached_interval_s;
+    static uint32_t s_cached_at_ms;
+
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+
+    if (!s_cached_valid || (now - s_cached_at_ms) >= LOCATION_SHARE_STATE_CACHE_MS) {
+        nvs_handle_t nvs;
+        if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK) {
+            /* Not cached: a failed open is usually "namespace does not exist
+             * yet", which the very next write changes, so caching it would
+             * hide the transition for up to the whole window. */
+            out->sharing_active = false;
+            out->interval_s = 0;
+            out->last_send_ms = s_location_last_send_ms;
+            return;
+        }
+
+        location_policy_t policy;
+        location_policy_load_or_defaults(nvs, &policy);
+        nvs_close(nvs);
+
+        s_cached_sharing_active = policy.enabled && location_policy_has_targets();
+        s_cached_interval_s = policy.interval_s;
+        s_cached_at_ms = now;
+        s_cached_valid = true;
     }
 
-    location_policy_t policy;
-    location_policy_load_or_defaults(nvs, &policy);
-    nvs_close(nvs);
-
-    out->sharing_active = policy.enabled && location_policy_has_targets();
-    out->interval_s = policy.interval_s;
+    out->sharing_active = s_cached_sharing_active;
+    out->interval_s = s_cached_interval_s;
+    /* Never cached: last_send_ms is a plain in-RAM counter that the share path
+     * updates, and the duty-cycle logic wakes the receiver relative to it, so
+     * a stale value here would move every scheduled wake. */
     out->last_send_ms = s_location_last_send_ms;
 }
 

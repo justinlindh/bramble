@@ -615,6 +615,35 @@ target_include_directories(test_nvs_lfs_shim PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 
+# Iterator regression suite for the same flash-backed shim. Separate from the
+# shared contract suite above because it asserts nvs_lfs.c's own enforced
+# single-live-iterator behaviour, which the RAM shim does not implement.
+add_executable(test_nvs_lfs_iter
+    test_nvs_lfs_iter.c
+    ../nrf/shim/nvs_lfs.c
+    stubs/lfs_nvmc_rambd.c
+    stubs/nrf_log_host_stub.c
+    ${littlefs_SOURCE_DIR}/lfs.c
+    ${littlefs_SOURCE_DIR}/lfs_util.c
+    ${littlefs_SOURCE_DIR}/bd/lfs_rambd.c
+    unity/unity.c
+)
+target_compile_definitions(test_nvs_lfs_iter PRIVATE
+    BRAMBLE_TEST_NVS_LFS
+    BRAMBLE_LFS_BASE=0
+    BRAMBLE_LFS_SIZE=0x2D000
+    LFS_NO_MALLOC
+)
+target_include_directories(test_nvs_lfs_iter BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src
+    ${littlefs_SOURCE_DIR}
+)
+target_include_directories(test_nvs_lfs_iter PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+
 # The nRF message-store backend, run for real against littlefs's RAM block
 # device: recovery invariants (count from file size, torn-record truncation,
 # corrupt-header recreate), the streaming rollover, and clear. The ESP SPIFFS
