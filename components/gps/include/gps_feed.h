@@ -41,6 +41,16 @@ bool gps_feed_has_fix(const gps_feed_t* f);
 bool gps_feed_get_position(const gps_feed_t* f, bramble_position_t* out);
 bool gps_feed_get_utc_hm(const gps_feed_t* f, uint8_t* hour, uint8_t* min);
 void gps_feed_get_stats(const gps_feed_t* f, uint64_t now_ms, gps_stats_t* out);
+/* Clears the current fix and its UTC latch (has_fix, utc_valid) without
+ * touching anything else: sats/antenna stats, rx counters, the chip banner,
+ * the accumulator's merged coordinates, and the cb registration all survive.
+ * For a driver that needs to invalidate "we have a fix" (e.g. on a power
+ * gate re-open) without losing in-progress stats. The invariant that
+ * utc_valid implies has_fix (both set together in gps_feed_line) lives
+ * entirely inside gps_feed: callers must go through this instead of poking
+ * f->has_fix/f->utc_valid directly, or they can desync the two and leak a
+ * stale UTC time-of-day past a fix that no longer holds. */
+void gps_feed_clear_fix(gps_feed_t* f);
 /* Clears fix/stats/accumulator/banner but keeps cb registration. */
 void gps_feed_reset(gps_feed_t* f);
 

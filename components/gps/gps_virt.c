@@ -168,16 +168,12 @@ int gps_set_enabled(bool enabled) {
     }
 
     pthread_mutex_lock(&s_mu);
-    /* Old code cleared only s_has_fix here (sats/antenna stats survive an
-     * enable without an intervening disable); the double gate in the old
-     * gps_get_utc_hm (s_has_fix && s_utc_valid) kept a stale UTC latch
-     * hidden even though s_utc_valid was untouched. gps_feed_get_utc_hm
-     * checks only utc_valid (the feed's own invariant is that utc_valid
-     * implies has_fix, both set together and cleared together by
-     * gps_feed_reset), so clearing has_fix alone here would leak a stale
-     * UTC time-of-day; clear both to preserve the same observable gate. */
-    s_feed.has_fix = false;
-    s_feed.utc_valid = false;
+    /* Invalidate the current fix on re-enable (sats/antenna stats survive:
+     * gps_feed_clear_fix leaves them alone). Old code cleared only s_has_fix
+     * here and relied on gps_get_utc_hm's double check (s_has_fix &&
+     * s_utc_valid) to hide a stale UTC latch; gps_feed_clear_fix clears the
+     * fix and its UTC latch together, which is the same observable gate. */
+    gps_feed_clear_fix(&s_feed);
     s_gate_on = true; /* power the GNSS on (P-FET low) */
     pthread_mutex_unlock(&s_mu);
 

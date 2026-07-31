@@ -8,6 +8,11 @@ void gps_feed_init(gps_feed_t* f, gps_fix_cb_t cb, void* ctx) {
     f->cb_ctx = ctx;
 }
 
+void gps_feed_clear_fix(gps_feed_t* f) {
+    f->has_fix = false;
+    f->utc_valid = false;
+}
+
 void gps_feed_reset(gps_feed_t* f) {
     gps_fix_cb_t cb = f->cb;
     void* cb_ctx = f->cb_ctx;

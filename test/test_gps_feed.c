@@ -99,6 +99,40 @@ void test_reset_clears_fix_keeps_cb(void) {
     TEST_ASSERT_EQUAL_INT(2, cb_count); /* cb survived the reset */
 }
 
+void test_clear_fix_hides_position_and_utc_but_keeps_stats(void) {
+    char buf[160];
+    snprintf(buf, sizeof(buf), "%s\r\n", GSV);
+    gps_feed_bytes(&f, (const uint8_t*)buf, strlen(buf), 1000); /* sats_in_view + rx counters */
+    gps_feed_line(&f, GGA, 1000);                               /* sats_used + UTC latch */
+    gps_feed_line(&f, RMC, 1000);                               /* fix */
+    gps_feed_line(&f, "$PAIR021,AG3335M,V1.0*3A", 1000);        /* chip banner */
+    TEST_ASSERT_TRUE(gps_feed_has_fix(&f));
+    uint8_t h, m;
+    TEST_ASSERT_TRUE(gps_feed_get_utc_hm(&f, &h, &m));
+    uint32_t rx_lines_before = f.rx_lines_total;
+
+    gps_feed_clear_fix(&f);
+
+    TEST_ASSERT_FALSE(gps_feed_has_fix(&f));
+    bramble_position_t p;
+    TEST_ASSERT_FALSE(gps_feed_get_position(&f, &p));
+    TEST_ASSERT_FALSE(gps_feed_get_utc_hm(&f, &h, &m));
+
+    /* Sats/antenna stats, rx counters, and the chip banner all survive. */
+    gps_stats_t st;
+    gps_feed_get_stats(&f, 1000, &st);
+    TEST_ASSERT_EQUAL_UINT8(8, st.sats_used);
+    TEST_ASSERT_EQUAL_UINT8(11, st.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT32(rx_lines_before, f.rx_lines_total);
+    TEST_ASSERT_EQUAL_STRING("$PAIR021,AG3335M,V1.0*3A", f.chip_banner);
+
+    /* A fresh valid sentence re-fixes and fires the callback again. */
+    int calls_before = cb_count;
+    gps_feed_line(&f, RMC, 2000);
+    TEST_ASSERT_TRUE(gps_feed_has_fix(&f));
+    TEST_ASSERT_EQUAL_INT(calls_before + 1, cb_count);
+}
+
 void test_gsv_updates_sats_in_view(void) {
     gps_feed_line(&f, GSV, 1000);
     gps_stats_t st;
@@ -117,6 +151,7 @@ int main(void) {
     RUN_TEST(test_utc_latched_from_gga);
     RUN_TEST(test_chip_banner_captured_once);
     RUN_TEST(test_reset_clears_fix_keeps_cb);
+    RUN_TEST(test_clear_fix_hides_position_and_utc_but_keeps_stats);
     RUN_TEST(test_gsv_updates_sats_in_view);
     return UNITY_END();
 }
