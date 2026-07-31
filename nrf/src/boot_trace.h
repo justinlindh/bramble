@@ -29,6 +29,7 @@
 #define BT_RPC_READY 0x08u     /* (0) */
 #define BT_TOKEN_SEED 0x09u    /* (rc) */
 #define BT_TOKEN_LOADED 0x0Au  /* (0) */
+#define BT_GPS_INIT 0x0Bu      /* (rc) gps_init result, GNSS boards only */
 #define BT_HFXO_OK 0x0Cu       /* (0) high-frequency crystal running */
 #define BT_LFCLK 0x0Du         /* (1 xtal / 0 rc) */
 #define BT_BLE_INIT 0x0Eu      /* (rc) ble_server_init */

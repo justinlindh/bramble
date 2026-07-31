@@ -11,14 +11,14 @@
  * The pin fields are deliberately all -1: the real pin mapping is owned by
  * the port (nrf/boards/t1000e.h) and the drivers that consume THESE fields
  * are the ESP-IDF ones, which do not build for nRF. This struct exists for
- * identity (name, short_name) and the capability mask. GNSS (the LR1110 +
- * AG3335 pair), battery ADC, buzzer and sensors exist on the hardware but
- * are not brought up until P3, so the mask honestly stays empty.
+ * identity (name, short_name) and the capability mask. GNSS is brought up
+ * by the nRF driver. Battery, buzzer, and sensors exist on the hardware but
+ * are not brought up yet, so they are not claimed here.
  */
 static const bramble_board_config_t board_t1000e = {
     .name = "Seeed SenseCAP T1000-E",
     .short_name = "t1000e",
-    .capabilities = 0,
+    .capabilities = BOARD_CAP_GPS,
 
     .peripheral_power_pin = -1,
 

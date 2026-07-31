@@ -20,6 +20,8 @@
 #define BOARD_PIN_CONSOLE_RX BOARD_PIN_UART1_RX
 #define BOARD_HAS_CONSOLE 1
 
+#define BOARD_HAS_GNSS 0
+
 // LR1110 radio bus (P1 phase; unused in P0)
 #define BOARD_PIN_LORA_SCK (32 + 13)   // P1.13
 #define BOARD_PIN_LORA_MOSI (32 + 14)  // P1.14

@@ -24,8 +24,22 @@
 #define BOARD_HAS_CONSOLE 0
 // The pins are still named so console_uart.c compiles; with
 // BOARD_HAS_CONSOLE 0 it never initializes the peripheral or touches them.
-#define BOARD_PIN_CONSOLE_TX 13 // P0.13, GNSS TX pad, unused
-#define BOARD_PIN_CONSOLE_RX 14 // P0.14, GNSS RX pad, unused
+#define BOARD_PIN_CONSOLE_TX 13 // P0.13, see BOARD_PIN_GNSS_TX (AG3335 RX)
+#define BOARD_PIN_CONSOLE_RX 14 // P0.14, see BOARD_PIN_GNSS_RX (AG3335 TX)
+
+// AG3335 GNSS (Meshtastic tracker-t1000-e variant, the field-proven map).
+// P0.13/P0.14 are the same pads named in the console stanza above: the
+// console never drives them (BOARD_HAS_CONSOLE 0); the GNSS driver does.
+#define BOARD_HAS_GNSS 1
+#define BOARD_PIN_GNSS_TX 13           // P0.13, nRF TX -> AG3335 RX
+#define BOARD_PIN_GNSS_RX 14           // P0.14, nRF RX <- AG3335 TX
+#define BOARD_GNSS_BAUD 115200
+#define BOARD_PIN_GNSS_EN (32 + 11)    // P1.11, HIGH = GNSS power on
+#define BOARD_PIN_GNSS_RESET (32 + 15) // P1.15, idle LOW, pulse HIGH to reset
+#define BOARD_PIN_GNSS_VRTC_EN 8       // P0.08, backup power: set HIGH once, NEVER clear
+#define BOARD_PIN_GNSS_SLEEP_INT (32 + 12) // P1.12, hold HIGH
+#define BOARD_PIN_GNSS_RTC_INT 15      // P0.15, LOW; pulse HIGH to wake
+#define BOARD_PIN_GNSS_RESETB (32 + 14) // P1.14, reset status readback, input pull-up
 
 // LR1110 radio bus
 #define BOARD_PIN_LORA_SCK 11          // P0.11
