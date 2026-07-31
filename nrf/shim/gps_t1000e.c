@@ -113,16 +113,37 @@ static volatile uint32_t s_rx_overruns;   /* stream-buffer-full drops */
 static volatile uint32_t s_rx_errors;     /* NRFX_UARTE_EVT_ERROR occurrences */
 static volatile uint32_t s_rx_disabled;   /* NRFX_UARTE_EVT_RX_DISABLED recoveries */
 static volatile uint32_t s_rx_rearm_fail; /* failed nrfx_uarte_rx from any site */
-static volatile bool s_shutdown;          /* gps_deinit's request to gnss_task */
-static bool s_powered;                    /* EN state; task-private, see file header */
-static volatile bool s_user_enabled;      /* mirrors gps_pref/setGpsEnabled; the one
-                                           * cross-task input into the gnss task */
+/* Set when an RX restart attempt fails, cleared when one succeeds. Sticky on
+ * purpose: without it a single failed recovery leaves reception dead forever
+ * with nothing but a counter to show for it, which is the same silent-death
+ * shape this whole path exists to prevent. gnss_task retries on its tick. */
+static volatile bool s_rx_needs_restart;
+static volatile bool s_shutdown;     /* gps_deinit's request to gnss_task */
+static bool s_powered;               /* EN state; task-private, see file header */
+static volatile bool s_user_enabled; /* mirrors gps_pref/setGpsEnabled; the one
+                                      * cross-task input into the gnss task */
 
 static uint64_t now_ms(void) { return (uint64_t)(esp_timer_get_time() / 1000ULL); }
 
 /* ------------------------------------------------------------------ */
 /*  UARTE event handler (IRQ context): only FromISR APIs here.         */
 /* ------------------------------------------------------------------ */
+
+/* Restart reception from scratch. Safe from both the RX_DISABLED handler (IRQ
+ * context, where nrfx has already finished its own teardown) and the gnss
+ * task's retry tick. Only the first buffer is supplied: nrfx_uarte_rx_enable()
+ * inside nrfx_uarte_rx() re-enables the peripheral, re-arms rx_int_mask and
+ * triggers STARTRX, whose RXSTARTED raises RX_BUF_REQUEST for the second, so
+ * there stays exactly one buffer-supply path. */
+static void gnss_rx_restart(void) {
+    s_rx_last_idx = 0;
+    if (nrfx_uarte_rx(&s_uarte, s_rx_buf[0], sizeof(s_rx_buf[0])) == NRFX_SUCCESS) {
+        s_rx_needs_restart = false;
+    } else {
+        s_rx_rearm_fail++;
+        s_rx_needs_restart = true;
+    }
+}
 
 static void uarte_handler(nrfx_uarte_event_t const* event, void* context) {
     (void)context;
@@ -208,10 +229,7 @@ static void uarte_handler(nrfx_uarte_event_t const* event, void* context) {
          * RXSTARTED, whose RX_BUF_REQUEST supplies the second through the
          * case above, which keeps one supply path rather than two. */
         s_rx_disabled++;
-        s_rx_last_idx = 0;
-        if (nrfx_uarte_rx(&s_uarte, s_rx_buf[0], sizeof(s_rx_buf[0])) != NRFX_SUCCESS) {
-            s_rx_rearm_fail++;
-        }
+        gnss_rx_restart();
         break;
     case NRFX_UARTE_EVT_ERROR:
         /* No re-arm here. nrfx keeps the receiver running through an ERROR
@@ -441,6 +459,11 @@ static void gnss_task(void* arg) {
         TickType_t now_tick = xTaskGetTickCount();
         if ((now_tick - last_duty_tick) >= pdMS_TO_TICKS(1000)) {
             last_duty_tick = now_tick;
+            /* Retry a failed RX restart. Costs one nrfx call a second only
+             * while reception is actually down. */
+            if (s_rx_needs_restart && s_powered) {
+                gnss_rx_restart();
+            }
 
             /* The only power-transition call site: see the file header.
              * gps_duty_should_power's rule 1 (!user_enabled -> off) fully
