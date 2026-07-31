@@ -212,15 +212,6 @@ export interface BrambleConfig {
   location: LocationConfig;
 }
 
-// ─── RPC types ─────────────────────────────────────────────────────────
-
-export interface SendParams {
-  dest: number;             // 0xFFFFFFFF for broadcast, 0xFFFFFFFE for default channel
-  text: string;
-  tier?: MessageTier;
-  channelIndex?: number;    // set for channel messages
-}
-
 // ─── Probe / Network Reach ─────────────────────────────────────────────
 
 export interface ProbeResponse {
