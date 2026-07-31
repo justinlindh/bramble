@@ -97,6 +97,11 @@ int gps_set_enabled(bool enabled);
 
 /**
  * Shutdown GPS and free resources.
+ *
+ * No other GPS API call may be in flight when this runs; callers must
+ * quiesce their own users of the GPS API first. A query blocked inside the
+ * driver during deinit is undefined: on the nRF driver, teardown deletes the
+ * locks that a blocked query is waiting on.
  */
 void gps_deinit(void);
 

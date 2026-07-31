@@ -45,9 +45,8 @@
  * this build. See the comments in gps_deinit() for the per-step reasoning.
  *
  * P1.06 (Meshtastic's PIN_3V3_EN, "Power to Sensors") is deliberately NOT
- * driven here. Bench Task 11 Step 2 validates that GNSS runs without it; the
- * documented contingency, if the bench disagrees, is a BOARD_PIN_GNSS_RAIL
- * define plus a step 0 in gnss_power_on(), resolved before merge either way.
+ * driven here. Bench testing on the physical T1000-E confirmed GNSS runs
+ * without it: no BOARD_PIN_GNSS_RAIL or extra power-on step is needed.
  */
 #include "gps.h"
 
@@ -101,7 +100,13 @@ static SemaphoreHandle_t s_tx_done; /* UARTE TX completion */
  * not yet published, skip its give, and self-delete behind gps_deinit's
  * back. See gps_deinit() for the full argument. */
 static StaticSemaphore_t s_stopped_buf;
-static SemaphoreHandle_t s_stopped;
+/* volatile: the publish-before-request ordering against s_shutdown (also
+ * volatile) in gps_deinit() must be structural, not empirical. C only
+ * orders volatile accesses against each other, not a volatile against a
+ * plain store, so without this the compiler (or gnss_task's read of
+ * s_shutdown racing this write) has no guarantee of seeing s_stopped set
+ * before s_shutdown goes true. */
+static SemaphoreHandle_t volatile s_stopped;
 static gps_feed_t s_feed;
 static volatile uint32_t s_rx_overruns; /* stream-buffer-full drops */
 static volatile uint32_t s_rx_errors;   /* NRFX_UARTE_EVT_ERROR occurrences */
@@ -675,7 +680,10 @@ void gps_deinit(void) {
      *    therefore targets a live, undeleted task.
      * 2. Capturing inside the same section makes gps_deinit idempotent and
      *    safe against two callers: exactly one of them comes out with a
-     *    non-NULL `task` and owns the teardown, the other returns here.
+     *    non-NULL `task` and owns the teardown below; the other observes
+     *    NULL and early-returns after forcing EN low, touching nothing
+     *    else, since s_mu/s_tx_done/s_stream may still be in live use by
+     *    the owning caller's still-running gnss_task.
      *
      * The critical section is the ordering guarantee. On this port
      * (GCC_ARM_CM4F) taskENTER_CRITICAL() raises BASEPRI to
@@ -691,67 +699,76 @@ void gps_deinit(void) {
     s_task = NULL;
     taskEXIT_CRITICAL();
 
-    if (task != NULL) {
-        /* Publish the confirmation channel BEFORE requesting the shutdown,
-         * never the other way round. gnss_task's exit path is "see
-         * s_shutdown, give s_stopped, self-delete", so if it observes
-         * s_shutdown while s_stopped is still NULL it skips the give and
-         * self-deletes silently; this function would then wait out the full
-         * budget and force-delete an already-reclaimed TCB, double-decrement
-         * uxCurrentNumberOfTasks and run prvDeleteTCB on freed memory that is
-         * still on the termination list. That window is not hypothetical with
-         * a dynamically created semaphore: gnss_task can wake on its own
-         * 100ms timeout inside it, and pvPortMalloc's vTaskSuspendAll /
-         * xTaskResumeAll pair is itself a reschedule point. The static
-         * variant removes both halves of the problem, since it neither
-         * allocates nor can return NULL. */
-        SemaphoreHandle_t stopped = xSemaphoreCreateBinaryStatic(&s_stopped_buf);
-        s_stopped = stopped;
-        s_shutdown = true;
-
-        /* Losing the ISR wake for the duration of the wait below is
-         * deliberate and harmless: gnss_task still polls the stream buffer
-         * every 100ms, gnss_delay_draining() blocks on the stream buffer
-         * rather than on notifications, and the task is on its way out. */
-        xTaskNotifyGive(task);
-
-        /* Budget for the worst case, not the nominal case: gnss_power_on()
-         * schedules ~1733ms of delay (10+100+3+50+1000+320+250) plus real
-         * UART TX time for its 34 gnss_tx() sends (25 wake + 8 config + 1
-         * save), and each of those 34 sends can independently block up to
-         * 100ms on its own TX_DONE timeout before giving up (3400ms on top
-         * in the worst case). 5500ms covers that with margin. */
-        bool confirmed = xSemaphoreTake(stopped, pdMS_TO_TICKS(5500)) == pdTRUE;
-
-        if (!confirmed) {
-            ESP_LOGW(TAG, "gps_deinit: gnss task did not confirm exit in time, forcing delete");
-            /* The task is genuinely still live here (it simply has not
-             * confirmed within the budget), so it has to be excised from
-             * the scheduler before the driver goes away: vTaskDelete()
-             * takes effect immediately, even called from another task and
-             * before it returns, so only past this call is it guaranteed
-             * the task can never issue another nrfx_uarte_tx()/rx(). The
-             * reverse order would leave a window where a still-live task's
-             * next UARTE call hits nrfx's NRFX_ASSERT(state == INITIALIZED),
-             * and this build's assert handler is __disable_irq(); for (;;)
-             * {}: a permanent hard lockup, not a benign race. */
-            vTaskDelete(task);
-        }
-        /* Safe in both branches now. Confirmed: gnss_task gave `stopped` and
-         * from there only runs vTaskDelete(NULL), never touching the UARTE
-         * driver again. Forced: the task is already gone. Either way no
-         * nrfx_uarte_*() call can still be in flight or yet to come, and
-         * uninit's own first act is NVIC_DisableIRQ on UARTE1
-         * (nrfy_uarte_int_uninit), so uarte_handler() cannot run afterwards
-         * either. */
-        nrfx_uarte_uninit(&s_uarte);
-
-        /* Only past both calls above is gnss_task guaranteed to be unable to
-         * execute another instruction, so retiring `stopped` here cannot race
-         * a genuine late-but-real xSemaphoreGive(s_stopped). */
-        s_stopped = NULL;
-        vSemaphoreDelete(stopped);
+    if (task == NULL) {
+        /* No task to tear down: either GPS was never initialized, or a
+         * concurrent second caller lost the race above to a first caller
+         * that is still tearing down (see the critical section comment).
+         * Force EN low so a never-initialized call still leaves the module
+         * off, then stop: the resources below may still be in live use by
+         * the first caller's still-running gnss_task, and deleting them
+         * here would pull them out from under it. */
+        nrf_gpio_pin_clear(BOARD_PIN_GNSS_EN);
+        return;
     }
+
+    /* Publish the confirmation channel BEFORE requesting the shutdown,
+     * never the other way round. gnss_task's exit path is "see s_shutdown,
+     * give s_stopped, self-delete", so if it observes s_shutdown while
+     * s_stopped is still NULL it skips the give and self-deletes silently;
+     * this function would then wait out the full budget and force-delete an
+     * already-reclaimed TCB, double-decrement uxCurrentNumberOfTasks and run
+     * prvDeleteTCB on freed memory that is still on the termination list.
+     * That window is not hypothetical with a dynamically created semaphore:
+     * gnss_task can wake on its own 100ms timeout inside it, and
+     * pvPortMalloc's vTaskSuspendAll / xTaskResumeAll pair is itself a
+     * reschedule point. The static variant removes both halves of the
+     * problem, since it neither allocates nor can return NULL. */
+    SemaphoreHandle_t stopped = xSemaphoreCreateBinaryStatic(&s_stopped_buf);
+    s_stopped = stopped;
+    s_shutdown = true;
+
+    /* Losing the ISR wake for the duration of the wait below is deliberate
+     * and harmless: gnss_task still polls the stream buffer every 100ms,
+     * gnss_delay_draining() blocks on the stream buffer rather than on
+     * notifications, and the task is on its way out. */
+    xTaskNotifyGive(task);
+
+    /* Budget for the worst case, not the nominal case: gnss_power_on()
+     * schedules ~1733ms of delay (10+100+3+50+1000+320+250) plus real UART
+     * TX time for its 34 gnss_tx() sends (25 wake + 8 config + 1 save), and
+     * each of those 34 sends can independently block up to 100ms on its own
+     * TX_DONE timeout before giving up (3400ms on top in the worst case).
+     * 5500ms covers that with margin. */
+    bool confirmed = xSemaphoreTake(stopped, pdMS_TO_TICKS(5500)) == pdTRUE;
+
+    if (!confirmed) {
+        ESP_LOGW(TAG, "gps_deinit: gnss task did not confirm exit in time, forcing delete");
+        /* The task is genuinely still live here (it simply has not
+         * confirmed within the budget), so it has to be excised from the
+         * scheduler before the driver goes away: vTaskDelete() takes effect
+         * immediately, even called from another task and before it returns,
+         * so only past this call is it guaranteed the task can never issue
+         * another nrfx_uarte_tx()/rx(). The reverse order would leave a
+         * window where a still-live task's next UARTE call hits nrfx's
+         * NRFX_ASSERT(state == INITIALIZED), and this build's assert
+         * handler is __disable_irq(); for (;;) {}: a permanent hard lockup,
+         * not a benign race. */
+        vTaskDelete(task);
+    }
+    /* Safe in both branches now. Confirmed: gnss_task gave `stopped` and
+     * from there only runs vTaskDelete(NULL), never touching the UARTE
+     * driver again. Forced: the task is already gone. Either way no
+     * nrfx_uarte_*() call can still be in flight or yet to come, and
+     * uninit's own first act is NVIC_DisableIRQ on UARTE1
+     * (nrfy_uarte_int_uninit), so uarte_handler() cannot run afterwards
+     * either. */
+    nrfx_uarte_uninit(&s_uarte);
+
+    /* Only past both calls above is gnss_task guaranteed to be unable to
+     * execute another instruction, so retiring `stopped` here cannot race a
+     * genuine late-but-real xSemaphoreGive(s_stopped). */
+    s_stopped = NULL;
+    vSemaphoreDelete(stopped);
 
     nrf_gpio_pin_clear(BOARD_PIN_GNSS_EN);
 
