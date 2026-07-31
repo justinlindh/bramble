@@ -28,6 +28,14 @@
  * only ~44ms of bytes at 115200 baud, so a bare sleep would overrun on
  * every single power-on.
  *
+ * gps_deinit() tears down in one fixed order, and the order is the whole
+ * correctness argument: gate the ISR off (clear s_task), then settle the
+ * task's fate (wait for its own confirmation, or force-delete it), then
+ * nrfx_uarte_uninit(). Gating first means the ISR can never notify a
+ * mid-deletion or freed TCB; uninit last means a still-live task can never
+ * reach a de-initialized nrfx driver, whose NRFX_ASSERT is a hard lockup in
+ * this build. See the comments in gps_deinit() for the per-step reasoning.
+ *
  * P1.06 (Meshtastic's PIN_3V3_EN, "Power to Sensors") is deliberately NOT
  * driven here. Bench Task 11 Step 2 validates that GNSS runs without it; the
  * documented contingency, if the bench disagrees, is a BOARD_PIN_GNSS_RAIL
@@ -67,10 +75,14 @@ static uint8_t s_rx_buf[2][64]; /* alternating EasyDMA targets */
  * pointer, so this is how its handler knows which of the two is free. */
 static uint8_t s_rx_last_idx;
 static StreamBufferHandle_t s_stream; /* 512B, ISR -> task */
-static TaskHandle_t s_task;           /* "gnss", prio 5 */
-static SemaphoreHandle_t s_mu;        /* guards s_feed */
-static SemaphoreHandle_t s_tx_done;   /* UARTE TX completion */
-static SemaphoreHandle_t s_stopped;   /* gps_deinit's exit-confirmation from gnss_task */
+/* "gnss", prio 5. volatile because uarte_handler() reads it in IRQ context to
+ * decide whether to notify, and gps_deinit() clears it to gate that notify
+ * off before the task is deleted: the read must be a real load every time,
+ * and the store must not be sunk past the teardown calls that follow it. */
+static TaskHandle_t volatile s_task;
+static SemaphoreHandle_t s_mu;      /* guards s_feed */
+static SemaphoreHandle_t s_tx_done; /* UARTE TX completion */
+static SemaphoreHandle_t s_stopped; /* gps_deinit's exit-confirmation from gnss_task */
 static gps_feed_t s_feed;
 static volatile uint32_t s_rx_overruns; /* stream-buffer-full drops */
 static volatile uint32_t s_rx_errors;   /* NRFX_UARTE_EVT_ERROR occurrences */
@@ -110,8 +122,12 @@ static void uarte_handler(nrfx_uarte_event_t const* event, void* context) {
         if (nrfx_uarte_rx(&s_uarte, done_buf, sizeof(s_rx_buf[0])) == NRFX_SUCCESS) {
             s_rx_last_idx = (uint8_t)(done_buf == s_rx_buf[1] ? 1 : 0);
         }
-        if (s_task) {
-            vTaskNotifyGiveFromISR(s_task, &woken);
+        /* Snapshot the volatile handle once: test and notify must use the
+         * same value, and gps_deinit() clears it precisely so this notify
+         * stops happening before the task is deleted. */
+        TaskHandle_t task = s_task;
+        if (task) {
+            vTaskNotifyGiveFromISR(task, &woken);
         }
         break;
     }
@@ -467,7 +483,13 @@ int gps_init(gps_fix_cb_t cb, void* ctx) {
      * power-on sequence regardless of the pref. */
     s_user_enabled = gps_pref_get();
 
-    if (xTaskCreate(gnss_task, "gnss", 3072, NULL, 5, &s_task) != pdPASS) {
+    /* Created into a local, then published: xTaskCreate() wants a plain
+     * TaskHandle_t*, and s_task is volatile (see its declaration). The gap
+     * where the task runs but the ISR still sees s_task == NULL costs
+     * nothing: the notify is only a wake accelerator, and gnss_task()'s
+     * 100ms ulTaskNotifyTake() bound covers it. */
+    TaskHandle_t task = NULL;
+    if (xTaskCreate(gnss_task, "gnss", 3072, NULL, 5, &task) != pdPASS) {
         ESP_LOGE(TAG, "gps_init: task create failed");
         nrfx_uarte_uninit(&s_uarte);
         vStreamBufferDelete(s_stream);
@@ -476,9 +498,9 @@ int gps_init(gps_fix_cb_t cb, void* ctx) {
         s_tx_done = NULL;
         vSemaphoreDelete(s_mu);
         s_mu = NULL;
-        s_task = NULL;
         return -1;
     }
+    s_task = task;
 
     ESP_LOGI(TAG, "gps_init complete (pref=%s)", s_user_enabled ? "on" : "off");
     return 0;
@@ -560,6 +582,35 @@ void gps_get_debug(gps_debug_t* out) {
 void gps_deinit(void) {
     if (s_task) {
         TaskHandle_t task = s_task;
+
+        /* Gate the ISR off FIRST, before anything can make `task` stale.
+         * Past this store uarte_handler() reads s_task == NULL and skips its
+         * vTaskNotifyGiveFromISR() forever, so neither the confirmed path
+         * (gnss_task self-deletes via vTaskDelete(NULL), and the idle task
+         * frees its TCB some time after that) nor the forced path below can
+         * leave the ISR notifying a task that is mid-deletion or already
+         * freed. Doing it here rather than after the wait is what makes that
+         * unconditional: s_shutdown is still false, so gnss_task provably
+         * has not exited yet, and any notify that lands before this store
+         * therefore targets a live, undeleted task.
+         *
+         * The critical section is the ordering guarantee. On this port
+         * (GCC_ARM_CM4F) taskENTER_CRITICAL() raises BASEPRI to
+         * configMAX_SYSCALL_INTERRUPT_PRIORITY (2 << (8 - 3) = 0x40), which
+         * masks every interrupt whose priority value is numerically >= 0x40;
+         * UARTE1 runs at NRFX_UARTE_DEFAULT_CONFIG_IRQ_PRIORITY = 7 (0xE0),
+         * so it is masked here. It has to be: uarte_handler() calls
+         * ...FromISR APIs, which are only legal at or below that ceiling.
+         * s_task's volatile qualifier does the rest, keeping the compiler
+         * from sinking the store past the teardown calls that follow. */
+        taskENTER_CRITICAL();
+        s_task = NULL;
+        taskEXIT_CRITICAL();
+
+        /* Losing the ISR wake for the duration of the wait below is
+         * deliberate and harmless: gnss_task still polls the stream buffer
+         * every 100ms, gnss_delay_draining() blocks on the stream buffer
+         * rather than on notifications, and the task is on its way out. */
         s_shutdown = true;
         SemaphoreHandle_t stopped = xSemaphoreCreateBinary();
         s_stopped = stopped;
@@ -573,39 +624,32 @@ void gps_deinit(void) {
          * in the worst case). 5500ms covers that with margin. */
         bool confirmed = stopped && xSemaphoreTake(stopped, pdMS_TO_TICKS(5500)) == pdTRUE;
 
-        if (confirmed) {
-            /* gnss_task() gave `stopped` and then self-deletes via
-             * vTaskDelete(NULL); it never touches the UARTE driver again
-             * after giving that semaphore, so uninitializing right now
-             * cannot collide with an in-flight nrfx call from that task.
-             * This is also what stops uarte_handler() from ever running
-             * again, which is what prevents it from calling
-             * vTaskNotifyGiveFromISR() on a handle that self-deletion may
-             * already have freed by the time this function gets around to
-             * clearing s_task below. */
-            nrfx_uarte_uninit(&s_uarte);
-        } else {
+        if (!confirmed) {
             ESP_LOGW(TAG, "gps_deinit: gnss task did not confirm exit in time, forcing delete");
-            /* vTaskDelete() BEFORE uninit here, not after: the task is
-             * still genuinely live at this point (it simply hasn't
-             * confirmed in time), and FreeRTOS's vTaskDelete() excises a
-             * task from the scheduler immediately, even called from
-             * another task, before this call returns; only past that
-             * point is it guaranteed the task can never issue another
-             * nrfx_uarte_tx()/rx() call. Uninitializing first would leave
-             * a real window where a still-live task's next UARTE call hits
-             * nrfx's NRFX_ASSERT(state == INITIALIZED), and this build's
-             * assert handler is __disable_irq(); for (;;) {}: a permanent
-             * hard lockup, not a benign race. */
+            /* The task is genuinely still live here (it simply has not
+             * confirmed within the budget), so it has to be excised from
+             * the scheduler before the driver goes away: vTaskDelete()
+             * takes effect immediately, even called from another task and
+             * before it returns, so only past this call is it guaranteed
+             * the task can never issue another nrfx_uarte_tx()/rx(). The
+             * reverse order would leave a window where a still-live task's
+             * next UARTE call hits nrfx's NRFX_ASSERT(state == INITIALIZED),
+             * and this build's assert handler is __disable_irq(); for (;;)
+             * {}: a permanent hard lockup, not a benign race. */
             vTaskDelete(task);
-            nrfx_uarte_uninit(&s_uarte);
-            /* Only past this point (both calls above have returned) is it
-             * guaranteed gnss_task() can never execute another
-             * instruction, so freeing `stopped` below cannot race a
-             * genuine late-but-real xSemaphoreGive(s_stopped) against this
-             * function's own timeout. */
         }
-        s_task = NULL;
+        /* Safe in both branches now. Confirmed: gnss_task gave `stopped` and
+         * from there only runs vTaskDelete(NULL), never touching the UARTE
+         * driver again. Forced: the task is already gone. Either way no
+         * nrfx_uarte_*() call can still be in flight or yet to come, and
+         * uninit's own first act is NVIC_DisableIRQ on UARTE1
+         * (nrfy_uarte_int_uninit), so uarte_handler() cannot run afterwards
+         * either. */
+        nrfx_uarte_uninit(&s_uarte);
+
+        /* Only past both calls above is gnss_task guaranteed to be unable to
+         * execute another instruction, so freeing `stopped` here cannot race
+         * a genuine late-but-real xSemaphoreGive(s_stopped). */
         s_stopped = NULL;
         if (stopped) {
             vSemaphoreDelete(stopped);
@@ -613,9 +657,19 @@ void gps_deinit(void) {
     }
     nrf_gpio_pin_clear(BOARD_PIN_GNSS_EN);
     if (s_mu) {
-        xSemaphoreTake(s_mu, portMAX_DELAY);
+        /* Bounded, never portMAX_DELAY: the forced delete above can strand
+         * s_mu, because FreeRTOS does not release a deleted task's mutexes
+         * and gnss_task holds s_mu across gps_feed_bytes() in both its drain
+         * loop and gnss_delay_draining(). An unbounded take would then hang
+         * gps_deinit forever. The feed is reset and the mutex deleted
+         * whether or not the take succeeds: past this point nothing can
+         * reach s_feed through this driver again, since gnss_task is gone
+         * and every other s_mu holder is a short synchronous query. */
+        bool locked = xSemaphoreTake(s_mu, pdMS_TO_TICKS(100)) == pdTRUE;
         gps_feed_reset(&s_feed);
-        xSemaphoreGive(s_mu);
+        if (locked) {
+            xSemaphoreGive(s_mu);
+        }
         vSemaphoreDelete(s_mu);
         s_mu = NULL;
     } else {
