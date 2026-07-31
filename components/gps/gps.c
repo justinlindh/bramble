@@ -262,6 +262,8 @@ void gps_get_debug(gps_debug_t* out) {
      * error-event channel; the nRF driver is the only one that populates
      * these two counters. */
     out->rx_overruns = 0;
+    out->rx_disabled = 0;
+    out->rx_rearm_fail = 0;
     out->rx_errors = 0;
 }
 

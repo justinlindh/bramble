@@ -1650,6 +1650,10 @@ export interface components {
             gps_rx_overruns?: number;
             /** @description UART/driver error events observed on the GNSS link. Present only on boards with GPS capability; always zero on backends without a distinct error-event channel (currently nonzero-capable on the nRF52840 target only). */
             gps_rx_errors?: number;
+            /** @description Times the GNSS UART driver silently disabled its receiver and had to be restarted by the recovery path. Expected to stay zero; nonzero means reception died and was recovered, which is worth investigating. Present only on boards with GPS capability; always zero on backends without such a path (currently nonzero-capable on the nRF52840 target only). */
+            gps_rx_disabled?: number;
+            /** @description Failed attempts to hand the GNSS UART driver a receive buffer, from any supply site. Expected to stay zero. Present only on boards with GPS capability; always zero on backends without an explicit buffer-supply step (currently nonzero-capable on the nRF52840 target only). */
+            gps_rx_rearm_fail?: number;
         };
         /** @description Airtime backpressure counters. Non-zero values mean the node shed load rather than transmitting: they are the field-diagnosable record of congestion, distinguishing "we deliberately yielded the channel" from "the radio is broken". */
         BackpressureDiagnostics: {

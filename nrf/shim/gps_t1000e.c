@@ -78,10 +78,11 @@ static const char* TAG = "gps_t1000e";
 /* Statics */
 static nrfx_uarte_t s_uarte = NRFX_UARTE_INSTANCE(1);
 static uint8_t s_rx_buf[2][64]; /* alternating EasyDMA targets */
-/* Index of the static buffer most recently handed to nrfx_uarte_rx(),
- * whether via the initial queueing, the RX_DONE re-arm, or the
- * RX_BUF_REQUEST re-arm. NRFX_UARTE_EVT_RX_BUF_REQUEST carries no buffer
- * pointer, so this is how its handler knows which of the two is free. */
+/* Index of the static buffer most recently handed to nrfx_uarte_rx(), seeded
+ * by the initial queueing in gps_init() and advanced only by the
+ * RX_BUF_REQUEST handler, which is the sole supply path in steady state.
+ * NRFX_UARTE_EVT_RX_BUF_REQUEST carries no buffer pointer, so this is how
+ * that handler knows which of the two is free. */
 static uint8_t s_rx_last_idx;
 static StreamBufferHandle_t s_stream; /* 512B, ISR -> task */
 /* "gnss", prio 5. volatile because uarte_handler() reads it in IRQ context to
@@ -108,12 +109,14 @@ static StaticSemaphore_t s_stopped_buf;
  * before s_shutdown goes true. */
 static SemaphoreHandle_t volatile s_stopped;
 static gps_feed_t s_feed;
-static volatile uint32_t s_rx_overruns; /* stream-buffer-full drops */
-static volatile uint32_t s_rx_errors;   /* NRFX_UARTE_EVT_ERROR occurrences */
-static volatile bool s_shutdown;        /* gps_deinit's request to gnss_task */
-static bool s_powered;                  /* EN state; task-private, see file header */
-static volatile bool s_user_enabled;    /* mirrors gps_pref/setGpsEnabled; the one
-                                         * cross-task input into the gnss task */
+static volatile uint32_t s_rx_overruns;   /* stream-buffer-full drops */
+static volatile uint32_t s_rx_errors;     /* NRFX_UARTE_EVT_ERROR occurrences */
+static volatile uint32_t s_rx_disabled;   /* NRFX_UARTE_EVT_RX_DISABLED recoveries */
+static volatile uint32_t s_rx_rearm_fail; /* failed nrfx_uarte_rx from any site */
+static volatile bool s_shutdown;          /* gps_deinit's request to gnss_task */
+static bool s_powered;                    /* EN state; task-private, see file header */
+static volatile bool s_user_enabled;      /* mirrors gps_pref/setGpsEnabled; the one
+                                           * cross-task input into the gnss task */
 
 static uint64_t now_ms(void) { return (uint64_t)(esp_timer_get_time() / 1000ULL); }
 
@@ -137,15 +140,23 @@ static void uarte_handler(nrfx_uarte_event_t const* event, void* context) {
                 s_rx_overruns += (uint32_t)(len - sent);
             }
         }
-        /* Re-arm immediately with the buffer that just completed: nrfx
-         * already has the other buffer queued as the pending one, so this
-         * closes the gap before the FIFO can overrun. Only record it as
-         * "last supplied" if the supply actually succeeded, or a failed
-         * call here could leave s_rx_last_idx claiming a buffer is free
-         * when it never was, letting RX_BUF_REQUEST alias it against curr. */
-        if (nrfx_uarte_rx(&s_uarte, done_buf, sizeof(s_rx_buf[0])) == NRFX_SUCCESS) {
-            s_rx_last_idx = (uint8_t)(done_buf == s_rx_buf[1] ? 1 : 0);
-        }
+        /* Deliberately NO re-arm here: consume the bytes and nothing else.
+         * Supplying a buffer from this event is what killed reception on the
+         * bench. nrfx calls us from inside endrx_irq_handler(), and the very
+         * next thing that function does after we return is
+         * nrfy_uarte_shorts_disable(NRF_UARTE_SHORT_ENDRX_STARTRX), which
+         * undoes the ENDRX->STARTRX short that rx_buffer_set() had just
+         * enabled on our behalf. Every cycle then had to take the manual
+         * STARTRX fallback further down that same function, and once a
+         * buffer landed late enough for RXTO to already be set, nrfx
+         * triggered STOPRX and the resulting RXTO ran on_rx_disabled():
+         * that masks rx_int_mask, which includes NRF_UARTE_INT_ERROR_MASK,
+         * and powers the receiver down. Reception then stopped permanently
+         * and even the error counter froze, which is exactly the signature
+         * the bench saw. Buffers are supplied only from RX_BUF_REQUEST
+         * below, which nrfx raises from rxstarted_irq_handler(), the
+         * ordering the driver is actually written for. */
+
         /* Snapshot the volatile handle once: test and notify must use the
          * same value, and gps_deinit() clears it precisely so this notify
          * stops happening before the task is deleted. */
@@ -156,21 +167,52 @@ static void uarte_handler(nrfx_uarte_event_t const* event, void* context) {
         break;
     }
     case NRFX_UARTE_EVT_RX_BUF_REQUEST: {
-        /* The driver wants the NEXT buffer queued and this event carries no
-         * pointer to say which one is free. With exactly two static buffers
-         * rotating between "being filled" and "just resupplied", the free
-         * one is always the other of the two relative to whichever was
-         * handed out last. This path is reachable in ordinary operation,
-         * not just in theory: nrfx's own rxstarted_irq_handler() comment
-         * describes a small-transfer interleaving (ENDRX processed, then
-         * RXSTARTED processed for that same short transfer) that raises
-         * this even though RX_DONE above already resupplies proactively. */
+        /* The ONLY place buffers are supplied during normal operation. nrfx
+         * raises this from rxstarted_irq_handler() once the receiver has
+         * actually started on the previous buffer, so the short it enables
+         * survives (nothing disables it afterwards on this path) and the
+         * driver stays on its continuous-reception fast path.
+         *
+         * The event carries no pointer saying which buffer is free. With
+         * two buffers alternating between "being filled" and "just
+         * supplied", the free one is always the other of the two relative
+         * to whichever went out last, so s_rx_last_idx ^ 1 names it.
+         * s_rx_last_idx now has exactly one writer in steady state (this
+         * handler) plus the seed in gps_init(), and it is only advanced on
+         * success: recording a supply that did not happen would let the
+         * next request hand nrfx the buffer the receiver is filling. */
         uint8_t idx = (uint8_t)(s_rx_last_idx ^ 1);
         if (nrfx_uarte_rx(&s_uarte, s_rx_buf[idx], sizeof(s_rx_buf[0])) == NRFX_SUCCESS) {
             s_rx_last_idx = idx;
+        } else {
+            s_rx_rearm_fail++;
         }
         break;
     }
+    case NRFX_UARTE_EVT_RX_DISABLED:
+        /* Safety net, and the thing whose absence made the bench failure
+         * permanent and silent. nrfx reaches on_rx_disabled() from an RXTO
+         * after a STOPRX, which masks every RX interrupt (ERROR included)
+         * and NULLs both buffer slots; without this case the driver simply
+         * stopped talking to us forever. Chain A above should mean this
+         * never fires, so it is instrumented rather than trusted:
+         * gps_rx_disabled is a permanent diagnostic, and a nonzero value on
+         * a bench node means the fast path lost a race somewhere.
+         *
+         * Recovery is the init sequence, which is legal from here: nrfx has
+         * already finished its own teardown before invoking this handler
+         * (curr/next NULL, RX flags released), and nrfx_uarte_rx_enable()
+         * inside nrfx_uarte_rx() re-enables the peripheral, re-arms
+         * rx_int_mask and manually triggers STARTRX. Supplying only the
+         * first buffer is deliberate: rx_enable's own STARTRX raises
+         * RXSTARTED, whose RX_BUF_REQUEST supplies the second through the
+         * case above, which keeps one supply path rather than two. */
+        s_rx_disabled++;
+        s_rx_last_idx = 0;
+        if (nrfx_uarte_rx(&s_uarte, s_rx_buf[0], sizeof(s_rx_buf[0])) != NRFX_SUCCESS) {
+            s_rx_rearm_fail++;
+        }
+        break;
     case NRFX_UARTE_EVT_ERROR:
         /* No re-arm here. nrfx keeps the receiver running through an ERROR
          * event on its own: irq_handler() processes ERROR and then
@@ -528,6 +570,7 @@ int gps_init(gps_fix_cb_t cb, void* ctx) {
         }
     }
     if (rx0 != NRFX_SUCCESS || (rx1 != NRFX_SUCCESS && rx1 != NRFX_ERROR_BUSY)) {
+        s_rx_rearm_fail++;
         ESP_LOGE(TAG, "gps_init: nrfx_uarte_rx queueing failed (rx0=0x%08x rx1=0x%08x)",
                  (unsigned)rx0, (unsigned)rx1);
         nrfx_uarte_uninit(&s_uarte);
@@ -663,6 +706,8 @@ void gps_get_debug(gps_debug_t* out) {
      * single word (atomic enough on Cortex-M) and merely diagnostic. */
     out->rx_overruns = s_rx_overruns;
     out->rx_errors = s_rx_errors;
+    out->rx_disabled = s_rx_disabled;
+    out->rx_rearm_fail = s_rx_rearm_fail;
 }
 
 void gps_deinit(void) {
