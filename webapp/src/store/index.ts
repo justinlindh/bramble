@@ -177,7 +177,6 @@ interface Actions {
   setTrafficDebugStatus: (s: TrafficDebugStatus) => void;
   addTrafficEvent: (e: TrafficEvent) => void;
   addTrafficEvents: (events: TrafficEvent[]) => void;
-  clearTrafficEvents: () => void;
   setNetworkKeyStatus: (s: NetworkKeyStatus | null) => void;
   setAnchorStatus: (s: AnchorStatus | null) => void;
 }
@@ -464,8 +463,6 @@ export const useStore = create<AppState & Actions>((set) => ({
       const merged = Array.from(bySeq.values()).sort((a, b) => a.seq - b.seq).slice(-1000);
       return { trafficEvents: merged };
     }),
-
-  clearTrafficEvents: () => set({ trafficEvents: [] }),
 
   setNetworkKeyStatus: (s) => set({ networkKeyStatus: s }),
   setAnchorStatus: (s) => set({ anchorStatus: s }),
