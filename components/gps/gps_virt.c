@@ -41,7 +41,7 @@
 #else
 
 #include "gps.h"
-#include "nmea_parser.h"
+#include "gps_feed.h"
 #include "emu_link.h"
 
 #include <pthread.h>
@@ -62,16 +62,24 @@ static const char* TAG = "gps_virt";
 static pthread_mutex_t s_mu = PTHREAD_MUTEX_INITIALIZER;
 static gps_fix_cb_t s_cb = NULL;
 static void* s_cb_ctx = NULL;
-static bramble_position_t s_pos = {0};
-static nmea_position_t s_np = {0}; /* running accumulator across sentences */
-static bool s_has_fix = false;
+static gps_feed_t s_feed;
 static bool s_gate_on = false; /* GPS power gate: false = powered off */
-static uint8_t s_sats_used = 0;
-static uint8_t s_sats_in_view = 0;
-static bool s_antenna_warning = false;
-static uint8_t s_utc_hour = 0;
-static uint8_t s_utc_min = 0;
-static bool s_utc_valid = false;
+
+/* feed cb: runs under s_mu (called from inside gps_feed_line, itself called
+ * from process_sentence with s_mu held): stash only. The file-header
+ * threading contract requires the user's fix callback (s_cb) to run with the
+ * lock dropped, so process_sentence invokes it after unlocking. */
+static bool s_cb_pending;
+static bramble_position_t s_cb_pos;
+static void on_feed_fix(const bramble_position_t* p, void* ctx) {
+    (void)ctx;
+    s_cb_pending = true;
+    s_cb_pos = *p;
+}
+
+/* Preserves the unix-seconds timestamps the emulator has always reported:
+ * (uint32_t)(now_ms / 1000) inside the feed reproduces time(NULL) exactly. */
+static uint64_t gvirt_now_ms(void) { return (uint64_t)time(NULL) * 1000ULL; }
 
 static void nmea_handler(const cJSON* msg, void* ctx);
 
@@ -148,6 +156,7 @@ int gps_init(gps_fix_cb_t cb, void* ctx) {
     pthread_mutex_lock(&s_mu);
     s_cb = cb;
     s_cb_ctx = ctx;
+    gps_feed_init(&s_feed, on_feed_fix, NULL);
     pthread_mutex_unlock(&s_mu);
     return gps_set_enabled(true);
 }
@@ -159,7 +168,16 @@ int gps_set_enabled(bool enabled) {
     }
 
     pthread_mutex_lock(&s_mu);
-    s_has_fix = false;
+    /* Old code cleared only s_has_fix here (sats/antenna stats survive an
+     * enable without an intervening disable); the double gate in the old
+     * gps_get_utc_hm (s_has_fix && s_utc_valid) kept a stale UTC latch
+     * hidden even though s_utc_valid was untouched. gps_feed_get_utc_hm
+     * checks only utc_valid (the feed's own invariant is that utc_valid
+     * implies has_fix, both set together and cleared together by
+     * gps_feed_reset), so clearing has_fix alone here would leak a stale
+     * UTC time-of-day; clear both to preserve the same observable gate. */
+    s_feed.has_fix = false;
+    s_feed.utc_valid = false;
     s_gate_on = true; /* power the GNSS on (P-FET low) */
     pthread_mutex_unlock(&s_mu);
 
@@ -190,78 +208,31 @@ int gps_set_enabled(bool enabled) {
     return 0;
 }
 
-/* Parse one sentence and apply it: accumulator merge, position/stats update,
- * fix callback. On the node this runs on the pump task; in the plain-gcc
- * harness it runs synchronously on the caller of the nmea handler. */
+/* Parse one sentence and apply it via gps_feed: accumulator merge,
+ * position/stats update, fix callback. On the node this runs on the pump
+ * task; in the plain-gcc harness it runs synchronously on the caller of the
+ * nmea handler.
+ *
+ * gps_feed_line's fix callback (on_feed_fix) fires from inside this call,
+ * under s_mu, and only stashes the fix; the real user callback s_cb is
+ * invoked below with the lock dropped, per the file-header threading
+ * contract. */
 static void process_sentence(const char* str) {
-    pthread_mutex_lock(&s_mu);
-    if (!s_gate_on) {
-        pthread_mutex_unlock(&s_mu);
-        return; /* powered off: no sentences, like an open P-FET */
-    }
-    nmea_position_t np = s_np; /* accumulator snapshot */
-    pthread_mutex_unlock(&s_mu);
-
-    char line[GPS_VIRT_MAX_LINE];
-    strncpy(line, str, sizeof(line) - 1);
-    line[sizeof(line) - 1] = '\0';
-
-    bool parsed = false;
-    bool is_gga = false;
-    bool got_gsv = false;
-    uint8_t sats_in_view = 0;
-
-    if (strncmp(line, "$GPRMC", 6) == 0 || strncmp(line, "$GNRMC", 6) == 0) {
-        char copy[GPS_VIRT_MAX_LINE];
-        strncpy(copy, line, sizeof(copy) - 1);
-        copy[sizeof(copy) - 1] = '\0';
-        parsed = nmea_parse_rmc(copy, &np);
-    } else if (strncmp(line, "$GPGGA", 6) == 0 || strncmp(line, "$GNGGA", 6) == 0) {
-        char copy[GPS_VIRT_MAX_LINE];
-        strncpy(copy, line, sizeof(copy) - 1);
-        copy[sizeof(copy) - 1] = '\0';
-        parsed = nmea_parse_gga(copy, &np);
-        is_gga = true; /* satellites-used is reported even without a fix */
-    } else if (strncmp(line, "$GPGSV", 6) == 0 || strncmp(line, "$GNGSV", 6) == 0) {
-        char copy[GPS_VIRT_MAX_LINE];
-        strncpy(copy, line, sizeof(copy) - 1);
-        copy[sizeof(copy) - 1] = '\0';
-        got_gsv = nmea_parse_gsv(copy, &sats_in_view);
-    } else if (nmea_is_antenna_open(line)) {
-        pthread_mutex_lock(&s_mu);
-        s_antenna_warning = true;
-        pthread_mutex_unlock(&s_mu);
-        return;
-    }
-
     gps_fix_cb_t cb = NULL;
     void* cb_ctx = NULL;
     bramble_position_t out;
 
     pthread_mutex_lock(&s_mu);
-    s_np = np; /* persist merged accumulator (incl. sats_used) */
-    if (is_gga)
-        s_sats_used = np.sats_used;
-    if (got_gsv)
-        s_sats_in_view = sats_in_view;
-    if (parsed && np.valid) {
-        s_pos.latitude_e7 = np.latitude_e7;
-        s_pos.longitude_e7 = np.longitude_e7;
-        s_pos.altitude_m = np.altitude_m;
-        s_pos.accuracy_m = np.accuracy_m;
-        s_pos.speed_kmh = np.speed_kmh;
-        s_pos.heading_deg2 = np.heading_deg2;
-        s_pos.timestamp = (uint32_t)time(NULL);
-        s_pos.valid = np.valid;
-        s_has_fix = true;
-        if (np.utc_valid) {
-            s_utc_hour = np.utc_hour;
-            s_utc_min = np.utc_min;
-            s_utc_valid = true;
-        }
+    if (!s_gate_on) {
+        pthread_mutex_unlock(&s_mu);
+        return; /* powered off: no sentences, like an open P-FET */
+    }
+    s_cb_pending = false;
+    gps_feed_line(&s_feed, str, gvirt_now_ms());
+    if (s_cb_pending) {
         cb = s_cb;
         cb_ctx = s_cb_ctx;
-        out = s_pos;
+        out = s_cb_pos;
     }
     pthread_mutex_unlock(&s_mu);
 
@@ -288,7 +259,7 @@ static void nmea_handler(const cJSON* msg, void* ctx) {
 
 bool gps_has_fix(void) {
     pthread_mutex_lock(&s_mu);
-    bool f = s_has_fix;
+    bool f = gps_feed_has_fix(&s_feed);
     pthread_mutex_unlock(&s_mu);
     return f;
 }
@@ -298,9 +269,7 @@ bool gps_get_position(bramble_position_t* out) {
         return false;
     bool ok;
     pthread_mutex_lock(&s_mu);
-    ok = s_has_fix;
-    if (ok)
-        *out = s_pos;
+    ok = gps_feed_get_position(&s_feed, out);
     pthread_mutex_unlock(&s_mu);
     return ok;
 }
@@ -308,13 +277,7 @@ bool gps_get_position(bramble_position_t* out) {
 bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
     bool ok;
     pthread_mutex_lock(&s_mu);
-    ok = s_has_fix && s_utc_valid;
-    if (ok) {
-        if (hour)
-            *hour = s_utc_hour;
-        if (min)
-            *min = s_utc_min;
-    }
+    ok = gps_feed_get_utc_hm(&s_feed, hour, min);
     pthread_mutex_unlock(&s_mu);
     return ok;
 }
@@ -323,9 +286,7 @@ void gps_get_stats(gps_stats_t* out) {
     if (!out)
         return;
     pthread_mutex_lock(&s_mu);
-    out->sats_used = s_sats_used;
-    out->sats_in_view = s_sats_in_view;
-    out->antenna_warning = s_antenna_warning;
+    gps_feed_get_stats(&s_feed, gvirt_now_ms(), out);
     pthread_mutex_unlock(&s_mu);
 }
 
@@ -342,12 +303,7 @@ void gps_deinit(void) {
 #endif
     pthread_mutex_lock(&s_mu);
     s_gate_on = false; /* cut GNSS power (P-FET high) */
-    s_has_fix = false;
-    s_sats_used = 0;
-    s_sats_in_view = 0;
-    s_antenna_warning = false;
-    s_utc_valid = false;
-    memset(&s_np, 0, sizeof(s_np));
+    gps_feed_reset(&s_feed);
     pthread_mutex_unlock(&s_mu);
     send_gpsgate(false);
 }
