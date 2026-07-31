@@ -573,29 +573,37 @@ void gps_deinit(void) {
          * in the worst case). 5500ms covers that with margin. */
         bool confirmed = stopped && xSemaphoreTake(stopped, pdMS_TO_TICKS(5500)) == pdTRUE;
 
-        /* Uninit the UARTE peripheral before touching the task any further.
-         * This is what actually stops uarte_handler from ever running
-         * again, which is what prevents it from calling
-         * vTaskNotifyGiveFromISR() on a handle that may already be a freed
-         * TCB by the time this function gets around to clearing s_task
-         * below: in the confirmed case, gnss_task() gives `stopped` and
-         * then self-deletes via vTaskDelete(NULL), and it never touches the
-         * UARTE driver again after giving that semaphore, so uninitializing
-         * here can never collide with an in-flight nrfx call from that
-         * task. */
-        nrfx_uarte_uninit(&s_uarte);
-
-        if (!confirmed) {
+        if (confirmed) {
+            /* gnss_task() gave `stopped` and then self-deletes via
+             * vTaskDelete(NULL); it never touches the UARTE driver again
+             * after giving that semaphore, so uninitializing right now
+             * cannot collide with an in-flight nrfx call from that task.
+             * This is also what stops uarte_handler() from ever running
+             * again, which is what prevents it from calling
+             * vTaskNotifyGiveFromISR() on a handle that self-deletion may
+             * already have freed by the time this function gets around to
+             * clearing s_task below. */
+            nrfx_uarte_uninit(&s_uarte);
+        } else {
             ESP_LOGW(TAG, "gps_deinit: gnss task did not confirm exit in time, forcing delete");
+            /* vTaskDelete() BEFORE uninit here, not after: the task is
+             * still genuinely live at this point (it simply hasn't
+             * confirmed in time), and FreeRTOS's vTaskDelete() excises a
+             * task from the scheduler immediately, even called from
+             * another task, before this call returns; only past that
+             * point is it guaranteed the task can never issue another
+             * nrfx_uarte_tx()/rx() call. Uninitializing first would leave
+             * a real window where a still-live task's next UARTE call hits
+             * nrfx's NRFX_ASSERT(state == INITIALIZED), and this build's
+             * assert handler is __disable_irq(); for (;;) {}: a permanent
+             * hard lockup, not a benign race. */
             vTaskDelete(task);
-            /* Only past this point is it guaranteed gnss_task() can never
-             * execute another instruction: FreeRTOS's vTaskDelete()
-             * excises a task from the scheduler immediately, even called
-             * from another task, before this call returns. Freeing
-             * `stopped` any earlier than this could race a genuine
-             * late-but-real xSemaphoreGive(s_stopped) against this
-             * function's own timeout, dereferencing a semaphore this
-             * function had already deleted out from under it. */
+            nrfx_uarte_uninit(&s_uarte);
+            /* Only past this point (both calls above have returned) is it
+             * guaranteed gnss_task() can never execute another
+             * instruction, so freeing `stopped` below cannot race a
+             * genuine late-but-real xSemaphoreGive(s_stopped) against this
+             * function's own timeout. */
         }
         s_task = NULL;
         s_stopped = NULL;
