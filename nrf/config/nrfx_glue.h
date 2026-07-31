@@ -10,15 +10,30 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 // Bind peripheral IRQ handlers to the MDK startup vector names at link time.
 #include <soc/nrfx_irqs.h>
+
+// A failed nrfx assert used to be __disable_irq() plus a spin, which on a
+// consoleless board is indistinguishable from a dead battery: no BLE (the
+// link layer is interrupt-driven), no mesh, no DFU, and nothing written
+// anywhere to say it happened. Route it through the boot trace instead, the
+// same way configASSERT reaches bramble_assert_failed, so the failure stamps
+// a tag plus the asserting nrfx source line and comes back in the
+// bootloader where the host can read it.
+//
+// Declared here rather than by including boot_trace.h: this header is pulled
+// into every nrfx translation unit, so the dependency is kept one way, a
+// declaration out of the glue and the definition in nrf/src/boot_trace.c.
+// __LINE__ expands at the nrfx call site, which is what makes the stamped
+// line the nrfx source line that actually asserted.
+void bramble_nrfx_assert_failed(uint32_t line) __attribute__((noreturn));
 
 #define NRFX_ASSERT(expression)                                                                    \
     do {                                                                                           \
         if (!(expression)) {                                                                       \
-            __disable_irq();                                                                       \
-            for (;;) {                                                                             \
-            }                                                                                      \
+            bramble_nrfx_assert_failed((uint32_t)__LINE__);                                        \
         }                                                                                          \
     } while (0)
 
