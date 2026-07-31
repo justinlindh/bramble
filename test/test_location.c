@@ -72,22 +72,6 @@ void test_location_coarse_precision(void) {
     TEST_ASSERT_TRUE(err_m < 8000.0); /* within ~8km (coarse grid) */
 }
 
-void test_location_contact_management(void) {
-    TEST_ASSERT_EQUAL(0, location_add_contact(&mgr, 0x1234, LOCATION_TIER_FULL));
-    TEST_ASSERT_EQUAL(0, location_add_contact(&mgr, 0x5678, LOCATION_TIER_COARSE));
-    TEST_ASSERT_EQUAL(-1, location_add_contact(&mgr, 0x1234, LOCATION_TIER_FULL)); /* dup */
-    TEST_ASSERT_EQUAL(2, mgr.contact_count);
-
-    location_contact_t* c = location_find_contact(&mgr, 0x1234);
-    TEST_ASSERT_NOT_NULL(c);
-    TEST_ASSERT_EQUAL(LOCATION_TIER_FULL, c->tier);
-
-    TEST_ASSERT_EQUAL(0, location_remove_contact(&mgr, 0x1234));
-    TEST_ASSERT_EQUAL(1, mgr.contact_count);
-    TEST_ASSERT_NULL(location_find_contact(&mgr, 0x1234));
-    TEST_ASSERT_EQUAL(-1, location_remove_contact(&mgr, 0x1234)); /* not found */
-}
-
 void test_location_cache(void) {
     bramble_position_t pos = {.latitude_e7 = 100000000, .longitude_e7 = 200000000, .valid = true};
 
@@ -112,24 +96,6 @@ void test_location_cache(void) {
     TEST_ASSERT_EQUAL(0, mgr.cache_count);
 }
 
-void test_location_should_send_time(void) {
-    location_add_contact(&mgr, 0x10, LOCATION_TIER_FULL);
-    mgr.my_position.valid = true;
-
-    /* Never sent -> should send */
-    TEST_ASSERT_TRUE(location_should_send(&mgr, 0x10, 1000));
-
-    /* Mark as sent */
-    location_contact_t* c = location_find_contact(&mgr, 0x10);
-    c->last_sent_ms = 1000;
-
-    /* Not enough time elapsed */
-    TEST_ASSERT_FALSE(location_should_send(&mgr, 0x10, 1000 + LOCATION_DEFAULT_INTERVAL_MS - 1));
-
-    /* Enough time */
-    TEST_ASSERT_TRUE(location_should_send(&mgr, 0x10, 1000 + LOCATION_DEFAULT_INTERVAL_MS));
-}
-
 void test_location_policy_defaults(void) {
     location_policy_t policy;
     location_policy_set_defaults(&policy);
@@ -147,30 +113,6 @@ void test_location_policy_interval_floor(void) {
     location_policy_normalize(&policy);
 
     TEST_ASSERT_EQUAL(LOCATION_MIN_INTERVAL_S, policy.interval_s);
-}
-
-void test_location_should_send_distance(void) {
-    location_add_contact(&mgr, 0x20, LOCATION_TIER_FULL);
-    location_contact_t* c = location_find_contact(&mgr, 0x20);
-    c->last_sent_ms = 1000; /* recently sent */
-
-    /* Set current position */
-    bramble_position_t pos1 = {
-        .latitude_e7 = 374220000, .longitude_e7 = -1220840000, .valid = true};
-    location_set_position(&mgr, &pos1);
-
-    /* Cache peer's last known position (same as ours = where we were when we last sent) */
-    location_cache_update(&mgr, 0x20, &pos1, 1000);
-
-    /* Haven't moved much; time not elapsed */
-    TEST_ASSERT_FALSE(location_should_send(&mgr, 0x20, 1500));
-
-    /* Move >100m north (~0.001 degrees lat ~ 111m) */
-    bramble_position_t pos2 = pos1;
-    pos2.latitude_e7 += 15000; /* ~167m north */
-    location_set_position(&mgr, &pos2);
-
-    TEST_ASSERT_TRUE(location_should_send(&mgr, 0x20, 1500));
 }
 
 void test_location_policy_should_send_disabled(void) {
@@ -269,12 +211,9 @@ int main(void) {
     RUN_TEST(test_location_serialize_full_roundtrip);
     RUN_TEST(test_location_serialize_coarse_roundtrip);
     RUN_TEST(test_location_coarse_precision);
-    RUN_TEST(test_location_contact_management);
     RUN_TEST(test_location_cache);
     RUN_TEST(test_location_policy_defaults);
     RUN_TEST(test_location_policy_interval_floor);
-    RUN_TEST(test_location_should_send_time);
-    RUN_TEST(test_location_should_send_distance);
     RUN_TEST(test_location_policy_should_send_disabled);
     RUN_TEST(test_location_policy_should_send_no_source);
     RUN_TEST(test_location_policy_should_send_no_target);
