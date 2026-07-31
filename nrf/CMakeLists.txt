@@ -167,6 +167,7 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/radio/phy_passthrough.c
   ${BRAMBLE_COMPONENTS}/gps/nmea_parser.c
   ${BRAMBLE_COMPONENTS}/gps/gps_pref.c
+  ${BRAMBLE_COMPONENTS}/gps/gps_feed.c
   ${BRAMBLE_COMPONENTS}/battery/battery_pct.c
   ${BRAMBLE_COMPONENTS}/indicators/alerts.c
   ${BRAMBLE_COMPONENTS}/ota/ota_progress.c
@@ -304,6 +305,26 @@ target_compile_options(nimble_lib PRIVATE -Wno-unused-parameter -Wno-sign-compar
                                           -include ${CMAKE_CURRENT_SOURCE_DIR}/config/nimble/bramble_nimble_decls.h)
 target_link_libraries(nimble_lib PUBLIC mbedcrypto)
 
+# Which physical board's pin map and profile to compile. The dev kit is the
+# default; t1000e selects the SenseCAP card (nrf/boards/t1000e.h, consoleless,
+# four pin RF switch) and its shared identity profile. Selected here, above
+# add_executable, because the GPS source list below depends on it.
+set(BRAMBLE_NRF_BOARD wm1110_devkit CACHE STRING "Board: wm1110_devkit or t1000e")
+if(BRAMBLE_NRF_BOARD STREQUAL "t1000e")
+  target_compile_definitions(bramble_core PUBLIC BRAMBLE_BOARD_T1000E CONFIG_BRAMBLE_BOARD_T1000E)
+else()
+  target_compile_definitions(bramble_core PUBLIC CONFIG_BRAMBLE_BOARD_WM1110)
+endif()
+
+# GNSS driver: the T1000-E gets the real AG3335 driver over UARTE1 plus the
+# RPC event emitter; every other board (no exposed GNSS UART) gets the null
+# backend.
+if(BRAMBLE_NRF_BOARD STREQUAL "t1000e")
+  set(BRAMBLE_NRF_GPS_SRCS shim/gps_t1000e.c src/gps_events.c)
+else()
+  set(BRAMBLE_NRF_GPS_SRCS shim/gps_null.c)
+endif()
+
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
@@ -326,7 +347,7 @@ add_executable(bramble-nrf
   shim/esp_timer_freertos.c
   shim/esp_random_nrf.c
   shim/esp_system_nrf.c
-  shim/gps_null.c
+  ${BRAMBLE_NRF_GPS_SRCS}
   shim/battery_null.c
   shim/esp_app_desc_nrf.c
   shim/rpc_platform_stubs.c
@@ -372,15 +393,6 @@ target_link_libraries(bramble-nrf PRIVATE bramble_core nrfx_lib freertos_kernel 
 # 0x26000 for the T1000-E's stock Adafruit UF2 bootloader and also emits
 # bramble-nrf.uf2 for drag-and-drop flashing.
 set(BRAMBLE_NRF_LAYOUT swd CACHE STRING "Flash layout: swd or uf2")
-# Which physical board's pin map and profile to compile. The dev kit is the
-# default; t1000e selects the SenseCAP card (nrf/boards/t1000e.h, consoleless,
-# four pin RF switch) and its shared identity profile.
-set(BRAMBLE_NRF_BOARD wm1110_devkit CACHE STRING "Board: wm1110_devkit or t1000e")
-if(BRAMBLE_NRF_BOARD STREQUAL "t1000e")
-  target_compile_definitions(bramble_core PUBLIC BRAMBLE_BOARD_T1000E CONFIG_BRAMBLE_BOARD_T1000E)
-else()
-  target_compile_definitions(bramble_core PUBLIC CONFIG_BRAMBLE_BOARD_WM1110)
-endif()
 # App base under the T1000-E's Adafruit UF2 bootloader (S140 v7.3.0 layout;
 # must match ld/nrf52840_s140_app.ld FLASH ORIGIN).
 set(BRAMBLE_UF2_BASE 0x27000)
