@@ -14,6 +14,20 @@
  * task ever reads or writes it), which is what rules out a check-then-act
  * race on it entirely, rather than needing a lock around it.
  *
+ * gnss_gpio_idle_init() establishes every AG3335 control line's safe idle
+ * state unconditionally from gps_init(), regardless of gps_pref: without
+ * it, a pref-off boot would leave EN/VRTC_EN/SLEEP_INT/RTC_INT/RESET
+ * floating in power-on-reset state (input, disconnected), so the module's
+ * power would end up decided by board leakage instead of by this driver.
+ * gnss_power_on() then only changes what differs from that idle state.
+ *
+ * Every blocking delay inside gnss_power_on() goes through
+ * gnss_delay_draining() instead of a bare vTaskDelay(): the sequence
+ * blocks the gnss task for close to two seconds while the module is
+ * already emitting NMEA and $PAIR ACKs, and the 512B stream buffer holds
+ * only ~44ms of bytes at 115200 baud, so a bare sleep would overrun on
+ * every single power-on.
+ *
  * P1.06 (Meshtastic's PIN_3V3_EN, "Power to Sensors") is deliberately NOT
  * driven here. Bench Task 11 Step 2 validates that GNSS runs without it; the
  * documented contingency, if the bench disagrees, is a BOARD_PIN_GNSS_RAIL
@@ -82,14 +96,20 @@ static void uarte_handler(nrfx_uarte_event_t const* event, void* context) {
         if (len > 0) {
             size_t sent = xStreamBufferSendFromISR(s_stream, done_buf, len, &woken);
             if (sent < len) {
-                s_rx_overruns++;
+                /* Counts dropped BYTES (matches the api/openapi.yaml
+                 * "gps_rx_overruns" description), not drop events. */
+                s_rx_overruns += (uint32_t)(len - sent);
             }
         }
         /* Re-arm immediately with the buffer that just completed: nrfx
          * already has the other buffer queued as the pending one, so this
-         * closes the gap before the FIFO can overrun. */
-        (void)nrfx_uarte_rx(&s_uarte, done_buf, sizeof(s_rx_buf[0]));
-        s_rx_last_idx = (uint8_t)(done_buf == s_rx_buf[1] ? 1 : 0);
+         * closes the gap before the FIFO can overrun. Only record it as
+         * "last supplied" if the supply actually succeeded, or a failed
+         * call here could leave s_rx_last_idx claiming a buffer is free
+         * when it never was, letting RX_BUF_REQUEST alias it against curr. */
+        if (nrfx_uarte_rx(&s_uarte, done_buf, sizeof(s_rx_buf[0])) == NRFX_SUCCESS) {
+            s_rx_last_idx = (uint8_t)(done_buf == s_rx_buf[1] ? 1 : 0);
+        }
         if (s_task) {
             vTaskNotifyGiveFromISR(s_task, &woken);
         }
@@ -106,8 +126,9 @@ static void uarte_handler(nrfx_uarte_event_t const* event, void* context) {
          * RXSTARTED processed for that same short transfer) that raises
          * this even though RX_DONE above already resupplies proactively. */
         uint8_t idx = (uint8_t)(s_rx_last_idx ^ 1);
-        (void)nrfx_uarte_rx(&s_uarte, s_rx_buf[idx], sizeof(s_rx_buf[0]));
-        s_rx_last_idx = idx;
+        if (nrfx_uarte_rx(&s_uarte, s_rx_buf[idx], sizeof(s_rx_buf[0])) == NRFX_SUCCESS) {
+            s_rx_last_idx = idx;
+        }
         break;
     }
     case NRFX_UARTE_EVT_ERROR:
@@ -172,6 +193,66 @@ static void gnss_tx(const char* cmd, size_t len) {
 /*  Power sequencing (gnss task only; see file header)                 */
 /* ------------------------------------------------------------------ */
 
+/* Drains the RX stream buffer for approximately total_ms instead of
+ * sleeping through it: gnss_power_on() blocks the gnss task for close to
+ * two seconds while the AG3335 is actively talking (NMEA plus $PAIR ACKs),
+ * and the 512B stream buffer is only about 44ms deep at 115200 baud, so a
+ * bare vTaskDelay() across that span would overrun on every power cycle.
+ * xStreamBufferReceive() returns as soon as any byte arrives (trigger
+ * level 1), so during active traffic this drains in a tight loop; the 20ms
+ * per-iteration cap just bounds how long a quiet stretch can run past the
+ * requested total before the loop notices. */
+static void gnss_delay_draining(uint32_t total_ms) {
+    uint8_t chunk[64];
+    TickType_t start = xTaskGetTickCount();
+    TickType_t total_ticks = pdMS_TO_TICKS(total_ms);
+
+    for (;;) {
+        TickType_t elapsed = xTaskGetTickCount() - start;
+        if (elapsed >= total_ticks) {
+            return;
+        }
+        TickType_t remaining = total_ticks - elapsed;
+        TickType_t slice = remaining < pdMS_TO_TICKS(20) ? remaining : pdMS_TO_TICKS(20);
+
+        size_t n = xStreamBufferReceive(s_stream, chunk, sizeof(chunk), slice);
+        if (n > 0) {
+            xSemaphoreTake(s_mu, portMAX_DELAY);
+            gps_feed_bytes(&s_feed, chunk, n, now_ms());
+            xSemaphoreGive(s_mu);
+        }
+    }
+}
+
+/* Safe-idle configuration for every AG3335 control line, run exactly once
+ * and unconditionally from gps_init() regardless of gps_pref_get(); see
+ * the file header for why this cannot be skipped on a pref-off boot.
+ * gnss_power_on() only changes what differs from this (EN, plus the
+ * reset/wake/config sequence). */
+static void gnss_gpio_idle_init(void) {
+    /* VRTC_EN: set once, NEVER cleared anywhere in this file (grep-able
+     * invariant). Buys warm start across power cycles; established here,
+     * unconditionally, so a later gps_set_enabled(true) still gets the
+     * warm-start benefit even when the pref was off at boot. */
+    nrf_gpio_cfg_output(BOARD_PIN_GNSS_VRTC_EN);
+    nrf_gpio_pin_set(BOARD_PIN_GNSS_VRTC_EN);
+
+    nrf_gpio_cfg_output(BOARD_PIN_GNSS_SLEEP_INT);
+    nrf_gpio_pin_set(BOARD_PIN_GNSS_SLEEP_INT);
+
+    nrf_gpio_cfg_output(BOARD_PIN_GNSS_RTC_INT);
+    nrf_gpio_pin_clear(BOARD_PIN_GNSS_RTC_INT);
+
+    nrf_gpio_cfg_input(BOARD_PIN_GNSS_RESETB, NRF_GPIO_PIN_PULLUP);
+
+    nrf_gpio_cfg_output(BOARD_PIN_GNSS_RESET);
+    nrf_gpio_pin_clear(BOARD_PIN_GNSS_RESET);
+
+    /* EN idle LOW: gnss_power_on() is the only place this goes HIGH. */
+    nrf_gpio_cfg_output(BOARD_PIN_GNSS_EN);
+    nrf_gpio_pin_clear(BOARD_PIN_GNSS_EN);
+}
+
 static const char* const k_init_cmds[] = {
     "$PAIR066,1,1,1,1,0,0*3A\r\n", /* GPS + GLONASS + GALILEO + BDS */
     "$PAIR062,0,1*3F\r\n",         /* GGA on  */
@@ -183,7 +264,7 @@ static const char* const k_init_cmds[] = {
     "$PAIR062,6,0*38\r\n", /* ZDA off */
 };
 
-/* Re-running the whole sequence on every unpark is deliberate: deterministic
+/* Re-running the sequence on every unpark is deliberate: deterministic
  * beats optimal, and the commands are idempotent. Only ever called from
  * gnss_task(). */
 static void gnss_power_on(void) {
@@ -192,56 +273,37 @@ static void gnss_power_on(void) {
      * task could observe a stale s_powered mid-sequence. */
     s_powered = true;
 
-    /* 1. VRTC_EN: set once, NEVER cleared anywhere in this file (grep-able
-     * invariant). Buys warm start across power cycles. */
-    nrf_gpio_cfg_output(BOARD_PIN_GNSS_VRTC_EN);
-    nrf_gpio_pin_set(BOARD_PIN_GNSS_VRTC_EN);
-
-    /* 2. SLEEP_INT output HIGH. */
-    nrf_gpio_cfg_output(BOARD_PIN_GNSS_SLEEP_INT);
-    nrf_gpio_pin_set(BOARD_PIN_GNSS_SLEEP_INT);
-
-    /* 3. RTC_INT output LOW. */
-    nrf_gpio_cfg_output(BOARD_PIN_GNSS_RTC_INT);
-    nrf_gpio_pin_clear(BOARD_PIN_GNSS_RTC_INT);
-
-    /* 4. RESETB input pull-up (reset status readback). */
-    nrf_gpio_cfg_input(BOARD_PIN_GNSS_RESETB, NRF_GPIO_PIN_PULLUP);
-
-    /* 5. RESET output LOW. */
-    nrf_gpio_cfg_output(BOARD_PIN_GNSS_RESET);
-    nrf_gpio_pin_clear(BOARD_PIN_GNSS_RESET);
-
-    /* 6. EN output HIGH. */
-    nrf_gpio_cfg_output(BOARD_PIN_GNSS_EN);
+    /* EN HIGH: the only pin state gnss_gpio_idle_init() (called once,
+     * unconditionally, from gps_init()) left at its "off" value.
+     * VRTC_EN/SLEEP_INT/RTC_INT/RESET/RESETB already sit where that idle
+     * configuration left them; re-driving them here on every power-on
+     * would be redundant (idempotent, but pointless), so only EN changes. */
     nrf_gpio_pin_set(BOARD_PIN_GNSS_EN);
 
-    /* 7. UARTE is already up from gps_init. */
-
-    /* 8. Reset pulse. */
+    /* Reset pulse. */
     nrf_gpio_pin_set(BOARD_PIN_GNSS_RESET);
-    vTaskDelay(pdMS_TO_TICKS(10));
+    gnss_delay_draining(10);
     nrf_gpio_pin_clear(BOARD_PIN_GNSS_RESET);
-    vTaskDelay(pdMS_TO_TICKS(100));
+    gnss_delay_draining(100);
 
-    /* 9. Wake: RTC_INT pulse, then $PAIR382 spam for 1000ms (25 sends at
+    /* Wake: RTC_INT pulse, then $PAIR382 spam for 1000ms (25 sends at
      * 40ms). Meshtastic treats the spam as required on this board; bench
      * Task 11 confirms. */
     nrf_gpio_pin_set(BOARD_PIN_GNSS_RTC_INT);
-    vTaskDelay(pdMS_TO_TICKS(3));
+    gnss_delay_draining(3);
     nrf_gpio_pin_clear(BOARD_PIN_GNSS_RTC_INT);
-    vTaskDelay(pdMS_TO_TICKS(50));
+    gnss_delay_draining(50);
     for (int i = 0; i < 25; i++) {
         GNSS_TX_STR("$PAIR382,1*2E\r\n");
-        vTaskDelay(pdMS_TO_TICKS(40));
+        gnss_delay_draining(40);
     }
 
-    /* 10. Config burst, each line followed by 40ms, then save to flash. */
+    /* Config burst, each line followed by 40ms, then save to flash. */
     for (size_t i = 0; i < sizeof(k_init_cmds) / sizeof(k_init_cmds[0]); i++) {
         gnss_tx(k_init_cmds[i], strlen(k_init_cmds[i]));
-        vTaskDelay(pdMS_TO_TICKS(40));
+        gnss_delay_draining(40);
     }
-    vTaskDelay(pdMS_TO_TICKS(250));
+    gnss_delay_draining(250);
     GNSS_TX_STR("$PAIR513*3D\r\n");
 
     ESP_LOGI(TAG, "GNSS powered on");
@@ -322,6 +384,11 @@ static void gnss_task(void* arg) {
 /* ------------------------------------------------------------------ */
 
 int gps_init(gps_fix_cb_t cb, void* ctx) {
+    /* Unconditional, before anything below can fail and bail out early:
+     * the GNSS control lines must never be left floating regardless of
+     * what the rest of this function does. */
+    gnss_gpio_idle_init();
+
     s_shutdown = false;
 
     s_mu = xSemaphoreCreateMutex();
@@ -362,9 +429,22 @@ int gps_init(gps_fix_cb_t cb, void* ctx) {
     }
 
     /* Queue both RX buffers: nrfx keeps one active plus one pending, which
-     * is what makes the re-arm gap in uarte_handler survivable. */
-    if (nrfx_uarte_rx(&s_uarte, s_rx_buf[0], sizeof(s_rx_buf[0])) != NRFX_SUCCESS ||
-        nrfx_uarte_rx(&s_uarte, s_rx_buf[1], sizeof(s_rx_buf[1])) != NRFX_SUCCESS) {
+     * is what makes the re-arm gap in uarte_handler survivable. s_rx_last_idx
+     * is updated inline, only on success, immediately after each call: an
+     * IRQ (RXSTARTED, hence RX_BUF_REQUEST, fires purely off the receiver
+     * hardware starting, not off actual incoming bytes) can land between
+     * these two calls, and it must never see a value claiming a buffer is
+     * "last supplied" before that supply has actually succeeded. */
+    bool rx0_ok = nrfx_uarte_rx(&s_uarte, s_rx_buf[0], sizeof(s_rx_buf[0])) == NRFX_SUCCESS;
+    if (rx0_ok) {
+        s_rx_last_idx = 0;
+    }
+    bool rx1_ok =
+        rx0_ok && nrfx_uarte_rx(&s_uarte, s_rx_buf[1], sizeof(s_rx_buf[1])) == NRFX_SUCCESS;
+    if (rx1_ok) {
+        s_rx_last_idx = 1;
+    }
+    if (!rx0_ok || !rx1_ok) {
         ESP_LOGE(TAG, "gps_init: nrfx_uarte_rx queueing failed");
         nrfx_uarte_uninit(&s_uarte);
         vStreamBufferDelete(s_stream);
@@ -375,7 +455,6 @@ int gps_init(gps_fix_cb_t cb, void* ctx) {
         s_mu = NULL;
         return -1;
     }
-    s_rx_last_idx = 1;
 
     /* Read the persisted preference here, inside the nRF driver only: the
      * ESP32 gps_init() does not read gps_pref, and gps.h's cross-platform
@@ -485,26 +564,45 @@ void gps_deinit(void) {
         SemaphoreHandle_t stopped = xSemaphoreCreateBinary();
         s_stopped = stopped;
         xTaskNotifyGive(task);
-        /* 2000ms comfortably covers gnss_task() finishing a worst-case
-         * in-progress gnss_power_on() (~1.55s) before it next checks
-         * s_shutdown, so the confirmed path below is the expected one. */
-        bool confirmed = stopped && xSemaphoreTake(stopped, pdMS_TO_TICKS(2000)) == pdTRUE;
+
+        /* Budget for the worst case, not the nominal case: gnss_power_on()
+         * schedules ~1733ms of delay (10+100+3+50+1000+320+250) plus real
+         * UART TX time for its 34 gnss_tx() sends (25 wake + 8 config + 1
+         * save), and each of those 34 sends can independently block up to
+         * 100ms on its own TX_DONE timeout before giving up (3400ms on top
+         * in the worst case). 5500ms covers that with margin. */
+        bool confirmed = stopped && xSemaphoreTake(stopped, pdMS_TO_TICKS(5500)) == pdTRUE;
+
+        /* Uninit the UARTE peripheral before touching the task any further.
+         * This is what actually stops uarte_handler from ever running
+         * again, which is what prevents it from calling
+         * vTaskNotifyGiveFromISR() on a handle that may already be a freed
+         * TCB by the time this function gets around to clearing s_task
+         * below: in the confirmed case, gnss_task() gives `stopped` and
+         * then self-deletes via vTaskDelete(NULL), and it never touches the
+         * UARTE driver again after giving that semaphore, so uninitializing
+         * here can never collide with an in-flight nrfx call from that
+         * task. */
+        nrfx_uarte_uninit(&s_uarte);
+
+        if (!confirmed) {
+            ESP_LOGW(TAG, "gps_deinit: gnss task did not confirm exit in time, forcing delete");
+            vTaskDelete(task);
+            /* Only past this point is it guaranteed gnss_task() can never
+             * execute another instruction: FreeRTOS's vTaskDelete()
+             * excises a task from the scheduler immediately, even called
+             * from another task, before this call returns. Freeing
+             * `stopped` any earlier than this could race a genuine
+             * late-but-real xSemaphoreGive(s_stopped) against this
+             * function's own timeout, dereferencing a semaphore this
+             * function had already deleted out from under it. */
+        }
+        s_task = NULL;
         s_stopped = NULL;
         if (stopped) {
             vSemaphoreDelete(stopped);
         }
-        if (confirmed) {
-            /* gnss_task() already called vTaskDelete(NULL) on itself after
-             * giving the semaphore above, and it held no lock at that
-             * point, so there is nothing left to delete and s_mu is safe
-             * to reuse below. */
-        } else {
-            ESP_LOGW(TAG, "gps_deinit: gnss task did not confirm exit in time, forcing delete");
-            vTaskDelete(task);
-        }
-        s_task = NULL;
     }
-    nrfx_uarte_uninit(&s_uarte);
     nrf_gpio_pin_clear(BOARD_PIN_GNSS_EN);
     if (s_mu) {
         xSemaphoreTake(s_mu, portMAX_DELAY);
