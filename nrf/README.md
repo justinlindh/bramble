@@ -41,10 +41,11 @@ mesh traffic with the ESP32 fleet, and reflashes remotely over BLE
 boot failures are diagnosed through the flash boot trace (below) instead of
 a UART.
 
-GNSS (P3) is implemented for the AG3335 module (see below), but it has not
-run on hardware yet: the driver is build-verified only, pending a bench
-validation pass. Still absent: power management (P3, the 32MHz crystal
-stays on, so battery life is untuned). Not a supported device yet.
+GNSS (P3) is implemented for the AG3335 module (see below) and bench-verified
+on the physical T1000-E, 2026-07-31 (see the GNSS section for what was
+checked). Still absent: power management (P3, the 32MHz crystal stays on, so
+battery life is untuned) and outdoor cold-start TTFF, which the bench pass
+did not measure. Not a supported device yet.
 
 ## Build
 
@@ -187,12 +188,18 @@ the mesh's location-share state. GNSS stays off outright if the user
 preference is off; otherwise it stays powered continuously unless the node
 is actively sharing location on an interval of at least
 `GPS_DUTY_MIN_INTERVAL_S` (120s; below that, cycling saves nothing against
-the margin cost). When sharing on a longer interval, it powers down between
-fixes and wakes `GPS_DUTY_WARM_MARGIN_S` before the next scheduled send to
-leave time for a warm reacquisition. That margin defaults to 60s and is
-deliberately generous: it has not been tuned against a bench-measured warm
-TTFF, so it is documented here as a default awaiting that measurement, not
-a validated figure.
+the margin cost). A node that has never sent a share yet also keeps GNSS
+powered continuously, since there is no prior send time to schedule a wake
+against; the cycling behavior only starts after the first share goes out.
+From there, it powers down between fixes and wakes
+`GPS_DUTY_WARM_MARGIN_S` before the next scheduled send to leave time for a
+warm reacquisition. That margin defaults to 60s. The bench measured warm
+TTFF at 1 to 2 seconds with VRTC held under open sky, but 60s is a
+deliberate judgment on top of that measurement, not a scaled-up version of
+it: it covers a warm start after ephemeris has gone stale (a multi-hour
+park), which re-downloads ephemeris and takes tens of seconds, a case the
+short bench soak did not exercise. See `components/gps/include/gps_duty.h`
+for the full reasoning.
 
 Diagnostics: `bramble.getDiagnostics` reports `gps_rx_bytes` and
 `gps_rx_lines` (total bytes and NMEA-ish lines seen since the driver last
@@ -206,13 +213,25 @@ not parsing.
 Verification status: the shared NMEA feed (`components/gps/gps_feed.c`)
 and the duty-cycling policy (`components/gps/gps_duty.c`) are host-tested
 via `bash test/run_all_tests.sh`. The T1000-E driver itself
-(`shim/gps_t1000e.c`) is build-verified only; it has not yet run against a
-live AG3335 module on hardware. Airoha's published AG3335 chip
+(`shim/gps_t1000e.c`) was bench-verified on the physical card, 2026-07-31:
+NMEA flowed from the AG3335 with zero stream-buffer overruns, and the chip
+banner identified the module as an AG3335M running firmware V2.6.0. Cold
+time-to-first-fix measured about 22 minutes indoors (outdoor cold TTFF was
+not measured this pass). Warm TTFF measured 1 to 2 seconds with VRTC held,
+under open sky. `bramble.shareLocationOnce` delivered a live GPS position
+to a bench peer over the mesh. `bramble.setGpsEnabled` and the underlying
+preference were verified to toggle GNSS power live and to persist across a
+reboot. Duty-cycling was observed powering the module down after a share
+went out and waking it again at `last_send + interval - GPS_DUTY_WARM_MARGIN_S`,
+matching the policy. A 45-minute soak ran with a byte-stable heap, mesh RX
+observed every minute, and zero stream-buffer overruns throughout.
+
+Still unverified: power management and current draw (the next work, see
+above), outdoor cold-start TTFF, and reacquisition after a multi-hour park
+where ephemeris has gone stale. Airoha's published AG3335 chip
 specification states a cold-start time to first fix under 25 seconds and a
 tracking sensitivity of -167 dBm; Airoha does not publish current
-consumption figures for the chip, so none are cited here. Both TTFF and
-current draw on the actual T1000-E hardware are bench measurements yet to
-be taken, not figures this port has verified.
+consumption figures for the chip, so none are cited here.
 
 ## Dev network key (bench only)
 
@@ -265,5 +284,5 @@ ticks (the vendor SDK's 3.0V was not needed; no calibration errors).
 Neither table above includes the T1000-E's GNSS driver (see the GNSS
 section above): both were measured on the Wio-WM1110 dev kit build, which
 has no GPS hardware and compiles it out. A T1000-E image size, including
-the GNSS driver, has not been measured yet; that figure is part of the
-pending bench validation pass.
+the GNSS driver, is a separate figure from the GNSS functional bench pass
+above and has not been measured yet.

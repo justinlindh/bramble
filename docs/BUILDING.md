@@ -194,7 +194,7 @@ npm test
 | LilyGo T-Deck Plus | ESP32-S3 | SX1262 | ✅ Running target with LVGL v9 GUI |
 | Bramble Pager v1 (custom PCB) | ESP32-S3-WROOM-1 | SX1262 (DIO2 RF switch, TCXO) + ATGM336H GNSS | Design complete, boards not yet ordered |
 | Seeed Wio-WM1110 Dev Kit | nRF52840 | LR1110 | 🚧 Experimental: joins the mesh, BLE RPC + provisioning over an encrypted link, identity/key/bonds persist in flash; see [../nrf/README.md](../nrf/README.md) |
-| Seeed SenseCAP T1000-E | nRF52840 | LR1110 | 🚧 Experimental: consoleless card tracker; flashes via its stock UF2 bootloader (then remotely via `bramble.enterDfu`), BLE RPC, joins the mesh; GNSS driver implemented for the onboard AG3335 module but not yet bench-verified; power management not yet implemented; see [../nrf/README.md](../nrf/README.md) |
+| Seeed SenseCAP T1000-E | nRF52840 | LR1110 | 🚧 Experimental: consoleless card tracker; flashes via its stock UF2 bootloader (then remotely via `bramble.enterDfu`), BLE RPC, joins the mesh; GNSS driver implemented for the onboard AG3335 module and bench-verified (2026-07-31); power management not yet implemented; see [../nrf/README.md](../nrf/README.md) |
 
 GNSS pins live in `main/boards/heltec_v4.h`. The nRF52840 target is a
 separate bare-metal build (no ESP-IDF) under `nrf/`, with its own build and
