@@ -154,32 +154,6 @@ const (
 	rxOutcomeCaptured   = int(C.RADIO_RX_CAPTURED)
 )
 
-// --- Metrics ---
-
-func metricsInit(m *C.metrics_state_t) {
-	C.metrics_init(m)
-}
-
-func metricsUpdateActiveNodes(m *C.metrics_state_t, count int) {
-	C.metrics_update_active_nodes(m, C.int(count))
-}
-
-func metricsDeliveryRate(m *C.metrics_state_t) float64 {
-	return float64(C.metrics_delivery_rate(m))
-}
-
-func metricsAvgLatencyMs(m *C.metrics_state_t) float64 {
-	return float64(C.metrics_avg_latency_ms(m))
-}
-
-func metricsControlAirtimePct(m *C.metrics_state_t) float64 {
-	return float64(C.metrics_control_airtime_pct(m))
-}
-
-func metricsControlPacketPct(m *C.metrics_state_t) float64 {
-	return float64(C.metrics_control_packet_pct(m))
-}
-
 // --- Anomaly ---
 
 func anomalyInit(t *C.node_anomaly_tracker_t) {

@@ -679,13 +679,13 @@ func (s *Sim) putSharedMetrics(m map[string]any) {
 	m["receptions_ok"] = uint64(s.metrics.receptions_ok)
 	m["channel_log_overflow"] = uint64(s.radio.channel.overflow_drops)
 	m["airtime_total_ms"] = uint64(s.metrics.airtime_total_us) / 1000
-	m["avg_latency_ms"] = metricsAvgLatencyMs(&s.metrics)
+	m["avg_latency_ms"] = float64(C.metrics_avg_latency_ms(&s.metrics))
 	// delivery_rate divides delivered by total_packets (every frame of every
 	// type on the air, beacons included), which is NOT a message delivery
 	// figure and understates end-to-end delivery by an order of magnitude in
 	// control-heavy runs. Kept under its old name for continuity; the honest
 	// number is message_delivery_rate on the final_metrics event.
-	m["delivery_rate"] = metricsDeliveryRate(&s.metrics)
+	m["delivery_rate"] = float64(C.metrics_delivery_rate(&s.metrics))
 }
 
 func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
@@ -700,7 +700,7 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 			active++
 		}
 	}
-	metricsUpdateActiveNodes(&s.metrics, active)
+	C.metrics_update_active_nodes(&s.metrics, C.int(active))
 
 	metrics := map[string]any{
 		"type":          "metrics",
@@ -745,7 +745,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 	nodeArrayInit(&s.nodes)
 	radioConfigInit(&s.radio)
 	eventQueueInit(&s.events)
-	metricsInit(&s.metrics)
+	C.metrics_init(&s.metrics)
 	C.bridge_msg_track_init(&s.msgTrack[0], C.MAX_MSG_TRACK)
 	for i := 0; i < C.MAX_NODES; i++ {
 		anomalyInit(&s.anomaly[i])
@@ -1266,8 +1266,8 @@ func (s *Sim) complete() {
 		// ToA(beacon+RREQ+RREP+RERR) / ToA(all). control_packet_pct is the
 		// OLD formula (beacon+RREQ+RREP packet COUNT / total packet count,
 		// RERR not included) kept under its own honest name for continuity.
-		"control_airtime_pct": metricsControlAirtimePct(&s.metrics),
-		"control_packet_pct":  metricsControlPacketPct(&s.metrics),
+		"control_airtime_pct": float64(C.metrics_control_airtime_pct(&s.metrics)),
+		"control_packet_pct":  float64(C.metrics_control_packet_pct(&s.metrics)),
 		// Per-tier airtime-budget denials (Task 1) and per-limiter RREQ
 		// denials (Task 2), so scale runs can see how much control/data
 		// traffic the real gates actually refused, not just what got sent.
