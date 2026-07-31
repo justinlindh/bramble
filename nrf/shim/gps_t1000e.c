@@ -478,24 +478,53 @@ int gps_init(gps_fix_cb_t cb, void* ctx) {
         return -1;
     }
 
-    /* Queue both RX buffers: nrfx keeps one active plus one pending, which
-     * is what makes the re-arm gap in uarte_handler survivable. s_rx_last_idx
-     * is updated inline, only on success, immediately after each call: an
-     * IRQ (RXSTARTED, hence RX_BUF_REQUEST, fires purely off the receiver
-     * hardware starting, not off actual incoming bytes) can land between
-     * these two calls, and it must never see a value claiming a buffer is
-     * "last supplied" before that supply has actually succeeded. */
-    bool rx0_ok = nrfx_uarte_rx(&s_uarte, s_rx_buf[0], sizeof(s_rx_buf[0])) == NRFX_SUCCESS;
-    if (rx0_ok) {
-        s_rx_last_idx = 0;
+    /* Queue both RX buffers: nrfx keeps one active plus one pending, which is
+     * what makes the re-arm gap in uarte_handler survivable. Our own ISR
+     * usually beats us to the second one, and that is fine.
+     *
+     * The first nrfx_uarte_rx() triggers STARTRX from inside rx_buffer_set(),
+     * RXSTARTED fires straight away, and nrfx's rxstarted_irq_handler()
+     * raises NRFX_UARTE_EVT_RX_BUF_REQUEST off it, so uarte_handler() can
+     * supply the second buffer before the second call below even runs. Two
+     * consequences, and getting either wrong breaks init outright:
+     *
+     * - s_rx_last_idx is SEEDED BEFORE the first call, never assigned after
+     *   it. Assigning after would clobber whatever the ISR just set, leaving
+     *   it claiming s_rx_buf[0] was supplied last when s_rx_buf[1] actually
+     *   was, and the next RX_BUF_REQUEST would then hand nrfx the buffer it
+     *   is currently filling. Seeding is also what makes a second gps_init()
+     *   after a gps_deinit() start from a known value rather than inheriting
+     *   the previous session's.
+     * - NRFX_ERROR_BUSY from the SECOND call is success, not failure. It
+     *   means rx_buffer_set() found both of nrfx's slots already occupied
+     *   (drivers/src/nrfx_uarte.c:1408), i.e. the ISR queued the buffer we
+     *   were about to queue. This is the normal outcome on real hardware:
+     *   the T1000-E bench hit it on every boot, and treating it as an error
+     *   failed gps_init() with -1 every time, so GNSS never started at all.
+     *   No aliasing results, because the handler supplies s_rx_last_idx ^ 1
+     *   and the seed above makes that s_rx_buf[1]: precisely the buffer this
+     *   second call would have supplied.
+     *
+     * Everything else stays fatal, including BUSY from the FIRST call, which
+     * would mean something other than this driver had already armed the
+     * receiver rather than a benign lost race. The post-success assignment
+     * below is safe for the same reason the seed is needed: the module is
+     * still unpowered here (EN is low until gnss_power_on() runs on the gnss
+     * task), so no bytes can arrive and RX_BUF_REQUEST is the only ISR path
+     * reachable, and once both slots are full it can only return BUSY and
+     * leave s_rx_last_idx alone. */
+    s_rx_last_idx = 0;
+    nrfx_err_t rx0 = nrfx_uarte_rx(&s_uarte, s_rx_buf[0], sizeof(s_rx_buf[0]));
+    nrfx_err_t rx1 = NRFX_SUCCESS;
+    if (rx0 == NRFX_SUCCESS) {
+        rx1 = nrfx_uarte_rx(&s_uarte, s_rx_buf[1], sizeof(s_rx_buf[1]));
+        if (rx1 == NRFX_SUCCESS) {
+            s_rx_last_idx = 1;
+        }
     }
-    bool rx1_ok =
-        rx0_ok && nrfx_uarte_rx(&s_uarte, s_rx_buf[1], sizeof(s_rx_buf[1])) == NRFX_SUCCESS;
-    if (rx1_ok) {
-        s_rx_last_idx = 1;
-    }
-    if (!rx0_ok || !rx1_ok) {
-        ESP_LOGE(TAG, "gps_init: nrfx_uarte_rx queueing failed");
+    if (rx0 != NRFX_SUCCESS || (rx1 != NRFX_SUCCESS && rx1 != NRFX_ERROR_BUSY)) {
+        ESP_LOGE(TAG, "gps_init: nrfx_uarte_rx queueing failed (rx0=0x%08x rx1=0x%08x)",
+                 (unsigned)rx0, (unsigned)rx1);
         nrfx_uarte_uninit(&s_uarte);
         vStreamBufferDelete(s_stream);
         s_stream = NULL;
