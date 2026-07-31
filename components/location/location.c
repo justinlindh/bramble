@@ -3,28 +3,6 @@
 #include "nvs_keys.h"
 #include "location.h"
 #include <string.h>
-#include <math.h>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-/* Earth radius in meters */
-#define EARTH_RADIUS_M 6371000.0
-
-static double deg_to_rad(double deg) { return deg * M_PI / 180.0; }
-
-/* Equirectangular distance approximation, good enough for short distances */
-static double approx_distance_m(int32_t lat1_e7, int32_t lon1_e7, int32_t lat2_e7,
-                                int32_t lon2_e7) {
-    double lat1 = lat1_e7 / 1e7;
-    double lat2 = lat2_e7 / 1e7;
-    double dlat = deg_to_rad(lat2 - lat1);
-    double dlon = deg_to_rad((lon2_e7 - lon1_e7) / 1e7);
-    double cos_lat = cos(deg_to_rad((lat1 + lat2) / 2.0));
-    double x = dlon * cos_lat;
-    return EARTH_RADIUS_M * sqrt(x * x + dlat * dlat);
-}
 
 loc_share_mode_t location_share_mode_get(void) {
     nvs_handle_t nvs;
@@ -47,42 +25,7 @@ void location_share_mode_set(loc_share_mode_t mode) {
     }
 }
 
-void location_init(location_manager_t* mgr) {
-    memset(mgr, 0, sizeof(*mgr));
-    mgr->update_interval_ms = LOCATION_DEFAULT_INTERVAL_MS;
-    mgr->min_distance_m = LOCATION_MIN_DISTANCE_M;
-}
-
-int location_add_contact(location_manager_t* mgr, uint32_t peer_addr, uint8_t tier) {
-    if (location_find_contact(mgr, peer_addr))
-        return -1; /* already exists */
-    if (mgr->contact_count >= LOCATION_MAX_CONTACTS)
-        return -2; /* full */
-    location_contact_t* c = &mgr->contacts[mgr->contact_count++];
-    memset(c, 0, sizeof(*c));
-    c->peer_addr = peer_addr;
-    c->tier = tier;
-    c->active = true;
-    return 0;
-}
-
-int location_remove_contact(location_manager_t* mgr, uint32_t peer_addr) {
-    for (int i = 0; i < mgr->contact_count; i++) {
-        if (mgr->contacts[i].peer_addr == peer_addr) {
-            mgr->contacts[i] = mgr->contacts[--mgr->contact_count];
-            return 0;
-        }
-    }
-    return -1;
-}
-
-location_contact_t* location_find_contact(location_manager_t* mgr, uint32_t peer_addr) {
-    for (int i = 0; i < mgr->contact_count; i++) {
-        if (mgr->contacts[i].peer_addr == peer_addr)
-            return &mgr->contacts[i];
-    }
-    return NULL;
-}
+void location_init(location_manager_t* mgr) { memset(mgr, 0, sizeof(*mgr)); }
 
 void location_set_position(location_manager_t* mgr, const bramble_position_t* pos) {
     mgr->my_position = *pos;
@@ -329,26 +272,4 @@ bool location_policy_should_send(const location_policy_t* policy, bool has_sourc
     }
 
     return true;
-}
-
-bool location_should_send(const location_manager_t* mgr, uint32_t peer_addr, uint32_t now_ms) {
-    for (int i = 0; i < mgr->contact_count; i++) {
-        if (mgr->contacts[i].peer_addr == peer_addr && mgr->contacts[i].active) {
-            const location_contact_t* c = &mgr->contacts[i];
-            /* Time-based */
-            if (c->last_sent_ms == 0 || (now_ms - c->last_sent_ms) >= mgr->update_interval_ms)
-                return true;
-            /* Distance-based: check cache for last known sent position */
-            const location_cache_entry_t* cached = location_cache_get(mgr, peer_addr);
-            if (cached && mgr->my_position.valid) {
-                double dist =
-                    approx_distance_m(mgr->my_position.latitude_e7, mgr->my_position.longitude_e7,
-                                      cached->pos.latitude_e7, cached->pos.longitude_e7);
-                if (dist >= mgr->min_distance_m)
-                    return true;
-            }
-            return false;
-        }
-    }
-    return false;
 }

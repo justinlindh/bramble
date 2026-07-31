@@ -33,11 +33,9 @@
 #define L_LOC_INNER (1 + LOCATION_FULL_SIZE) /* 18: tier(1) + padded position payload */
 
 #define LOCATION_MAX_CONTACTS 16
-#define LOCATION_DEFAULT_INTERVAL_MS 300000 /* 5 minutes */
-#define LOCATION_DEFAULT_INTERVAL_S 300     /* 5 minutes */
-#define LOCATION_MIN_INTERVAL_S 30          /* floor for periodic sharing */
-#define LOCATION_MIN_DISTANCE_M 100         /* distance trigger */
-#define LOCATION_CACHE_TTL_MS 3600000       /* 1 hour */
+#define LOCATION_DEFAULT_INTERVAL_S 300 /* 5 minutes */
+#define LOCATION_MIN_INTERVAL_S 30      /* floor for periodic sharing */
+#define LOCATION_CACHE_TTL_MS 3600000   /* 1 hour */
 
 /* Persistent sharing policy */
 typedef struct {
@@ -58,15 +56,6 @@ typedef struct {
     bool valid;
 } bramble_position_t;
 
-/* Contact sharing config */
-typedef struct {
-    uint32_t peer_addr;
-    uint8_t tier; /* LOCATION_TIER_* */
-    bool active;
-    bool auto_approve_requests;
-    uint32_t last_sent_ms;
-} location_contact_t;
-
 /* Cached position from peer */
 typedef struct {
     uint32_t peer_addr;
@@ -78,12 +67,8 @@ typedef struct {
 /* Location manager state */
 typedef struct {
     bramble_position_t my_position;
-    location_contact_t contacts[LOCATION_MAX_CONTACTS];
-    int contact_count;
     location_cache_entry_t cache[LOCATION_MAX_CONTACTS];
     int cache_count;
-    uint32_t update_interval_ms;
-    uint16_t min_distance_m;
 } location_manager_t;
 
 /* Location sharing mode for Settings UI */
@@ -100,11 +85,6 @@ void location_share_mode_set(loc_share_mode_t mode);
 
 /* Init */
 void location_init(location_manager_t* mgr);
-
-/* Contact management */
-int location_add_contact(location_manager_t* mgr, uint32_t peer_addr, uint8_t tier);
-int location_remove_contact(location_manager_t* mgr, uint32_t peer_addr);
-location_contact_t* location_find_contact(location_manager_t* mgr, uint32_t peer_addr);
 
 /* Position update */
 void location_set_position(location_manager_t* mgr, const bramble_position_t* pos);
@@ -141,9 +121,6 @@ int location_cache_update(location_manager_t* mgr, uint32_t peer_addr,
                           const bramble_position_t* pos, uint32_t now_ms);
 const location_cache_entry_t* location_cache_get(const location_manager_t* mgr, uint32_t peer_addr);
 void location_cache_purge(location_manager_t* mgr, uint32_t now_ms);
-
-/* Check if update needed (time or distance based) */
-bool location_should_send(const location_manager_t* mgr, uint32_t peer_addr, uint32_t now_ms);
 
 /* Policy engine send gating for periodic sharing */
 bool location_policy_should_send(const location_policy_t* policy, bool has_source, bool has_targets,

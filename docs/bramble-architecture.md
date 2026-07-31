@@ -662,9 +662,8 @@ lat_e7(4) + lon_e7(4) + alt_m(2) + accuracy_m(1) + speed_kmh(1) + heading_deg2(1
 
 **Sharing rules:**
 
-- Per-contact sharing config: each contact has an assigned tier and an `auto_approve_requests` flag.
-- Update triggers: time-based (default 5-minute interval) or distance-based (default 100 m threshold).
-- `location_should_send(mgr, peer_addr, now_ms)` combines both triggers.
+- Periodic sharing is gated by the persisted policy (`location_policy_t`: enabled flag, default tier, interval): `location_policy_should_send(policy, has_source, has_targets, now_ms, last_sent_ms)` returns true once the configured interval has elapsed and both a position source and at least one target exist.
+- Per-contact rules (which peers receive updates and at which tier) are persisted in NVS under the `lcr_` key prefix and managed over RPC (`bramble.setLocationContact`).
 
 **Position cache:**
 
@@ -676,8 +675,8 @@ lat_e7(4) + lon_e7(4) + alt_m(2) + accuracy_m(1) + speed_kmh(1) + heading_deg2(1
 
 ```c
 void location_init(location_manager_t *mgr);
-int  location_add_contact(mgr, peer_addr, tier);
 void location_set_position(mgr, pos);
+bool location_policy_should_send(policy, has_source, has_targets, now_ms, last_sent_ms);
 int  location_serialize_full(pos, buf, buf_len);    /* → 17 bytes */
 int  location_serialize_coarse(pos, buf, buf_len);  /* → 5 bytes */
 ```
