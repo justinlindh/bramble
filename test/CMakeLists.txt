@@ -1165,6 +1165,7 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1185,6 +1186,7 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1205,6 +1207,7 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1225,6 +1228,7 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1327,6 +1331,7 @@ add_executable(test_rpc_anchor_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1600,6 +1605,7 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1659,6 +1665,7 @@ add_executable(test_rpc_scratch_isolation
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1893,6 +1900,7 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c

@@ -1081,6 +1081,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.setGpsEnabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the GPS power preference
+         * @description Persists the GPS power preference and applies it live (powers GNSS on or cuts power). Returns not-supported on boards without GPS capability.
+         */
+        post: operations["setGpsEnabled"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.getStorageInfo": {
         parameters: {
             query?: never;
@@ -1554,6 +1574,8 @@ export interface components {
             battery_pct: number;
             /** @description Whether this board has GPS hardware. */
             gps_available: boolean;
+            /** @description The persisted GPS power preference (independent of gps_available). */
+            gps_enabled: boolean;
             /** @description True when bramble.getDeliveryEvents incremental replay is supported. */
             supports_delivery_event_sync: boolean;
             /** @description Verified per-node identity pins currently held (TOFU pin store, RAM-only; resets on reboot). */
@@ -2288,6 +2310,18 @@ export interface components {
             accuracy_m?: number;
             /** @description Unix timestamp of the GPS fix (seconds). */
             timestamp?: number;
+        };
+        /** @description Parameters for bramble.setGpsEnabled. */
+        SetGpsEnabledParams: {
+            /** @description True to power GNSS on, false to cut power. */
+            enabled: boolean;
+        };
+        /** @description Response from bramble.setGpsEnabled. */
+        SetGpsEnabledResponse: {
+            /** @description Always true on success. */
+            ok: boolean;
+            /** @description The GPS power preference that was persisted and applied. */
+            enabled: boolean;
         };
         /** @description Response from bramble.getStorageInfo (T-Deck Plus only). */
         GetStorageInfoResponse: {
@@ -4151,6 +4185,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GetGpsPositionResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    setGpsEnabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SetGpsEnabledParams"];
+            };
+        };
+        responses: {
+            /** @description GPS power preference updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetGpsEnabledResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */

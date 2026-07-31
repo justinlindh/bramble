@@ -31,6 +31,7 @@
 #include "board_config.h"
 #include "display.h"
 #include "gps.h"
+#include "gps_pref.h"
 #include "location.h"
 #include "wifi_manager.h"
 #include "ws_server.h"
@@ -147,6 +148,7 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(result, "battery_mv", battery_read_mv());
     cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
+    cJSON_AddBoolToObject(result, "gps_enabled", gps_pref_get());
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync",
                           mesh_supports_delivery_event_sync());
 
@@ -2640,6 +2642,23 @@ static int handle_get_gps_position(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* bramble.setGpsEnabled: persist the GPS power preference, then apply live. */
+static int handle_set_gps_enabled(const cJSON* params, cJSON* result) {
+    if (!board_has_cap(BOARD_CAP_GPS)) {
+        cJSON_AddStringToObject(result, "error", "gps not supported on this board");
+        return RPC_ERR_NOT_SUPPORTED;
+    }
+    const cJSON* en = params ? cJSON_GetObjectItem(params, "enabled") : NULL;
+    if (!en || !cJSON_IsBool(en))
+        return RPC_ERR_INVALID_PARAMS;
+    bool enabled = cJSON_IsTrue(en);
+    gps_pref_set(enabled);    /* persist first (survives a crash mid-apply) */
+    gps_set_enabled(enabled); /* then apply live, same order as the UI toggle */
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddBoolToObject(result, "enabled", enabled);
+    return 0;
+}
+
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "sdcard.h"
 
@@ -3360,6 +3379,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.sleep", handle_sleep);
 
     rpc_register("bramble.getGpsPosition", handle_get_gps_position);
+    rpc_register("bramble.setGpsEnabled", handle_set_gps_enabled);
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     rpc_register("bramble.getStorageInfo", handle_get_storage_info);

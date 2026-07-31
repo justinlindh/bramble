@@ -1315,6 +1315,30 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetGpsPositionResponse'
 
+  /rpc/bramble.setGpsEnabled:
+    post:
+      operationId: setGpsEnabled
+      summary: Set the GPS power preference
+      description: >
+        Persists the GPS power preference and applies it live (powers GNSS
+        on or cuts power). Returns not-supported on boards without GPS
+        capability.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetGpsEnabledParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: GPS power preference updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetGpsEnabledResponse'
+
   # ── Storage (T-Deck Plus only) ─────────────────────────────────────────────
 
   /rpc/bramble.getStorageInfo:
@@ -2011,6 +2035,7 @@ components:
         - battery_mv
         - battery_pct
         - gps_available
+        - gps_enabled
         - supports_delivery_event_sync
         - identity_pins
         - identity_conflicts
@@ -2064,6 +2089,9 @@ components:
         gps_available:
           type: boolean
           description: Whether this board has GPS hardware.
+        gps_enabled:
+          type: boolean
+          description: The persisted GPS power preference (independent of gps_available).
         supports_delivery_event_sync:
           type: boolean
           description: True when bramble.getDeliveryEvents incremental replay is supported.
@@ -3478,6 +3506,27 @@ components:
         timestamp:
           type: integer
           description: Unix timestamp of the GPS fix (seconds).
+
+    SetGpsEnabledParams:
+      type: object
+      description: Parameters for bramble.setGpsEnabled.
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: True to power GNSS on, false to cut power.
+
+    SetGpsEnabledResponse:
+      type: object
+      description: Response from bramble.setGpsEnabled.
+      required: [ok, enabled]
+      properties:
+        ok:
+          type: boolean
+          description: Always true on success.
+        enabled:
+          type: boolean
+          description: The GPS power preference that was persisted and applied.
 
     # ── Storage (T-Deck Plus only) ─────────────────────────────────────────
 

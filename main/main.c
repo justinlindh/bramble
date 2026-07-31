@@ -47,6 +47,7 @@
 #include "sas_format.h"
 
 #include "gps.h"
+#include "gps_pref.h"
 #include "cJSON.h"
 
 #ifdef CONFIG_IDF_TARGET_LINUX
@@ -235,33 +236,15 @@ void conn_mode_set(conn_mode_t mode) {
 
 /* ── GPS enable (NVS-persisted) ─────────────────────────────────────── */
 
-/* Persisted GPS power preference. Default ON so a fresh GPS board behaves as
- * before; the Settings toggle flips it and gps_set_enabled() applies it live. */
-static bool gps_enabled_get(void) {
-    uint8_t en = 1; /* default: ON */
-    nvs_handle_t nvs;
-    if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, NVS_KEY_GPS_EN, &en);
-        nvs_close(nvs);
-    }
-    return en != 0;
-}
-
-static void gps_enabled_set(bool enabled) {
-    nvs_handle_t nvs;
-    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, NVS_KEY_GPS_EN, enabled ? 1 : 0);
-        nvs_commit(nvs);
-        nvs_close(nvs);
-        ESP_LOGI(TAG, "GPS enable saved: %d", enabled ? 1 : 0);
-    }
-}
+/* The persisted GPS power preference itself now lives in the shared
+ * components/gps/gps_pref.c (gps_pref_get()/gps_pref_set()), so the nRF
+ * target and the RPC layer can reach it too; this file just delegates. */
 
 /* Read-only view of the persisted GPS power preference, so the T-Deck status
  * bar can dim its GPS icon when GPS is switched off in Settings. Self-declared
  * to satisfy -Wmissing-prototypes for this cross-module accessor. */
 bool bramble_gps_enabled(void);
-bool bramble_gps_enabled(void) { return gps_enabled_get(); }
+bool bramble_gps_enabled(void) { return gps_pref_get(); }
 
 /* ── Splash screen ──────────────────────────────────────────────────── */
 
@@ -793,7 +776,7 @@ static void render_screen(ui_state_t* ui) {
                 display_draw_text(2, y, "GPS:");
                 y += LINE_H + 4;
                 static const char* gps_names[] = {"Off", "On"};
-                bool cur_gps = gps_enabled_get();
+                bool cur_gps = gps_pref_get();
                 for (int i = 0; i < 2; i++) {
                     char ml[32];
                     const char* arrow = (i == ui->settings_cursor) ? ">" : " ";
@@ -859,7 +842,7 @@ static void render_screen(ui_state_t* ui) {
             /* Row 3: GPS power (only on GPS boards) */
             if (ui->gps_available) {
                 const char* sel = (ui->settings_item_cursor == UI_SETTINGS_ITEM_GPS) ? ">" : " ";
-                snprintf(line, sizeof(line), "%sGPS: %s", sel, gps_enabled_get() ? "On" : "Off");
+                snprintf(line, sizeof(line), "%sGPS: %s", sel, gps_pref_get() ? "On" : "Off");
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
@@ -1292,7 +1275,7 @@ void app_main(void) {
             /* Honor the persisted GPS-power preference (default ON). If the
              * user disabled GPS, cut power now; gps_init registered the fix
              * callback so a later Settings toggle can bring it back. */
-            if (!gps_enabled_get()) {
+            if (!gps_pref_get()) {
                 ESP_LOGI(TAG, "GPS disabled by saved setting; cutting power");
                 gps_set_enabled(false);
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
@@ -1728,9 +1711,9 @@ void app_main(void) {
                 ui.screen_dirty = true;
             } else if (ui.settings_item_cursor == UI_SETTINGS_ITEM_GPS) {
                 bool new_gps = (ui.settings_cursor == 1);
-                bool old_gps = gps_enabled_get();
+                bool old_gps = gps_pref_get();
                 if (new_gps != old_gps) {
-                    gps_enabled_set(new_gps);
+                    gps_pref_set(new_gps);
                     gps_set_enabled(new_gps);
                     ESP_LOGI(TAG, "GPS %s via settings", new_gps ? "enabled" : "disabled");
                 }

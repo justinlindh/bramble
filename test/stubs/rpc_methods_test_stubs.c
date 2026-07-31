@@ -127,6 +127,9 @@ char g_nvs_node_name[64] = "";
 char g_nvs_channel_names[8][20] = {{0}};
 uint8_t g_nvs_channel_psk_flags[8] = {0};
 bool g_nvs_channel_psk_present[8] = {false};
+/* Persisted GPS power preference, keyed the same as gps_pref.c's "gps_en".
+ * Default 1 (ON) mirrors gps_pref_get()'s own default-ON fallback. */
+uint8_t g_nvs_gps_en = 1;
 
 typedef struct {
     char key[16];
@@ -335,11 +338,26 @@ int battery_read_pct(void) { return 85; }
  * The real struct is ~256 bytes; we allocate 512 to be safe.
  * The short_name pointer is at offset 0 in the real struct. */
 static char g_stub_board_mem[512];
+/* Test lever: when true, board_get_config() reports BOARD_CAP_GPS so
+ * handle_set_gps_enabled / handle_get_gps_position exercise their
+ * GPS-capable path instead of the not-supported early return. */
+bool g_stub_board_has_gps = false;
 const void* board_get_config(void) {
     /* Ensure short_name is set (it's a const char* at some offset: we set
      * offset 0 which the stubs type expects, but real struct may differ).
      * Zero-init means capabilities=0, so board_has_cap returns false. */
     memset(g_stub_board_mem, 0, sizeof(g_stub_board_mem));
+    if (g_stub_board_has_gps) {
+        /* Mirror only the real bramble_board_config_t's leading fields (name,
+         * short_name, capabilities; see board_config.h) so board_has_cap()
+         * sees BOARD_CAP_GPS without pulling in the full ESP-only header. */
+        struct {
+            const char* name;
+            const char* short_name;
+            uint32_t capabilities;
+        }* hdr = (void*)g_stub_board_mem;
+        hdr->capabilities = (1u << 4); /* BOARD_CAP_GPS */
+    }
     /* We need to find where short_name lives. Since we can't include the real
      * header here, just return zeroed memory. board_has_cap will return false,
      * and bramble_hardware() will return "unknown" since short_name will be NULL. */
@@ -597,6 +615,10 @@ esp_err_t nvs_set_str(nvs_handle_t h, const char* k, const char* v) {
     return ESP_OK;
 }
 esp_err_t nvs_set_u8(nvs_handle_t h, const char* k, uint8_t v) {
+    if (h == 1 && k && strcmp(k, "gps_en") == 0) {
+        g_nvs_gps_en = v;
+        return ESP_OK;
+    }
     (void)h;
     (void)k;
     (void)v;
@@ -634,6 +656,11 @@ esp_err_t nvs_set_blob(nvs_handle_t h, const char* k, const void* v, size_t l) {
     return ESP_OK;
 }
 esp_err_t nvs_get_u8(nvs_handle_t h, const char* k, uint8_t* o) {
+    if (h == 1 && k && strcmp(k, "gps_en") == 0) {
+        if (o)
+            *o = g_nvs_gps_en;
+        return ESP_OK;
+    }
     (void)h;
     (void)k;
     if (o)
