@@ -488,6 +488,11 @@ esp_err_t nvs_get_str(nvs_handle_t h, const char* k, char* v, size_t* l) {
             *l = need;
             return ESP_OK;
         }
+        /* location_policy_load_or_init (rpc_methods.c) distinguishes a
+         * genuinely missing key (write defaults) from a real read error
+         * (propagate); real NVS reports the former as
+         * ESP_ERR_NVS_NOT_FOUND, not the generic ESP_FAIL. */
+        return ESP_ERR_NVS_NOT_FOUND;
     }
     return ESP_FAIL;
 }
@@ -558,15 +563,16 @@ esp_err_t nvs_get_u8(nvs_handle_t h, const char* k, uint8_t* o) {
     }
     if (o)
         *o = 0;
-    return ESP_FAIL;
+    /* See nvs_get_str's h==3 comment: location_policy_load_or_init needs
+     * "key not present" reported as ESP_ERR_NVS_NOT_FOUND. */
+    return (h == 3) ? ESP_ERR_NVS_NOT_FOUND : ESP_FAIL;
 }
 
 esp_err_t nvs_get_u16(nvs_handle_t h, const char* k, uint16_t* o) {
-    (void)h;
     (void)k;
     if (o)
         *o = 0;
-    return ESP_FAIL;
+    return (h == 3) ? ESP_ERR_NVS_NOT_FOUND : ESP_FAIL;
 }
 
 esp_err_t nvs_get_i32(nvs_handle_t h, const char* k, int32_t* o) {
@@ -705,6 +711,42 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
     (void)pos;
     (void)tier;
     return 0xABCDEF01u;
+}
+
+/* mesh_resolve_self_position stub: none of the RPC contract suites linked
+ * against this file exercise bramble.shareLocationOnce, so this only needs
+ * to satisfy the linker. gps_get_position is the real components/gps/gps.c
+ * function (compiled into every target that links this file); its host
+ * build always reports no fix, and nvs_get_i32 here is a permanent-miss
+ * stub, so this always falls through to "no position available". */
+extern bool gps_get_position(bramble_position_t* out);
+
+bool mesh_resolve_self_position(bramble_position_t* out) {
+    bramble_position_t gps_pos;
+    if (gps_get_position(&gps_pos) && gps_pos.valid) {
+        *out = gps_pos;
+        return true;
+    }
+
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    int32_t lat_e6 = 0;
+    int32_t lon_e6 = 0;
+    bool has_manual = (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK) &&
+                      (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK) &&
+                      !(lat_e6 == 0 && lon_e6 == 0);
+    nvs_close(nvs);
+    if (!has_manual) {
+        return false;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->latitude_e7 = lat_e6 * 10;
+    out->longitude_e7 = lon_e6 * 10;
+    out->valid = true;
+    return true;
 }
 
 void ws_server_load_token(void) {}

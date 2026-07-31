@@ -43,7 +43,6 @@ static int location_rx_decode_channel(const uint8_t* nonce, const uint8_t* ciphe
                                       size_t ct_len, const uint8_t* tag, const uint8_t* aad,
                                       size_t aad_len, uint8_t* tier_out,
                                       bramble_position_t* pos_out, int* channel_index_out);
-static bool mesh_resolve_self_position(bramble_position_t* out);
 
 static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t* policy) {
     location_policy_set_defaults(policy);
@@ -508,12 +507,15 @@ void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr)
 
 /* Resolve this node's own position: live GPS first, manual NVS coords as the
  * fallback for GPS-less boards. This is THE self-position source; the policy
- * tick below and mesh_get_location_state both use it. It exists because the
- * codebase grew two location_manager_t instances: main.c's g_location_mgr
- * received every GPS fix and nothing ever read it, while the s_location_mgr
- * that the T-Deck map reads had no writer for my_position at all, so the map
- * showed "waiting for position fix" forever against a 3 m GPS fix. */
-static bool mesh_resolve_self_position(bramble_position_t* out) {
+ * tick below and mesh_get_location_state both use it, and it is exported
+ * (mesh_task.h) so bramble.shareLocationOnce shares it too instead of
+ * re-reading manual NVS coords on its own and hard-failing GPS-only nodes. It
+ * exists because the codebase grew two location_manager_t instances: main.c's
+ * g_location_mgr received every GPS fix and nothing ever read it, while the
+ * s_location_mgr that the T-Deck map reads had no writer for my_position at
+ * all, so the map showed "waiting for position fix" forever against a 3 m
+ * GPS fix. */
+bool mesh_resolve_self_position(bramble_position_t* out) {
     bramble_position_t gps_pos;
     if (gps_get_position(&gps_pos) && gps_pos.valid) {
         *out = gps_pos;

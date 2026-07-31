@@ -23,6 +23,10 @@ extern bool g_nvs_allow_open;
 extern char g_nvs_node_name[64];
 extern uint8_t g_nvs_gps_en;
 extern bool g_stub_board_has_gps;
+extern bool g_nvs_lat_e6_set;
+extern int32_t g_nvs_lat_e6;
+extern bool g_nvs_lon_e6_set;
+extern int32_t g_nvs_lon_e6;
 
 /* phy.tx routes raw frames through the tx gate; the stub captures the call. */
 extern int g_stub_tx_gate_calls;
@@ -45,6 +49,10 @@ void setUp(void) {
     g_nvs_node_name[0] = '\0';
     g_nvs_gps_en = 1;
     g_stub_board_has_gps = false;
+    g_nvs_lat_e6_set = false;
+    g_nvs_lat_e6 = 0;
+    g_nvs_lon_e6_set = false;
+    g_nvs_lon_e6 = 0;
     /* PHY passthrough is module-global state that persists across tests; force
      * every case to start from a disabled gate and a clean tx-gate capture. */
     phy_passthrough_disable();
@@ -197,6 +205,39 @@ void test_set_gps_enabled_persists_and_reads_back_true(void) {
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(status_r, "gps_enabled")));
     cJSON_Delete(status_resp);
 
+    cJSON_Delete(resp);
+}
+
+/* ── 2c. shareLocationOnce ────────────────────────────────────────── */
+
+void test_share_location_once_no_source_errors(void) {
+    /* No GPS fix (host build always reports none) and no manual NVS
+     * location set: the resolver has no source at all. */
+    cJSON* resp = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"bramble."
+                                     "shareLocationOnce\",\"params\":{\"address\":\"0000ABCD\"}}");
+    cJSON* r = get_result(resp);
+    TEST_ASSERT_FALSE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
+    TEST_ASSERT_EQUAL_STRING("no location available (no GPS fix and no manual location set)",
+                             cJSON_GetObjectItem(r, "error")->valuestring);
+    cJSON_Delete(resp);
+}
+
+void test_share_location_once_manual_nvs_succeeds(void) {
+    /* setLocationConfig with lat/lon persists the manual fallback that
+     * mesh_resolve_self_position reads once GPS reports no fix. */
+    cJSON* set_resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"bramble.setLocationConfig\","
+        "\"params\":{\"lat\":37.7749,\"lon\":-122.4194}}");
+    cJSON_Delete(set_resp);
+
+    cJSON* resp = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"bramble."
+                                     "shareLocationOnce\",\"params\":{\"address\":\"0000ABCD\"}}");
+    cJSON* r = get_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
+    TEST_ASSERT_FLOAT_WITHIN(0.00001, 37.7749, cJSON_GetObjectItem(r, "lat")->valuedouble);
+    TEST_ASSERT_FLOAT_WITHIN(0.00001, -122.4194, cJSON_GetObjectItem(r, "lon")->valuedouble);
+    /* The stub's mesh_send_location_packet always returns 0xABCDEF01. */
+    TEST_ASSERT_EQUAL_STRING("ABCDEF01", cJSON_GetObjectItem(r, "packetId")->valuestring);
     cJSON_Delete(resp);
 }
 
@@ -547,6 +588,10 @@ int main(void) {
     RUN_TEST(test_set_gps_enabled_non_bool_param_invalid);
     RUN_TEST(test_set_gps_enabled_persists_and_reads_back_false);
     RUN_TEST(test_set_gps_enabled_persists_and_reads_back_true);
+
+    /* shareLocationOnce */
+    RUN_TEST(test_share_location_once_no_source_errors);
+    RUN_TEST(test_share_location_once_manual_nvs_succeeds);
 
     /* sendMessage */
     RUN_TEST(test_send_message_missing_dest);

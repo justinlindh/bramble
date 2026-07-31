@@ -1854,35 +1854,22 @@ static int handle_share_location_once(const cJSON* params, cJSON* result) {
         cJSON_AddStringToObject(result, "error", "location policy read failed");
         return 0;
     }
-
-    int32_t lat_e6 = 0, lon_e6 = 0;
-    nvs_get_i32(nvs, "lat_e6", &lat_e6);
-    nvs_get_i32(nvs, "lon_e6", &lon_e6);
     nvs_close(nvs);
 
-    if (lat_e6 == 0 && lon_e6 == 0) {
+    bramble_position_t pos;
+    if (!mesh_resolve_self_position(&pos)) {
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error",
-                                "no location set (use setLocationConfig with lat/lon)");
+                                "no location available (no GPS fix and no manual location set)");
         return 0;
     }
+    pos.timestamp = (uint32_t)(esp_timer_get_time() / 1000000ULL);
 
     uint8_t tier = policy.default_tier;
     cJSON* tier_j = cJSON_GetObjectItem(params, "tier");
     if (tier_j && cJSON_IsString(tier_j)) {
         tier = location_tier_from_string(tier_j->valuestring);
     }
-
-    bramble_position_t pos = {
-        .latitude_e7 = lat_e6 * 10,
-        .longitude_e7 = lon_e6 * 10,
-        .altitude_m = 0,
-        .accuracy_m = 0,
-        .speed_kmh = 0,
-        .heading_deg2 = 0,
-        .timestamp = (uint32_t)(esp_timer_get_time() / 1000000ULL),
-        .valid = true,
-    };
 
     uint32_t dest_addr = (uint32_t)strtoul(addr_str, NULL, 16);
     uint32_t pkt_id = mesh_send_location_packet(dest_addr, &pos, tier);
@@ -1893,8 +1880,8 @@ static int handle_share_location_once(const cJSON* params, cJSON* result) {
     }
 
     cJSON_AddBoolToObject(result, "ok", true);
-    cJSON_AddNumberToObject(result, "lat", lat_e6 / 1e6);
-    cJSON_AddNumberToObject(result, "lon", lon_e6 / 1e6);
+    cJSON_AddNumberToObject(result, "lat", pos.latitude_e7 / 1e7);
+    cJSON_AddNumberToObject(result, "lon", pos.longitude_e7 / 1e7);
     cJSON_AddStringToObject(result, "tier", location_tier_to_string(tier));
     char pkt_buf[12];
     snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, pkt_id);
