@@ -23,7 +23,6 @@
 #if BOARD_HAS_GNSS
 #include "gps.h"
 #include "gps_events.h"
-#include "gps_pref.h"
 #endif
 
 static const char* TAG = "app_init";
@@ -68,13 +67,14 @@ void app_init_stack(void) {
 
 #if BOARD_HAS_GNSS
     /* GNSS after the mesh: the fix callback's consumers (location policy,
-     * RPC events) exist once the mesh is up. */
+     * RPC events) exist once the mesh is up. gps_init() reads the
+     * persisted gps_pref preference itself and skips the first power-on
+     * when it is off (still registering the fix callback either way, for
+     * ESP boot parity with a later setGpsEnabled(true)), so this stage
+     * does not make a separate gps_set_enabled(false) call. gps_init()
+     * also returns almost immediately regardless of the pref: the AG3335's
+     * ~1.55s power-on sequence runs entirely on the gnss task, not here. */
     int gps_rc = gps_init(nrf_on_gps_fix, NULL);
-    if (gps_rc == 0 && !gps_pref_get()) {
-        /* Honor the persisted preference; init first so the callback stays
-         * registered for a later setGpsEnabled(true) (ESP boot parity). */
-        gps_set_enabled(false);
-    }
     boot_trace_mark(BT_GPS_INIT, (uint32_t)gps_rc);
 #endif
 

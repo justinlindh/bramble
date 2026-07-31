@@ -1640,6 +1640,16 @@ export interface components {
             heap: components["schemas"]["HeapDiagnostics"];
             task_stack_hwm: components["schemas"]["TaskStackHighWaterMark"][];
             backpressure?: components["schemas"]["BackpressureDiagnostics"];
+            /** @description Total bytes received on the GNSS UART since the driver last started. Present only on boards with GPS capability. Zero rx bytes with the driver running means the UART link is dead. */
+            gps_rx_bytes?: number;
+            /** @description Total complete NMEA-ish lines parsed out of the GNSS byte stream since the driver last started. Present only on boards with GPS capability. Nonzero rx bytes with zero rx lines means data is flowing but not framing as lines. */
+            gps_rx_lines?: number;
+            /** @description The first $PAIR021* chip identification banner line seen from the GNSS module, truncated to 64 bytes, empty if none has been seen. Present only on boards with GPS capability. */
+            gps_chip?: string;
+            /** @description Bytes dropped because an internal receive buffer was full. Present only on boards with GPS capability; always zero on backends without an intermediate buffer to overrun (currently nonzero-capable on the nRF52840 target only). */
+            gps_rx_overruns?: number;
+            /** @description UART/driver error events observed on the GNSS link. Present only on boards with GPS capability; always zero on backends without a distinct error-event channel (currently nonzero-capable on the nRF52840 target only). */
+            gps_rx_errors?: number;
         };
         /** @description Airtime backpressure counters. Non-zero values mean the node shed load rather than transmitting: they are the field-diagnosable record of congestion, distinguishing "we deliberately yielded the channel" from "the radio is broken". */
         BackpressureDiagnostics: {

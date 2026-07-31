@@ -294,6 +294,11 @@ void gps_get_debug(gps_debug_t* out) {
     out->rx_lines_total = s_feed.rx_lines_total;
     strncpy(out->chip, s_feed.chip_banner, sizeof(out->chip) - 1);
     out->chip[sizeof(out->chip) - 1] = '\0';
+    /* This backend has no intermediate buffer to overrun and no distinct
+     * error-event channel; the nRF driver is the only one that populates
+     * these two counters. */
+    out->rx_overruns = 0;
+    out->rx_errors = 0;
     pthread_mutex_unlock(&s_mu);
 }
 

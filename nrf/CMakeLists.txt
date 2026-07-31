@@ -411,6 +411,22 @@ target_link_options(bramble-nrf PRIVATE
   -T${BRAMBLE_LD}
   -L${nrfx_SOURCE_DIR}/mdk
   -Wl,-Map=bramble-nrf.map
+  # newlib-nano's default libc.a stubs float conversions out of printf/scanf
+  # to save flash. cJSON's print_number() falls to sprintf("%1.15g", ...)
+  # for any non-integral double (every GPS lat/lon in gps_events.c is one),
+  # and its number parser round-trips through sscanf("%lg"); without these,
+  # sprintf silently emits nothing/garbage for those fields (malformed RPC
+  # JSON over BLE) and the round-trip check on parse always fails. Every
+  # other cJSON number on this target happens to be integral, so nothing
+  # caught this until GNSS added the first non-integral one. Flash is at
+  # ~31%, so this is affordable.
+  # Each as a single self-contained -Wl, token (not "-u" "SYMBOL" as two
+  # list entries): CMake's link_options de-duplication otherwise collapses
+  # a second bare "-u" that follows the first, silently dropping it and
+  # leaving its symbol as a stray positional argument (observed: ld then
+  # fails with "cannot find _scanf_float: No such file or directory").
+  -Wl,--undefined=_printf_float
+  -Wl,--undefined=_scanf_float
 )
 if(BRAMBLE_NRF_LAYOUT STREQUAL "uf2")
   add_custom_command(TARGET bramble-nrf POST_BUILD

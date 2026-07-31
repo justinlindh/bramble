@@ -2242,6 +2242,20 @@ components:
             The first $PAIR021* chip identification banner line seen from the
             GNSS module, truncated to 64 bytes, empty if none has been seen.
             Present only on boards with GPS capability.
+        gps_rx_overruns:
+          type: number
+          description: >
+            Bytes dropped because an internal receive buffer was full.
+            Present only on boards with GPS capability; always zero on
+            backends without an intermediate buffer to overrun (currently
+            nonzero-capable on the nRF52840 target only).
+        gps_rx_errors:
+          type: number
+          description: >
+            UART/driver error events observed on the GNSS link. Present only
+            on boards with GPS capability; always zero on backends without a
+            distinct error-event channel (currently nonzero-capable on the
+            nRF52840 target only).
 
     BackpressureDiagnostics:
       type: object

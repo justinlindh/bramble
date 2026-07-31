@@ -238,6 +238,8 @@ static int handle_get_diagnostics(const cJSON* params, cJSON* result) {
         cJSON_AddNumberToObject(result, "gps_rx_bytes", gd.rx_bytes_total);
         cJSON_AddNumberToObject(result, "gps_rx_lines", gd.rx_lines_total);
         cJSON_AddStringToObject(result, "gps_chip", gd.chip);
+        cJSON_AddNumberToObject(result, "gps_rx_overruns", gd.rx_overruns);
+        cJSON_AddNumberToObject(result, "gps_rx_errors", gd.rx_errors);
     }
 
     if (include_heap_dump) {

@@ -143,6 +143,8 @@ void test_get_diagnostics_includes_gps_fields_when_gps_capable(void) {
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_rx_bytes"));
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_rx_lines"));
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_chip"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_rx_overruns"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_rx_errors"));
 
     cJSON_Delete(resp);
 }
@@ -156,6 +158,8 @@ void test_get_diagnostics_omits_gps_fields_without_gps_cap(void) {
     TEST_ASSERT_NULL(cJSON_GetObjectItem(r, "gps_rx_bytes"));
     TEST_ASSERT_NULL(cJSON_GetObjectItem(r, "gps_rx_lines"));
     TEST_ASSERT_NULL(cJSON_GetObjectItem(r, "gps_chip"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(r, "gps_rx_overruns"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(r, "gps_rx_errors"));
 
     cJSON_Delete(resp);
 }
