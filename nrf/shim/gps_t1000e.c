@@ -80,9 +80,18 @@ static StreamBufferHandle_t s_stream; /* 512B, ISR -> task */
  * off before the task is deleted: the read must be a real load every time,
  * and the store must not be sunk past the teardown calls that follow it. */
 static TaskHandle_t volatile s_task;
-static SemaphoreHandle_t s_mu;      /* guards s_feed */
+/* Guards s_feed. volatile and snapshotted at every use site for the same
+ * reason as s_task: gps_deinit() clears it while other tasks may be between
+ * their null-guard and their take. */
+static SemaphoreHandle_t volatile s_mu;
 static SemaphoreHandle_t s_tx_done; /* UARTE TX completion */
-static SemaphoreHandle_t s_stopped; /* gps_deinit's exit-confirmation from gnss_task */
+/* gps_deinit's exit-confirmation from gnss_task. Statically allocated so
+ * creating it cannot fail and cannot block: a NULL here, or a reschedule
+ * inside pvPortMalloc, would let gnss_task observe s_shutdown with s_stopped
+ * not yet published, skip its give, and self-delete behind gps_deinit's
+ * back. See gps_deinit() for the full argument. */
+static StaticSemaphore_t s_stopped_buf;
+static SemaphoreHandle_t s_stopped;
 static gps_feed_t s_feed;
 static volatile uint32_t s_rx_overruns; /* stream-buffer-full drops */
 static volatile uint32_t s_rx_errors;   /* NRFX_UARTE_EVT_ERROR occurrences */
@@ -507,41 +516,57 @@ int gps_init(gps_fix_cb_t cb, void* ctx) {
 }
 
 int gps_set_enabled(bool enabled) {
-    if (s_task == NULL) {
+    /* Snapshot once. Guarding on s_task and then notifying through it as two
+     * separate volatile loads lets gps_deinit() NULL it in between, and
+     * xTaskNotifyGive(NULL) trips configASSERT, i.e. bramble_assert_failed
+     * and a reset. What remains after the snapshot is a much narrower and
+     * strictly better-behaved window: this task would have to stay preempted
+     * across all of gps_deinit's teardown (up to the 5500ms wait plus the
+     * delete) for `task` to go stale, and notifying a task that is merely
+     * mid-teardown is harmless. Closing even that would mean holding a
+     * critical section across xTaskNotifyGive(), which is not legal. */
+    TaskHandle_t task = s_task;
+    if (task == NULL) {
         return -1;
     }
     s_user_enabled = enabled;
-    xTaskNotifyGive(s_task);
+    xTaskNotifyGive(task);
     return 0;
 }
 
 bool gps_has_fix(void) {
-    if (!s_mu) {
+    /* Snapshot s_mu once, here and in every query below: gps_deinit() clears
+     * it, so re-reading it between the guard and the take/give could take a
+     * live mutex and then give a NULL one. */
+    SemaphoreHandle_t mu = s_mu;
+    if (!mu) {
         return false;
     }
-    xSemaphoreTake(s_mu, portMAX_DELAY);
+    xSemaphoreTake(mu, portMAX_DELAY);
     bool has_fix = gps_feed_has_fix(&s_feed);
-    xSemaphoreGive(s_mu);
+    xSemaphoreGive(mu);
     return has_fix;
 }
 
 bool gps_get_position(bramble_position_t* out) {
-    if (!s_mu) {
+    SemaphoreHandle_t mu = s_mu;
+    if (!mu) {
         return false;
     }
-    xSemaphoreTake(s_mu, portMAX_DELAY);
+    xSemaphoreTake(mu, portMAX_DELAY);
     bool ok = gps_feed_get_position(&s_feed, out);
-    xSemaphoreGive(s_mu);
+    xSemaphoreGive(mu);
     return ok;
 }
 
 bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
-    if (!s_mu) {
+    SemaphoreHandle_t mu = s_mu;
+    if (!mu) {
         return false;
     }
-    xSemaphoreTake(s_mu, portMAX_DELAY);
+    xSemaphoreTake(mu, portMAX_DELAY);
     bool ok = gps_feed_get_utc_hm(&s_feed, hour, min);
-    xSemaphoreGive(s_mu);
+    xSemaphoreGive(mu);
     return ok;
 }
 
@@ -549,29 +574,31 @@ void gps_get_stats(gps_stats_t* out) {
     if (out == NULL) {
         return;
     }
-    if (!s_mu) {
+    SemaphoreHandle_t mu = s_mu;
+    if (!mu) {
         memset(out, 0, sizeof(*out));
         return;
     }
-    xSemaphoreTake(s_mu, portMAX_DELAY);
+    xSemaphoreTake(mu, portMAX_DELAY);
     gps_feed_get_stats(&s_feed, now_ms(), out);
-    xSemaphoreGive(s_mu);
+    xSemaphoreGive(mu);
 }
 
 void gps_get_debug(gps_debug_t* out) {
     if (out == NULL) {
         return;
     }
-    if (!s_mu) {
+    SemaphoreHandle_t mu = s_mu;
+    if (!mu) {
         memset(out, 0, sizeof(*out));
         return;
     }
-    xSemaphoreTake(s_mu, portMAX_DELAY);
+    xSemaphoreTake(mu, portMAX_DELAY);
     out->rx_bytes_total = s_feed.rx_bytes_total;
     out->rx_lines_total = s_feed.rx_lines_total;
     strncpy(out->chip, s_feed.chip_banner, sizeof(out->chip) - 1);
     out->chip[sizeof(out->chip) - 1] = '\0';
-    xSemaphoreGive(s_mu);
+    xSemaphoreGive(mu);
     /* ISR-incremented counters, not gps_feed state: s_mu guards s_feed, not
      * these, so they are read outside the critical section above. Each is a
      * single word (atomic enough on Cortex-M) and merely diagnostic. */
@@ -580,40 +607,58 @@ void gps_get_debug(gps_debug_t* out) {
 }
 
 void gps_deinit(void) {
-    if (s_task) {
-        TaskHandle_t task = s_task;
+    /* Capture and clear together, under one critical section. Two effects:
+     *
+     * 1. It gates the ISR off FIRST, before anything can make `task` stale.
+     *    Past this store uarte_handler() reads s_task == NULL and skips its
+     *    vTaskNotifyGiveFromISR() forever, so neither the confirmed path
+     *    (gnss_task self-deletes via vTaskDelete(NULL), and the idle task
+     *    frees its TCB some time after that) nor the forced path below can
+     *    leave the ISR notifying a task that is mid-deletion or already
+     *    freed. Doing it here rather than after the wait is what makes that
+     *    unconditional: s_shutdown is still false, so gnss_task provably has
+     *    not exited yet, and any notify that lands before this store
+     *    therefore targets a live, undeleted task.
+     * 2. Capturing inside the same section makes gps_deinit idempotent and
+     *    safe against two callers: exactly one of them comes out with a
+     *    non-NULL `task` and owns the teardown, the other returns here.
+     *
+     * The critical section is the ordering guarantee. On this port
+     * (GCC_ARM_CM4F) taskENTER_CRITICAL() raises BASEPRI to
+     * configMAX_SYSCALL_INTERRUPT_PRIORITY (2 << (8 - 3) = 0x40), which masks
+     * every interrupt whose priority value is numerically >= 0x40; UARTE1
+     * runs at NRFX_UARTE_DEFAULT_CONFIG_IRQ_PRIORITY = 7 (0xE0), so it is
+     * masked here. It has to be: uarte_handler() calls ...FromISR APIs, which
+     * are only legal at or below that ceiling. s_task's volatile qualifier
+     * does the rest, keeping the compiler from sinking the store past the
+     * teardown calls that follow. */
+    taskENTER_CRITICAL();
+    TaskHandle_t task = s_task;
+    s_task = NULL;
+    taskEXIT_CRITICAL();
 
-        /* Gate the ISR off FIRST, before anything can make `task` stale.
-         * Past this store uarte_handler() reads s_task == NULL and skips its
-         * vTaskNotifyGiveFromISR() forever, so neither the confirmed path
-         * (gnss_task self-deletes via vTaskDelete(NULL), and the idle task
-         * frees its TCB some time after that) nor the forced path below can
-         * leave the ISR notifying a task that is mid-deletion or already
-         * freed. Doing it here rather than after the wait is what makes that
-         * unconditional: s_shutdown is still false, so gnss_task provably
-         * has not exited yet, and any notify that lands before this store
-         * therefore targets a live, undeleted task.
-         *
-         * The critical section is the ordering guarantee. On this port
-         * (GCC_ARM_CM4F) taskENTER_CRITICAL() raises BASEPRI to
-         * configMAX_SYSCALL_INTERRUPT_PRIORITY (2 << (8 - 3) = 0x40), which
-         * masks every interrupt whose priority value is numerically >= 0x40;
-         * UARTE1 runs at NRFX_UARTE_DEFAULT_CONFIG_IRQ_PRIORITY = 7 (0xE0),
-         * so it is masked here. It has to be: uarte_handler() calls
-         * ...FromISR APIs, which are only legal at or below that ceiling.
-         * s_task's volatile qualifier does the rest, keeping the compiler
-         * from sinking the store past the teardown calls that follow. */
-        taskENTER_CRITICAL();
-        s_task = NULL;
-        taskEXIT_CRITICAL();
+    if (task != NULL) {
+        /* Publish the confirmation channel BEFORE requesting the shutdown,
+         * never the other way round. gnss_task's exit path is "see
+         * s_shutdown, give s_stopped, self-delete", so if it observes
+         * s_shutdown while s_stopped is still NULL it skips the give and
+         * self-deletes silently; this function would then wait out the full
+         * budget and force-delete an already-reclaimed TCB, double-decrement
+         * uxCurrentNumberOfTasks and run prvDeleteTCB on freed memory that is
+         * still on the termination list. That window is not hypothetical with
+         * a dynamically created semaphore: gnss_task can wake on its own
+         * 100ms timeout inside it, and pvPortMalloc's vTaskSuspendAll /
+         * xTaskResumeAll pair is itself a reschedule point. The static
+         * variant removes both halves of the problem, since it neither
+         * allocates nor can return NULL. */
+        SemaphoreHandle_t stopped = xSemaphoreCreateBinaryStatic(&s_stopped_buf);
+        s_stopped = stopped;
+        s_shutdown = true;
 
         /* Losing the ISR wake for the duration of the wait below is
          * deliberate and harmless: gnss_task still polls the stream buffer
          * every 100ms, gnss_delay_draining() blocks on the stream buffer
          * rather than on notifications, and the task is on its way out. */
-        s_shutdown = true;
-        SemaphoreHandle_t stopped = xSemaphoreCreateBinary();
-        s_stopped = stopped;
         xTaskNotifyGive(task);
 
         /* Budget for the worst case, not the nominal case: gnss_power_on()
@@ -622,7 +667,7 @@ void gps_deinit(void) {
          * save), and each of those 34 sends can independently block up to
          * 100ms on its own TX_DONE timeout before giving up (3400ms on top
          * in the worst case). 5500ms covers that with margin. */
-        bool confirmed = stopped && xSemaphoreTake(stopped, pdMS_TO_TICKS(5500)) == pdTRUE;
+        bool confirmed = xSemaphoreTake(stopped, pdMS_TO_TICKS(5500)) == pdTRUE;
 
         if (!confirmed) {
             ESP_LOGW(TAG, "gps_deinit: gnss task did not confirm exit in time, forcing delete");
@@ -648,30 +693,39 @@ void gps_deinit(void) {
         nrfx_uarte_uninit(&s_uarte);
 
         /* Only past both calls above is gnss_task guaranteed to be unable to
-         * execute another instruction, so freeing `stopped` here cannot race
+         * execute another instruction, so retiring `stopped` here cannot race
          * a genuine late-but-real xSemaphoreGive(s_stopped). */
         s_stopped = NULL;
-        if (stopped) {
-            vSemaphoreDelete(stopped);
-        }
+        vSemaphoreDelete(stopped);
     }
+
     nrf_gpio_pin_clear(BOARD_PIN_GNSS_EN);
-    if (s_mu) {
+
+    SemaphoreHandle_t mu = s_mu;
+    if (mu != NULL) {
         /* Bounded, never portMAX_DELAY: the forced delete above can strand
          * s_mu, because FreeRTOS does not release a deleted task's mutexes
          * and gnss_task holds s_mu across gps_feed_bytes() in both its drain
          * loop and gnss_delay_draining(). An unbounded take would then hang
-         * gps_deinit forever. The feed is reset and the mutex deleted
-         * whether or not the take succeeds: past this point nothing can
-         * reach s_feed through this driver again, since gnss_task is gone
-         * and every other s_mu holder is a short synchronous query. */
-        bool locked = xSemaphoreTake(s_mu, pdMS_TO_TICKS(100)) == pdTRUE;
+         * the caller forever. */
+        bool locked = xSemaphoreTake(mu, pdMS_TO_TICKS(100)) == pdTRUE;
+        s_mu = NULL;
         gps_feed_reset(&s_feed);
         if (locked) {
-            xSemaphoreGive(s_mu);
+            xSemaphoreGive(mu);
+            vSemaphoreDelete(mu);
+        } else {
+            /* Deliberately leaked, not deleted. Failing the take means the
+             * mutex is held by a task that no longer exists, and the query
+             * functions block on it with portMAX_DELAY, so there may be
+             * waiters parked on this queue right now. Freeing it would leave
+             * them blocked on released memory and giving/taking a recycled
+             * allocation later. Something has already gone wrong on this
+             * path; stranding one mutex control block is strictly cheaper
+             * than corrupting the heap. New callers are unaffected: s_mu is
+             * NULL above, so every query now takes its null-guard. */
+            ESP_LOGW(TAG, "gps_deinit: s_mu still held, leaking it rather than freeing waiters");
         }
-        vSemaphoreDelete(s_mu);
-        s_mu = NULL;
     } else {
         gps_feed_reset(&s_feed);
     }
