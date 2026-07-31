@@ -39,10 +39,12 @@ export {
   setMailbox,
   setDefaultChannel,
   setLocationConfig,
+  setGpsEnabled,
   shareLocationOnce,
 } from './config';
 export {
   loadStatus,
+  normalizeStatus,
   normalizeAirtime,
   loadAirtime,
   loadNeighbors,

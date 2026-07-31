@@ -131,6 +131,7 @@ export interface NodeStatus {
   airtimeUsedMs: number;    // total since boot
   position?: Position;      // current GPS position if available
   gpsAvailable?: boolean;   // hardware has GPS module
+  gpsEnabled?: boolean;     // persisted GPS power preference (independent of gpsAvailable)
   batteryMv?: number;       // battery voltage in millivolts
   batteryPct?: number;      // battery percentage 0-100
   hardware?: string;        // hardware profile (e.g. "heltec_v4")

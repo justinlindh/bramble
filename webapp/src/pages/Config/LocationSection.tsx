@@ -8,7 +8,7 @@ import type {
   Neighbor,
   Channel,
 } from '../../types/bramble';
-import { setLocationConfig } from '../../store/actions';
+import { setGpsEnabled, setLocationConfig } from '../../store/actions';
 import { useStore } from '../../store';
 import { IconLocation, IconLocationOff } from '../../components/Icons';
 import { AddressLabel } from '../../components/AddressLabel';
@@ -21,6 +21,7 @@ interface LocationSectionProps {
   neighbors: Neighbor[];
   channels: Channel[];
   gpsAvailable?: boolean;
+  gpsEnabled?: boolean;
 }
 
 const TIER_OPTIONS: Array<{ value: LocationTier; label: string }> = [
@@ -51,9 +52,10 @@ function normalizeAddress(raw: string): string | null {
   return cleaned.padStart(8, '0');
 }
 
-export function LocationSection({ location, neighbors, channels, gpsAvailable = false }: LocationSectionProps) {
+export function LocationSection({ location, neighbors, channels, gpsAvailable = false, gpsEnabled }: LocationSectionProps) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [gpsOn, setGpsOn] = useState(gpsEnabled ?? true);
 
   const [enabled, setEnabled] = useState(location.enabled ?? false);
   const [tier, setTier] = useState<LocationTier>(location.default_tier ?? location.tier ?? 'coarse');
@@ -80,6 +82,22 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
     setContactRules(location.contact_rules ?? []);
     setChannelTargets(location.channel_targets ?? []);
   }, [location]);
+
+  useEffect(() => {
+    setGpsOn(gpsEnabled ?? true);
+  }, [gpsEnabled]);
+
+  const toggleGps = async (checked: boolean) => {
+    setError('');
+    const previous = gpsOn;
+    setGpsOn(checked); // optimistic
+    try {
+      await setGpsEnabled(checked);
+    } catch (e) {
+      setGpsOn(previous); // revert
+      setError(friendlyErrorFrom(e));
+    }
+  };
 
   const preview = useMemo(() => {
     if (!enabled) {
@@ -145,6 +163,20 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
   return (
     <div className={styles.section}>
       {error && <div className={styles.error}>{error}</div>}
+
+      {gpsAvailable && (
+        <div className={styles.row}>
+          <label className={styles.toggle}>
+            <input
+              aria-label="GPS power"
+              type="checkbox"
+              checked={gpsOn}
+              onChange={e => toggleGps(e.target.checked)}
+            />
+            <span>{gpsOn ? 'GPS on' : 'GPS off (sharing falls back to manual location)'}</span>
+          </label>
+        </div>
+      )}
 
       <div className={styles.row}>
         <label className={styles.toggle}>

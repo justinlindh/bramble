@@ -23,12 +23,13 @@ type StatusWire = WirePartial<RpcSchemas['StatusResponse']> & {
   air_used_ms?: number;
   airtimeUsedMs?: number;
   gpsAvailable?: boolean;
+  gpsEnabled?: boolean;
   batteryMv?: number;
   batteryPct?: number;
   position?: NodeStatus['position'];
 };
 
-function normalizeStatus(raw: StatusWire): NodeStatus {
+export function normalizeStatus(raw: StatusWire): NodeStatus {
   return {
     uptimeSec: raw.uptime_s ?? raw.uptimeSec ?? 0,
     freeHeapBytes: raw.free_heap ?? raw.freeHeapBytes ?? 0,
@@ -41,6 +42,7 @@ function normalizeStatus(raw: StatusWire): NodeStatus {
     airtimeUsedMs: raw.airtime_used_ms ?? raw.air_used_ms ?? raw.airtimeUsedMs ?? 0,
     position: raw.position,
     gpsAvailable: raw.gps_available ?? raw.gpsAvailable ?? false,
+    gpsEnabled: raw.gps_enabled ?? raw.gpsEnabled ?? true,
     batteryMv: raw.battery_mv ?? raw.batteryMv,
     batteryPct: raw.battery_pct ?? raw.batteryPct,
     hardware: raw.hardware,
