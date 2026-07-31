@@ -41,14 +41,28 @@ static const struct lfs_file_config s_file_cfg = {.buffer = s_file_buffer};
 #include <FreeRTOS.h>
 #include <semphr.h>
 #include <task.h>
-/* RECURSIVE, and it has to be. The iterator API below holds this lock for the
+/* LOCK-ORDER INVARIANT: this mutex sits strictly BELOW every other lock in
+ * the firmware. It may be taken while holding nothing else, and no other lock
+ * may be taken while holding it. That is what makes it deadlock-free despite
+ * the iterator holding it across a caller's whole loop body.
+ *
+ * The invariant is load-bearing, not decorative. Two reverse orderings exist
+ * and both are reachable: mesh_add_channel() holds s_state_mutex across
+ * channel_storage_save() (mesh_channels.c), and sendMessage holds s_dm_mutex
+ * then s_nonce_mutex across nonce_counter_next()'s reserve-ceiling flush,
+ * which reaches NVS two frames down through mesh_nonce_write()
+ * (nonce_counter.c, mesh_persist.c). Any iterator caller that transmits or
+ * mutates shared mesh state from inside its loop would close one of those
+ * cycles. mesh_send_location_updates() is written in two phases for exactly
+ * this reason: collect targets under the iterator, release, then transmit.
+ *
+ * RECURSIVE, and it has to be. The iterator API below holds this lock for the
  * whole life of an iteration (see nvs_entry_find), and every caller that
  * iterates also calls locked nvs_* getters from inside its loop body:
- * main/mesh_location.c:312 (nvs_get_str), main/rpc_methods.c:2033
- * (nvs_get_blob) and :2240/:2251 (nvs_get_str). With a plain mutex the first
- * such nested call would deadlock the caller against itself. Priority
- * inheritance still applies to the recursive variant, so the bond-writer
- * inversion protection is unchanged. */
+ * main/mesh_location.c (nvs_get_str) and main/rpc_methods.c (nvs_get_blob,
+ * nvs_get_str). With a plain mutex the first such nested call would deadlock
+ * the caller against itself. Priority inheritance still applies to the
+ * recursive variant, so the bond-writer inversion protection is unchanged. */
 static SemaphoreHandle_t s_lock;
 static StaticSemaphore_t s_lock_buf;
 static void lock_init(void) {
@@ -66,11 +80,39 @@ static void lock_give(void) {
         xSemaphoreGiveRecursive(s_lock);
     }
 }
+/* Which task owns the live iteration, for the holder validation in
+ * nvs_release_iterator. Same intent as DM_MUTEX_GIVE in
+ * main/mesh_internal.h: a release from the wrong task is misuse, so name it
+ * in the log rather than let it corrupt the owner's recursion depth. The
+ * lifetime hold means a non-owner cannot normally reach the check at all;
+ * this catches the case where that stops being true. */
+static TaskHandle_t s_iter_owner;
+static void iter_set_owner(void) {
+    s_iter_owner = (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
+                       ? xTaskGetCurrentTaskHandle()
+                       : NULL;
+}
+static void iter_clear_owner(void) { s_iter_owner = NULL; }
+static bool iter_owned_here(void) {
+    if (s_iter_owner == NULL || xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) {
+        return true;
+    }
+    TaskHandle_t me = xTaskGetCurrentTaskHandle();
+    if (s_iter_owner != me) {
+        ESP_LOGE(TAG, "NVS iterator release by '%s' but owner is '%s'", pcTaskGetName(NULL),
+                 pcTaskGetName(s_iter_owner));
+        return false;
+    }
+    return true;
+}
 #else
 /* Host suite: single-threaded, no RTOS. */
 static void lock_init(void) {}
 static void lock_take(void) {}
 static void lock_give(void) {}
+static void iter_set_owner(void) {}
+static void iter_clear_owner(void) {}
+static bool iter_owned_here(void) { return true; }
 #endif
 
 /* The lock, exported for the mount header's other consumers. littlefs is not
@@ -405,6 +447,7 @@ static void iter_finish(void) {
         s_iter.open = false;
     }
     s_iter_active = false;
+    iter_clear_owner();
     lock_give();
 }
 
@@ -488,6 +531,7 @@ esp_err_t nvs_entry_find(const char* part, const char* ns, nvs_type_t type, nvs_
     s_iter.ns_idx = (uint8_t)ns_idx;
     s_iter.type = type;
     s_iter_active = true;
+    iter_set_owner();
     if (iter_advance(&s_iter) != ESP_OK) {
         iter_finish();
         *it = NULL;
@@ -534,10 +578,20 @@ esp_err_t nvs_entry_info(nvs_iterator_t it, nvs_entry_info_t* out_info) {
  * reach here with it == NULL, because nvs_entry_next() NULLs the handle when
  * the iteration runs out and the loop then falls through to this call; keying
  * on the handle would have made those calls no-ops and stranded the lifetime
- * lock forever. Releasing an already-finished iteration is a no-op. */
+ * lock forever. Releasing an already-finished iteration is a no-op.
+ *
+ * The flag is read UNDER the lock, never before it. Reading it first would
+ * let a task that owns no iteration observe another task's live one and call
+ * iter_finish(), closing that task's directory and giving a recursive mutex
+ * it does not hold (which FreeRTOS rejects, and which corrupts the owner's
+ * recursion depth). Taking the lock first costs the real owner one cheap
+ * recursive re-take, and makes a non-owner wait until the iteration is over
+ * and then correctly find nothing to do. */
 void nvs_release_iterator(nvs_iterator_t it) {
     (void)it;
-    if (s_iter_active) {
-        iter_finish();
+    lock_take();
+    if (s_iter_active && iter_owned_here()) {
+        iter_finish(); /* drops the lifetime hold */
     }
+    lock_give(); /* drops the hold taken just above */
 }

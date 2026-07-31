@@ -198,6 +198,41 @@ static void test_unknown_namespace_find_leaves_shim_reusable(void) {
     nvs_release_iterator(it);
 }
 
+/* nvs_release_iterator now reads the active flag under the lock and validates
+ * the owner, so the redundant/repeat release that real callers make must stay
+ * a clean no-op rather than unbalancing the recursive mutex depth. The host
+ * lock is a no-op, so what this pins down is the bookkeeping half: after a
+ * release, further releases neither re-enter iter_finish nor leave the shim
+ * unusable. On the device the same code path additionally blocks a non-owner
+ * until the iteration is over, which single-threaded host code cannot stage. */
+static void test_repeat_release_is_a_clean_noop(void) {
+    seed_entries();
+
+    nvs_iterator_t it = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_entry_find("nvs", NS, NVS_TYPE_ANY, &it));
+    nvs_release_iterator(it);
+
+    /* Every one of these must be inert. */
+    nvs_release_iterator(it);
+    nvs_release_iterator(NULL);
+    nvs_release_iterator(it);
+
+    /* The shim is still fully usable, which it would not be if a stray
+     * release had cleared state mid-iteration or stranded the lock. */
+    nvs_iterator_t again = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_entry_find("nvs", NS, NVS_TYPE_ANY, &again));
+    int seen = 1;
+    while (nvs_entry_next(&again) == ESP_OK) {
+        seen++;
+    }
+    TEST_ASSERT_EQUAL_INT(3, seen);
+    nvs_release_iterator(again);
+
+    nvs_iterator_t last = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_entry_find("nvs", NS, NVS_TYPE_ANY, &last));
+    nvs_release_iterator(last);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_iterates_every_entry_then_releases);
@@ -206,5 +241,6 @@ int main(void) {
     RUN_TEST(test_nested_get_inside_iteration);
     RUN_TEST(test_empty_namespace_find_leaves_shim_reusable);
     RUN_TEST(test_unknown_namespace_find_leaves_shim_reusable);
+    RUN_TEST(test_repeat_release_is_a_clean_noop);
     return UNITY_END();
 }
