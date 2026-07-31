@@ -14,6 +14,14 @@
  * task ever reads or writes it), which is what rules out a check-then-act
  * race on it entirely, rather than needing a lock around it.
  *
+ * The power decision itself is not just s_user_enabled: gnss_task's
+ * once-a-second duty-cycle evaluation runs it through
+ * gps_duty_should_power() (Task 9) against the location-share policy, so
+ * an idle mesh node with a long share interval powers the module down
+ * between fixes instead of holding it on continuously. s_user_enabled
+ * still gates it outright (off overrides everything), and the single
+ * power-transition call site above is unchanged.
+ *
  * gnss_gpio_idle_init() establishes every AG3335 control line's safe idle
  * state unconditionally from gps_init(), regardless of gps_pref: without
  * it, a pref-off boot would leave EN/VRTC_EN/SLEEP_INT/RTC_INT/RESET
@@ -60,9 +68,11 @@
 #include "bramble_board.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "gps_duty.h"
 #include "gps_events.h"
 #include "gps_feed.h"
 #include "gps_pref.h"
+#include "mesh_task.h"
 
 static const char* TAG = "gps_t1000e";
 
@@ -364,8 +374,10 @@ static void gnss_task(void* arg) {
     for (;;) {
         /* Woken by the ISR on RX_DONE (near-instant byte reaction) or by
          * gps_set_enabled()/gps_deinit() on a state change; the 100ms bound
-         * is a safety net, not the primary wake path, so quiescent power
-         * polling never lags by more than that. */
+         * is a safety net, not the primary wake path. The duty-cycle
+         * evaluation below is gated to once a second regardless of how
+         * often this wakes, so a gps_set_enabled() toggle takes effect
+         * within 1s, not within this 100ms bound. */
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
 
         if (s_shutdown) {
@@ -379,18 +391,31 @@ static void gnss_task(void* arg) {
             xSemaphoreGive(s_mu);
         }
 
-        /* The only power-transition call site: see the file header. */
-        bool want = s_user_enabled;
-        if (want && !s_powered) {
-            gnss_power_on();
-        } else if (!want && s_powered) {
-            gnss_power_off();
-        }
-
         TickType_t now_tick = xTaskGetTickCount();
         if ((now_tick - last_duty_tick) >= pdMS_TO_TICKS(1000)) {
             last_duty_tick = now_tick;
-            /* Task 9: duty-cycle evaluation hooks in here once it lands. */
+
+            /* The only power-transition call site: see the file header.
+             * gps_duty_should_power's rule 1 (!user_enabled -> off) fully
+             * subsumes the plain on/off-by-preference check this replaced,
+             * so there is no separate "want" path left: every power
+             * decision, preference or policy driven, goes through here,
+             * evaluated once a second. */
+            mesh_location_share_state_t share;
+            mesh_location_get_share_state(&share);
+            gps_duty_inputs_t duty_in = {
+                .user_enabled = s_user_enabled,
+                .sharing_active = share.sharing_active,
+                .interval_s = share.interval_s,
+                .now_ms = (uint32_t)(esp_timer_get_time() / 1000),
+                .last_send_ms = share.last_send_ms,
+            };
+            bool want = gps_duty_should_power(&duty_in);
+            if (want && !s_powered) {
+                gnss_power_on();
+            } else if (!want && s_powered) {
+                gnss_power_off();
+            }
         }
     }
 

@@ -570,6 +570,35 @@ void mesh_location_policy_tick(uint32_t t) {
     }
 }
 
+/* Feeds the GNSS duty-cycling decision (gps_duty_should_power). Reads the
+ * policy exactly like mesh_location_policy_tick above (its own NVS handle,
+ * not shared state), because the caller here is the nRF GNSS task, not the
+ * mesh task: on the nRF target this runs on a different FreeRTOS task
+ * entirely, once per second, so it cannot reuse the mesh task's read. The
+ * one piece of mesh-task state this does read, s_location_last_send_ms, is
+ * a plain uint32_t whose only writer is mesh_location_policy_tick above; a
+ * naturally aligned 32-bit load on this target cannot tear, so the worst
+ * case is a snapshot up to one policy tick stale, the same lock-free
+ * cross-task reasoning mesh_get_location_state uses for my_position. No
+ * lock is taken here on purpose. */
+void mesh_location_get_share_state(mesh_location_share_state_t* out) {
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK) {
+        out->sharing_active = false;
+        out->interval_s = 0;
+        out->last_send_ms = s_location_last_send_ms;
+        return;
+    }
+
+    location_policy_t policy;
+    location_policy_load_or_defaults(nvs, &policy);
+    nvs_close(nvs);
+
+    out->sharing_active = policy.enabled && location_policy_has_targets();
+    out->interval_s = policy.interval_s;
+    out->last_send_ms = s_location_last_send_ms;
+}
+
 void mesh_get_location_state(location_manager_t* out) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *out = s_location_mgr;

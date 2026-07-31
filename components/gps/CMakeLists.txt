@@ -5,13 +5,13 @@
 idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "linux")
     idf_component_register(
-        SRCS "gps.c" "gps_virt.c" "gps_feed.c" "gps_pref.c" "nmea_parser.c"
+        SRCS "gps.c" "gps_virt.c" "gps_feed.c" "gps_pref.c" "gps_duty.c" "nmea_parser.c"
         INCLUDE_DIRS "include"
         REQUIRES board_config location esp_timer emu_link json nvs_flash nvs_keys
     )
 else()
     idf_component_register(
-        SRCS "gps.c" "gps_feed.c" "gps_pref.c" "nmea_parser.c"
+        SRCS "gps.c" "gps_feed.c" "gps_pref.c" "gps_duty.c" "nmea_parser.c"
         INCLUDE_DIRS "include"
         REQUIRES driver board_config location esp_timer esp_driver_uart nvs_flash nvs_keys
     )

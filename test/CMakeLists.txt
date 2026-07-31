@@ -756,6 +756,17 @@ target_include_directories(test_broadcast_airtime_gate PRIVATE
 )
 add_test(NAME test_broadcast_airtime_gate COMMAND test_broadcast_airtime_gate)
 
+# GPS duty-cycling policy (Task 9): pure module, no stubs needed.
+add_executable(test_gps_duty
+    test_gps_duty.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_duty.c
+)
+target_include_directories(test_gps_duty PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+)
+add_test(NAME test_gps_duty COMMAND test_gps_duty)
+
 # Timesync tests
 add_executable(test_timesync
     test_timesync.c
