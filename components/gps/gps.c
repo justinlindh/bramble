@@ -1,5 +1,6 @@
 #include "gps.h"
 #include "board_config.h"
+#include <string.h>
 
 /* The POSIX/Linux simulator has no UART driver: it compiles the host stub
  * half below (gps_virt takes over in the emulator later). */
@@ -250,6 +251,15 @@ void gps_get_stats(gps_stats_t* out) {
     gps_feed_get_stats(&s_feed, (uint64_t)(esp_timer_get_time() / 1000ULL), out);
 }
 
+void gps_get_debug(gps_debug_t* out) {
+    if (!out)
+        return;
+    out->rx_bytes_total = s_feed.rx_bytes_total;
+    out->rx_lines_total = s_feed.rx_lines_total;
+    strncpy(out->chip, s_feed.chip_banner, sizeof(out->chip) - 1);
+    out->chip[sizeof(out->chip) - 1] = '\0';
+}
+
 void gps_deinit(void) {
     if (s_gps_task) {
         vTaskDelete(s_gps_task);
@@ -302,6 +312,11 @@ void gps_get_stats(gps_stats_t* out) {
         out->sats_used = 0;
         out->sats_in_view = 0;
         out->antenna_warning = false;
+    }
+}
+void gps_get_debug(gps_debug_t* out) {
+    if (out) {
+        memset(out, 0, sizeof(*out));
     }
 }
 void gps_deinit(void) {}

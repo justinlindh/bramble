@@ -60,6 +60,24 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min);
 void gps_get_stats(gps_stats_t* out);
 
 /**
+ * Raw-feed diagnostics: byte/line counters and the chip identification
+ * banner, for telling "UART dead" from "flowing but unparseable" on a
+ * console-less board.
+ */
+typedef struct {
+    uint32_t rx_bytes_total;
+    uint32_t rx_lines_total;
+    char chip[64]; /* first $PAIR021* banner line (truncated), "" if none */
+} gps_debug_t;
+
+/**
+ * Get raw-feed diagnostics (rx byte/line counters, chip banner).
+ * Zeroed when the board has no GPS or the driver never started.
+ * @param out: pointer to debug structure to fill
+ */
+void gps_get_debug(gps_debug_t* out);
+
+/**
  * Enable or disable GPS at runtime.
  *
  * Enabling powers the GNSS on and (re)starts parsing, reusing the fix callback

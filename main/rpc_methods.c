@@ -230,6 +230,16 @@ static int handle_get_diagnostics(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(probe, "dropped_reply", (double)probe_drop_reply);
     cJSON_AddNumberToObject(probe, "dropped_forward", (double)probe_drop_fwd);
 
+    /* GNSS raw-feed diagnostics: byte/line counters and chip banner tell
+     * "UART dead" from "flowing but unparseable" on a console-less board. */
+    if (board_has_cap(BOARD_CAP_GPS)) {
+        gps_debug_t gd;
+        gps_get_debug(&gd);
+        cJSON_AddNumberToObject(result, "gps_rx_bytes", gd.rx_bytes_total);
+        cJSON_AddNumberToObject(result, "gps_rx_lines", gd.rx_lines_total);
+        cJSON_AddStringToObject(result, "gps_chip", gd.chip);
+    }
+
     if (include_heap_dump) {
         ESP_LOGI(
             TAG,

@@ -132,6 +132,34 @@ void test_get_status_returns_expected_fields(void) {
     cJSON_Delete(resp);
 }
 
+/* ── 1b. getDiagnostics GPS fields ────────────────────────────────── */
+
+void test_get_diagnostics_includes_gps_fields_when_gps_capable(void) {
+    g_stub_board_has_gps = true;
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":100,\"method\":\"bramble.getDiagnostics\",\"params\":{}}");
+    cJSON* r = get_result(resp);
+
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_rx_bytes"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_rx_lines"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_chip"));
+
+    cJSON_Delete(resp);
+}
+
+void test_get_diagnostics_omits_gps_fields_without_gps_cap(void) {
+    g_stub_board_has_gps = false;
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":101,\"method\":\"bramble.getDiagnostics\",\"params\":{}}");
+    cJSON* r = get_result(resp);
+
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(r, "gps_rx_bytes"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(r, "gps_rx_lines"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(r, "gps_chip"));
+
+    cJSON_Delete(resp);
+}
+
 /* ── 2. getNeighbors ──────────────────────────────────────────────── */
 
 void test_get_neighbors_empty_table(void) {
@@ -579,6 +607,10 @@ int main(void) {
 
     /* getStatus */
     RUN_TEST(test_get_status_returns_expected_fields);
+
+    /* getDiagnostics GPS fields */
+    RUN_TEST(test_get_diagnostics_includes_gps_fields_when_gps_capable);
+    RUN_TEST(test_get_diagnostics_omits_gps_fields_without_gps_cap);
 
     /* getNeighbors */
     RUN_TEST(test_get_neighbors_empty_table);

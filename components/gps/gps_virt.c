@@ -286,6 +286,17 @@ void gps_get_stats(gps_stats_t* out) {
     pthread_mutex_unlock(&s_mu);
 }
 
+void gps_get_debug(gps_debug_t* out) {
+    if (!out)
+        return;
+    pthread_mutex_lock(&s_mu);
+    out->rx_bytes_total = s_feed.rx_bytes_total;
+    out->rx_lines_total = s_feed.rx_lines_total;
+    strncpy(out->chip, s_feed.chip_banner, sizeof(out->chip) - 1);
+    out->chip[sizeof(out->chip) - 1] = '\0';
+    pthread_mutex_unlock(&s_mu);
+}
+
 void gps_deinit(void) {
 #if defined(ESP_PLATFORM)
     /* Discard any sentences still queued from before the power cut. The gate
