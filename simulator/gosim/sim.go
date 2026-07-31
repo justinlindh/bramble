@@ -45,23 +45,6 @@ const (
 	StateCompleted
 )
 
-func (s SimState) String() string {
-	switch s {
-	case StateIdle:
-		return "idle"
-	case StateLoaded:
-		return "loaded"
-	case StateRunning:
-		return "running"
-	case StatePaused:
-		return "paused"
-	case StateCompleted:
-		return "completed"
-	default:
-		return "unknown"
-	}
-}
-
 // Command is a message from the WebSocket handler (or CLI) to the sim goroutine.
 type Command struct {
 	Type          string  `json:"type"`
