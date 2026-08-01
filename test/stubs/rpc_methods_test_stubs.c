@@ -155,6 +155,24 @@ int g_nvs_loc_kv_count = 0;
 nvs_loc_blob_t g_nvs_loc_blob[16];
 int g_nvs_loc_blob_count = 0;
 
+/* WiFi credential persistence (bramble.setWifiConfig). Strong override of
+ * the weak default in test/stubs/wifi_manager.h: controllable return code
+ * plus captured ssid/password, mirroring g_nvs_gps_en above. */
+int g_wifi_set_creds_rc = 0;
+char g_wifi_set_creds_ssid[33] = "";
+char g_wifi_set_creds_password[65] = "";
+int wifi_manager_nvs_set_creds(const char* ssid, const char* password) {
+    if (ssid) {
+        strncpy(g_wifi_set_creds_ssid, ssid, sizeof(g_wifi_set_creds_ssid) - 1);
+        g_wifi_set_creds_ssid[sizeof(g_wifi_set_creds_ssid) - 1] = '\0';
+    }
+    if (password) {
+        strncpy(g_wifi_set_creds_password, password, sizeof(g_wifi_set_creds_password) - 1);
+        g_wifi_set_creds_password[sizeof(g_wifi_set_creds_password) - 1] = '\0';
+    }
+    return g_wifi_set_creds_rc;
+}
+
 /* ── Mesh stubs (correct signatures) ─────────────────────────────── */
 
 int mesh_add_channel(const char* name, const uint8_t* psk, size_t psk_len) {
