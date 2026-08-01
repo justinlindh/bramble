@@ -96,11 +96,15 @@ battery_charging_t battery_charging_from_gpio(int chrg_gpio, int chrg_active_lev
 /**
  * Maps a status to the wire-level beacon battery_pct byte: 0xFF is the
  * protocol's documented "unknown/plugged in" sentinel
- * (docs/bramble-protocol-spec.md), emitted whenever charging is confirmed;
- * otherwise the real curve percentage passes through unchanged. Pure
- * function: host-testable in isolation.
+ * (docs/bramble-protocol-spec.md), emitted whenever charging is confirmed
+ * OR the board has no battery hardware (present == false). Without the
+ * present check, a battery-less node (nRF today) would emit a real 0,
+ * which on the wire means "dead battery", not "no reading": a false
+ * low-battery signal is worse than the sentinel. Otherwise the real curve
+ * percentage passes through unchanged. Pure function: host-testable in
+ * isolation.
  */
-uint8_t battery_beacon_pct(battery_charging_t charging, uint8_t pct);
+uint8_t battery_beacon_pct(battery_charging_t charging, uint8_t pct, bool present);
 
 /* Percentage at/below which a battery reading is genuinely dangerous.
  * battery_display_pct_ema below must never delay or mask a drop to or
@@ -131,7 +135,8 @@ typedef struct {
  * Floored at BATTERY_DANGER_PCT: raw_pct at or below that value is returned
  * immediately with no smoothing, so a genuinely low battery is never
  * masked by a display that is still catching up from a higher reading.
- * Pure function: host-testable in isolation.
+ * A NULL state returns raw_pct unsmoothed rather than crashing. Pure
+ * function: host-testable in isolation.
  */
 uint8_t battery_display_pct_ema(battery_display_state_t* state, uint8_t raw_pct);
 

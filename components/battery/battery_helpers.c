@@ -22,11 +22,14 @@ battery_charging_t battery_charging_from_gpio(int chrg_gpio, int chrg_active_lev
     return (level == chrg_active_level) ? BATTERY_CHG_YES : BATTERY_CHG_NO;
 }
 
-uint8_t battery_beacon_pct(battery_charging_t charging, uint8_t pct) {
-    return (charging == BATTERY_CHG_YES) ? 0xFF : pct;
+uint8_t battery_beacon_pct(battery_charging_t charging, uint8_t pct, bool present) {
+    return (charging == BATTERY_CHG_YES || !present) ? 0xFF : pct;
 }
 
 uint8_t battery_display_pct_ema(battery_display_state_t* state, uint8_t raw_pct) {
+    if (!state)
+        return raw_pct;
+
     if (!state->has_value) {
         state->displayed = raw_pct;
         state->has_value = true;

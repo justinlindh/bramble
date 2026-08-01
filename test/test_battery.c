@@ -80,10 +80,21 @@ void test_charging_from_gpio_matches_active_level(void) {
 /* ── battery_beacon_pct (wave 2) ──────────────────────────────────────── */
 
 void test_beacon_pct_emits_sentinel_only_when_confirmed_charging(void) {
-    TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_YES, 100));
-    TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_YES, 0));
-    TEST_ASSERT_EQUAL_UINT8(42, battery_beacon_pct(BATTERY_CHG_NO, 42));
-    TEST_ASSERT_EQUAL_UINT8(42, battery_beacon_pct(BATTERY_CHG_UNKNOWN, 42));
+    TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_YES, 100, true));
+    TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_YES, 0, true));
+    TEST_ASSERT_EQUAL_UINT8(42, battery_beacon_pct(BATTERY_CHG_NO, 42, true));
+    TEST_ASSERT_EQUAL_UINT8(42, battery_beacon_pct(BATTERY_CHG_UNKNOWN, 42, true));
+}
+
+/* A board with no battery hardware (present == false, e.g. the nRF null
+ * stub) must also get the sentinel: a real pct there is always 0, which on
+ * the wire means "dead battery", a false low-battery signal that is worse
+ * than the honest "unknown". This must win regardless of the charging
+ * value the absent hardware happens to report. */
+void test_beacon_pct_emits_sentinel_when_battery_not_present(void) {
+    TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_UNKNOWN, 0, false));
+    TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_NO, 0, false));
+    TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_YES, 0, false));
 }
 
 /* ── battery_display_pct_ema (wave 2) ────────────────────────────────── */
@@ -91,6 +102,13 @@ void test_beacon_pct_emits_sentinel_only_when_confirmed_charging(void) {
 void test_display_pct_ema_first_call_snaps_to_raw(void) {
     battery_display_state_t st = {0};
     TEST_ASSERT_EQUAL_UINT8(72, battery_display_pct_ema(&st, 72));
+}
+
+/* A NULL state (defensive; no real caller passes one) returns raw_pct
+ * unsmoothed instead of dereferencing NULL, consistent with
+ * battery_average_mv's NULL guard. */
+void test_display_pct_ema_null_state_returns_raw_unsmoothed(void) {
+    TEST_ASSERT_EQUAL_UINT8(55, battery_display_pct_ema(NULL, 55));
 }
 
 void test_display_pct_ema_settles_gradually_toward_a_step(void) {
@@ -147,8 +165,10 @@ int main(void) {
     RUN_TEST(test_charging_from_gpio_matches_active_level);
 
     RUN_TEST(test_beacon_pct_emits_sentinel_only_when_confirmed_charging);
+    RUN_TEST(test_beacon_pct_emits_sentinel_when_battery_not_present);
 
     RUN_TEST(test_display_pct_ema_first_call_snaps_to_raw);
+    RUN_TEST(test_display_pct_ema_null_state_returns_raw_unsmoothed);
     RUN_TEST(test_display_pct_ema_settles_gradually_toward_a_step);
     RUN_TEST(test_display_pct_ema_never_delays_a_drop_into_danger);
     RUN_TEST(test_display_pct_ema_independent_states_do_not_interfere);

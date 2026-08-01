@@ -51,10 +51,13 @@ int send_beacon(void) {
     /* Wave 2: a plugged-in node's cell voltage is meaningless (the charge
      * rail reads a dead-flat ~4798 mV on the T-Deck), so a confirmed
      * charging node emits the protocol's documented 0xFF sentinel
-     * (docs/bramble-protocol-spec.md) instead of a fabricated percentage. */
+     * (docs/bramble-protocol-spec.md) instead of a fabricated percentage.
+     * A node with no battery hardware (present == false, e.g. the nRF null
+     * stub) gets the same sentinel: a real 0 there would read as "dead
+     * battery" on the wire, not "no reading". */
     battery_status_t bstat;
     battery_get_status(&bstat);
-    beacon.battery_pct = battery_beacon_pct(bstat.charging, bstat.pct);
+    beacon.battery_pct = battery_beacon_pct(bstat.charging, bstat.pct, bstat.present);
     beacon.tx_queue_depth = 0;
     beacon.neighbor_count = (uint8_t)neighbor_count(&s_neighbors);
     beacon.flags = s_mailbox_enabled ? MAILBOX_BEACON_FLAG : 0;
