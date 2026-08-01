@@ -16,7 +16,7 @@
 #
 # Node major: keep in step with `.nvmrc`. scripts/lint/check-node-version.sh
 # gates that and runs on every pull request.
-FROM --platform=$BUILDPLATFORM node:24-slim AS build
+FROM --platform=$BUILDPLATFORM node:25-slim AS build
 WORKDIR /app
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
@@ -33,7 +33,7 @@ RUN npm run build
 # and playwright.
 RUN npm prune --omit=dev
 
-FROM node:24-slim AS runtime
+FROM node:25-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
