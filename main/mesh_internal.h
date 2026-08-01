@@ -90,7 +90,6 @@
  * receipt still terminates on roughly the timescale it does today. */
 #define RECEIPT_MAX_DEFERS 8u
 #define RECENT_BROADCAST_RING_SIZE 8
-#define MAILBOX_BEACON_FLAG 0x01
 #define PROBE_SWEEP_ROUNDS 3
 #define PROBE_SWEEP_INTERVAL_MS 350
 #define PROBE_COLLECTION_WINDOW_MS 5000
