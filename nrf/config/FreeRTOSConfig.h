@@ -8,7 +8,15 @@ extern uint32_t SystemCoreClock;
 
 #define configUSE_PREEMPTION 1
 #define configUSE_PORT_OPTIMISED_TASK_SELECTION 1
-#define configUSE_TICKLESS_IDLE 0 // P3 power work turns this on
+// Deliberately off this wave (wave 2 power work), not a placeholder for a
+// P3 flag: tickless idle would interact with NimBLE's timing, which drives
+// its own HFXO/radio scheduling off the steady tick (see
+// nrf/src/nimble_glue.c), and the 1ms tick keeps the mesh loop's timing
+// assumptions simple. The CPU still sleeps between ticks today via WFE
+// (vApplicationIdleHook, main_nrf.c); tickless would extend that to sleeping
+// across multiple ticks. Revisit once the mesh loop becomes event-driven
+// instead of tick-polled.
+#define configUSE_TICKLESS_IDLE 0
 #define configCPU_CLOCK_HZ (SystemCoreClock)
 #define configTICK_RATE_HZ ((TickType_t)1000)
 /* 9, not 8: NimBLE's port creates its link-layer task at

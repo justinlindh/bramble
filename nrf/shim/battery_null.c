@@ -1,11 +1,12 @@
-// Battery voltage stub for the WM1110 dev kit: it is USB-powered with no
-// battery sense wired in P1. Wave 2 replaces the old fake "4000 mV, always
-// healthy" reading with an honest "no battery hardware here" status
-// (present=false, mv=0, pct=0, charging=UNKNOWN). getStatus/getBattery RPC
-// consumers on the dev kit see 0 mV / not-present until the T1000-E's real
-// SAADC + charge-detect backend lands (Task 4): a deliberate accuracy fix,
-// not a regression. A fabricated healthy number is worse than an honest
-// zero (see honesty conventions in CLAUDE.md).
+// Battery voltage stub for boards with no battery sense wired (the WM1110
+// dev kit, BOARD_HAS_BATTERY 0): it is USB-powered. Wave 2 replaced the old
+// fake "4000 mV, always healthy" reading with an honest "no battery
+// hardware here" status (present=false, mv=0, pct=0, charging=UNKNOWN).
+// getStatus/getBattery RPC consumers on these boards see 0 mV / not-present;
+// the T1000-E gets the real reading instead, from shim/battery_saadc.c
+// (selected in nrf/CMakeLists.txt by BRAMBLE_NRF_BOARD). A fabricated
+// healthy number is worse than an honest zero (see honesty conventions in
+// CLAUDE.md).
 #include "battery.h"
 #include <string.h>
 
