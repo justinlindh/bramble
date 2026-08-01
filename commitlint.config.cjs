@@ -33,6 +33,7 @@ module.exports = {
         'anchor',
         'api',
         'auth',
+        'battery',
         'ble',
         'board',
         'build',
