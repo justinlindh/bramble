@@ -2096,8 +2096,11 @@ components:
           enum: [unknown, no, yes]
           description: >-
             Hardware-informed charging state. "unknown" when the board has
-            no charge-detect pin wired (every board today except future
-            hardware).
+            no charge-detect pin wired (every ESP board today, and the nRF
+            dev kit; the T1000-E has one). "yes" means a charger is
+            currently driving the battery rail, which includes a charger
+            left connected after the cell reads full, not strictly
+            "current is flowing into the cell right now".
         present:
           type: boolean
           description: >-
@@ -3508,8 +3511,11 @@ components:
           enum: [unknown, no, yes]
           description: >-
             Hardware-informed charging state. "unknown" when the board has
-            no charge-detect pin wired (every board today except future
-            hardware).
+            no charge-detect pin wired (every ESP board today, and the nRF
+            dev kit; the T1000-E has one). "yes" means a charger is
+            currently driving the battery rail, which includes a charger
+            left connected after the cell reads full, not strictly
+            "current is flowing into the cell right now".
         present:
           type: boolean
           description: >-
