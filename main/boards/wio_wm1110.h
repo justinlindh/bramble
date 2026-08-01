@@ -5,18 +5,20 @@
 
 /*
  * Seeed Wio-WM1110 Dev Kit: the nRF52840 target's board profile (bare-metal
- * FreeRTOS, LR1110 radio; the SenseCAP T1000-E will get its own profile when
- * it becomes a supported device). Without this profile the nRF build fell
- * through main/board.c's default and reported itself to every RPC client as
- * a heltec_v3, which is exactly the kind of claim the honesty conventions
+ * FreeRTOS, LR1110 radio; the SenseCAP T1000-E has its own profile,
+ * main/boards/t1000e.h). Without this profile the nRF build fell through
+ * main/board.c's default and reported itself to every RPC client as a
+ * heltec_v3, which is exactly the kind of claim the honesty conventions
  * exist to prevent.
  *
  * The pin fields are deliberately all -1: on this target the real pin
  * mapping is owned by the port (nrf/boards/wio_wm1110_devkit.h) and the
  * drivers that consume THESE fields are the ESP-IDF ones, which do not build
  * for nRF. This struct exists for identity (name, short_name) and the
- * capability mask, which correctly advertises: no display, no keyboard, no
- * battery ADC wired yet, and GNSS not brought up until P3.
+ * capability mask, which correctly advertises: no display, no keyboard, and
+ * no battery ADC or GPS hardware, since the dev kit carries neither (unlike
+ * the T1000-E, which has both, brought up through the nRF port's own board
+ * header and drivers rather than this struct).
  */
 static const bramble_board_config_t board_wio_wm1110 = {
     .name = "Seeed Wio-WM1110 Dev Kit",
