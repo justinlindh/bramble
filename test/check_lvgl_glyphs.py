@@ -67,9 +67,24 @@ SYMBOL_USE = re.compile(r"\bLV_SYMBOL_[A-Z0-9_]+\b")
 # managed_components/, so it always takes the fallback path below; if the lock
 # ever drifted to a newer 9.2.x with different glyph data, that job would keep
 # silently passing against stale data forever. _snapshot_is_confirmed_compatible()
-# below is the guard: it reads the lockfile's actual pinned version and fails
-# loudly (not silently) if it no longer matches _SNAPSHOT_LVGL_VERSION, instead
-# of trusting the frozen tables unconditionally.
+# below is the guard.
+#
+# dependencies.lock is GITIGNORED (not tracked): it only exists in a checkout
+# where an idf.py build has already run at least once, so a genuinely clean
+# checkout (a fresh `git clone` or `git archive` export, which is exactly what
+# CI's host-tests job runs from) has no lockfile to read at all. The guard
+# therefore has two tiers: when the lockfile IS present, it hard-fails on any
+# version disagreement (the strongest evidence available). When it is absent,
+# it falls back to confirming _SNAPSHOT_LVGL_VERSION still satisfies the
+# RANGE declared in the tracked idf_component.yml manifest. That fallback is
+# honestly weaker: it cannot detect a same-range float (dependencies.lock
+# silently moving from 9.2.2 to 9.2.3, both inside "~9.2") from tracked files
+# alone, because nothing tracked records the exact resolved version in that
+# case. It only catches the manifest's declared range itself moving away from
+# what the snapshot covers (e.g. a bump to "~9.3"). The live path above
+# remains the only fully authoritative check, and stays preferred whenever
+# managed_components/ has actually been fetched (a real board build, or a
+# dev box that has run one).
 _SNAPSHOT_LVGL_VERSION = "9.2.2"
 
 _FALLBACK_SYMBOL_CODEPOINTS = {
@@ -168,14 +183,17 @@ _FONT_SPARSE_RANGE = re.compile(
 
 
 _LOCKFILE_LVGL_VERSION = re.compile(r"lvgl/lvgl:\n(?:[ \t]+.*\n)*?[ \t]+version:\s*([0-9][0-9.]*)")
+_MANIFEST_LVGL_VERSION = re.compile(r"lvgl/lvgl:\s*\n\s*version:\s*[\"']?([^\"'\n]+)")
 
 
 def _locked_lvgl_version():
     """Return the lvgl/lvgl version pinned in the root dependencies.lock: the
-    version ESP-IDF's component manager actually resolves to for a real
-    build. (idf_component.yml's own "~9.2" is a floating range, not a pin;
-    the lockfile is what a build actually gets, until something regenerates
-    it.) None if the lockfile is missing or its lvgl entry cannot be parsed.
+    exact version ESP-IDF's component manager resolved to the last time a
+    build ran in this checkout. dependencies.lock is gitignored, so this is
+    None (not just "missing", genuinely absent) in a checkout where no
+    idf.py build has ever run, e.g. a fresh clone or a CI job that only
+    exercises the host-tests-only path. None also on an unparseable lvgl
+    entry.
     """
     lock_path = REPO_ROOT / "dependencies.lock"
     try:
@@ -186,20 +204,85 @@ def _locked_lvgl_version():
     return match.group(1) if match else None
 
 
+def _manifest_lvgl_range():
+    """Return the lvgl/lvgl version range declared in
+    components/ui_graphics/idf_component.yml: TRACKED, unlike
+    dependencies.lock, so it is always readable even in a checkout that has
+    never run a build. None if it cannot be parsed."""
+    manifest_path = REPO_ROOT / "components/ui_graphics/idf_component.yml"
+    try:
+        text = manifest_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = _MANIFEST_LVGL_VERSION.search(text)
+    return match.group(1).strip() if match else None
+
+
+def _version_tuple(version_str):
+    return tuple(int(p) for p in version_str.split("."))
+
+
+def _snapshot_satisfies_manifest_range(snapshot_version, range_str):
+    """True if snapshot_version satisfies range_str. Handles exactly the two
+    syntaxes actually used in this repo's idf_component.yml files: a bare
+    exact version ("9.2.2") or a tilde range ("~9.2", meaning >=9.2.0
+    <9.3.0, or "~9.2.2", meaning >=9.2.2 <9.3.0). This is NOT a general
+    semver range parser: an unrecognized syntax returns False (fail loudly)
+    rather than silently assuming the snapshot is still compatible."""
+    range_str = range_str.strip()
+    try:
+        if range_str.startswith("~"):
+            base_parts = _version_tuple(range_str[1:].strip())
+            if len(base_parts) not in (2, 3):
+                return False
+            major, minor = base_parts[0], base_parts[1]
+            snap_parts = _version_tuple(snapshot_version)
+            if len(snap_parts) != 3 or snap_parts[0] != major or snap_parts[1] != minor:
+                return False
+            return len(base_parts) == 2 or snap_parts >= base_parts
+        return _version_tuple(snapshot_version) == _version_tuple(range_str)
+    except ValueError:
+        return False
+
+
 def _snapshot_is_confirmed_compatible():
     """(ok, reason) for whether the frozen fallback tables above can be
     trusted for this run. Only called when managed_components/ is absent
     (the live path is always preferred when it is present, see main()).
-    Refuses to pass on an unreadable or mismatched lockfile: an unconfirmed
-    snapshot is a hard failure, not a warning, because the whole point of
-    this script is catching drift nothing else would notice."""
+
+    Two tiers, strongest evidence first:
+
+    1. dependencies.lock present (a build has run in this checkout at least
+       once): hard match against the exact resolved version. Any
+       disagreement is a hard failure, not a warning.
+    2. dependencies.lock absent (a genuinely clean checkout: see its
+       docstring): fall back to confirming the snapshot's version still
+       satisfies the tracked manifest's declared range. Weaker by
+       construction (see the comment above _SNAPSHOT_LVGL_VERSION for the
+       honest limit), but still catches the range itself moving away from
+       what the snapshot covers, and never silently passes when it cannot
+       even parse that much.
+    """
     locked = _locked_lvgl_version()
-    if locked is None:
-        return False, f"could not read lvgl/lvgl's pinned version from {REPO_ROOT / 'dependencies.lock'}"
-    if locked != _SNAPSHOT_LVGL_VERSION:
+    if locked is not None:
+        if locked != _SNAPSHOT_LVGL_VERSION:
+            return False, (
+                f"dependencies.lock pins lvgl {locked}, but the frozen glyph "
+                f"snapshot above was captured from lvgl {_SNAPSHOT_LVGL_VERSION}"
+            )
+        return True, None
+
+    manifest_range = _manifest_lvgl_range()
+    if manifest_range is None:
         return False, (
-            f"dependencies.lock pins lvgl {locked}, but the frozen glyph "
-            f"snapshot above was captured from lvgl {_SNAPSHOT_LVGL_VERSION}"
+            "could not read lvgl/lvgl's version range from "
+            f"{REPO_ROOT / 'components/ui_graphics/idf_component.yml'} (and there is no "
+            f"{REPO_ROOT / 'dependencies.lock'} in this checkout to check against instead)"
+        )
+    if not _snapshot_satisfies_manifest_range(_SNAPSHOT_LVGL_VERSION, manifest_range):
+        return False, (
+            f"components/ui_graphics/idf_component.yml declares lvgl {manifest_range}, "
+            f"which the frozen glyph snapshot's lvgl {_SNAPSHOT_LVGL_VERSION} does not satisfy"
         )
     return True, None
 
@@ -309,10 +392,10 @@ def main() -> int:
             print(f"  {reason}")
             print("\nThis check has no live managed_components/ to verify against here (the")
             print("host-tests-only CI path never fetches it), so it refuses to trust a")
-            print("snapshot it cannot confirm still matches the pinned lvgl version instead")
-            print("of silently passing against data that may no longer be accurate.")
-            print("Regenerate the snapshot (see the comment above _SNAPSHOT_LVGL_VERSION)")
-            print("against the currently locked lvgl version and update that constant.")
+            print("snapshot it cannot confirm is still compatible instead of silently passing")
+            print("against data that may no longer be accurate. Regenerate the snapshot (see")
+            print("the comment above _SNAPSHOT_LVGL_VERSION) against the currently resolved")
+            print("lvgl version and update that constant.")
             return 1
 
     symbol_table = _load_symbol_table()
