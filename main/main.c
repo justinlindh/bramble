@@ -400,7 +400,7 @@ static void render_main_screen(const ui_state_t* ui) {
              * the charge rail is driving it, so show a charge indicator
              * instead of a fabricated percentage. */
             snprintf(batt, sizeof(batt), "CHG");
-        } else if (!bstat.present || bstat.mv == 0) {
+        } else if (!battery_reading_available(&bstat)) {
             /* Honest "no reading" affordance. This replaces the old "USB"
              * guess, which claimed a specific power state that a bare 0 mV
              * reading cannot actually distinguish from "no battery

@@ -47,6 +47,25 @@ describe('SystemInfo battery row', () => {
     expect(screen.queryByText(/4000 mV/)).not.toBeInTheDocument();
   });
 
+  it('shows N/A, not 0% danger-red, when every ADC sample in a read failed', () => {
+    // present stays true through an all-failed read (it reflects ADC init
+    // success, not this read's outcome); mv/pct both come out 0 in that
+    // case. hasBattery must not treat present: true alone as "there is a
+    // real reading here."
+    const status: any = {
+      ...baseStatus,
+      batteryPct: 0,
+      batteryMv: 0,
+      present: true,
+      charging: 'unknown',
+    };
+
+    render(<SystemInfo status={status} config={config} />);
+
+    expect(screen.getByText('N/A')).toBeInTheDocument();
+    expect(screen.queryByText(/0%/)).not.toBeInTheDocument();
+  });
+
   it('falls back to the mv heuristic when present is absent, matching older firmware', () => {
     const status: any = {
       ...baseStatus,

@@ -59,6 +59,20 @@ typedef struct {
 } battery_status_t;
 
 /**
+ * True if status holds an actual usable reading, not just working
+ * hardware: present alone is not enough, because it stays true even when
+ * every ADC sample in a read failed (present describes init success, not
+ * this particular read's outcome), and mv == 0 is exactly
+ * battery_status_t.mv's documented "no reading" sentinel in that case.
+ * Every consumer that decides whether to show/emit a real percentage
+ * versus an honest "unknown" must check this, not status->present alone:
+ * checking present alone let an all-failed read display "0%" or beacon a
+ * literal 0 (both read as "battery is dead", not "no reading"). A NULL
+ * status returns false. Pure function: host-testable in isolation.
+ */
+bool battery_reading_available(const battery_status_t* status);
+
+/**
  * Fills out with the current battery reading: averaged voltage, curve
  * percentage, and charging state. This is the primary API; battery_read_mv
  * and battery_read_pct are thin wrappers over it.
@@ -110,14 +124,14 @@ battery_charging_t battery_charging_from_gpio(int chrg_gpio, int chrg_active_lev
  * Maps a status to the wire-level beacon battery_pct byte: 0xFF is the
  * protocol's documented "unknown/plugged in" sentinel
  * (docs/bramble-protocol-spec.md), emitted whenever charging is confirmed
- * OR the board has no battery hardware (present == false). Without the
- * present check, a battery-less node (nRF today) would emit a real 0,
- * which on the wire means "dead battery", not "no reading": a false
- * low-battery signal is worse than the sentinel. Otherwise the real curve
- * percentage passes through unchanged. Pure function: host-testable in
- * isolation.
+ * OR have_reading is false (pass battery_reading_available(&status), not
+ * status.present: present alone stays true through an all-failed read, and
+ * a battery-less or all-failed node would otherwise emit a real 0, which
+ * on the wire means "dead battery", not "no reading": a false low-battery
+ * signal is worse than the sentinel). Otherwise the real curve percentage
+ * passes through unchanged. Pure function: host-testable in isolation.
  */
-uint8_t battery_beacon_pct(battery_charging_t charging, uint8_t pct, bool present);
+uint8_t battery_beacon_pct(battery_charging_t charging, uint8_t pct, bool have_reading);
 
 /* Percentage at/below which a battery reading is genuinely dangerous.
  * battery_display_pct_ema below must never delay or mask a drop to or

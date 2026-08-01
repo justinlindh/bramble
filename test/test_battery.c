@@ -110,6 +110,31 @@ void test_charging_from_gpio_matches_active_level(void) {
     TEST_ASSERT_EQUAL_INT(BATTERY_CHG_NO, battery_charging_from_gpio(5, 1, 0));
 }
 
+/* ── battery_reading_available ───────────────────────────────── */
+
+void test_reading_available_true_when_present_and_nonzero_mv(void) {
+    battery_status_t st = {.mv = 4010, .pct = 83, .charging = BATTERY_CHG_NO, .present = true};
+    TEST_ASSERT_TRUE(battery_reading_available(&st));
+}
+
+/* present stays true through an all-failed read: it reflects ADC init
+ * success, not this particular read's outcome. mv/pct both come out 0 in
+ * that case (battery_status_t.mv's documented "no reading" sentinel), and
+ * that must not count as an available reading despite present == true. */
+void test_reading_available_false_when_present_but_all_samples_failed(void) {
+    battery_status_t st = {.mv = 0, .pct = 0, .charging = BATTERY_CHG_UNKNOWN, .present = true};
+    TEST_ASSERT_FALSE(battery_reading_available(&st));
+}
+
+void test_reading_available_false_when_not_present(void) {
+    battery_status_t st = {.mv = 4010, .pct = 83, .charging = BATTERY_CHG_NO, .present = false};
+    TEST_ASSERT_FALSE(battery_reading_available(&st));
+}
+
+void test_reading_available_null_status_is_false(void) {
+    TEST_ASSERT_FALSE(battery_reading_available(NULL));
+}
+
 /* ── battery_beacon_pct ──────────────────────────────────────── */
 
 void test_beacon_pct_emits_sentinel_only_when_confirmed_charging(void) {
@@ -117,6 +142,17 @@ void test_beacon_pct_emits_sentinel_only_when_confirmed_charging(void) {
     TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_YES, 0, true));
     TEST_ASSERT_EQUAL_UINT8(42, battery_beacon_pct(BATTERY_CHG_NO, 42, true));
     TEST_ASSERT_EQUAL_UINT8(42, battery_beacon_pct(BATTERY_CHG_UNKNOWN, 42, true));
+}
+
+/* Regression: an all-failed read (present stays true, mv/pct come out 0)
+ * must beacon the unknown sentinel, driven through battery_reading_available
+ * exactly as mesh_beacon.c does, not a literal 0 that reads as "dead
+ * battery" on the wire. */
+void test_beacon_pct_emits_sentinel_when_all_samples_failed_despite_present(void) {
+    battery_status_t all_failed = {
+        .mv = 0, .pct = 0, .charging = BATTERY_CHG_UNKNOWN, .present = true};
+    TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(all_failed.charging, all_failed.pct,
+                                                     battery_reading_available(&all_failed)));
 }
 
 /* A board with no battery hardware (present == false, e.g. the nRF null
@@ -241,8 +277,14 @@ int main(void) {
     RUN_TEST(test_charging_from_gpio_unwired_is_always_unknown);
     RUN_TEST(test_charging_from_gpio_matches_active_level);
 
+    RUN_TEST(test_reading_available_true_when_present_and_nonzero_mv);
+    RUN_TEST(test_reading_available_false_when_present_but_all_samples_failed);
+    RUN_TEST(test_reading_available_false_when_not_present);
+    RUN_TEST(test_reading_available_null_status_is_false);
+
     RUN_TEST(test_beacon_pct_emits_sentinel_only_when_confirmed_charging);
     RUN_TEST(test_beacon_pct_emits_sentinel_when_battery_not_present);
+    RUN_TEST(test_beacon_pct_emits_sentinel_when_all_samples_failed_despite_present);
 
     RUN_TEST(test_display_pct_ema_first_call_snaps_to_raw);
     RUN_TEST(test_display_pct_ema_null_state_returns_raw_unsmoothed);

@@ -64,8 +64,12 @@ function hasBattery(status: NodeStatus): boolean {
   // Boards without a battery commonly report 0mV / 0%.
   if (status.batteryMv === undefined && status.batteryPct === undefined) return false;
   // `present` is hardware-verified; prefer it when the firmware reports it.
-  // Older firmware omits it, so fall back to the voltage guess.
-  if (status.present !== undefined) return status.present;
+  // present alone is not enough: it stays true even when every ADC sample
+  // in a read failed (present describes ADC init success, not this
+  // particular read's outcome), and firmware's mv === 0 is the "no
+  // reading" sentinel for that case, so both must hold. Older firmware
+  // omits present, so fall back to the voltage guess.
+  if (status.present !== undefined) return status.present && (status.batteryMv ?? 0) > 0;
   return (status.batteryMv ?? 0) > 1000;
 }
 
