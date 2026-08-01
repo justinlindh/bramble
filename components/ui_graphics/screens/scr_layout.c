@@ -213,22 +213,39 @@ void layout_set_tab(bramble_layout_t* layout, bramble_tab_t tab) {
 }
 
 void layout_update_status(bramble_layout_t* layout) {
-    /* Battery */
-    int pct = battery_read_pct();
+    /* Battery. A confirmed-charging node shows a charge indicator instead
+     * of a percentage: the charge rail's voltage (the T-Deck reads a
+     * dead-flat ~4798 mV while plugged in) is not the cell's state of
+     * charge, so a percentage derived from it is fabricated. */
+    battery_status_t bstat;
+    battery_get_status(&bstat);
     char buf[32];
-    const char* batt_sym = pct > 75   ? LV_SYMBOL_BATTERY_FULL
-                           : pct > 50 ? LV_SYMBOL_BATTERY_3
-                           : pct > 25 ? LV_SYMBOL_BATTERY_2
-                                      : LV_SYMBOL_BATTERY_1;
-    snprintf(buf, sizeof(buf), "%s %d%%", batt_sym, pct);
-    lv_label_set_text(layout->lbl_battery, buf);
 
-    if (pct <= 15) {
-        lv_obj_set_style_text_color(layout->lbl_battery, BR_COLOR_DANGER, 0);
-    } else if (pct <= 30) {
-        lv_obj_set_style_text_color(layout->lbl_battery, BR_COLOR_ACCENT, 0);
-    } else {
+    if (bstat.charging == BATTERY_CHG_YES) {
+        snprintf(buf, sizeof(buf), LV_SYMBOL_CHARGE " CHG");
+        lv_label_set_text(layout->lbl_battery, buf);
         lv_obj_set_style_text_color(layout->lbl_battery, BR_COLOR_TEXT, 0);
+    } else {
+        /* charging == NO or UNKNOWN: pct through the display-smoothing
+         * hook so the unplug cliff (charge rail -> resting cell voltage)
+         * renders as a gradual settle rather than an instant jump. The
+         * floor inside battery_display_pct guarantees a genuine drop into
+         * danger territory is never delayed by that smoothing. */
+        int pct = battery_display_pct(bstat.pct);
+        const char* batt_sym = pct > 75   ? LV_SYMBOL_BATTERY_FULL
+                               : pct > 50 ? LV_SYMBOL_BATTERY_3
+                               : pct > 25 ? LV_SYMBOL_BATTERY_2
+                                          : LV_SYMBOL_BATTERY_1;
+        snprintf(buf, sizeof(buf), "%s %d%%", batt_sym, pct);
+        lv_label_set_text(layout->lbl_battery, buf);
+
+        if (pct <= BATTERY_DANGER_PCT) {
+            lv_obj_set_style_text_color(layout->lbl_battery, BR_COLOR_DANGER, 0);
+        } else if (pct <= 30) {
+            lv_obj_set_style_text_color(layout->lbl_battery, BR_COLOR_ACCENT, 0);
+        } else {
+            lv_obj_set_style_text_color(layout->lbl_battery, BR_COLOR_TEXT, 0);
+        }
     }
 
     /* Neighbor count (signal strength indicator) */

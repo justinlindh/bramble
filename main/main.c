@@ -389,15 +389,31 @@ static void render_main_screen(const ui_state_t* ui) {
 
     /* Header: name + battery, right-aligned battery */
     {
-        uint8_t bpct = battery_read_pct();
+        battery_status_t bstat;
+        battery_get_status(&bstat);
         char name[] = "Bramble";
         display_draw_text(2, HEADER_Y, name);
 
         char batt[16];
-        if (bpct > 0)
-            snprintf(batt, sizeof(batt), "%3u%%", bpct);
-        else
-            snprintf(batt, sizeof(batt), "USB");
+        if (bstat.charging == BATTERY_CHG_YES) {
+            /* Confirmed charging: the cell voltage is not meaningful while
+             * the charge rail is driving it, so show a charge indicator
+             * instead of a fabricated percentage. */
+            snprintf(batt, sizeof(batt), "CHG");
+        } else if (!bstat.present || bstat.mv == 0) {
+            /* Honest "no reading" affordance. This replaces the old "USB"
+             * guess, which claimed a specific power state that a bare 0 mV
+             * reading cannot actually distinguish from "no battery
+             * hardware" or "read failed". */
+            snprintf(batt, sizeof(batt), "--");
+        } else {
+            /* charging == NO or UNKNOWN: smoothed pct so the unplug cliff
+             * (charge rail -> resting cell voltage) settles gradually
+             * instead of jumping; the smoothing floors at BATTERY_DANGER_PCT
+             * so a genuine low-battery drop is never delayed. */
+            uint8_t disp_pct = battery_display_pct(bstat.pct);
+            snprintf(batt, sizeof(batt), "%3u%%", disp_pct);
+        }
         int batt_x = DISPLAY_WIDTH - (strlen(batt) * FONT_W) - 2;
         display_draw_text(batt_x, HEADER_Y, batt);
         render_unread_badge(ui, batt_x - FONT_W);
