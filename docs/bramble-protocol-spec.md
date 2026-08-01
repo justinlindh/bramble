@@ -780,10 +780,10 @@ Total: 1 byte
 | Coarse | `LOCATION_TIER_COARSE` (1) | Grid square | ~1 km |
 | Presence | `LOCATION_TIER_PRESENCE` (2) | Online/offline only | None |
 
-**Update triggers:**
+**Sharing policy:**
 
-- Time-based: default 5-minute interval (`LOCATION_DEFAULT_INTERVAL_MS`)
-- Distance-based: default 100m threshold (`LOCATION_MIN_DISTANCE_M`)
+- Periodic sharing is gated by the persisted policy (`location_policy_t`: enabled flag, default tier, interval). `location_policy_should_send()` returns true once the configured interval has elapsed (`LOCATION_DEFAULT_INTERVAL_S`, 5 minutes by default, floored at `LOCATION_MIN_INTERVAL_S`, 30 seconds) and both a position source and at least one target exist.
+- Per-contact rules (which peers receive updates and at which tier) are persisted in NVS under the `lcr_` key prefix and managed over RPC (`bramble.setLocationContact`).
 
 **Cache:**
 
@@ -2816,7 +2816,7 @@ The emergency component was removed unshipped (section 4.19); there is no emerge
 | Location leaked to relay nodes | Location payloads are E2E encrypted inside DM packets |
 | Recipient sharing location with others | Social/trust issue, not protocol-level: same as any private data |
 | Stale location data | 1-hour cache TTL; `location_cache_purge()` evicts expired entries |
-| Update flooding | Time-based (5 min default) and distance-based (100m) triggers; low priority in TX queue |
+| Update flooding | Interval-gated periodic sharing (5 min default, 30 s floor); low priority in TX queue |
 
 **Privacy tiers rationale:**
 
