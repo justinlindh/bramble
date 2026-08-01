@@ -72,7 +72,7 @@ export function Config() {
       {/* ── Location ── */}
       <section className={styles.section}>
         <h2><IconLocation size={18} /> Location</h2>
-        <LocationSection location={config.location} neighbors={neighbors ?? []} channels={config.channels} gpsAvailable={status?.gpsAvailable} />
+        <LocationSection location={config.location} neighbors={neighbors ?? []} channels={config.channels} gpsAvailable={status?.gpsAvailable} gpsEnabled={status?.gpsEnabled} />
       </section>
 
       {/* ── Network Key ── */}

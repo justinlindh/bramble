@@ -7,7 +7,7 @@ import { formatAddrHex } from '../../utils/address';
 import { parseAddr } from '../../lib/addr';
 import type { BrambleConfig, LocationConfig, LocationTier } from '../../types/bramble';
 import type { RpcSchemas, WirePartial } from '../../types/rpc';
-import { loadPeerLocations } from './telemetry';
+import { loadPeerLocations, loadStatus } from './telemetry';
 
 // Wire types: the contract schema made deep-optional plus every legacy key
 // spelling this normalizer still reads. See types/rpc.ts for the rationale.
@@ -165,6 +165,13 @@ export async function setLocationConfig(config: Partial<LocationConfig>): Promis
   assertOk(result, 'Failed to save location config');
   await loadConfig();
   await loadPeerLocations().catch(() => {});
+}
+
+export async function setGpsEnabled(enabled: boolean): Promise<void> {
+  const client = requireClient();
+  const result = await client.rpc('bramble.setGpsEnabled', { enabled });
+  assertOk(result, 'Failed to set GPS power');
+  await loadStatus(); // re-pull so gpsEnabled reflects the device's answer
 }
 
 export async function shareLocationOnce(addr: number, tier?: LocationTier): Promise<void> {

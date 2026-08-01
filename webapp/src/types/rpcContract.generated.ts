@@ -1081,6 +1081,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.setGpsEnabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the GPS power preference
+         * @description Persists the GPS power preference and applies it live (powers GNSS on or cuts power). Returns not-supported on boards without GPS capability.
+         */
+        post: operations["setGpsEnabled"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.getStorageInfo": {
         parameters: {
             query?: never;
@@ -1554,6 +1574,8 @@ export interface components {
             battery_pct: number;
             /** @description Whether this board has GPS hardware. */
             gps_available: boolean;
+            /** @description The persisted GPS power preference (independent of gps_available). */
+            gps_enabled: boolean;
             /** @description True when bramble.getDeliveryEvents incremental replay is supported. */
             supports_delivery_event_sync: boolean;
             /** @description Verified per-node identity pins currently held (TOFU pin store, RAM-only; resets on reboot). */
@@ -1618,6 +1640,20 @@ export interface components {
             heap: components["schemas"]["HeapDiagnostics"];
             task_stack_hwm: components["schemas"]["TaskStackHighWaterMark"][];
             backpressure?: components["schemas"]["BackpressureDiagnostics"];
+            /** @description Total bytes received on the GNSS UART since the driver last started. Present only on boards with GPS capability. Zero rx bytes with the driver running means the UART link is dead. */
+            gps_rx_bytes?: number;
+            /** @description Total complete NMEA-ish lines parsed out of the GNSS byte stream since the driver last started. Present only on boards with GPS capability. Nonzero rx bytes with zero rx lines means data is flowing but not framing as lines. */
+            gps_rx_lines?: number;
+            /** @description The first $PAIR021* chip identification banner line seen from the GNSS module, truncated to 64 bytes, empty if none has been seen. Present only on boards with GPS capability. */
+            gps_chip?: string;
+            /** @description Bytes dropped because an internal receive buffer was full. Present only on boards with GPS capability; always zero on backends without an intermediate buffer to overrun (currently nonzero-capable on the nRF52840 target only). */
+            gps_rx_overruns?: number;
+            /** @description UART/driver error events observed on the GNSS link. Present only on boards with GPS capability; always zero on backends without a distinct error-event channel (currently nonzero-capable on the nRF52840 target only). */
+            gps_rx_errors?: number;
+            /** @description Times the GNSS UART driver silently disabled its receiver and had to be restarted by the recovery path. Expected to stay zero; nonzero means reception died and was recovered, which is worth investigating. Present only on boards with GPS capability; always zero on backends without such a path (currently nonzero-capable on the nRF52840 target only). */
+            gps_rx_disabled?: number;
+            /** @description Failed attempts to hand the GNSS UART driver a receive buffer, from any supply site. Expected to stay zero. Present only on boards with GPS capability; always zero on backends without an explicit buffer-supply step (currently nonzero-capable on the nRF52840 target only). */
+            gps_rx_rearm_fail?: number;
         };
         /** @description Airtime backpressure counters. Non-zero values mean the node shed load rather than transmitting: they are the field-diagnosable record of congestion, distinguishing "we deliberately yielded the channel" from "the radio is broken". */
         BackpressureDiagnostics: {
@@ -2288,6 +2324,18 @@ export interface components {
             accuracy_m?: number;
             /** @description Unix timestamp of the GPS fix (seconds). */
             timestamp?: number;
+        };
+        /** @description Parameters for bramble.setGpsEnabled. */
+        SetGpsEnabledParams: {
+            /** @description True to power GNSS on, false to cut power. */
+            enabled: boolean;
+        };
+        /** @description Response from bramble.setGpsEnabled. */
+        SetGpsEnabledResponse: {
+            /** @description Always true on success. */
+            ok: boolean;
+            /** @description The GPS power preference that was persisted and applied. */
+            enabled: boolean;
         };
         /** @description Response from bramble.getStorageInfo (T-Deck Plus only). */
         GetStorageInfoResponse: {
@@ -4151,6 +4199,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GetGpsPositionResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    setGpsEnabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SetGpsEnabledParams"];
+            };
+        };
+        responses: {
+            /** @description GPS power preference updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetGpsEnabledResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */

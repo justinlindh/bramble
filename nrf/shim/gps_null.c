@@ -30,6 +30,12 @@ void gps_get_stats(gps_stats_t* out) {
     }
 }
 
+void gps_get_debug(gps_debug_t* out) {
+    if (out != NULL) {
+        memset(out, 0, sizeof(*out));
+    }
+}
+
 int gps_set_enabled(bool enabled) {
     (void)enabled;
     return 0;

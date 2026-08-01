@@ -39,13 +39,8 @@ void tearDown(void) {
     pthread_mutex_lock(&s_mu);
     s_cb = NULL;
     s_cb_ctx = NULL;
-    memset(&s_pos, 0, sizeof(s_pos));
-    memset(&s_np, 0, sizeof(s_np));
-    s_has_fix = false;
+    gps_feed_reset(&s_feed);
     s_gate_on = false;
-    s_sats_used = 0;
-    s_sats_in_view = 0;
-    s_antenna_warning = false;
     pthread_mutex_unlock(&s_mu);
 }
 

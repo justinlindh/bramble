@@ -1315,6 +1315,30 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetGpsPositionResponse'
 
+  /rpc/bramble.setGpsEnabled:
+    post:
+      operationId: setGpsEnabled
+      summary: Set the GPS power preference
+      description: >
+        Persists the GPS power preference and applies it live (powers GNSS
+        on or cuts power). Returns not-supported on boards without GPS
+        capability.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetGpsEnabledParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: GPS power preference updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetGpsEnabledResponse'
+
   # ── Storage (T-Deck Plus only) ─────────────────────────────────────────────
 
   /rpc/bramble.getStorageInfo:
@@ -2011,6 +2035,7 @@ components:
         - battery_mv
         - battery_pct
         - gps_available
+        - gps_enabled
         - supports_delivery_event_sync
         - identity_pins
         - identity_conflicts
@@ -2064,6 +2089,9 @@ components:
         gps_available:
           type: boolean
           description: Whether this board has GPS hardware.
+        gps_enabled:
+          type: boolean
+          description: The persisted GPS power preference (independent of gps_available).
         supports_delivery_event_sync:
           type: boolean
           description: True when bramble.getDeliveryEvents incremental replay is supported.
@@ -2195,6 +2223,56 @@ components:
             $ref: '#/components/schemas/TaskStackHighWaterMark'
         backpressure:
           $ref: '#/components/schemas/BackpressureDiagnostics'
+        gps_rx_bytes:
+          type: number
+          description: >
+            Total bytes received on the GNSS UART since the driver last
+            started. Present only on boards with GPS capability. Zero rx
+            bytes with the driver running means the UART link is dead.
+        gps_rx_lines:
+          type: number
+          description: >
+            Total complete NMEA-ish lines parsed out of the GNSS byte stream
+            since the driver last started. Present only on boards with GPS
+            capability. Nonzero rx bytes with zero rx lines means data is
+            flowing but not framing as lines.
+        gps_chip:
+          type: string
+          description: >
+            The first $PAIR021* chip identification banner line seen from the
+            GNSS module, truncated to 64 bytes, empty if none has been seen.
+            Present only on boards with GPS capability.
+        gps_rx_overruns:
+          type: number
+          description: >
+            Bytes dropped because an internal receive buffer was full.
+            Present only on boards with GPS capability; always zero on
+            backends without an intermediate buffer to overrun (currently
+            nonzero-capable on the nRF52840 target only).
+        gps_rx_errors:
+          type: number
+          description: >
+            UART/driver error events observed on the GNSS link. Present only
+            on boards with GPS capability; always zero on backends without a
+            distinct error-event channel (currently nonzero-capable on the
+            nRF52840 target only).
+        gps_rx_disabled:
+          type: number
+          description: >
+            Times the GNSS UART driver silently disabled its receiver and had
+            to be restarted by the recovery path. Expected to stay zero;
+            nonzero means reception died and was recovered, which is worth
+            investigating. Present only on boards with GPS capability; always
+            zero on backends without such a path (currently nonzero-capable
+            on the nRF52840 target only).
+        gps_rx_rearm_fail:
+          type: number
+          description: >
+            Failed attempts to hand the GNSS UART driver a receive buffer,
+            from any supply site. Expected to stay zero. Present only on
+            boards with GPS capability; always zero on backends without an
+            explicit buffer-supply step (currently nonzero-capable on the
+            nRF52840 target only).
 
     BackpressureDiagnostics:
       type: object
@@ -3478,6 +3556,27 @@ components:
         timestamp:
           type: integer
           description: Unix timestamp of the GPS fix (seconds).
+
+    SetGpsEnabledParams:
+      type: object
+      description: Parameters for bramble.setGpsEnabled.
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: True to power GNSS on, false to cut power.
+
+    SetGpsEnabledResponse:
+      type: object
+      description: Response from bramble.setGpsEnabled.
+      required: [ok, enabled]
+      properties:
+        ok:
+          type: boolean
+          description: Always true on success.
+        enabled:
+          type: boolean
+          description: The GPS power preference that was persisted and applied.
 
     # ── Storage (T-Deck Plus only) ─────────────────────────────────────────
 

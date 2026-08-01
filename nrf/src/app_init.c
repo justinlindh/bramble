@@ -19,6 +19,11 @@
 #include "ws_server.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "bramble_board.h"
+#if BOARD_HAS_GNSS
+#include "gps.h"
+#include "gps_events.h"
+#endif
 
 static const char* TAG = "app_init";
 
@@ -59,6 +64,19 @@ void app_init_stack(void) {
 
     mesh_task_start(&s_identity);
     boot_trace_mark(BT_MESH_STARTED, 0);
+
+#if BOARD_HAS_GNSS
+    /* GNSS after the mesh: the fix callback's consumers (location policy,
+     * RPC events) exist once the mesh is up. gps_init() reads the
+     * persisted gps_pref preference itself and skips the first power-on
+     * when it is off (still registering the fix callback either way, for
+     * ESP boot parity with a later setGpsEnabled(true)), so this stage
+     * does not make a separate gps_set_enabled(false) call. gps_init()
+     * also returns almost immediately regardless of the pref: the AG3335's
+     * ~1.55s power-on sequence runs entirely on the gnss task, not here. */
+    int gps_rc = gps_init(nrf_on_gps_fix, NULL);
+    boot_trace_mark(BT_GPS_INIT, (uint32_t)gps_rc);
+#endif
 
     /* BLE last: the mesh owns the node's identity and RPC state, and the
      * transport should not accept a connection before they exist. */

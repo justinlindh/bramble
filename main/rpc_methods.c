@@ -31,6 +31,7 @@
 #include "board_config.h"
 #include "display.h"
 #include "gps.h"
+#include "gps_pref.h"
 #include "location.h"
 #include "wifi_manager.h"
 #include "ws_server.h"
@@ -147,6 +148,7 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(result, "battery_mv", battery_read_mv());
     cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
+    cJSON_AddBoolToObject(result, "gps_enabled", gps_pref_get());
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync",
                           mesh_supports_delivery_event_sync());
 
@@ -227,6 +229,20 @@ static int handle_get_diagnostics(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(probe, "accepted", (double)probe_accepted);
     cJSON_AddNumberToObject(probe, "dropped_reply", (double)probe_drop_reply);
     cJSON_AddNumberToObject(probe, "dropped_forward", (double)probe_drop_fwd);
+
+    /* GNSS raw-feed diagnostics: byte/line counters and chip banner tell
+     * "UART dead" from "flowing but unparseable" on a console-less board. */
+    if (board_has_cap(BOARD_CAP_GPS)) {
+        gps_debug_t gd;
+        gps_get_debug(&gd);
+        cJSON_AddNumberToObject(result, "gps_rx_bytes", gd.rx_bytes_total);
+        cJSON_AddNumberToObject(result, "gps_rx_lines", gd.rx_lines_total);
+        cJSON_AddStringToObject(result, "gps_chip", gd.chip);
+        cJSON_AddNumberToObject(result, "gps_rx_overruns", gd.rx_overruns);
+        cJSON_AddNumberToObject(result, "gps_rx_errors", gd.rx_errors);
+        cJSON_AddNumberToObject(result, "gps_rx_disabled", gd.rx_disabled);
+        cJSON_AddNumberToObject(result, "gps_rx_rearm_fail", gd.rx_rearm_fail);
+    }
 
     if (include_heap_dump) {
         ESP_LOGI(
@@ -1852,35 +1868,22 @@ static int handle_share_location_once(const cJSON* params, cJSON* result) {
         cJSON_AddStringToObject(result, "error", "location policy read failed");
         return 0;
     }
-
-    int32_t lat_e6 = 0, lon_e6 = 0;
-    nvs_get_i32(nvs, "lat_e6", &lat_e6);
-    nvs_get_i32(nvs, "lon_e6", &lon_e6);
     nvs_close(nvs);
 
-    if (lat_e6 == 0 && lon_e6 == 0) {
+    bramble_position_t pos;
+    if (!mesh_resolve_self_position(&pos)) {
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error",
-                                "no location set (use setLocationConfig with lat/lon)");
+                                "no location available (no GPS fix and no manual location set)");
         return 0;
     }
+    pos.timestamp = (uint32_t)(esp_timer_get_time() / 1000000ULL);
 
     uint8_t tier = policy.default_tier;
     cJSON* tier_j = cJSON_GetObjectItem(params, "tier");
     if (tier_j && cJSON_IsString(tier_j)) {
         tier = location_tier_from_string(tier_j->valuestring);
     }
-
-    bramble_position_t pos = {
-        .latitude_e7 = lat_e6 * 10,
-        .longitude_e7 = lon_e6 * 10,
-        .altitude_m = 0,
-        .accuracy_m = 0,
-        .speed_kmh = 0,
-        .heading_deg2 = 0,
-        .timestamp = (uint32_t)(esp_timer_get_time() / 1000000ULL),
-        .valid = true,
-    };
 
     uint32_t dest_addr = (uint32_t)strtoul(addr_str, NULL, 16);
     uint32_t pkt_id = mesh_send_location_packet(dest_addr, &pos, tier);
@@ -1891,8 +1894,8 @@ static int handle_share_location_once(const cJSON* params, cJSON* result) {
     }
 
     cJSON_AddBoolToObject(result, "ok", true);
-    cJSON_AddNumberToObject(result, "lat", lat_e6 / 1e6);
-    cJSON_AddNumberToObject(result, "lon", lon_e6 / 1e6);
+    cJSON_AddNumberToObject(result, "lat", pos.latitude_e7 / 1e7);
+    cJSON_AddNumberToObject(result, "lon", pos.longitude_e7 / 1e7);
     cJSON_AddStringToObject(result, "tier", location_tier_to_string(tier));
     char pkt_buf[12];
     snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, pkt_id);
@@ -2640,6 +2643,23 @@ static int handle_get_gps_position(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* bramble.setGpsEnabled: persist the GPS power preference, then apply live. */
+static int handle_set_gps_enabled(const cJSON* params, cJSON* result) {
+    if (!board_has_cap(BOARD_CAP_GPS)) {
+        cJSON_AddStringToObject(result, "error", "gps not supported on this board");
+        return RPC_ERR_NOT_SUPPORTED;
+    }
+    const cJSON* en = params ? cJSON_GetObjectItem(params, "enabled") : NULL;
+    if (!en || !cJSON_IsBool(en))
+        return RPC_ERR_INVALID_PARAMS;
+    bool enabled = cJSON_IsTrue(en);
+    gps_pref_set(enabled);    /* persist first (survives a crash mid-apply) */
+    gps_set_enabled(enabled); /* then apply live, same order as the UI toggle */
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddBoolToObject(result, "enabled", enabled);
+    return 0;
+}
+
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "sdcard.h"
 
@@ -3360,6 +3380,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.sleep", handle_sleep);
 
     rpc_register("bramble.getGpsPosition", handle_get_gps_position);
+    rpc_register("bramble.setGpsEnabled", handle_set_gps_enabled);
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     rpc_register("bramble.getStorageInfo", handle_get_storage_info);

@@ -105,6 +105,32 @@ void mesh_get_routes(routing_table_t* out);
 void mesh_get_location_state(location_manager_t* out);
 
 /**
+ * Resolve this node's own position: live GPS first, manual NVS coords as the
+ * fallback for GPS-less boards. THE self-position source, shared by the
+ * location policy tick, the map state (mesh_get_location_state), and
+ * bramble.shareLocationOnce. Returns false if neither source has a position.
+ */
+bool mesh_resolve_self_position(bramble_position_t* out);
+
+/**
+ * Snapshot of the location-share policy state, for the GNSS duty-cycling
+ * decision (gps_duty_should_power).
+ */
+typedef struct {
+    bool sharing_active;   /* policy.enabled && location_policy_has_targets() */
+    uint16_t interval_s;   /* policy share interval */
+    uint32_t last_send_ms; /* 0 = never */
+} mesh_location_share_state_t;
+
+/**
+ * Get the current location-share policy state. Reads NVS directly (same
+ * pattern as mesh_location_policy_tick), so this is safe to call from any
+ * task, including the nRF GNSS task, which calls it once per second and is
+ * not the mesh task.
+ */
+void mesh_location_get_share_state(mesh_location_share_state_t* out);
+
+/**
  * Add a channel to the mesh. Returns channel index or -1 on error.
  */
 int mesh_add_channel(const char* name, const uint8_t* psk, size_t psk_len);

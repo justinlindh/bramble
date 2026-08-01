@@ -43,7 +43,6 @@ static int location_rx_decode_channel(const uint8_t* nonce, const uint8_t* ciphe
                                       size_t ct_len, const uint8_t* tag, const uint8_t* aad,
                                       size_t aad_len, uint8_t* tier_out,
                                       bramble_position_t* pos_out, int* channel_index_out);
-static bool mesh_resolve_self_position(bramble_position_t* out);
 
 static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t* policy) {
     location_policy_set_defaults(policy);
@@ -296,7 +295,35 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
     pos.timestamp = t / 1000;
     pos.valid = true;
 
-    uint32_t sent_count = 0;
+    /* Two phases on purpose: COLLECT the targets under the NVS iterator, then
+     * release everything and only then TRANSMIT.
+     *
+     * The iterator holds the NVS shim's mutex for the whole iteration, so
+     * calling mesh_send_location_packet() from inside the loop would make
+     * NVS the outer lock over everything that send path touches. Two
+     * reverse orderings exist and each one is a deadlock:
+     *   - s_state_mutex then NVS, via mesh_add_channel() ->
+     *     channel_storage_save() (mesh_channels.c), on the ble_rpc task. An
+     *     addChannel landing during a share round wedges both tasks.
+     *   - s_dm_mutex then s_nonce_mutex then NVS, via
+     *     nonce_counter_next()'s reserve-ceiling flush ->
+     *     mesh_nonce_write() (nonce_counter.c, mesh_persist.c), on any
+     *     sendMessage. The NVS call is two frames below the mutex, which is
+     *     why a textual scan of the critical sections does not show it.
+     * Hoisting the transmit out keeps the shim mutex strictly below every
+     * other lock in the system: it is taken while holding nothing else, and
+     * nothing else is taken while holding it.
+     *
+     * It also stops the NVS mutex being pinned across synchronous LBT radio
+     * transmits (up to about a second per contact in the worst case), which
+     * was starving the gnss drain task and the bond writer. */
+    struct {
+        uint32_t addr;
+        uint8_t tier;
+    } targets[LOCATION_MAX_CONTACTS];
+    size_t target_count = 0;
+    size_t skipped = 0;
+
     nvs_iterator_t it = NULL;
     if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) == ESP_OK) {
         while (it != NULL) {
@@ -321,10 +348,20 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
                 }
 
                 if (enabled) {
-                    uint32_t pkt_id =
-                        mesh_send_location_packet((uint32_t)strtoul(addr, NULL, 16), &pos, tier);
-                    if (pkt_id != 0) {
-                        sent_count++;
+                    if (target_count < LOCATION_MAX_CONTACTS) {
+                        targets[target_count].addr = (uint32_t)strtoul(addr, NULL, 16);
+                        targets[target_count].tier = tier;
+                        target_count++;
+                    } else {
+                        /* Nothing caps how many lcr_ keys the setLocationRule
+                         * RPC can write (LOCATION_MAX_CONTACTS bounds the
+                         * in-RAM location_manager_t, not the NVS namespace),
+                         * so this really is reachable. Count and log rather
+                         * than truncate quietly: the previous in-loop send
+                         * had no bound at all, and silently dropping a
+                         * contact from a share round is exactly the kind of
+                         * thing that should be visible. */
+                        skipped++;
                     }
                 }
             }
@@ -337,6 +374,19 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
     }
 
     nvs_close(nvs);
+
+    if (skipped > 0) {
+        ESP_LOGW(TAG, "location share: %u contacts over the %d-target cap were not sent",
+                 (unsigned)skipped, LOCATION_MAX_CONTACTS);
+    }
+
+    /* Transmit phase: no NVS lock, no iterator, nothing held. */
+    uint32_t sent_count = 0;
+    for (size_t i = 0; i < target_count; i++) {
+        if (mesh_send_location_packet(targets[i].addr, &pos, targets[i].tier) != 0) {
+            sent_count++;
+        }
+    }
 
     if (sent_count > 0) {
         mesh_emit_location_event("sent", 0, policy->default_tier, t, 0, 0, sent_count);
@@ -508,12 +558,15 @@ void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr)
 
 /* Resolve this node's own position: live GPS first, manual NVS coords as the
  * fallback for GPS-less boards. This is THE self-position source; the policy
- * tick below and mesh_get_location_state both use it. It exists because the
- * codebase grew two location_manager_t instances: main.c's g_location_mgr
- * received every GPS fix and nothing ever read it, while the s_location_mgr
- * that the T-Deck map reads had no writer for my_position at all, so the map
- * showed "waiting for position fix" forever against a 3 m GPS fix. */
-static bool mesh_resolve_self_position(bramble_position_t* out) {
+ * tick below and mesh_get_location_state both use it, and it is exported
+ * (mesh_task.h) so bramble.shareLocationOnce shares it too instead of
+ * re-reading manual NVS coords on its own and hard-failing GPS-only nodes. It
+ * exists because the codebase grew two location_manager_t instances: main.c's
+ * g_location_mgr received every GPS fix and nothing ever read it, while the
+ * s_location_mgr that the T-Deck map reads had no writer for my_position at
+ * all, so the map showed "waiting for position fix" forever against a 3 m
+ * GPS fix. */
+bool mesh_resolve_self_position(bramble_position_t* out) {
     bramble_position_t gps_pos;
     if (gps_get_position(&gps_pos) && gps_pos.valid) {
         *out = gps_pos;
@@ -566,6 +619,69 @@ void mesh_location_policy_tick(uint32_t t) {
         mesh_send_location_updates(t, &policy, &source_pos);
         s_location_last_send_ms = t;
     }
+}
+
+/* Cache window for the NVS-backed half of the share state. The gnss task
+ * calls this once a second for its duty-cycle decision, and answering it
+ * meant an nvs_open plus a policy load plus a full directory iteration every
+ * time: a second 1Hz NVS reader alongside the mesh task's policy tick, which
+ * is the traffic that made the iterator race reachable at all. The policy is
+ * operator configuration that changes on human timescales, so re-reading it
+ * every 10s instead of every 1s costs nothing real and cuts this caller's
+ * share of the NVS load by 90%. */
+#define LOCATION_SHARE_STATE_CACHE_MS 10000U
+
+/* Feeds the GNSS duty-cycling decision (gps_duty_should_power). Reads the
+ * policy exactly like mesh_location_policy_tick above (its own NVS handle,
+ * not shared state), because the caller here is the nRF GNSS task, not the
+ * mesh task: on the nRF target this runs on a different FreeRTOS task
+ * entirely, once per second, so it cannot reuse the mesh task's read. The
+ * one piece of mesh-task state this does read, s_location_last_send_ms, is
+ * a plain uint32_t whose only writer is mesh_location_policy_tick above; a
+ * naturally aligned 32-bit load on this target cannot tear, so the worst
+ * case is a snapshot up to one policy tick stale, the same lock-free
+ * cross-task reasoning mesh_get_location_state uses for my_position. No
+ * lock is taken here on purpose. */
+void mesh_location_get_share_state(mesh_location_share_state_t* out) {
+    /* Unsynchronized on purpose: these are only ever touched from this
+     * function, and on every target it has exactly one caller (the nRF GNSS
+     * task's duty tick), so there is no second writer to race. If a second
+     * caller is ever added, this cache needs a lock. */
+    static bool s_cached_valid;
+    static bool s_cached_sharing_active;
+    static uint32_t s_cached_interval_s;
+    static uint32_t s_cached_at_ms;
+
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+
+    if (!s_cached_valid || (now - s_cached_at_ms) >= LOCATION_SHARE_STATE_CACHE_MS) {
+        nvs_handle_t nvs;
+        if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK) {
+            /* Not cached: a failed open is usually "namespace does not exist
+             * yet", which the very next write changes, so caching it would
+             * hide the transition for up to the whole window. */
+            out->sharing_active = false;
+            out->interval_s = 0;
+            out->last_send_ms = s_location_last_send_ms;
+            return;
+        }
+
+        location_policy_t policy;
+        location_policy_load_or_defaults(nvs, &policy);
+        nvs_close(nvs);
+
+        s_cached_sharing_active = policy.enabled && location_policy_has_targets();
+        s_cached_interval_s = policy.interval_s;
+        s_cached_at_ms = now;
+        s_cached_valid = true;
+    }
+
+    out->sharing_active = s_cached_sharing_active;
+    out->interval_s = s_cached_interval_s;
+    /* Never cached: last_send_ms is a plain in-RAM counter that the share path
+     * updates, and the duty-cycle logic wakes the receiver relative to it, so
+     * a stale value here would move every scheduled wake. */
+    out->last_send_ms = s_location_last_send_ms;
 }
 
 void mesh_get_location_state(location_manager_t* out) {

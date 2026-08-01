@@ -127,6 +127,17 @@ char g_nvs_node_name[64] = "";
 char g_nvs_channel_names[8][20] = {{0}};
 uint8_t g_nvs_channel_psk_flags[8] = {0};
 bool g_nvs_channel_psk_present[8] = {false};
+/* Persisted GPS power preference, keyed the same as gps_pref.c's "gps_en".
+ * Default 1 (ON) mirrors gps_pref_get()'s own default-ON fallback. */
+uint8_t g_nvs_gps_en = 1;
+/* Manual location coordinates, keyed the same as mesh_location.c's real
+ * "lat_e6"/"lon_e6" (NVS_NS_LOCATION namespace, handle 3 below). These are
+ * the only two i32 keys used anywhere in main/, so a small dedicated pair of
+ * globals stands in for a generic i32 store. */
+bool g_nvs_lat_e6_set = false;
+int32_t g_nvs_lat_e6 = 0;
+bool g_nvs_lon_e6_set = false;
+int32_t g_nvs_lon_e6 = 0;
 
 typedef struct {
     char key[16];
@@ -335,11 +346,26 @@ int battery_read_pct(void) { return 85; }
  * The real struct is ~256 bytes; we allocate 512 to be safe.
  * The short_name pointer is at offset 0 in the real struct. */
 static char g_stub_board_mem[512];
+/* Test lever: when true, board_get_config() reports BOARD_CAP_GPS so
+ * handle_set_gps_enabled / handle_get_gps_position exercise their
+ * GPS-capable path instead of the not-supported early return. */
+bool g_stub_board_has_gps = false;
 const void* board_get_config(void) {
     /* Ensure short_name is set (it's a const char* at some offset: we set
      * offset 0 which the stubs type expects, but real struct may differ).
      * Zero-init means capabilities=0, so board_has_cap returns false. */
     memset(g_stub_board_mem, 0, sizeof(g_stub_board_mem));
+    if (g_stub_board_has_gps) {
+        /* Mirror only the real bramble_board_config_t's leading fields (name,
+         * short_name, capabilities; see board_config.h) so board_has_cap()
+         * sees BOARD_CAP_GPS without pulling in the full ESP-only header. */
+        struct {
+            const char* name;
+            const char* short_name;
+            uint32_t capabilities;
+        }* hdr = (void*)g_stub_board_mem;
+        hdr->capabilities = (1u << 4); /* BOARD_CAP_GPS */
+    }
     /* We need to find where short_name lives. Since we can't include the real
      * header here, just return zeroed memory. board_has_cap will return false,
      * and bramble_hardware() will return "unknown" since short_name will be NULL. */
@@ -478,6 +504,42 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
     return 0xABCDEF01u;
 }
 
+/* mesh_resolve_self_position stub: mirrors mesh_location.c's real resolver
+ * (live GPS first, manual NVS lat/lon fallback) without pulling in
+ * mesh_location.c's mesh-task dependencies. gps_get_position is the real
+ * components/gps/gps.c function, compiled into this suite; its host build
+ * always reports no fix, so only the manual-NVS leg and the no-source error
+ * are reachable from here (the live-GPS leg is bench-only, see Task 11). */
+extern bool gps_get_position(bramble_position_t* out);
+
+bool mesh_resolve_self_position(bramble_position_t* out) {
+    bramble_position_t gps_pos;
+    if (gps_get_position(&gps_pos) && gps_pos.valid) {
+        *out = gps_pos;
+        return true;
+    }
+
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    int32_t lat_e6 = 0;
+    int32_t lon_e6 = 0;
+    bool has_manual = (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK) &&
+                      (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK) &&
+                      !(lat_e6 == 0 && lon_e6 == 0);
+    nvs_close(nvs);
+    if (!has_manual) {
+        return false;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->latitude_e7 = lat_e6 * 10;
+    out->longitude_e7 = lon_e6 * 10;
+    out->valid = true;
+    return true;
+}
+
 /* ── NVS stubs (same as rpc_methods_link_stubs) ──────────────────── */
 
 struct nvs_iter_rec {
@@ -575,6 +637,11 @@ esp_err_t nvs_get_str(nvs_handle_t h, const char* k, char* v, size_t* l) {
             *l = need;
             return ESP_OK;
         }
+        /* location_policy_load_or_init (rpc_methods.c) distinguishes a
+         * genuinely missing key (write defaults) from a real read error
+         * (propagate); real NVS reports the former as
+         * ESP_ERR_NVS_NOT_FOUND, not the generic ESP_FAIL. */
+        return ESP_ERR_NVS_NOT_FOUND;
     }
     return ESP_FAIL;
 }
@@ -597,6 +664,10 @@ esp_err_t nvs_set_str(nvs_handle_t h, const char* k, const char* v) {
     return ESP_OK;
 }
 esp_err_t nvs_set_u8(nvs_handle_t h, const char* k, uint8_t v) {
+    if (h == 1 && k && strcmp(k, "gps_en") == 0) {
+        g_nvs_gps_en = v;
+        return ESP_OK;
+    }
     (void)h;
     (void)k;
     (void)v;
@@ -621,6 +692,16 @@ esp_err_t nvs_set_i8(nvs_handle_t h, const char* k, int8_t v) {
     return ESP_OK;
 }
 esp_err_t nvs_set_i32(nvs_handle_t h, const char* k, int32_t v) {
+    if (h == 3 && k && strcmp(k, "lat_e6") == 0) {
+        g_nvs_lat_e6 = v;
+        g_nvs_lat_e6_set = true;
+        return ESP_OK;
+    }
+    if (h == 3 && k && strcmp(k, "lon_e6") == 0) {
+        g_nvs_lon_e6 = v;
+        g_nvs_lon_e6_set = true;
+        return ESP_OK;
+    }
     (void)h;
     (void)k;
     (void)v;
@@ -634,20 +715,34 @@ esp_err_t nvs_set_blob(nvs_handle_t h, const char* k, const void* v, size_t l) {
     return ESP_OK;
 }
 esp_err_t nvs_get_u8(nvs_handle_t h, const char* k, uint8_t* o) {
-    (void)h;
-    (void)k;
+    if (h == 1 && k && strcmp(k, "gps_en") == 0) {
+        if (o)
+            *o = g_nvs_gps_en;
+        return ESP_OK;
+    }
     if (o)
         *o = 0;
-    return ESP_FAIL;
+    /* See nvs_get_str's h==3 comment: location_policy_load_or_init needs
+     * "key not present" reported as ESP_ERR_NVS_NOT_FOUND. */
+    return (h == 3) ? ESP_ERR_NVS_NOT_FOUND : ESP_FAIL;
 }
 esp_err_t nvs_get_u16(nvs_handle_t h, const char* k, uint16_t* o) {
-    (void)h;
     (void)k;
     if (o)
         *o = 0;
-    return ESP_FAIL;
+    return (h == 3) ? ESP_ERR_NVS_NOT_FOUND : ESP_FAIL;
 }
 esp_err_t nvs_get_i32(nvs_handle_t h, const char* k, int32_t* o) {
+    if (h == 3 && k && strcmp(k, "lat_e6") == 0 && g_nvs_lat_e6_set) {
+        if (o)
+            *o = g_nvs_lat_e6;
+        return ESP_OK;
+    }
+    if (h == 3 && k && strcmp(k, "lon_e6") == 0 && g_nvs_lon_e6_set) {
+        if (o)
+            *o = g_nvs_lon_e6;
+        return ESP_OK;
+    }
     (void)h;
     (void)k;
     if (o)

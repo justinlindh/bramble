@@ -33,18 +33,49 @@ void boot_trace_mark(uint32_t tag, uint32_t aux) {
     s_last_tag = tag;
 }
 
-void boot_trace_fail(uint32_t tag, uint32_t aux) {
-    boot_trace_mark(tag, aux);
-    /* Adafruit nRF52 bootloader: DFU_MAGIC_UF2_RESET. The bootloader sees
-     * this in GPREGRET after reset and stays resident with the UF2 volume,
-     * which is exactly where the host can read this page back. On a board
-     * without that bootloader (SWD layout) the value is ignored and the app
-     * simply reboots. */
+/* Adafruit nRF52 bootloader: DFU_MAGIC_UF2_RESET. The bootloader sees this
+ * in GPREGRET after reset and stays resident with the UF2 volume, which is
+ * exactly where the host can read this page back. On a board without that
+ * bootloader (SWD layout) the value is ignored and the app simply reboots. */
+static void reboot_to_dfu(void) __attribute__((noreturn));
+
+static void reboot_to_dfu(void) {
     NRF_POWER->GPREGRET = 0x57;
     __DSB();
     NVIC_SystemReset();
     for (;;) {
     }
+}
+
+void boot_trace_fail(uint32_t tag, uint32_t aux) {
+    boot_trace_mark(tag, aux);
+    reboot_to_dfu();
+}
+
+void bramble_nrfx_assert_failed(uint32_t line) {
+    /* Interrupts off before touching flash, matching bramble_assert_failed:
+     * this can fire from IRQ context, and the NVMC busy-wait in
+     * boot_trace_mark() should not be racing anything. Nothing is logged on
+     * the way out either. An nrfx assert can fire inside an ISR, the T1000-E
+     * has no console at all, and a blocking console write would risk hanging
+     * before the stamp lands, which is precisely the failure this handler
+     * exists to eliminate. The flash stamp is the channel that survives. */
+    __disable_irq();
+
+    /* Reentrancy guard, and it is load-bearing rather than defensive:
+     * boot_trace_mark() writes through nrfx_nvmc_word_write(), which carries
+     * NRFX_ASSERTs of its own (address validity and word alignment). Without
+     * this, an assert raised inside the stamping path would call straight
+     * back into here and recurse until the stack gave out, turning a silent
+     * lockup into a silent lockup with extra steps. A nested failure skips
+     * the flash write and resets anyway, so whatever the trace already holds
+     * (the clean boot stages) is still readable from DFU. */
+    static volatile bool s_stamping;
+    if (!s_stamping) {
+        s_stamping = true;
+        boot_trace_mark(BT_FAIL_NRFX, line);
+    }
+    reboot_to_dfu();
 }
 
 uint32_t boot_trace_last(void) { return s_last_tag; }

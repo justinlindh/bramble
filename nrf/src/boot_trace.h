@@ -29,6 +29,7 @@
 #define BT_RPC_READY 0x08u     /* (0) */
 #define BT_TOKEN_SEED 0x09u    /* (rc) */
 #define BT_TOKEN_LOADED 0x0Au  /* (0) */
+#define BT_GPS_INIT 0x0Bu      /* (rc) gps_init result, GNSS boards only */
 #define BT_HFXO_OK 0x0Cu       /* (0) high-frequency crystal running */
 #define BT_LFCLK 0x0Du         /* (1 xtal / 0 rc) */
 #define BT_BLE_INIT 0x0Eu      /* (rc) ble_server_init */
@@ -42,6 +43,7 @@
 #define BT_FAIL_STACK_OVF 0xE2u /* (0) */
 #define BT_FAIL_MALLOC 0xE3u    /* (0) */
 #define BT_FAIL_SENTINEL 0xE4u  /* (last stage tag seen) */
+#define BT_FAIL_NRFX 0xE5u      /* (nrfx source line) NRFX_ASSERT failed */
 #define BT_FAIL_HARDFAULT 0xEFu /* (stacked PC) */
 
 /* Erases the trace page and stamps the magic. Call once, early, before the
@@ -59,3 +61,15 @@ void boot_trace_fail(uint32_t tag, uint32_t aux);
 /* Most recent stage tag, and whether advertising came up (BT_ADV rc==0). */
 uint32_t boot_trace_last(void);
 bool boot_trace_adv_ok(void);
+
+/* NRFX_ASSERT's failure handler (see nrf/config/nrfx_glue.h, which declares
+ * it independently so no nrfx translation unit has to include this header).
+ * Stamps BT_FAIL_NRFX with the asserting nrfx source line and reboots.
+ *
+ * `line` alone does not name the file. If this tag ever appears, grep the
+ * vendored tree for an NRFX_ASSERT on exactly that line to narrow it:
+ *   grep -n "NRFX_ASSERT" nrf/build-t1000e/_deps/nrfx-src/drivers/src/*.c \
+ *     | awk -F: '$2 == LINE'
+ * Only a handful of files carry an assert on any given line, and the last
+ * stage tags in the trace say which peripheral was live. */
+void bramble_nrfx_assert_failed(uint32_t line) __attribute__((noreturn));

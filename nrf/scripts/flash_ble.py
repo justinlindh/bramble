@@ -6,6 +6,12 @@ the UF2 mass-storage volume, copies the image, and watches the device come
 back up. Requires the device to be advertising (disconnect other clients
 first: the link is single-connection).
 
+Authentication is not a JSON-RPC call: the transport requires the very
+first NUS write after start_notify to be the raw token string terminated
+by a newline. A JSON line sent before that point is instead dispatched
+against the unauthenticated pairing allowlist, so a JSON-RPC "auth"
+method silently fails and every call after it comes back unauthorized.
+
 Usage:
   uv run --with bleak python nrf/scripts/flash_ble.py NAME UF2 --token HEX
   (NAME e.g. Bramble-AA36; add --skip-dfu if the device is already in DFU)
@@ -89,16 +95,23 @@ async def rpc_enter_dfu(name: str, token: str) -> bool:
             print(f"pairing: {e} (continuing; may already be bonded)")
         await client.start_notify(NUS_TX, on_notify)
 
+        async def write_line(line: bytes) -> None:
+            for i in range(0, len(line), 200):
+                await client.write_gatt_char(NUS_RX, line[i : i + 200], response=True)
+
         async def call(payload: dict) -> dict:
-            data = (json.dumps(payload) + "\n").encode()
-            for i in range(0, len(data), 200):
-                await client.write_gatt_char(NUS_RX, data[i : i + 200], response=True)
+            await write_line((json.dumps(payload) + "\n").encode())
             raw = await asyncio.wait_for(responses.get(), timeout=15)
             return json.loads(raw)
 
-        auth = await call({"jsonrpc": "2.0", "method": "auth", "params": {"token": token}, "id": 1})
+        # The first NUS write is the raw token, not a JSON-RPC call: an
+        # earlier JSON line here would be dispatched against the pairing
+        # allowlist instead of authenticating.
+        await write_line((token + "\n").encode())
+        raw = await asyncio.wait_for(responses.get(), timeout=15)
+        auth = json.loads(raw)
         if not (auth.get("result") or {}).get("ok"):
-            print(f"auth failed: {auth}")
+            print(f"auth failed: {raw.decode(errors='replace')}")
             return False
         print("authenticated")
         resp = await call({"jsonrpc": "2.0", "method": "bramble.enterDfu", "params": {}, "id": 2})

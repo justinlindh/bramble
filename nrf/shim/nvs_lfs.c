@@ -41,28 +41,78 @@ static const struct lfs_file_config s_file_cfg = {.buffer = s_file_buffer};
 #include <FreeRTOS.h>
 #include <semphr.h>
 #include <task.h>
+/* LOCK-ORDER INVARIANT: this mutex sits strictly BELOW every other lock in
+ * the firmware. It may be taken while holding nothing else, and no other lock
+ * may be taken while holding it. That is what makes it deadlock-free despite
+ * the iterator holding it across a caller's whole loop body.
+ *
+ * The invariant is load-bearing, not decorative. Two reverse orderings exist
+ * and both are reachable: mesh_add_channel() holds s_state_mutex across
+ * channel_storage_save() (mesh_channels.c), and sendMessage holds s_dm_mutex
+ * then s_nonce_mutex across nonce_counter_next()'s reserve-ceiling flush,
+ * which reaches NVS two frames down through mesh_nonce_write()
+ * (nonce_counter.c, mesh_persist.c). Any iterator caller that transmits or
+ * mutates shared mesh state from inside its loop would close one of those
+ * cycles. mesh_send_location_updates() is written in two phases for exactly
+ * this reason: collect targets under the iterator, release, then transmit.
+ *
+ * RECURSIVE, and it has to be. The iterator API below holds this lock for the
+ * whole life of an iteration (see nvs_entry_find), and every caller that
+ * iterates also calls locked nvs_* getters from inside its loop body:
+ * main/mesh_location.c (nvs_get_str) and main/rpc_methods.c (nvs_get_blob,
+ * nvs_get_str). With a plain mutex the first such nested call would deadlock
+ * the caller against itself. Priority inheritance still applies to the
+ * recursive variant, so the bond-writer inversion protection is unchanged. */
 static SemaphoreHandle_t s_lock;
 static StaticSemaphore_t s_lock_buf;
 static void lock_init(void) {
     if (s_lock == NULL) {
-        s_lock = xSemaphoreCreateMutexStatic(&s_lock_buf);
+        s_lock = xSemaphoreCreateRecursiveMutexStatic(&s_lock_buf);
     }
 }
 static void lock_take(void) {
     if (s_lock != NULL && xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
-        xSemaphoreTake(s_lock, portMAX_DELAY);
+        xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
     }
 }
 static void lock_give(void) {
     if (s_lock != NULL && xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
-        xSemaphoreGive(s_lock);
+        xSemaphoreGiveRecursive(s_lock);
     }
+}
+/* Which task owns the live iteration, for the holder validation in
+ * nvs_release_iterator. Same intent as DM_MUTEX_GIVE in
+ * main/mesh_internal.h: a release from the wrong task is misuse, so name it
+ * in the log rather than let it corrupt the owner's recursion depth. The
+ * lifetime hold means a non-owner cannot normally reach the check at all;
+ * this catches the case where that stops being true. */
+static TaskHandle_t s_iter_owner;
+static void iter_set_owner(void) {
+    s_iter_owner = (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
+                       ? xTaskGetCurrentTaskHandle()
+                       : NULL;
+}
+static void iter_clear_owner(void) { s_iter_owner = NULL; }
+static bool iter_owned_here(void) {
+    if (s_iter_owner == NULL || xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) {
+        return true;
+    }
+    TaskHandle_t me = xTaskGetCurrentTaskHandle();
+    if (s_iter_owner != me) {
+        ESP_LOGE(TAG, "NVS iterator release by '%s' but owner is '%s'", pcTaskGetName(NULL),
+                 pcTaskGetName(s_iter_owner));
+        return false;
+    }
+    return true;
 }
 #else
 /* Host suite: single-threaded, no RTOS. */
 static void lock_init(void) {}
 static void lock_take(void) {}
 static void lock_give(void) {}
+static void iter_set_owner(void) {}
+static void iter_clear_owner(void) {}
+static bool iter_owned_here(void) { return true; }
 #endif
 
 /* The lock, exported for the mount header's other consumers. littlefs is not
@@ -384,6 +434,22 @@ struct nvs_opaque_iterator_t {
     bool open;
 };
 static struct nvs_opaque_iterator_t s_iter;
+/* True from a successful nvs_entry_find() until the iteration ends, either by
+ * nvs_entry_next() running out or by nvs_release_iterator(). While it is true
+ * this module's lock is held by the iterating task. */
+static bool s_iter_active;
+
+/* Ends the current iteration and drops the lifetime lock. Caller must hold
+ * the lock and have s_iter_active set. */
+static void iter_finish(void) {
+    if (s_iter.open) {
+        lfs_dir_close(&s_lfs, &s_iter.dir);
+        s_iter.open = false;
+    }
+    s_iter_active = false;
+    iter_clear_owner();
+    lock_give();
+}
 
 static esp_err_t iter_advance(struct nvs_opaque_iterator_t* it) {
     struct lfs_info info;
@@ -418,32 +484,56 @@ static esp_err_t iter_advance(struct nvs_opaque_iterator_t* it) {
     return ESP_ERR_NVS_NOT_FOUND;
 }
 
+/* Takes the module lock and KEEPS it until the iteration ends. Nothing here
+ * took any lock before, which is what wedged the device: this family walks a
+ * single global s_iter (and the shared s_file_cfg buffer) with no mutual
+ * exclusion at all, so the mesh task's 1Hz policy scan and the gnss task's
+ * 1Hz duty-cycle scan could both be inside lfs_dir_open() on the SAME
+ * lfs_dir_t. littlefs threads open dirs onto lfs->mlist, and a concurrent
+ * second open self-cycles that list (dir->next == dir, lfs.c lfs_mlist_append),
+ * after which the next write walks it forever while holding this lock, and
+ * every NVS consumer blocks on portMAX_DELAY behind it in turn.
+ *
+ * The hold spans the caller's whole loop body, not just these functions,
+ * because littlefs directory reads are not valid across a concurrent write to
+ * the same directory. That is also why the lock is recursive: every caller
+ * makes locked nvs_get_* calls from inside its loop. */
 esp_err_t nvs_entry_find(const char* part, const char* ns, nvs_type_t type, nvs_iterator_t* it) {
     (void)part;
     if (ns == NULL || it == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+    lock_take();
+    /* Single live iterator, matching the RAM shim's documented limit. With
+     * the lifetime hold, a second task's find() simply waits here, so this
+     * can only trip on same-task misuse: a find() whose iteration was never
+     * released. Fail it loudly instead of silently closing someone else's
+     * open dir out from under them, which is what the old code did. */
+    if (s_iter_active) {
+        lock_give();
+        *it = NULL;
+        return ESP_ERR_INVALID_STATE;
+    }
     int ns_idx = ns_index(ns);
     if (ns_idx < 0) {
+        lock_give();
         *it = NULL;
         return ESP_ERR_NVS_NOT_FOUND;
-    }
-    if (s_iter.open) {
-        lfs_dir_close(&s_lfs, &s_iter.dir);
-        s_iter.open = false;
     }
     char dir_path[NVS_RAM_NAME_MAX + 1];
     snprintf(dir_path, sizeof(dir_path), "/%s", ns);
     if (lfs_dir_open(&s_lfs, &s_iter.dir, dir_path) < 0) {
+        lock_give();
         *it = NULL;
         return ESP_ERR_NVS_NOT_FOUND;
     }
     s_iter.open = true;
     s_iter.ns_idx = (uint8_t)ns_idx;
     s_iter.type = type;
+    s_iter_active = true;
+    iter_set_owner();
     if (iter_advance(&s_iter) != ESP_OK) {
-        lfs_dir_close(&s_lfs, &s_iter.dir);
-        s_iter.open = false;
+        iter_finish();
         *it = NULL;
         return ESP_ERR_NVS_NOT_FOUND;
     }
@@ -451,14 +541,22 @@ esp_err_t nvs_entry_find(const char* part, const char* ns, nvs_type_t type, nvs_
     return ESP_OK;
 }
 
+/* Called with the lifetime lock held (nvs_entry_find took it). Releases it
+ * when the iteration runs out, so the common
+ * "while (...) { if (nvs_entry_next(&it) != ESP_OK) break; }" shape cannot
+ * leak the lock: every caller either breaks out here or calls
+ * nvs_release_iterator, and both paths end the iteration exactly once. */
 esp_err_t nvs_entry_next(nvs_iterator_t* it) {
     if (it == NULL || *it == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!s_iter_active) {
+        *it = NULL;
+        return ESP_ERR_INVALID_STATE;
+    }
     esp_err_t err = iter_advance(*it);
     if (err != ESP_OK) {
-        lfs_dir_close(&s_lfs, &(*it)->dir);
-        (*it)->open = false;
+        iter_finish();
         *it = NULL;
     }
     return err;
@@ -476,9 +574,24 @@ esp_err_t nvs_entry_info(nvs_iterator_t it, nvs_entry_info_t* out_info) {
     return ESP_OK;
 }
 
+/* Deliberately keyed on s_iter_active rather than on `it`. Callers routinely
+ * reach here with it == NULL, because nvs_entry_next() NULLs the handle when
+ * the iteration runs out and the loop then falls through to this call; keying
+ * on the handle would have made those calls no-ops and stranded the lifetime
+ * lock forever. Releasing an already-finished iteration is a no-op.
+ *
+ * The flag is read UNDER the lock, never before it. Reading it first would
+ * let a task that owns no iteration observe another task's live one and call
+ * iter_finish(), closing that task's directory and giving a recursive mutex
+ * it does not hold (which FreeRTOS rejects, and which corrupts the owner's
+ * recursion depth). Taking the lock first costs the real owner one cheap
+ * recursive re-take, and makes a non-owner wait until the iteration is over
+ * and then correctly find nothing to do. */
 void nvs_release_iterator(nvs_iterator_t it) {
-    if (it != NULL && it->open) {
-        lfs_dir_close(&s_lfs, &it->dir);
-        it->open = false;
+    (void)it;
+    lock_take();
+    if (s_iter_active && iter_owned_here()) {
+        iter_finish(); /* drops the lifetime hold */
     }
+    lock_give(); /* drops the hold taken just above */
 }
