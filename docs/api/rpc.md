@@ -128,7 +128,7 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 - Description: Returns high-level node runtime status.
 - Params: none (`{}`).
-- Response fields: `uptime_s` (number), `peers` (number), `radio_ok` (bool), `battery_mv` (number, when available), `battery_pct` (number, when available), `charging` (string: `"unknown"`/`"no"`/`"yes"`, optional), `present` (bool, optional), `gps_available` (bool), `gps_enabled` (bool).
+- Response fields: `uptime_s` (number), `peers` (number), `radio_ok` (bool), `battery_mv` (number, when available), `battery_pct` (number, when available), `charging` (string: `"unknown"`/`"no"`/`"yes"`, optional), `present` (bool, optional; init status, not per-read: treat a 0 voltage as no reading even when true), `gps_available` (bool), `gps_enabled` (bool).
 - Example:
 
 ```json
@@ -183,7 +183,7 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 - Description: Returns battery telemetry.
 - Params: none.
-- Response fields: `percentage` (number), `voltage_mv` (number), `charging` (string: `"unknown"`/`"no"`/`"yes"`, optional), `present` (bool, optional).
+- Response fields: `percentage` (number), `voltage_mv` (number), `charging` (string: `"unknown"`/`"no"`/`"yes"`, optional), `present` (bool, optional; init status, not per-read: treat a 0 voltage as no reading even when true).
 - Example:
 
 ```json

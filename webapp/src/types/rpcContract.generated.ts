@@ -1577,7 +1577,7 @@ export interface components {
              * @enum {string}
              */
             charging?: "unknown" | "no" | "yes";
-            /** @description Whether this board has battery-sensing hardware and it initialized successfully. false means battery_mv and battery_pct are not meaningful (0). */
+            /** @description Whether this board has battery-sensing hardware and it initialized successfully. false means battery_mv and battery_pct are not meaningful (0). present describes hardware init, not this particular read: a read where every ADC sample failed still reports present true with a 0 voltage, so treat a 0 voltage as "no reading" regardless of present. */
             present?: boolean;
             /** @description Whether this board has GPS hardware. */
             gps_available: boolean;
@@ -2293,7 +2293,7 @@ export interface components {
              * @enum {string}
              */
             charging?: "unknown" | "no" | "yes";
-            /** @description Whether this board has battery-sensing hardware and it initialized successfully. false means voltage_mv and percentage are not meaningful (0). */
+            /** @description Whether this board has battery-sensing hardware and it initialized successfully. false means voltage_mv and percentage are not meaningful (0). present describes hardware init, not this particular read: a read where every ADC sample failed still reports present true with a 0 voltage, so treat a 0 voltage as "no reading" regardless of present. */
             present?: boolean;
         };
         /** @description Parameters for bramble.setBacklight. */
