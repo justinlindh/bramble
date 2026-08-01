@@ -33,7 +33,6 @@ typedef struct {
 void mock_radio_init(mock_radio_t* radio, int num_nodes);
 void mock_radio_connect(mock_radio_t* radio, int a, int b, int8_t rssi, int8_t snr);
 void mock_radio_send(mock_radio_t* radio, int from_node, const uint8_t* data, size_t len);
-bool mock_radio_has_packet(mock_radio_t* radio, int node);
 bool mock_radio_recv(mock_radio_t* radio, int node, mock_packet_t* pkt);
 
 #endif
