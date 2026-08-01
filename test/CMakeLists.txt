@@ -1640,6 +1640,7 @@ add_executable(test_rpc_methods_firmware
     stubs/cJSON.c
     stubs/rpc_methods_test_stubs.c
     stubs/wifi_ws_stubs.c
+    stubs/wifi_manager_nvs_stub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
@@ -1805,6 +1806,7 @@ add_executable(test_ws_server
     unity/unity.c
     stubs/cJSON.c
     stubs/ws/esp_http_server_fake.c
+    stubs/wifi_manager_nvs_stub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_origin.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_auth_credential.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_token.c
