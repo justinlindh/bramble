@@ -195,9 +195,12 @@ bool nimble_glue_start_lfclk(void) {
      * MYNEWT_VAL_BLE_LL_SCA (nrf/config/nimble/syscfg/syscfg.h) is a fixed
      * 250ppm figure chosen for a calibrated RC fallback; an uncalibrated
      * LFRC can drift past that, and the link layer has no runtime signal
-     * to learn it did not get calibrated, so the honest consequence of
-     * hitting this fallback is a higher risk of missed connection events
-     * until the next periodic recalibration. The 1000000-iteration bound
+     * to learn it did not get calibrated. This boot-time trigger is also
+     * the only CAL in the tree: nothing recalibrates later, so the honest
+     * consequence of hitting this fallback is a higher risk of missed
+     * connection events for the device's whole uptime, and post-boot
+     * temperature drift goes uncorrected even when this one-shot
+     * calibration succeeded. The 1000000-iteration bound
      * reuses the same unscaled loop budget as the crystal-detection wait
      * above rather than a datasheet CAL-duration figure; no such figure was
      * looked up for this bound; it is a generous margin, not a measurement.
