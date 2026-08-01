@@ -1163,7 +1163,9 @@ void app_main(void) {
      * is not cryptographically secure until RF (Wi-Fi/BT) is up, and identity
      * generation runs long before that. bootloader_random_enable() turns on the
      * SAR-ADC entropy source; it MUST be disabled again before the first app
-     * ADC user (battery_init, ~line 832) which shares the SAR-ADC. */
+     * ADC user, battery_init, which shares the SAR-ADC: entropy harvesting
+     * must close out before that call runs, wherever it ends up in this
+     * function. */
 #ifndef CONFIG_IDF_TARGET_LINUX
     bootloader_random_enable();
 #endif
