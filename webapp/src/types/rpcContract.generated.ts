@@ -2286,7 +2286,7 @@ export interface components {
         GetBatteryResponse: {
             /** @description Battery voltage in millivolts, averaged over several ADC samples. While charging is "yes" this reflects the charge rail, not the cell's state of charge. */
             voltage_mv: number;
-            /** @description Estimated battery charge percentage (0-100), derived from voltage_mv. While charging is "yes" this is not meaningful (the charge rail's voltage does not reflect the cell); prefer 0xFF-style handling: treat it as unknown rather than a real level. */
+            /** @description Estimated battery charge percentage (0-100), derived from voltage_mv. While charging is "yes" this is not meaningful (the charge rail's voltage does not reflect the cell); treat it as unknown rather than a real level in that case. */
             percentage: number;
             /**
              * @description Hardware-informed charging state. "unknown" when the board has no charge-detect pin wired (every board today except future hardware).

@@ -3501,9 +3501,8 @@ components:
           description: >-
             Estimated battery charge percentage (0-100), derived from
             voltage_mv. While charging is "yes" this is not meaningful
-            (the charge rail's voltage does not reflect the cell); prefer
-            0xFF-style handling: treat it as unknown rather than a real
-            level.
+            (the charge rail's voltage does not reflect the cell); treat
+            it as unknown rather than a real level in that case.
         charging:
           type: string
           enum: [unknown, no, yes]

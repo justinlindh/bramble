@@ -128,7 +128,7 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 - Description: Returns high-level node runtime status.
 - Params: none (`{}`).
-- Response fields: `uptime_s` (number), `neighbors` (number), `routes` (number), `radio_ok` (bool), `battery_pct` (number, when available), `gps` (object, when available).
+- Response fields: `uptime_s` (number), `neighbors` (number), `routes` (number), `radio_ok` (bool), `battery_mv` (number, when available), `battery_pct` (number, when available), `charging` (string: `"unknown"`/`"no"`/`"yes"`, optional), `present` (bool, optional), `gps` (object, when available).
 - Example:
 
 ```json
@@ -183,7 +183,7 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 - Description: Returns battery telemetry.
 - Params: none.
-- Response fields: `pct` (number), `mv` (number, optional), `charging` (bool, optional).
+- Response fields: `percentage` (number), `voltage_mv` (number), `charging` (string: `"unknown"`/`"no"`/`"yes"`, optional), `present` (bool, optional).
 - Example:
 
 ```json
