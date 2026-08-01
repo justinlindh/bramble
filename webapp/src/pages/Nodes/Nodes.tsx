@@ -29,9 +29,8 @@ export function Nodes() {
   // bramble.onGpsEvent, so 60s is only a backstop for cache expiry.
   // All polls are gated on connection state so a disconnected tab is silent
   // rather than relying on the `if (!client) return` guard in actions.
-  const noop = () => Promise.resolve();
-  usePoll(connected ? loadRoutes : noop, 30_000);
-  usePoll(connected ? loadPeerLocations : noop, 60_000);
+  usePoll(loadRoutes, 30_000, { enabled: connected });
+  usePoll(loadPeerLocations, 60_000, { enabled: connected });
 
   // One-shot neighbor refresh on entering the tab, so opening Nodes never
   // shows data up to a full global-poll interval old. Not a poll.
