@@ -169,9 +169,10 @@ JSON lines, one object per line, `t` discriminates. Node to broker: `hello`
 `fb` (seq, kind partial|full, b64 packed 1bpp 250x122, busy_ms), `ind` (led,
 buzzer_hz, vibra), `gpsgate` (on|off), `log` (line). Broker to node: `rx` (b64
 payload, rssi, snr, freq), `txdone` (toa_ms), `cadres` (busy), `btn` (id, edge),
-`nmea` (sentence), `batt` (mv), `time` (epoch ms at attach). Unknown message
-types are ignored by both sides (forward compatibility with phase 2). The
-protocol version rides in `hello`; the broker refuses mismatches loudly.
+`nmea` (sentence), `batt` (mv, optional charging bool: true/false/absent maps
+to YES/NO/UNKNOWN), `time` (epoch ms at attach). Unknown message types are
+ignored by both sides (forward compatibility with phase 2). The protocol
+version rides in `hello`; the broker refuses mismatches loudly.
 
 ## 9. Frontend (device view)
 
