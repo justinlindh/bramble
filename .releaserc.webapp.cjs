@@ -26,8 +26,9 @@ const wrapped = {
 // found that several feature-named scopes are used almost entirely for
 // webapp/src work even though nothing about their name says so:
 //   - anchor: trust-anchor enrollment UI (webapp/src/pages/Config/
-//     AnchorSection*, webapp/src/utils/anchor*), six commits, all webapp,
-//     zero device code.
+//     AnchorSection*, webapp/src/utils/anchor*). Five of six commits touch
+//     only webapp/src/**; the sixth is docs-only (docs/trust-anchor.md).
+//     Zero commits touch device code.
 //   - electron: webapp/electron/main.ts, the desktop shell.
 // A second group is genuinely dual-scoped between webapp and firmware (a
 // single commit changing both a webapp screen and the on-device code it
