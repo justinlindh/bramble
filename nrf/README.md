@@ -257,6 +257,36 @@ specification states a cold-start time to first fix under 25 seconds and a
 tracking sensitivity of -167 dBm; Airoha does not publish current
 consumption figures for the chip, so none are cited here.
 
+## Battery (T1000-E)
+
+The T1000-E carries a LiPo cell plus charger-IC status pins (Seeed's stock
+Meshtastic-compatible wiring). `shim/battery_saadc.c` reads the cell voltage
+over P0.02/AIN0 through the board's 2x divider using the nRF52840's SAADC,
+and reads charge/VBUS-detect (P1.03, P0.05) as plain GPIO inputs, satisfying
+the same `components/battery/include/battery.h` contract as the ESP32 fleet
+and the emulator's virtual battery: `battery_get_status()` returns averaged
+millivolts, a curve percentage, presence, and a hardware-informed charging
+state. Every field this backend produces flows through the shared code the
+ESP32 fleet already uses: the same LiPo discharge curve
+(`components/battery/battery_pct.c`), the same beacon-level 0xFF
+unknown/plugged-in sentinel (`battery_beacon_pct()`,
+`docs/bramble-protocol-spec.md` §beacon layout), the same RPC charging
+fields on `getStatus`/`getBattery`, and the same webapp charging display.
+The pin wiring and charge-detect polarity are source-verified against
+Meshtastic's `tracker-t1000-e` variant and `Power.cpp` (cited in
+`battery_saadc.c`'s header comment), not against this project's own bench
+measurement of the T1000-E's battery circuit.
+
+Verification status: source-level only. The SAADC driver builds and its
+pure logic (averaging, curve mapping, charging classification) is
+host-tested the same way the ESP32 path is, but the actual voltage and
+charge-detect readings have not yet been checked against real hardware
+(a multimeter, a live charge/discharge cycle, or a charger being plugged
+and unplugged on the physical card): that bench pass is still pending. The
+Wio-WM1110 dev kit has no battery hardware and never claims otherwise:
+`shim/battery_null.c` reports `present=false` honestly rather than
+fabricating a reading.
+
 ## Dev network key (bench only)
 
 Bench builds may seed the network key at configure time:
