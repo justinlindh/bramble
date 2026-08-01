@@ -150,6 +150,15 @@ void test_infer_charging_never_overrides_pin_yes(void) {
     TEST_ASSERT_EQUAL_INT(BATTERY_CHG_YES, battery_infer_charging(BATTERY_CHG_YES, 3700));
 }
 
+/* Interaction with an all-failed read (see battery_reading_available): mv
+ * comes out 0 in that case, which is nowhere near the inference threshold,
+ * so it must stay UNKNOWN rather than the inference logic accidentally
+ * treating "no reading" as "definitely not charging" or, worse, tripping
+ * on some other zero-adjacent edge case. */
+void test_infer_charging_zero_mv_from_failed_read_stays_unknown(void) {
+    TEST_ASSERT_EQUAL_INT(BATTERY_CHG_UNKNOWN, battery_infer_charging(BATTERY_CHG_UNKNOWN, 0));
+}
+
 /* ── battery_reading_available ───────────────────────────────── */
 
 void test_reading_available_true_when_present_and_nonzero_mv(void) {
@@ -334,6 +343,7 @@ int main(void) {
     RUN_TEST(test_infer_charging_threshold_boundary);
     RUN_TEST(test_infer_charging_never_overrides_pin_no);
     RUN_TEST(test_infer_charging_never_overrides_pin_yes);
+    RUN_TEST(test_infer_charging_zero_mv_from_failed_read_stays_unknown);
 
     RUN_TEST(test_reading_available_true_when_present_and_nonzero_mv);
     RUN_TEST(test_reading_available_false_when_present_but_all_samples_failed);

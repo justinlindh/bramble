@@ -123,15 +123,38 @@ battery_charging_t battery_charging_from_gpio(int chrg_gpio, int chrg_active_lev
 /* Averaged mv at/above which the rail can only mean a charger is actively
  * driving it, for boards with no charge-detect pin (battery_infer_charging
  * below). Evidence class: bench-measured, T-Deck replug trace, 2026-08-01
- * (Alice). A 1S Li-ion/LiPo cell's own chemistry caps it at 4200 mV, so
- * anything meaningfully above that on the sense pin is not the cell; the
- * same trace's plugged rail measured 4542-4798 mV across every capture on
- * that board. 4350 mV sits with margin above the cell's physical ceiling
- * (room for ADC/divider tolerance without a false positive on a genuinely
- * full, unplugged cell) and margin below the lowest observed plugged
- * reading (room for a weaker charger or higher-drop divider without a
- * false negative). */
-#define BATTERY_MV_CHARGER_RAIL_MIN 4350u
+ * (Alice); this is a ONE-BOARD measurement, not a fleet survey. A 1S
+ * Li-ion/LiPo cell's own chemistry caps it at 4200 mV, so a rail reading
+ * meaningfully above that is not the cell; the T-Deck trace's plugged rail
+ * measured 4542-4798 mV across every capture on that board.
+ *
+ * The margin above 4200 has to cover the worst ADC error across every
+ * board this constant applies to, not just the T-Deck it was measured on.
+ * The T-Deck reads its battery through a divider-2 path at ADC_ATTEN_DB_12
+ * (battery.c); heltec_v4 and virtual_heltec instead use divider-5 at
+ * ADC_ATTEN_DB_2_5, which amplifies the same pin-referred ADC error by a
+ * further 2.5x once the divider factor is applied (a ~25 mV pin-level
+ * error becomes ~125 mV of measured-mv error at divider 5, versus ~50 mV
+ * at the T-Deck's divider 2). 4450 mV gives 250 mV (about 6%) of margin
+ * over the 4200 mV cell ceiling, comfortably clear of that amplified-error
+ * board, while staying 92 mV below the lowest plugged rail ever observed
+ * (4542 mV) on the board it was actually measured against.
+ *
+ * The margin is deliberately asymmetric, wider toward avoiding false
+ * positives than false negatives: a false negative here just leaves the
+ * status quo (charging stays UNKNOWN, the existing behavior before this
+ * inference existed), which costs nothing new. A false positive asserts
+ * charging==YES, an untruth the beacon, display, and RPC surfaces all
+ * treat as ground truth. Getting that wrong is strictly worse than
+ * getting nothing.
+ *
+ * One-clause caveat for future boards: the divider-5 margin above is
+ * analytic (worked from the ADC/divider math), not itself bench-measured;
+ * a board using different chemistry, e.g. a 4.35V HV-LiPo (no current
+ * board does), would sit AT, not above, a 4350-class threshold at full
+ * charge, so this constant would need re-deriving before applying it
+ * there. */
+#define BATTERY_MV_CHARGER_RAIL_MIN 4450u
 
 /**
  * Upgrades a pin-based charging verdict using voltage alone, for the many
@@ -181,6 +204,18 @@ uint8_t battery_beacon_pct(battery_charging_t charging, uint8_t pct, bool have_r
  * artifact, not tracking the subsequent steady-state wobble (bench-measured
  * at +/-4 mV, itself under a percentage point). Task 8 verifies this
  * against real hardware; it is not expected to change these constants.
+ *
+ * On a board where battery_infer_charging actually fires (the T-Deck
+ * included), the cliff described above never reaches this smoothing at
+ * all: while plugged, charging == YES takes the display's charge-indicator
+ * branch instead of the percentage path, so battery_display_pct is not
+ * called during that whole period and its state goes stale; the first
+ * call after unplugging sees a gap well past
+ * BATTERY_DISPLAY_SNAP_INTERVAL_MS and snaps straight to the real resting
+ * value instead of walking down from one. What remains for the EMA to do
+ * on such a board is exactly the "subsequent steady-state wobble" case
+ * above: smoothing normal percentage-path jitter and settle drift once
+ * charging is UNKNOWN or NO, not the unplug cliff itself.
  */
 #define BATTERY_DISPLAY_EMA_NUM 1    /* new-sample weight numerator */
 #define BATTERY_DISPLAY_EMA_DEN 4    /* new-sample weight denominator */
