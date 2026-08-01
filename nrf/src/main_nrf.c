@@ -71,6 +71,31 @@ void vApplicationMallocFailedHook(void) {
     boot_trace_fail(BT_FAIL_MALLOC, 0);
 }
 
+/* Without this hook the idle task busy-spins: with configUSE_TICKLESS_IDLE 0
+ * the vendored idle loop (prvIdleTask in tasks.c) reduces to
+ * prvCheckTasksWaitingTermination() plus a conditional taskYIELD(), and the
+ * port's only sleep instruction (the WFI in vPortSuppressTicksAndSleep,
+ * port.c) is compiled out entirely under `#if configUSE_TICKLESS_IDLE == 1`.
+ * So every idle tick previously ran the core flat out at 64MHz for no work.
+ *
+ * WFE, not WFI: the vendored tickless path wraps its WFI in a cpsid/cpsie
+ * critical section specifically to close the race between "check for
+ * pending work" and "sleep" (an interrupt landing in that gap would
+ * otherwise need the critical section to guarantee WFI sees it pending).
+ * We call this hook with interrupts enabled and no critical section, so we
+ * need the same guarantee some other way: the ARM event register does it
+ * for free. Every exception, including every enabled interrupt, sets the
+ * event register on the way out; WFE consumes and clears it, so an event
+ * pended anytime since the last WFE falls straight through instead of
+ * blocking, and no wakeup can be lost to the timing of when we happen to
+ * call this hook.
+ *
+ * Safe next to NimBLE's link-layer task: the LL's radio and timer ISRs run
+ * at hardware IRQ priority regardless of what the CPU is doing when they
+ * fire, and any enabled interrupt wakes WFE by definition, so sleeping here
+ * cannot delay or drop a radio event. */
+void vApplicationIdleHook(void) { __WFE(); }
+
 // Boot-time crypto self-check: proves the minimal mbedtls config plus the
 // Monocypher Ed25519 provider actually execute on this silicon (the host
 // suites prove correctness against standards vectors; this proves the target
