@@ -18,3 +18,31 @@ describe('normalizeStatus gpsEnabled', () => {
     expect(status.gpsEnabled).toBe(true);
   });
 });
+
+describe('normalizeStatus charging and present', () => {
+  it.each(['unknown', 'no', 'yes'] as const)('passes through charging=%s', (charging) => {
+    const status = normalizeStatus({ charging });
+    expect(status.charging).toBe(charging);
+  });
+
+  it('leaves charging undefined when the field is absent, matching older firmware', () => {
+    const status = normalizeStatus({});
+    expect(status.charging).toBeUndefined();
+  });
+
+  it('never fabricates "no" for absent charging', () => {
+    const status = normalizeStatus({ battery_mv: 4200, battery_pct: 90 });
+    expect(status.charging).not.toBe('no');
+    expect(status.charging).toBeUndefined();
+  });
+
+  it.each([true, false])('passes through present=%s', (present) => {
+    const status = normalizeStatus({ present });
+    expect(status.present).toBe(present);
+  });
+
+  it('leaves present undefined when the field is absent, matching older firmware', () => {
+    const status = normalizeStatus({});
+    expect(status.present).toBeUndefined();
+  });
+});

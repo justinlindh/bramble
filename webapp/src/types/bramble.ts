@@ -134,6 +134,8 @@ export interface NodeStatus {
   gpsEnabled?: boolean;     // persisted GPS power preference (independent of gpsAvailable)
   batteryMv?: number;       // battery voltage in millivolts
   batteryPct?: number;      // battery percentage 0-100
+  charging?: 'unknown' | 'no' | 'yes'; // hardware-informed charging state; "yes" includes plugged-in-and-full
+  present?: boolean;        // whether battery-sensing hardware initialized; false means batteryMv/batteryPct are not meaningful
   hardware?: string;        // hardware profile (e.g. "heltec_v4")
 }
 

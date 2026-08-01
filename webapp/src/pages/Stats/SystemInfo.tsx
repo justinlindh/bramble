@@ -63,6 +63,9 @@ interface Props {
 function hasBattery(status: NodeStatus): boolean {
   // Boards without a battery commonly report 0mV / 0%.
   if (status.batteryMv === undefined && status.batteryPct === undefined) return false;
+  // `present` is hardware-verified; prefer it when the firmware reports it.
+  // Older firmware omits it, so fall back to the voltage guess.
+  if (status.present !== undefined) return status.present;
   return (status.batteryMv ?? 0) > 1000;
 }
 
@@ -111,14 +114,23 @@ export function SystemInfo({ status, config }: Props) {
     ...((status.batteryPct !== undefined || status.batteryMv !== undefined)
       ? [{
           label: 'Battery',
-          value: hasBattery(status) ? `${status.batteryPct ?? '?'}% (${status.batteryMv ?? '?'} mV)` : 'N/A',
-          color: hasBattery(status)
-            ? (status.batteryPct ?? 100) < 10
-              ? ('danger' as const)
-              : (status.batteryPct ?? 100) < 25
-                ? ('warning' as const)
-                : undefined
-            : ('muted' as const),
+          // While charging, battery_mv reflects the charge rail rather than
+          // the cell, so battery_pct is not a real level: show the charging
+          // indicator instead of an inflated percentage.
+          value: !hasBattery(status)
+            ? 'N/A'
+            : status.charging === 'yes'
+              ? '⚡ Charging'
+              : `${status.batteryPct ?? '?'}% (${status.batteryMv ?? '?'} mV)`,
+          color: !hasBattery(status)
+            ? ('muted' as const)
+            : status.charging === 'yes'
+              ? undefined
+              : (status.batteryPct ?? 100) < 10
+                ? ('danger' as const)
+                : (status.batteryPct ?? 100) < 25
+                  ? ('warning' as const)
+                  : undefined,
         }]
       : []),
     {
