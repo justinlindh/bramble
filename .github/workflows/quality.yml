@@ -75,8 +75,9 @@ jobs:
 
   board-build-smoke:
     name: Board build smoke (${{ matrix.board }})
-    # One job per supported board target. scripts/ci-build-firmware.sh has
-    # always listed four boards, but only heltec-v3 was ever built by an
+    # Covers ESP-IDF board targets. The nRF52840 boards (Wio-WM1110 dev kit and
+    # SenseCAP T1000-E) build in the separate nRF52840 build job below.
+    # scripts/ci-build-firmware.sh has always listed four boards, but only heltec-v3 was ever built by an
     # automatic run, so a change to components/display or components/ui_graphics
     # could break the other three with every required context green until
     # someone manually dispatched a release build. The four targets diverge on
