@@ -222,8 +222,7 @@ void layout_update_status(bramble_layout_t* layout) {
     char buf[32];
 
     if (bstat.charging == BATTERY_CHG_YES) {
-        snprintf(buf, sizeof(buf), LV_SYMBOL_CHARGE " CHG");
-        lv_label_set_text(layout->lbl_battery, buf);
+        lv_label_set_text(layout->lbl_battery, LV_SYMBOL_CHARGE " CHG");
         lv_obj_set_style_text_color(layout->lbl_battery, BR_COLOR_TEXT, 0);
     } else {
         /* charging == NO or UNKNOWN: pct through the display-smoothing
