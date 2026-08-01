@@ -27,6 +27,9 @@ extern bool g_nvs_lat_e6_set;
 extern int32_t g_nvs_lat_e6;
 extern bool g_nvs_lon_e6_set;
 extern int32_t g_nvs_lon_e6;
+extern int g_wifi_set_creds_rc;
+extern char g_wifi_set_creds_ssid[33];
+extern char g_wifi_set_creds_password[65];
 
 /* phy.tx routes raw frames through the tx gate; the stub captures the call. */
 extern int g_stub_tx_gate_calls;
@@ -53,6 +56,9 @@ void setUp(void) {
     g_nvs_lat_e6 = 0;
     g_nvs_lon_e6_set = false;
     g_nvs_lon_e6 = 0;
+    g_wifi_set_creds_rc = 0;
+    g_wifi_set_creds_ssid[0] = '\0';
+    g_wifi_set_creds_password[0] = '\0';
     /* PHY passthrough is module-global state that persists across tests; force
      * every case to start from a disabled gate and a clean tx-gate capture. */
     phy_passthrough_disable();
@@ -274,6 +280,97 @@ void test_share_location_once_manual_nvs_succeeds(void) {
     TEST_ASSERT_FLOAT_WITHIN(0.00001, -122.4194, cJSON_GetObjectItem(r, "lon")->valuedouble);
     /* The stub's mesh_send_location_packet always returns 0xABCDEF01. */
     TEST_ASSERT_EQUAL_STRING("ABCDEF01", cJSON_GetObjectItem(r, "packetId")->valuestring);
+    cJSON_Delete(resp);
+}
+
+/* ── 2d. setWifiConfig ────────────────────────────────────────────── */
+
+void test_set_wifi_config_missing_ssid_invalid(void) {
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"bramble.setWifiConfig\",\"params\":{}}");
+    cJSON* err = get_error(resp);
+    TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
+    TEST_ASSERT_EQUAL_STRING("", g_wifi_set_creds_ssid);
+    cJSON_Delete(resp);
+}
+
+void test_set_wifi_config_empty_ssid_invalid(void) {
+    cJSON* resp = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"bramble."
+                                     "setWifiConfig\",\"params\":{\"ssid\":\"\"}}");
+    cJSON* err = get_error(resp);
+    TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(resp);
+}
+
+void test_set_wifi_config_oversize_ssid_invalid(void) {
+    /* 33 chars, one past the 32-char SSID ceiling. */
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":52,\"method\":\"bramble.setWifiConfig\","
+                           "\"params\":{\"ssid\":\"123456789012345678901234567890123\"}}");
+    cJSON* err = get_error(resp);
+    TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
+    TEST_ASSERT_EQUAL_STRING("", g_wifi_set_creds_ssid);
+    cJSON_Delete(resp);
+}
+
+void test_set_wifi_config_oversize_password_invalid(void) {
+    char req[256];
+    /* 65 chars, one past the 64-char WPA2 password ceiling. */
+    snprintf(req, sizeof(req),
+             "{\"jsonrpc\":\"2.0\",\"id\":53,\"method\":\"bramble.setWifiConfig\","
+             "\"params\":{\"ssid\":\"example-ssid\",\"password\":"
+             "\"12345678901234567890123456789012345678901234567890123456789012345\"}}");
+    cJSON* resp = dispatch_and_parse(req);
+    cJSON* err = get_error(resp);
+    TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
+    TEST_ASSERT_EQUAL_STRING("", g_wifi_set_creds_ssid);
+    cJSON_Delete(resp);
+}
+
+void test_set_wifi_config_bad_mode_not_supported(void) {
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":54,\"method\":\"bramble.setWifiConfig\","
+                           "\"params\":{\"ssid\":\"example-ssid\",\"mode\":\"ap\"}}");
+    cJSON* err = get_error(resp);
+    TEST_ASSERT_EQUAL_INT(-1004, cJSON_GetObjectItem(err, "code")->valueint);
+    TEST_ASSERT_EQUAL_STRING("", g_wifi_set_creds_ssid);
+    cJSON_Delete(resp);
+}
+
+void test_set_wifi_config_persists_open_network(void) {
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":55,\"method\":\"bramble.setWifiConfig\","
+                           "\"params\":{\"ssid\":\"example-ssid\",\"mode\":\"sta\"}}");
+    cJSON* r = get_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
+    TEST_ASSERT_EQUAL_STRING("reboot_required", cJSON_GetObjectItem(r, "applied")->valuestring);
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(r, "password"));
+    TEST_ASSERT_EQUAL_STRING("example-ssid", g_wifi_set_creds_ssid);
+    TEST_ASSERT_EQUAL_STRING("", g_wifi_set_creds_password);
+    cJSON_Delete(resp);
+}
+
+void test_set_wifi_config_persists_both_keys(void) {
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":56,\"method\":\"bramble.setWifiConfig\","
+                           "\"params\":{\"ssid\":\"example-ssid\",\"password\":\"hunter22\"}}");
+    cJSON* r = get_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
+    TEST_ASSERT_EQUAL_STRING("reboot_required", cJSON_GetObjectItem(r, "applied")->valuestring);
+    /* The response never echoes the password back, write-only. */
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(r, "password"));
+    TEST_ASSERT_EQUAL_STRING("example-ssid", g_wifi_set_creds_ssid);
+    TEST_ASSERT_EQUAL_STRING("hunter22", g_wifi_set_creds_password);
+    cJSON_Delete(resp);
+}
+
+void test_set_wifi_config_persist_failure_reports_internal_error(void) {
+    g_wifi_set_creds_rc = -1;
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":57,\"method\":\"bramble.setWifiConfig\","
+                           "\"params\":{\"ssid\":\"example-ssid\"}}");
+    cJSON* err = get_error(resp);
+    TEST_ASSERT_EQUAL_INT(-32603, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
 }
 
@@ -632,6 +729,15 @@ int main(void) {
     /* shareLocationOnce */
     RUN_TEST(test_share_location_once_no_source_errors);
     RUN_TEST(test_share_location_once_manual_nvs_succeeds);
+
+    RUN_TEST(test_set_wifi_config_missing_ssid_invalid);
+    RUN_TEST(test_set_wifi_config_empty_ssid_invalid);
+    RUN_TEST(test_set_wifi_config_oversize_ssid_invalid);
+    RUN_TEST(test_set_wifi_config_oversize_password_invalid);
+    RUN_TEST(test_set_wifi_config_bad_mode_not_supported);
+    RUN_TEST(test_set_wifi_config_persists_open_network);
+    RUN_TEST(test_set_wifi_config_persists_both_keys);
+    RUN_TEST(test_set_wifi_config_persist_failure_reports_internal_error);
 
     /* sendMessage */
     RUN_TEST(test_send_message_missing_dest);

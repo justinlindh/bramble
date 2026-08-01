@@ -174,25 +174,42 @@ try {
     inGitRepo = true;
 } catch {}
 
-if (inGitRepo) {
-    test("inferPathScopes injects synthetic commit when files match but scope does not", () => {
-        // Use the actual HEAD commit and a pathScopes map that will match
-        // something in the repo. We don't know what files HEAD touched, so
-        // use a prefix that matches the test file itself.
-        const head = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
-        const files = execSync(`git diff-tree --no-commit-id --name-only -r ${head}`, {
+// Walk back through recent history to find a commit that touched at least
+// one file inside a subdirectory, and return its hash plus that
+// subdirectory's prefix. Assuming HEAD itself has a subdirectory file is
+// not safe: a release-config-only commit (this repo's own
+// .releaserc.*.cjs edits, which live at repo root) touches nothing but
+// root-level files, which made this test fail for reasons having nothing
+// to do with inferPathScopes whenever such a commit happened to be
+// checked out. Searching bounded history instead decouples the test from
+// whatever the current checkout's HEAD happens to be.
+function findCommitWithSubdirFile(maxDepth = 200) {
+    const hashes = execSync(`git log --format=%H -n ${maxDepth} HEAD`, { encoding: "utf8" })
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+    for (const hash of hashes) {
+        const files = execSync(`git diff-tree --no-commit-id --name-only -r ${hash}`, {
             encoding: "utf8",
         }).trim().split("\n").filter(Boolean);
+        const subdirFile = files.find((f) => f.includes("/"));
+        if (subdirFile) {
+            return { hash, prefix: subdirFile.split("/")[0] + "/" };
+        }
+    }
+    return null;
+}
 
-        if (files.length === 0) {
-            console.log("SKIP inferPathScopes inject (HEAD has no files)");
+if (inGitRepo) {
+    test("inferPathScopes injects synthetic commit when files match but scope does not", () => {
+        const found = findCommitWithSubdirFile();
+        if (!found) {
+            console.log("SKIP inferPathScopes inject (no recent commit touches a subdirectory)");
             return;
         }
-
-        // Pick a prefix from the first file
-        const prefix = files[0].split("/")[0] + "/";
+        const { hash, prefix } = found;
         const commits = [{
-            hash: head,
+            hash,
             subject: "feat(unrelated): something",
             header: "feat(unrelated): something",
             message: "feat(unrelated): something",
@@ -327,6 +344,53 @@ async function runReleaseRuleRegression() {
     for (const [component, message, expected] of uiExpectations) {
         const actual = await releaseFor(component, message);
         const label = `${component}: ${JSON.stringify(message.split("\n")[0])} => ${JSON.stringify(
+            actual,
+        )} (expect ${JSON.stringify(expected)})`;
+        if (actual === expected) {
+            console.log(`PASS ${label}`);
+        } else {
+            console.error(`FAIL ${label}`);
+            process.exitCode = 1;
+        }
+    }
+
+    // Regression for the 2026-08-01 firmware/webapp/sim scope audit (PR
+    // #412): the per-component loop above only exercises the
+    // component-named scope (plus the `ui` special case), so it gives zero
+    // protection against someone later dropping, say, `gps` or `anchor`
+    // from FIRMWARE_SCOPES/WEBAPP_SCOPES/SIM_SCOPES. Pins one accurate
+    // positive per audited config, including the two PR #392 trigger
+    // scopes and the `settings` scope the audit corrected from "assumed
+    // webapp" to "actually the on-device T-Deck screen", plus the negatives
+    // called out in the audit itself (a linux-target-only scope that must
+    // never release, and an out-of-scope scope). Not exhaustive: that would
+    // just be the scope arrays restated as assertions.
+    const auditedScopeExpectations = [
+        // Firmware: the PR #392 trigger scopes, nrf (shared-code target),
+        // and settings.
+        ["firmware", "fix(gps): fix a GNSS driver bug", "patch"],
+        ["firmware", "fix(location): fix a location-sharing bug", "patch"],
+        ["firmware", "feat(rpc): add a new RPC method", "minor"],
+        ["firmware", "feat(nrf): bring up a new nRF52840 driver", "minor"],
+        ["firmware", "fix(settings): fix a T-Deck settings screen bug", "patch"],
+        ["firmware", "fix(emulator): fix a linux-target-only bug", null],
+        ["firmware", "fix(some-unknown-scope): not a real scope", null],
+        // Webapp: anchor is pure webapp (previously matched no rule at
+        // all); chat is dual-scoped (also releases firmware for the same
+        // commit, see the firmware table above); settings is deliberately
+        // NOT webapp despite the name.
+        ["webapp", "feat(anchor): add anchor enrollment UI", "minor"],
+        ["webapp", "fix(chat): fix a webapp chat UI bug", "patch"],
+        ["webapp", "fix(settings): fix a T-Deck settings screen bug", null],
+        // Sim: gosim and sim-ui, both previously unmatched by the
+        // sim-only rule.
+        ["sim", "fix(gosim): fix a Go mesh engine bug", "patch"],
+        ["sim", "feat(sim-ui): add a browser UI feature", "minor"],
+        ["sim", "fix(emulator): fix a linux-target-only bug", null],
+    ];
+    for (const [component, message, expected] of auditedScopeExpectations) {
+        const actual = await releaseFor(component, message);
+        const label = `${component}: ${JSON.stringify(message)} => ${JSON.stringify(
             actual,
         )} (expect ${JSON.stringify(expected)})`;
         if (actual === expected) {
