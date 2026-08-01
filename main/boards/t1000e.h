@@ -39,6 +39,11 @@ static const bramble_board_config_t board_t1000e = {
 
     .battery = {.gpio = -1, .adc_channel = 0, .divider_factor = 0},
 
+    /* All -1, same rationale as .battery/.radio above: the real charge and
+     * VBUS-sense pins are wired by the nRF backend (Task 4), not this
+     * ESP-IDF-facing struct, which no ESP driver reads for this board. */
+    .charge = {.chrg_gpio = -1, .chrg_active_level = 0, .vbus_gpio = -1},
+
     .i2c_sda = -1,
     .i2c_scl = -1,
 

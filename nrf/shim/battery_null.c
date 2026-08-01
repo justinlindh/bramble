@@ -1,8 +1,12 @@
 // Battery voltage stub for the WM1110 dev kit: it is USB-powered with no
-// battery sense wired in P1, so report a steady healthy voltage;
-// battery_pct.c (already linked) turns this into the pct beacons carry.
+// battery sense wired in P1. Wave 2 replaces the old fake "4000 mV, always
+// healthy" reading with an honest "no battery hardware here" status
+// (present=false, mv=0, pct=0, charging=UNKNOWN). getStatus/getBattery RPC
+// consumers on the dev kit see 0 mV / not-present until the T1000-E's real
+// SAADC + charge-detect backend lands (Task 4): a deliberate accuracy fix,
+// not a regression. A fabricated healthy number is worse than an honest
+// zero (see honesty conventions in CLAUDE.md).
 #include "battery.h"
+#include <string.h>
 
-uint32_t battery_read_mv(void) { return 4000; }
-
-uint8_t battery_read_pct(void) { return battery_mv_to_pct(battery_read_mv()); }
+void battery_get_status(battery_status_t* out) { memset(out, 0, sizeof(*out)); }

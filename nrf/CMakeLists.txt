@@ -170,6 +170,8 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/gps/gps_feed.c
   ${BRAMBLE_COMPONENTS}/gps/gps_duty.c
   ${BRAMBLE_COMPONENTS}/battery/battery_pct.c
+  ${BRAMBLE_COMPONENTS}/battery/battery_helpers.c
+  ${BRAMBLE_COMPONENTS}/battery/battery_wrappers.c
   ${BRAMBLE_COMPONENTS}/indicators/alerts.c
   ${BRAMBLE_COMPONENTS}/ota/ota_progress.c
   ${BRAMBLE_COMPONENTS}/ota/ota_origin.c

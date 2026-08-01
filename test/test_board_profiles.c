@@ -107,6 +107,14 @@ void test_bramble_pager_profile_has_expected_peripheral_pins(void) {
     TEST_ASSERT_EQUAL_INT(0, cfg->battery.adc_channel);
     TEST_ASSERT_EQUAL_INT(2, cfg->battery.divider_factor);
 
+    /* No board has a charge-detect pin wired yet (wave 2): every profile
+     * ships {-1, 0, -1} explicitly, since the struct's designated
+     * initializers mean an omitted .charge would zero-init to
+     * {chrg_gpio=0, ...}, silently misreading GPIO0 as a charge pin. */
+    TEST_ASSERT_EQUAL_INT(-1, cfg->charge.chrg_gpio);
+    TEST_ASSERT_EQUAL_INT(0, cfg->charge.chrg_active_level);
+    TEST_ASSERT_EQUAL_INT(-1, cfg->charge.vbus_gpio);
+
     TEST_ASSERT_EQUAL_INT(17, cfg->i2c_sda);
     TEST_ASSERT_EQUAL_INT(18, cfg->i2c_scl);
 
@@ -156,6 +164,10 @@ void test_virtual_pager_profile_matches_bramble_pager_pins(void) {
     TEST_ASSERT_EQUAL_INT(real->battery.gpio, virt->battery.gpio);
     TEST_ASSERT_EQUAL_INT(real->battery.adc_channel, virt->battery.adc_channel);
     TEST_ASSERT_EQUAL_INT(real->battery.divider_factor, virt->battery.divider_factor);
+
+    TEST_ASSERT_EQUAL_INT(real->charge.chrg_gpio, virt->charge.chrg_gpio);
+    TEST_ASSERT_EQUAL_INT(real->charge.chrg_active_level, virt->charge.chrg_active_level);
+    TEST_ASSERT_EQUAL_INT(real->charge.vbus_gpio, virt->charge.vbus_gpio);
 
     TEST_ASSERT_EQUAL_INT(real->i2c_sda, virt->i2c_sda);
     TEST_ASSERT_EQUAL_INT(real->i2c_scl, virt->i2c_scl);
