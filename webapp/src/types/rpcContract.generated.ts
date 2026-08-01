@@ -44,6 +44,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.setWifiConfig": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Provision WiFi station credentials
+         * @description Persists WiFi station credentials to the same NVS keys the firmware reads at boot. Only station mode is supported today; omit mode or pass "sta" explicitly. There is no live station reconfigure path, so this always reports applied="reboot_required": call bramble.reboot to apply. Returns not-supported on hardware with no WiFi radio (the nRF52840 target, and the Linux simulator). The password is write-only and is never echoed back by this or any other method.
+         */
+        post: operations["setWifiConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.getDiagnostics": {
         parameters: {
             query?: never;
@@ -1609,6 +1629,28 @@ export interface components {
             /** @description Connected AP client count; 0 in station mode. */
             clients: number;
         };
+        /** @description Parameters for bramble.setWifiConfig. */
+        SetWifiConfigParams: {
+            /** @description Network SSID to join in station mode. */
+            ssid: string;
+            /** @description WPA2-PSK passphrase. Omit or send empty for an open network. */
+            password?: string;
+            /**
+             * @description Connection mode to provision. Only station mode is supported today; any other value is rejected as not-supported.
+             * @enum {string}
+             */
+            mode?: "sta";
+        };
+        /** @description Response from bramble.setWifiConfig. */
+        SetWifiConfigResponse: {
+            /** @description Always true on success. */
+            ok: boolean;
+            /**
+             * @description Whether the new credentials took effect immediately or need a reboot (bramble.reboot) to apply. Always reboot_required today: station mode has no live reconfigure path.
+             * @enum {string}
+             */
+            applied: "live" | "reboot_required";
+        };
         /** @description Optional parameters for bramble.getDiagnostics. */
         GetDiagnosticsRequest: {
             /** @description If true, triggers heap_caps_dump() to serial logs before returning diagnostics. */
@@ -2583,6 +2625,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WifiStatusResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    setWifiConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SetWifiConfigParams"];
+            };
+        };
+        responses: {
+            /** @description WiFi credentials persisted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetWifiConfigResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */

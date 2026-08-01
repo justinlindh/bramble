@@ -109,10 +109,17 @@ int wifi_manager_nvs_set_creds(const char* ssid, const char* password) {
     if (err != ESP_OK)
         return -1;
 
-    nvs_set_str(nvs, NVS_KEY_SSID, ssid);
-    nvs_set_str(nvs, NVS_KEY_PASSWORD, password ? password : "");
-    nvs_commit(nvs);
+    esp_err_t ssid_err = nvs_set_str(nvs, NVS_KEY_SSID, ssid);
+    esp_err_t pass_err = nvs_set_str(nvs, NVS_KEY_PASSWORD, password ? password : "");
+    esp_err_t commit_err = nvs_commit(nvs);
     nvs_close(nvs);
+
+    if (ssid_err != ESP_OK || pass_err != ESP_OK || commit_err != ESP_OK) {
+        ESP_LOGE(TAG, "WiFi credential save failed (ssid=%d pass=%d commit=%d)", ssid_err, pass_err,
+                 commit_err);
+        return -1;
+    }
+
     ESP_LOGI(TAG, "WiFi credentials saved to NVS (SSID: %s)", ssid);
     return 0;
 }

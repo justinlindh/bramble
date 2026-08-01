@@ -155,6 +155,10 @@ int g_nvs_loc_kv_count = 0;
 nvs_loc_blob_t g_nvs_loc_blob[16];
 int g_nvs_loc_blob_count = 0;
 
+/* WiFi credential persistence globals (g_wifi_set_creds_rc/ssid/password) and
+ * the wifi_manager_nvs_set_creds override itself now live in the standalone
+ * stubs/wifi_manager_nvs_stub.c, shared with test_ws_server. */
+
 /* ── Mesh stubs (correct signatures) ─────────────────────────────── */
 
 int mesh_add_channel(const char* name, const uint8_t* psk, size_t psk_len) {

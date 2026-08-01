@@ -616,7 +616,12 @@ static esp_err_t config_post_handler(httpd_req_t* req) {
     }
 
     ESP_LOGI(TAG, "WiFi config received: SSID=%s", ssid);
-    wifi_manager_nvs_set_creds(ssid, pass);
+    if (wifi_manager_nvs_set_creds(ssid, pass) != 0) {
+        ESP_LOGE(TAG, "WiFi config: failed to persist credentials to NVS");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "Failed to save WiFi credentials");
+        return ESP_FAIL;
+    }
 
     const char* resp =
         "<!DOCTYPE html><html><head>"

@@ -42,7 +42,13 @@ static inline int wifi_manager_nvs_get_creds(char* ssid, size_t ssid_len, char* 
     (void)pass_len;
     return -1;
 }
-static inline int wifi_manager_nvs_set_creds(const char* ssid, const char* password) {
+/* Not static inline like its neighbors: test_rpc_methods_firmware needs a
+ * controllable, observable stub (rpc_methods_test_stubs.c provides a strong
+ * override) so it can assert what bramble.setWifiConfig persisted. Weak so
+ * every other test target that pulls this header in (via ws_server.c's
+ * captive portal, which never exercises this path in test_ws_server) keeps
+ * today's always-fails behavior with no extra wiring. */
+__attribute__((weak)) int wifi_manager_nvs_set_creds(const char* ssid, const char* password) {
     (void)ssid;
     (void)password;
     return -1;
