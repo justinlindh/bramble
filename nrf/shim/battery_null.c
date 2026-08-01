@@ -9,4 +9,9 @@
 #include "battery.h"
 #include <string.h>
 
+/* Nothing to configure: no battery ADC or charge-detect pins on this board.
+ * Exists so app_init.c can call battery_init() unconditionally, the same
+ * way it does on every ESP board (main/main.c). */
+void battery_init(void) {}
+
 void battery_get_status(battery_status_t* out) { memset(out, 0, sizeof(*out)); }
