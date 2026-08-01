@@ -318,6 +318,62 @@ static int handle_get_wifi_status(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* bramble.setWifiConfig: provision WiFi station credentials over RPC (any
+ * transport: serial, WS, BLE), so a first-boot device does not need its
+ * on-device UI or the AP-mode captive portal to join a network.
+ *
+ * password is write-only: it is persisted to the same NVS keys
+ * wifi_manager reads at boot, but never echoed back here or by any other
+ * RPC (see handle_get_wifi_status and handle_get_config, neither of which
+ * reads WiFi credentials out of NVS).
+ *
+ * There is no live station reconfigure path today (wifi_manager only tries
+ * station mode once, at wifi_manager_init, from main's boot sequence), so
+ * this mirrors the existing AP-mode captive portal in ws_server.c: persist
+ * now, apply requires a reboot. Unlike the captive portal, this method does
+ * not reboot the device itself; it reports applied="reboot_required" and
+ * leaves the caller to invoke bramble.reboot when it is ready. */
+static int handle_set_wifi_config(const cJSON* params, cJSON* result) {
+#if defined(CONFIG_IDF_TARGET_LINUX) || defined(BRAMBLE_PLATFORM_NRF)
+    (void)params;
+    cJSON_AddStringToObject(result, "error", "wifi not supported on this hardware");
+    return RPC_ERR_NOT_SUPPORTED;
+#else
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+
+    const char* ssid = cJSON_GetStringValue(cJSON_GetObjectItem(params, "ssid"));
+    if (!ssid || strlen(ssid) < 1 || strlen(ssid) > 32)
+        return RPC_ERR_INVALID_PARAMS;
+
+    const char* password = "";
+    cJSON* pass_item = cJSON_GetObjectItem(params, "password");
+    if (pass_item) {
+        password = cJSON_GetStringValue(pass_item);
+        if (!password || strlen(password) > 64)
+            return RPC_ERR_INVALID_PARAMS;
+    }
+
+    cJSON* mode_item = cJSON_GetObjectItem(params, "mode");
+    if (mode_item) {
+        const char* mode = cJSON_GetStringValue(mode_item);
+        if (!mode || strcmp(mode, "sta") != 0) {
+            cJSON_AddStringToObject(result, "error", "only station mode (\"sta\") is supported");
+            return RPC_ERR_NOT_SUPPORTED;
+        }
+    }
+
+    if (wifi_manager_nvs_set_creds(ssid, password) != 0) {
+        cJSON_AddStringToObject(result, "error", "failed to persist wifi credentials");
+        return RPC_ERR_INTERNAL;
+    }
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "applied", "reboot_required");
+    return 0;
+#endif
+}
+
 /* bramble.getIdentity */
 static int handle_get_identity(const cJSON* params, cJSON* result) {
     (void)params;
@@ -3351,6 +3407,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.getStatus", handle_get_status);
     rpc_register("bramble.getDiagnostics", handle_get_diagnostics);
     rpc_register("bramble.getWifiStatus", handle_get_wifi_status);
+    rpc_register("bramble.setWifiConfig", handle_set_wifi_config);
     rpc_register("bramble.getIdentity", handle_get_identity);
     rpc_register("bramble.getPeerVerification", handle_get_peer_verification);
     rpc_register("bramble.getVersion", handle_get_version);

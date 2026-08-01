@@ -339,6 +339,28 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 {"jsonrpc":"2.0","id":31,"method":"bramble.setRadio","params":{"frequency_mhz":915.0,"sf":9,"bw_hz":125000,"tx_power_dbm":17}}
 ```
 
+#### `bramble.setWifiConfig`
+
+- Description: Provisions WiFi station credentials over any RPC transport
+  (serial, WebSocket, BLE), so a first-boot device does not need its
+  on-device UI or the AP-mode captive portal to join a network. The
+  password is write-only: it is persisted to NVS but never echoed back by
+  this or any other method. There is no live station reconfigure path
+  today, so this always returns `applied: "reboot_required"`; call
+  `bramble.reboot` afterward to apply the new credentials. Returns
+  `not-supported` on hardware with no WiFi radio (the nRF52840 target and
+  the Linux simulator).
+- Params: `ssid` (string, 1-32 chars), optional `password` (string, 0-64
+  chars; omit or send empty for an open network), optional `mode` (string,
+  only `"sta"` is accepted; any other value is rejected).
+- Response fields: `ok` (bool), `applied` (string: `"live"` or
+  `"reboot_required"`; currently always `"reboot_required"`).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":36,"method":"bramble.setWifiConfig","params":{"ssid":"my-network","password":"changeme123"}}
+```
+
 #### `bramble.setNodeName`
 
 - Description: Sets local node display name.

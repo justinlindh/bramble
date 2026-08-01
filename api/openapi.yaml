@@ -69,6 +69,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/WifiStatusResponse'
 
+  /rpc/bramble.setWifiConfig:
+    post:
+      operationId: setWifiConfig
+      summary: Provision WiFi station credentials
+      description: >
+        Persists WiFi station credentials to the same NVS keys the firmware
+        reads at boot. Only station mode is supported today; omit mode or
+        pass "sta" explicitly. There is no live station reconfigure path, so
+        this always reports applied="reboot_required": call bramble.reboot
+        to apply. Returns not-supported on hardware with no WiFi radio
+        (the nRF52840 target, and the Linux simulator). The password is
+        write-only and is never echoed back by this or any other method.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetWifiConfigParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: WiFi credentials persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetWifiConfigResponse'
+
   /rpc/bramble.getDiagnostics:
     post:
       operationId: getDiagnostics
@@ -2183,6 +2211,43 @@ components:
         clients:
           type: integer
           description: Connected AP client count; 0 in station mode.
+
+    SetWifiConfigParams:
+      type: object
+      description: Parameters for bramble.setWifiConfig.
+      required: [ssid]
+      properties:
+        ssid:
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: Network SSID to join in station mode.
+        password:
+          type: string
+          maxLength: 64
+          description: WPA2-PSK passphrase. Omit or send empty for an open network.
+        mode:
+          type: string
+          enum: [sta]
+          description: >
+            Connection mode to provision. Only station mode is supported
+            today; any other value is rejected as not-supported.
+
+    SetWifiConfigResponse:
+      type: object
+      description: Response from bramble.setWifiConfig.
+      required: [ok, applied]
+      properties:
+        ok:
+          type: boolean
+          description: Always true on success.
+        applied:
+          type: string
+          enum: [live, reboot_required]
+          description: >
+            Whether the new credentials took effect immediately or need a
+            reboot (bramble.reboot) to apply. Always reboot_required today:
+            station mode has no live reconfigure path.
 
     GetDiagnosticsRequest:
       type: object

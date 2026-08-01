@@ -24,6 +24,9 @@ const char* IP_EVENT = "IP_EVENT";
 static esp_err_t g_nvs_open_err;
 static esp_err_t g_nvs_get_ssid_err;
 static esp_err_t g_nvs_get_pass_err;
+static esp_err_t g_nvs_set_ssid_err;
+static esp_err_t g_nvs_set_pass_err;
+static esp_err_t g_nvs_commit_err;
 static char g_nvs_ssid[33];
 static char g_nvs_pass[65];
 static char g_saved_ssid[33];
@@ -97,9 +100,11 @@ esp_err_t nvs_set_str(nvs_handle_t handle, const char* key, const char* value) {
     if (strcmp(key, "ssid") == 0) {
         strncpy(g_saved_ssid, value, sizeof(g_saved_ssid) - 1);
         g_saved_ssid[sizeof(g_saved_ssid) - 1] = '\0';
+        return g_nvs_set_ssid_err;
     } else if (strcmp(key, "password") == 0) {
         strncpy(g_saved_pass, value, sizeof(g_saved_pass) - 1);
         g_saved_pass[sizeof(g_saved_pass) - 1] = '\0';
+        return g_nvs_set_pass_err;
     }
     return ESP_OK;
 }
@@ -114,7 +119,7 @@ esp_err_t nvs_erase_key(nvs_handle_t handle, const char* key) {
 esp_err_t nvs_commit(nvs_handle_t handle) {
     (void)handle;
     g_nvs_commit_calls++;
-    return ESP_OK;
+    return g_nvs_commit_err;
 }
 
 EventGroupHandle_t xEventGroupCreate(void) { return (EventGroupHandle_t)0x1; }
@@ -236,6 +241,9 @@ void setUp(void) {
     g_nvs_open_err = ESP_OK;
     g_nvs_get_ssid_err = ESP_OK;
     g_nvs_get_pass_err = ESP_OK;
+    g_nvs_set_ssid_err = ESP_OK;
+    g_nvs_set_pass_err = ESP_OK;
+    g_nvs_commit_err = ESP_OK;
     g_nvs_ssid[0] = '\0';
     g_nvs_pass[0] = '\0';
     g_saved_ssid[0] = '\0';
@@ -293,6 +301,26 @@ void test_nvs_roundtrip_and_clear(void) {
 
     TEST_ASSERT_EQUAL_INT(0, wifi_manager_nvs_clear_creds());
     TEST_ASSERT_EQUAL_INT(2, g_nvs_erase_calls);
+}
+
+/* A real flash-write failure (nvs_set_str or nvs_commit returning non-OK)
+ * must surface as -1, not the silent "success" the function used to report
+ * regardless of what nvs_set_str/nvs_commit actually did. bramble.setWifiConfig
+ * depends on this to answer ok:true only when the credentials are genuinely
+ * on flash. */
+void test_nvs_set_creds_reports_failure_on_set_str_error(void) {
+    g_nvs_set_ssid_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL_INT(-1, wifi_manager_nvs_set_creds("MyNet", "secret"));
+}
+
+void test_nvs_set_creds_reports_failure_on_password_set_str_error(void) {
+    g_nvs_set_pass_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL_INT(-1, wifi_manager_nvs_set_creds("MyNet", "secret"));
+}
+
+void test_nvs_set_creds_reports_failure_on_commit_error(void) {
+    g_nvs_commit_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL_INT(-1, wifi_manager_nvs_set_creds("MyNet", "secret"));
 }
 
 void test_nvs_get_creds_treats_missing_password_as_open_network(void) {
@@ -440,6 +468,9 @@ void test_station_event_transitions_disconnected_and_got_ip(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_nvs_roundtrip_and_clear);
+    RUN_TEST(test_nvs_set_creds_reports_failure_on_set_str_error);
+    RUN_TEST(test_nvs_set_creds_reports_failure_on_password_set_str_error);
+    RUN_TEST(test_nvs_set_creds_reports_failure_on_commit_error);
     RUN_TEST(test_nvs_get_creds_treats_missing_password_as_open_network);
     RUN_TEST(test_init_prefers_station_with_saved_creds);
     RUN_TEST(test_init_falls_back_to_ap_when_station_fails);
