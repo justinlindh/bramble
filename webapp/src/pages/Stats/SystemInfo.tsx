@@ -114,13 +114,14 @@ export function SystemInfo({ status, config }: Props) {
     ...((status.batteryPct !== undefined || status.batteryMv !== undefined)
       ? [{
           label: 'Battery',
-          // While charging, battery_mv reflects the charge rail rather than
-          // the cell, so battery_pct is not a real level: show the charging
-          // indicator instead of an inflated percentage.
+          // While charging, battery_pct is derived from the charge rail
+          // rather than the cell, so it is not a real level: hide it. The
+          // mV reading is still a real measurement, just of the rail rather
+          // than the cell, so it stays visible labeled as such.
           value: !hasBattery(status)
             ? 'N/A'
             : status.charging === 'yes'
-              ? '⚡ Charging'
+              ? `⚡ Charging (${status.batteryMv ?? '?'} mV rail)`
               : `${status.batteryPct ?? '?'}% (${status.batteryMv ?? '?'} mV)`,
           color: !hasBattery(status)
             ? ('muted' as const)
