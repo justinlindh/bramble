@@ -123,8 +123,8 @@ void battery_init(void) {
     /* Simple mode, NULL event handler: blocking oneshot conversions, no IRQ
      * plumbing needed. nrfx_saadc_mode_trigger() busy-waits for the END
      * event itself (nrfy_saadc_sample_start). */
-    err = nrfx_saadc_simple_mode_set(1u << 0, NRF_SAADC_RESOLUTION_14BIT, NRF_SAADC_OVERSAMPLE_DISABLED,
-                                      NULL);
+    err = nrfx_saadc_simple_mode_set(1u << 0, NRF_SAADC_RESOLUTION_14BIT,
+                                     NRF_SAADC_OVERSAMPLE_DISABLED, NULL);
     if (err != NRFX_SUCCESS) {
         ESP_LOGE(TAG, "nrfx_saadc_simple_mode_set failed: %d", (int)err);
         return;
