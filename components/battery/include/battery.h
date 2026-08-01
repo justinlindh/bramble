@@ -151,9 +151,9 @@ battery_charging_t battery_charging_from_gpio(int chrg_gpio, int chrg_active_lev
  * One-clause caveat for future boards: the divider-5 margin above is
  * analytic (worked from the ADC/divider math), not itself bench-measured;
  * a board using different chemistry, e.g. a 4.35V HV-LiPo (no current
- * board does), would sit AT, not above, a 4350-class threshold at full
- * charge, so this constant would need re-deriving before applying it
- * there. */
+ * board does), tops out only 100 mV under this 4450 threshold, less
+ * than the ~125 mV divider-5 error derived above, so this constant
+ * would need re-deriving before applying it there. */
 #define BATTERY_MV_CHARGER_RAIL_MIN 4450u
 
 /**

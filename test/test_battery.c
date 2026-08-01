@@ -125,6 +125,15 @@ void test_infer_charging_unknown_stays_unknown_at_cell_ceiling(void) {
     TEST_ASSERT_EQUAL_INT(BATTERY_CHG_UNKNOWN, battery_infer_charging(BATTERY_CHG_UNKNOWN, 4200));
 }
 
+/* 4400 sits in the band the 4350-to-4450 threshold raise exists to
+ * protect: high enough that a divider-5 board's amplified ADC error could
+ * reach it from a genuinely full unplugged cell, so it must NOT infer
+ * charging. Unlike the symbolic boundary test below, this literal fails
+ * if the constant is ever lowered back. */
+void test_infer_charging_divider5_error_band_stays_unknown(void) {
+    TEST_ASSERT_EQUAL_INT(BATTERY_CHG_UNKNOWN, battery_infer_charging(BATTERY_CHG_UNKNOWN, 4400));
+}
+
 /* Threshold boundary: exactly at BATTERY_MV_CHARGER_RAIL_MIN infers YES
  * (>=), one below does not. */
 void test_infer_charging_threshold_boundary(void) {
@@ -340,6 +349,7 @@ int main(void) {
 
     RUN_TEST(test_infer_charging_unknown_upgrades_to_yes_above_threshold);
     RUN_TEST(test_infer_charging_unknown_stays_unknown_at_cell_ceiling);
+    RUN_TEST(test_infer_charging_divider5_error_band_stays_unknown);
     RUN_TEST(test_infer_charging_threshold_boundary);
     RUN_TEST(test_infer_charging_never_overrides_pin_no);
     RUN_TEST(test_infer_charging_never_overrides_pin_yes);
