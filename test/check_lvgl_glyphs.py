@@ -182,7 +182,13 @@ _FONT_SPARSE_RANGE = re.compile(
 )
 
 
-_LOCKFILE_LVGL_VERSION = re.compile(r"lvgl/lvgl:\n(?:[ \t]+.*\n)*?[ \t]+version:\s*([0-9][0-9.]*)")
+# Each repeated line must start with whitespace followed by a non-whitespace
+# character, so the split between the indent and the rest of the line is
+# unambiguous: an all-whitespace line cannot be carved up two ways, which is
+# what made the previous [ \t]+.* form exponential under backtracking.
+_LOCKFILE_LVGL_VERSION = re.compile(
+    r"lvgl/lvgl:\n(?:[ \t]+\S[^\n]*\n)*?[ \t]+version:[ \t]*([0-9][0-9.]*)"
+)
 _MANIFEST_LVGL_VERSION = re.compile(r"lvgl/lvgl:\s*\n\s*version:\s*[\"']?([^\"'\n]+)")
 
 
