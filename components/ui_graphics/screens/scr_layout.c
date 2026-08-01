@@ -224,6 +224,14 @@ void layout_update_status(bramble_layout_t* layout) {
     if (bstat.charging == BATTERY_CHG_YES) {
         lv_label_set_text(layout->lbl_battery, LV_SYMBOL_CHARGE " CHG");
         lv_obj_set_style_text_color(layout->lbl_battery, BR_COLOR_TEXT, 0);
+    } else if (!bstat.present || bstat.mv == 0) {
+        /* Honest "no reading" affordance, matching main.c's OLED header:
+         * a bare 0 mV cannot distinguish "no battery hardware" or "every
+         * ADC sample this read failed" from a genuinely dead cell, so show
+         * "--" rather than a 0% danger-red reading that claims to know
+         * more than it does. */
+        lv_label_set_text(layout->lbl_battery, "--");
+        lv_obj_set_style_text_color(layout->lbl_battery, BR_COLOR_TEXT, 0);
     } else {
         /* charging == NO or UNKNOWN: pct through the display-smoothing
          * hook so the unplug cliff (charge rail -> resting cell voltage)
