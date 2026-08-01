@@ -121,6 +121,20 @@ typedef struct __attribute__((packed)) {
  * node too low on heap to snapshot its own state cannot report that state.
  */
 
+/* Wire string for the RPC-visible charging enum (wave 2). Additive fields on
+ * getBattery/getStatus; see api/openapi.yaml. */
+static const char* battery_charging_str(battery_charging_t charging) {
+    switch (charging) {
+    case BATTERY_CHG_YES:
+        return "yes";
+    case BATTERY_CHG_NO:
+        return "no";
+    case BATTERY_CHG_UNKNOWN:
+    default:
+        return "unknown";
+    }
+}
+
 /* bramble.getStatus */
 static int handle_get_status(const cJSON* params, cJSON* result) {
     (void)params;
@@ -145,8 +159,12 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
     free(st);
     cJSON_AddNumberToObject(result, "uptime_s", (double)(esp_timer_get_time() / 1000000));
     cJSON_AddNumberToObject(result, "free_heap", (double)esp_get_free_heap_size());
-    cJSON_AddNumberToObject(result, "battery_mv", battery_read_mv());
-    cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
+    battery_status_t bstat;
+    battery_get_status(&bstat);
+    cJSON_AddNumberToObject(result, "battery_mv", bstat.mv);
+    cJSON_AddNumberToObject(result, "battery_pct", bstat.pct);
+    cJSON_AddStringToObject(result, "charging", battery_charging_str(bstat.charging));
+    cJSON_AddBoolToObject(result, "present", bstat.present);
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
     cJSON_AddBoolToObject(result, "gps_enabled", gps_pref_get());
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync",
@@ -2591,11 +2609,15 @@ static int handle_sleep(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getBattery: returns battery voltage and percentage */
+/* bramble.getBattery: returns battery voltage, percentage, and charging state */
 static int handle_get_battery(const cJSON* params, cJSON* result) {
     (void)params;
-    cJSON_AddNumberToObject(result, "voltage_mv", battery_read_mv());
-    cJSON_AddNumberToObject(result, "percentage", battery_read_pct());
+    battery_status_t bstat;
+    battery_get_status(&bstat);
+    cJSON_AddNumberToObject(result, "voltage_mv", bstat.mv);
+    cJSON_AddNumberToObject(result, "percentage", bstat.pct);
+    cJSON_AddStringToObject(result, "charging", battery_charging_str(bstat.charging));
+    cJSON_AddBoolToObject(result, "present", bstat.present);
     return 0;
 }
 

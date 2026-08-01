@@ -119,6 +119,14 @@ void test_get_status_returns_expected_fields(void) {
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "battery_pct"));
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "peers"));
 
+    /* Wave 2: charging-aware additive fields (stub reports UNKNOWN/present). */
+    cJSON* charging = cJSON_GetObjectItem(r, "charging");
+    TEST_ASSERT_NOT_NULL(charging);
+    TEST_ASSERT_EQUAL_STRING("unknown", charging->valuestring);
+    cJSON* present = cJSON_GetObjectItem(r, "present");
+    TEST_ASSERT_NOT_NULL(present);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(present));
+
     /* Per-node identity Phase 4 diagnostics (additive fields). */
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "identity_pins"));
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "identity_conflicts"));
@@ -128,6 +136,26 @@ void test_get_status_returns_expected_fields(void) {
     /* gps_enabled mirrors the persisted preference regardless of gps_available. */
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_enabled"));
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "gps_enabled")));
+
+    cJSON_Delete(resp);
+}
+
+/* ── 1a. getBattery ───────────────────────────────────────────────── */
+
+void test_get_battery_returns_charging_and_present_fields(void) {
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"bramble.getBattery\",\"params\":{}}");
+    cJSON* r = get_result(resp);
+
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "voltage_mv"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "percentage"));
+
+    cJSON* charging = cJSON_GetObjectItem(r, "charging");
+    TEST_ASSERT_NOT_NULL(charging);
+    TEST_ASSERT_EQUAL_STRING("unknown", charging->valuestring);
+    cJSON* present = cJSON_GetObjectItem(r, "present");
+    TEST_ASSERT_NOT_NULL(present);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(present));
 
     cJSON_Delete(resp);
 }
@@ -615,6 +643,7 @@ int main(void) {
 
     /* getStatus */
     RUN_TEST(test_get_status_returns_expected_fields);
+    RUN_TEST(test_get_battery_returns_charging_and_present_fields);
 
     /* getDiagnostics GPS fields */
     RUN_TEST(test_get_diagnostics_includes_gps_fields_when_gps_capable);

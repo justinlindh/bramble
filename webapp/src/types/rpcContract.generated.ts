@@ -1568,10 +1568,17 @@ export interface components {
             uptime_s: number;
             /** @description Free heap memory in bytes. */
             free_heap: number;
-            /** @description Battery voltage in millivolts. */
+            /** @description Battery voltage in millivolts, averaged over several ADC samples. While charging is "yes" this reflects the charge rail, not the cell's state of charge. */
             battery_mv: number;
-            /** @description Estimated battery charge percentage. */
+            /** @description Estimated battery charge percentage. While charging is "yes" this is not meaningful; see charging. */
             battery_pct: number;
+            /**
+             * @description Hardware-informed charging state. "unknown" when the board has no charge-detect pin wired (every board today except future hardware).
+             * @enum {string}
+             */
+            charging?: "unknown" | "no" | "yes";
+            /** @description Whether this board has battery-sensing hardware and it initialized successfully. false means battery_mv and battery_pct are not meaningful (0). */
+            present?: boolean;
             /** @description Whether this board has GPS hardware. */
             gps_available: boolean;
             /** @description The persisted GPS power preference (independent of gps_available). */
@@ -2277,10 +2284,17 @@ export interface components {
         };
         /** @description Response from bramble.getBattery. */
         GetBatteryResponse: {
-            /** @description Battery voltage in millivolts. */
+            /** @description Battery voltage in millivolts, averaged over several ADC samples. While charging is "yes" this reflects the charge rail, not the cell's state of charge. */
             voltage_mv: number;
-            /** @description Estimated battery charge percentage (0–100). */
+            /** @description Estimated battery charge percentage (0-100), derived from voltage_mv. While charging is "yes" this is not meaningful (the charge rail's voltage does not reflect the cell); prefer 0xFF-style handling: treat it as unknown rather than a real level. */
             percentage: number;
+            /**
+             * @description Hardware-informed charging state. "unknown" when the board has no charge-detect pin wired (every board today except future hardware).
+             * @enum {string}
+             */
+            charging?: "unknown" | "no" | "yes";
+            /** @description Whether this board has battery-sensing hardware and it initialized successfully. false means voltage_mv and percentage are not meaningful (0). */
+            present?: boolean;
         };
         /** @description Parameters for bramble.setBacklight. */
         SetBacklightParams: {
