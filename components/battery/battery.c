@@ -75,7 +75,7 @@ void battery_init(void) {
         s_cali_handle = NULL;
     }
 
-    /* Optional hardware charge-detect pin (wave 2). No ESP board has this
+    /* Optional hardware charge-detect pin. No ESP board has this
      * wired today (see board_config.h's charge struct, {-1,0,-1} on every
      * ESP profile); when one does, configure it as an input here so
      * battery_get_status can read it. */
@@ -93,14 +93,18 @@ void battery_init(void) {
 }
 
 /* One raw-ADC-to-millivolts conversion, pre-divider-factor. Shared by every
- * sample battery_get_status averages. Returns 0 on ADC read failure, same
- * degradation the pre-averaging single-sample code had. */
-static uint32_t read_one_sample_mv(void) {
+ * sample battery_get_status averages. Reports success via the return
+ * value instead of folding a failure into a fabricated 0 mV sample: see
+ * battery_average_mv's doc comment for why averaging a real failure in as
+ * 0 would corrupt the whole reading toward a false low battery, rather
+ * than degrading it the way a single-sample 0 mV used to (an obviously
+ * unavailable reading, not a plausible-looking low one). */
+static bool read_one_sample_mv(uint32_t* out_mv) {
     int raw = 0;
     esp_err_t err = adc_oneshot_read(s_adc_handle, s_board->battery.adc_channel, &raw);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "ADC read failed: %d", err);
-        return 0;
+        return false;
     }
 
     int voltage_mv = 0;
@@ -110,7 +114,8 @@ static uint32_t read_one_sample_mv(void) {
         /* Rough estimate without calibration: 12-bit ADC, 0-3.3V range at 12dB atten */
         voltage_mv = (raw * 3300) / 4095;
     }
-    return (uint32_t)voltage_mv;
+    *out_mv = (uint32_t)voltage_mv;
+    return true;
 }
 
 /* battery_mv_to_pct lives in battery_pct.c, shared with the virtual driver. */
@@ -126,11 +131,14 @@ void battery_get_status(battery_status_t* out) {
     /* Average BATTERY_AVG_SAMPLE_COUNT raw conversions before applying the
      * board's divider factor. Averaging is linear, so doing it pre-divider
      * (rather than post-multiply) is numerically equivalent and keeps
-     * read_one_sample_mv focused on one conversion. */
+     * read_one_sample_mv focused on one conversion. Only successful
+     * samples are averaged (battery_average_mv's valid mask); mv comes out
+     * 0 only when every one of the 8 conversions failed. */
     uint32_t samples[BATTERY_AVG_SAMPLE_COUNT];
+    bool valid[BATTERY_AVG_SAMPLE_COUNT];
     for (int i = 0; i < BATTERY_AVG_SAMPLE_COUNT; i++)
-        samples[i] = read_one_sample_mv();
-    uint32_t voltage_mv = battery_average_mv(samples, BATTERY_AVG_SAMPLE_COUNT);
+        valid[i] = read_one_sample_mv(&samples[i]);
+    uint32_t voltage_mv = battery_average_mv(samples, valid, BATTERY_AVG_SAMPLE_COUNT);
 
     out->mv = voltage_mv * (uint32_t)s_board->battery.divider_factor;
     out->pct = battery_mv_to_pct(out->mv);

@@ -1,19 +1,26 @@
 /*
  * battery_helpers: pure functions shared by every battery_get_status()
- * implementation (ESP ADC, emulator virtual battery, nRF null stub). No
- * hardware access, no ESP-IDF dependency: host-testable in isolation (see
- * test/test_battery.c).
+ * implementation (ESP ADC, SAADC, emulator virtual battery, nRF null
+ * stub). No hardware access, no ESP-IDF dependency: host-testable in
+ * isolation (see test/test_battery.c).
  */
 #include "battery.h"
 
-uint32_t battery_average_mv(const uint32_t* samples, size_t count) {
+uint32_t battery_average_mv(const uint32_t* samples, const bool* valid, size_t count) {
     if (!samples || count == 0)
         return 0;
 
     uint64_t sum = 0;
-    for (size_t i = 0; i < count; i++)
+    size_t valid_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (valid && !valid[i])
+            continue;
         sum += samples[i];
-    return (uint32_t)(sum / count);
+        valid_count++;
+    }
+    if (valid_count == 0)
+        return 0;
+    return (uint32_t)(sum / valid_count);
 }
 
 battery_charging_t battery_charging_from_gpio(int chrg_gpio, int chrg_active_level, int level) {
@@ -26,11 +33,18 @@ uint8_t battery_beacon_pct(battery_charging_t charging, uint8_t pct, bool presen
     return (charging == BATTERY_CHG_YES || !present) ? 0xFF : pct;
 }
 
-uint8_t battery_display_pct_ema(battery_display_state_t* state, uint8_t raw_pct) {
+uint8_t battery_display_pct_ema(battery_display_state_t* state, uint8_t raw_pct, uint32_t now_ms) {
     if (!state)
         return raw_pct;
 
-    if (!state->has_value) {
+    /* Unsigned subtraction: correct across a monotonic clock's wraparound
+     * (the same modular-arithmetic idiom used everywhere else in this tree
+     * that diffs ms ticks), not just when now_ms happens to be larger. */
+    bool long_gap = state->has_value &&
+                    (uint32_t)(now_ms - state->last_call_ms) > BATTERY_DISPLAY_SNAP_INTERVAL_MS;
+    state->last_call_ms = now_ms;
+
+    if (!state->has_value || long_gap) {
         state->displayed = raw_pct;
         state->has_value = true;
         return state->displayed;
@@ -59,10 +73,4 @@ uint8_t battery_display_pct_ema(battery_display_state_t* state, uint8_t raw_pct)
 
     state->displayed = (uint8_t)((int32_t)state->displayed + step);
     return state->displayed;
-}
-
-static battery_display_state_t s_display_state;
-
-uint8_t battery_display_pct(uint8_t raw_pct) {
-    return battery_display_pct_ema(&s_display_state, raw_pct);
 }

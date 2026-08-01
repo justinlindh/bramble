@@ -157,20 +157,25 @@ void battery_init(void) {
 /* One oneshot SAADC conversion at the pin, pre-divider. battery_get_status
  * averages BATTERY_AVG_SAMPLE_COUNT of these through the shared
  * battery_average_mv helper (components/battery/battery_helpers.c), same
- * split as the ESP ADC backend (components/battery/battery.c). */
-static uint32_t read_one_sample_mv(void) {
+ * split as the ESP ADC backend (components/battery/battery.c). Reports
+ * success via the return value: a failed conversion is excluded from the
+ * average (battery_average_mv's valid mask) rather than folded in as a
+ * fabricated 0 mV sample, which would corrupt the whole reading toward a
+ * false low battery instead of just being one fewer sample in the mean. */
+static bool read_one_sample_mv(uint32_t* out_mv) {
     int16_t raw = 0;
     nrfx_err_t err = nrfx_saadc_buffer_set(&raw, 1);
     if (err != NRFX_SUCCESS) {
         ESP_LOGW(TAG, "saadc buffer_set failed: %d", (int)err);
-        return 0;
+        return false;
     }
     err = nrfx_saadc_mode_trigger();
     if (err != NRFX_SUCCESS) {
         ESP_LOGW(TAG, "saadc mode_trigger failed: %d", (int)err);
-        return 0;
+        return false;
     }
-    return raw_to_pin_mv(raw);
+    *out_mv = raw_to_pin_mv(raw);
+    return true;
 }
 
 void battery_get_status(battery_status_t* out) {
@@ -189,10 +194,11 @@ void battery_get_status(battery_status_t* out) {
      * stay outside the lock. */
     xSemaphoreTake(s_lock, portMAX_DELAY);
     uint32_t samples[BATTERY_AVG_SAMPLE_COUNT];
+    bool valid[BATTERY_AVG_SAMPLE_COUNT];
     for (int i = 0; i < BATTERY_AVG_SAMPLE_COUNT; i++)
-        samples[i] = read_one_sample_mv();
+        valid[i] = read_one_sample_mv(&samples[i]);
     xSemaphoreGive(s_lock);
-    uint32_t pin_mv = battery_average_mv(samples, BATTERY_AVG_SAMPLE_COUNT);
+    uint32_t pin_mv = battery_average_mv(samples, valid, BATTERY_AVG_SAMPLE_COUNT);
 
     out->mv = pin_mv * (uint32_t)BOARD_BATTERY_DIVIDER;
     out->pct = battery_mv_to_pct(out->mv);
