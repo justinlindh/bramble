@@ -46,6 +46,15 @@ node. It connects three ways:
 - **BLE.** Bluetooth to a nearby node; the app remembers the per-device token
   in its device book.
 
+**Getting a node onto your WiFi.** A fresh node has no station credentials,
+so the WiFi (WebSocket) path above only works once it has joined a network.
+Connect over USB or BLE first and call `bramble.setWifiConfig` with your
+network's SSID and password (see [api/rpc.md](../api/rpc.md)); the password
+is write-only and is never echoed back by this or any other RPC. There is no
+live reconfigure path, so the response reports `applied: "reboot_required"`:
+follow up with `bramble.reboot` to apply the new credentials. The same thing
+is available from the serial console with `wifi set <ssid> <pass>`.
+
 Where the auth token comes from: on first boot the firmware generates a random
 token and stores it in NVS. WiFi and BLE require it; retrieve it over USB with
 `bramble pair`, or read it from the serial boot log the first time it is
