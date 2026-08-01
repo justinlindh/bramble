@@ -121,7 +121,7 @@ typedef struct __attribute__((packed)) {
  * node too low on heap to snapshot its own state cannot report that state.
  */
 
-/* Wire string for the RPC-visible charging enum (wave 2). Additive fields on
+/* Wire string for the RPC-visible charging enum. Additive fields on
  * getBattery/getStatus; see api/openapi.yaml. */
 static const char* battery_charging_str(battery_charging_t charging) {
     switch (charging) {

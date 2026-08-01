@@ -4,7 +4,7 @@
 #define _DEFAULT_SOURCE
 
 /*
- * Whitebox tests for battery_virt (wave 2's charging-aware emu-link battery).
+ * Whitebox tests for battery_virt (the charging-aware emu-link battery).
  * Plays the broker over a socketpair (same pattern as test_radio_virt.c /
  * test_gps_virt.c) and drives battery_virt through the real battery.h
  * surface (battery_get_status). emu_link.c and battery_virt.c are both

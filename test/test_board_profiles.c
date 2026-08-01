@@ -112,7 +112,7 @@ void test_bramble_pager_profile_has_expected_peripheral_pins(void) {
     TEST_ASSERT_EQUAL_INT(0, cfg->battery.adc_channel);
     TEST_ASSERT_EQUAL_INT(2, cfg->battery.divider_factor);
 
-    /* No board has a charge-detect pin wired yet (wave 2); see
+    /* No ESP board has a charge-detect pin wired yet; see
      * test_all_board_profiles_default_no_charge_pin below for the same
      * assertion across every profile, not just this one. */
     TEST_ASSERT_EQUAL_INT(-1, cfg->charge.chrg_gpio);
@@ -208,13 +208,16 @@ void test_virtual_pager_profile_matches_bramble_pager_pins(void) {
 }
 
 /*
- * Wave 2: board_config.h's charge struct uses designated initializers, so
- * a board profile that omitted .charge would silently zero-init to
- * {chrg_gpio=0, chrg_active_level=0, vbus_gpio=0}, misreading GPIO0 as a
- * wired charge-detect pin. No board has real pins today, so every one of
- * the 8 profiles must ship the explicit "not wired" sentinel
- * {-1, 0, -1}; this checks all of them, not just bramble_pager (which has
- * its own copy above as part of its broader peripheral-pin contract).
+ * board_config.h's charge struct uses designated initializers, so a board
+ * profile that omitted .charge would silently zero-init to {chrg_gpio=0,
+ * chrg_active_level=0, vbus_gpio=0}, misreading GPIO0 as a wired
+ * charge-detect pin. No board wires real pins through this ESP-IDF-facing
+ * struct (the T1000-E's real charge/VBUS pins are read by
+ * nrf/shim/battery_saadc.c via its own nRF-specific board header, not
+ * this one; see main/boards/t1000e.h), so every one of the 8 profiles
+ * must ship the explicit "not wired" sentinel {-1, 0, -1}; this checks
+ * all of them, not just bramble_pager (which has its own copy above as
+ * part of its broader peripheral-pin contract).
  */
 void test_all_board_profiles_default_no_charge_pin(void) {
     const bramble_board_config_t* profiles[] = {

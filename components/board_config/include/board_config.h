@@ -98,7 +98,7 @@ typedef struct {
 } board_battery_config_t;
 
 /*
- * Hardware charge-detect config (wave 2). -1 = not wired: every board ships
+ * Hardware charge-detect config. -1 = not wired: every board ships
  * {-1, 0, -1} today, ESP boards because none has these pins routed, and
  * t1000e because the real pins are owned by the nRF port (nrf/boards/), not
  * this ESP-IDF-facing struct (see main/boards/t1000e.h). Without a wired

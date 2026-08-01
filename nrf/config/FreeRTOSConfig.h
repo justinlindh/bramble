@@ -8,8 +8,8 @@ extern uint32_t SystemCoreClock;
 
 #define configUSE_PREEMPTION 1
 #define configUSE_PORT_OPTIMISED_TASK_SELECTION 1
-// Deliberately off this wave (wave 2 power work), not a placeholder for a
-// P3 flag: tickless idle is unverified on this port, and this project's own
+// Deliberately off, a considered decision rather than an unset placeholder:
+// tickless idle is unverified on this port, and this project's own
 // mesh loop assumes a steady 1ms tick. NimBLE's host stack schedules its
 // own timers (connection/GAP/SM timeouts) as FreeRTOS software timers,
 // tick-driven by design (npl_freertos_callout_reset's xTimerChangePeriod,

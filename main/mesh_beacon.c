@@ -48,7 +48,7 @@ int send_beacon(void) {
     beacon.src_addr = s_identity->address;
     beacon.pubkey_hash = s_identity->pubkey_hash;
     beacon.uptime_min = (uint16_t)(now_ms() / 60000);
-    /* Wave 2: a plugged-in node's cell voltage is meaningless (the charge
+    /* A plugged-in node's cell voltage is meaningless (the charge
      * rail reads a dead-flat ~4798 mV on the T-Deck), so a confirmed
      * charging node emits the protocol's documented 0xFF sentinel
      * (docs/bramble-protocol-spec.md) instead of a fabricated percentage.

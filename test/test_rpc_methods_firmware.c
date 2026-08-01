@@ -119,7 +119,7 @@ void test_get_status_returns_expected_fields(void) {
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "battery_pct"));
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "peers"));
 
-    /* Wave 2: charging-aware additive fields (stub reports UNKNOWN/present). */
+    /* Charging-aware additive fields (stub reports UNKNOWN/present). */
     cJSON* charging = cJSON_GetObjectItem(r, "charging");
     TEST_ASSERT_NOT_NULL(charging);
     TEST_ASSERT_EQUAL_STRING("unknown", charging->valuestring);

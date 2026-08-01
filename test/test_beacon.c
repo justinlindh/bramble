@@ -192,7 +192,7 @@ void test_beacon_serialize_max_name_fits_size_invariant(void) {
 }
 
 /*
- * Wave 2: the protocol documents battery_pct=0xFF as "unknown/plugged in"
+ * The protocol documents battery_pct=0xFF as "unknown/plugged in"
  * (docs/bramble-protocol-spec.md), emitted by main/mesh_beacon.c whenever
  * battery_beacon_pct() (components/battery, unit-tested in test_battery.c)
  * decides the node is confirmed charging. beacon_build itself has no

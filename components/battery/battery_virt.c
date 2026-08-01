@@ -1,17 +1,17 @@
 /*
  * battery_virt: the emulator's virtual battery. It implements the battery.h
  * contract for the host (IDF linux target and the plain-gcc harness) by
- * serving the last VBAT millivolts (and, as of wave 2, charging state)
- * delivered over emu-link as a `batt` message. Before the first `batt`
- * arrives it reports a sane full-ish value (4000 mV) so a node that reads
- * the battery at boot never sees 0.
+ * serving the last VBAT millivolts (and charging state) delivered over
+ * emu-link as a `batt` message. Before the first `batt` arrives it reports
+ * a sane full-ish value (4000 mV) so a node that reads the battery at
+ * boot never sees 0.
  *
  * `batt` message fields: "mv" (required, number), "charging" (optional
  * bool). charging:true maps to BATTERY_CHG_YES, charging:false to
  * BATTERY_CHG_NO, and an absent field to BATTERY_CHG_UNKNOWN (also the
- * default before the first message, and what any pre-wave-2 scenario
- * script that never sends "charging" gets). The emulated node always
- * reports present=true: emu-link is its battery hardware.
+ * default before the first message, and what any scenario script that
+ * never sends "charging" gets). The emulated node always reports
+ * present=true: emu-link is its battery hardware.
  *
  * Thread-safety: the batt handler runs on emu_link's reader thread while
  * battery_get_status is called from firmware tasks. Plain scalars are
