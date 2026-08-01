@@ -8,12 +8,13 @@ and the platform seams are shimmed (`shim/`).
 The port landed in phases, and the measured tables below keep their phase
 labels: P0 protocol core on the dev kit, P1 LoRa radio, P2 BLE RPC + flash
 persistence, P3 GNSS (below). Power management has since landed too: WFE
-idle-sleep in the idle task, corrected HFXO ownership (BLE releases the
-crystal instead of holding it across every idle period), and real battery
-telemetry on the T1000-E (SAADC + charge/VBUS detect,
-`nrf/shim/battery_saadc.c`). What remains is bench verification against
-real hardware (overnight drain bound, current-draw measurement), not
-implementation.
+idle-sleep in the idle task, a corrected account of HFXO ownership
+(NimBLE's rfmgmt always cycled the crystal; what landed here is the boot
+path stopping it after LFCLK bring-up, plus the anomaly-192 workaround in
+the RC fallback), and real battery telemetry on the T1000-E (SAADC +
+charge/VBUS detect, `nrf/shim/battery_saadc.c`). What remains is bench
+verification against real hardware (overnight drain bound, current-draw
+measurement), not implementation.
 
 Status, stated per the repo's honesty conventions: builds, boots, and runs
 as a live peer on the bench mesh from the Wio-WM1110 dev kit, with the
