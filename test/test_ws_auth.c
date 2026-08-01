@@ -79,6 +79,10 @@ void test_unauth_denies_get_messages(void) {
     TEST_ASSERT_FALSE(rpc_auth_method_allowed("bramble.getMessages", false));
 }
 
+void test_unauth_denies_set_wifi_config(void) {
+    TEST_ASSERT_FALSE(rpc_auth_method_allowed("bramble.setWifiConfig", false));
+}
+
 void test_unauth_denies_unknown_method(void) {
     TEST_ASSERT_FALSE(rpc_auth_method_allowed("bramble.doesNotExist", false));
 }
@@ -174,6 +178,7 @@ int main(void) {
     RUN_TEST(test_unauth_denies_set_auth_token);
     RUN_TEST(test_unauth_denies_ota_update);
     RUN_TEST(test_unauth_denies_get_messages);
+    RUN_TEST(test_unauth_denies_set_wifi_config);
     RUN_TEST(test_unauth_denies_unknown_method);
     RUN_TEST(test_unauth_denies_prefix_lookalike);
     RUN_TEST(test_unauth_denies_null_method);
