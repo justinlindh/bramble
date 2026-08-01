@@ -9,13 +9,25 @@ extern uint32_t SystemCoreClock;
 #define configUSE_PREEMPTION 1
 #define configUSE_PORT_OPTIMISED_TASK_SELECTION 1
 // Deliberately off this wave (wave 2 power work), not a placeholder for a
-// P3 flag: tickless idle would interact with NimBLE's timing, which drives
-// its own HFXO/radio scheduling off the steady tick (see
-// nrf/src/nimble_glue.c), and the 1ms tick keeps the mesh loop's timing
-// assumptions simple. The CPU still sleeps between ticks today via WFE
-// (vApplicationIdleHook, main_nrf.c); tickless would extend that to sleeping
-// across multiple ticks. Revisit once the mesh loop becomes event-driven
-// instead of tick-polled.
+// P3 flag: tickless idle is unverified on this port, and this project's own
+// mesh loop assumes a steady 1ms tick. NimBLE's host stack schedules its
+// own timers (connection/GAP/SM timeouts) as FreeRTOS software timers,
+// tick-driven by design (npl_freertos_callout_reset's xTimerChangePeriod,
+// porting/npl/freertos/src/npl_os_freertos.c in the fetched nimble source),
+// and this project has not checked that those correctly resync after a
+// tickless sleep. Radio/link-layer timing is unaffected either way: NimBLE's
+// controller schedules radio events off os_cputime (ble_ll_tmr_get/start in
+// nimble/controller/include/controller/ble_ll_tmr.h, called from
+// nimble/controller/src/ble_ll_sched.c), which on this build is backed by
+// hardware RTC0, not SysTick (MYNEWT_VAL(OS_CPUTIME_TIMER_NUM) is 5 in
+// nrf/config/nimble/syscfg/syscfg.h, and case 5 in
+// porting/nimble/src/hal_timer.c maps to NRF_RTC0/RTC0_IRQn); tickless idle
+// only reprograms SysTick, so it could only ever affect the host stack's own
+// timers and this project's mesh loop, never radio timing. The CPU still
+// sleeps between ticks today via WFE (vApplicationIdleHook, main_nrf.c);
+// tickless would extend that to sleeping across multiple ticks. Revisit
+// once the mesh loop becomes event-driven instead of tick-polled, and
+// verify NimBLE's host timers resync correctly before flipping this on.
 #define configUSE_TICKLESS_IDLE 0
 #define configCPU_CLOCK_HZ (SystemCoreClock)
 #define configTICK_RATE_HZ ((TickType_t)1000)
