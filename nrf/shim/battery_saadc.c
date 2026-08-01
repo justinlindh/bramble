@@ -224,4 +224,10 @@ void battery_get_status(battery_status_t* out) {
      * T-Deck, so it gets the same YES/0xFF treatment here. */
     bool vbus_present = nrf_gpio_pin_read(BOARD_PIN_VBUS_DETECT) != 0;
     out->charging = (chrg == BATTERY_CHG_YES || vbus_present) ? BATTERY_CHG_YES : BATTERY_CHG_NO;
+
+    /* No-op here (this board's charge/VBUS pins mean the verdict above is
+     * already YES or NO, never UNKNOWN), but run through the shared
+     * voltage-inference step anyway so every battery_get_status
+     * implementation funnels through the same decision. */
+    out->charging = battery_infer_charging(out->charging, out->mv);
 }

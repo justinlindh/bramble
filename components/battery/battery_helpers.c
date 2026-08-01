@@ -29,6 +29,12 @@ battery_charging_t battery_charging_from_gpio(int chrg_gpio, int chrg_active_lev
     return (level == chrg_active_level) ? BATTERY_CHG_YES : BATTERY_CHG_NO;
 }
 
+battery_charging_t battery_infer_charging(battery_charging_t pin_verdict, uint32_t mv) {
+    if (pin_verdict != BATTERY_CHG_UNKNOWN)
+        return pin_verdict;
+    return (mv >= BATTERY_MV_CHARGER_RAIL_MIN) ? BATTERY_CHG_YES : BATTERY_CHG_UNKNOWN;
+}
+
 bool battery_reading_available(const battery_status_t* status) {
     return status && status->present && status->mv != 0;
 }

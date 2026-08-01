@@ -110,6 +110,46 @@ void test_charging_from_gpio_matches_active_level(void) {
     TEST_ASSERT_EQUAL_INT(BATTERY_CHG_NO, battery_charging_from_gpio(5, 1, 0));
 }
 
+/* ── battery_infer_charging ─────────────────────────────────── */
+
+/* Bench-measured T-Deck plugged rail range is 4542-4798 mV; 4500 sits
+ * comfortably inside it as a representative "obviously plugged" reading. */
+void test_infer_charging_unknown_upgrades_to_yes_above_threshold(void) {
+    TEST_ASSERT_EQUAL_INT(BATTERY_CHG_YES, battery_infer_charging(BATTERY_CHG_UNKNOWN, 4500));
+}
+
+/* 4200 mV is a real 1S cell's own physical ceiling: a healthy, fully
+ * charged, UNPLUGGED cell can read this high, so it must not infer
+ * charging. */
+void test_infer_charging_unknown_stays_unknown_at_cell_ceiling(void) {
+    TEST_ASSERT_EQUAL_INT(BATTERY_CHG_UNKNOWN, battery_infer_charging(BATTERY_CHG_UNKNOWN, 4200));
+}
+
+/* Threshold boundary: exactly at BATTERY_MV_CHARGER_RAIL_MIN infers YES
+ * (>=), one below does not. */
+void test_infer_charging_threshold_boundary(void) {
+    TEST_ASSERT_EQUAL_INT(
+        BATTERY_CHG_UNKNOWN,
+        battery_infer_charging(BATTERY_CHG_UNKNOWN, BATTERY_MV_CHARGER_RAIL_MIN - 1));
+    TEST_ASSERT_EQUAL_INT(BATTERY_CHG_YES,
+                          battery_infer_charging(BATTERY_CHG_UNKNOWN, BATTERY_MV_CHARGER_RAIL_MIN));
+}
+
+/* Hardware truth always wins: a pin-based NO at a voltage that would
+ * otherwise infer charging is not second-guessed. A charge-status pin
+ * reading NO at 4500 mV is not physically expected, but if it happens,
+ * pins still win over an inference the pin itself contradicts. */
+void test_infer_charging_never_overrides_pin_no(void) {
+    TEST_ASSERT_EQUAL_INT(BATTERY_CHG_NO, battery_infer_charging(BATTERY_CHG_NO, 4500));
+}
+
+/* Hardware truth always wins the other direction too: a pin-based YES at
+ * a low voltage (e.g. a charge-complete pin still asserted near a full
+ * but unplugged-adjacent cell) is not downgraded. */
+void test_infer_charging_never_overrides_pin_yes(void) {
+    TEST_ASSERT_EQUAL_INT(BATTERY_CHG_YES, battery_infer_charging(BATTERY_CHG_YES, 3700));
+}
+
 /* ── battery_reading_available ───────────────────────────────── */
 
 void test_reading_available_true_when_present_and_nonzero_mv(void) {
@@ -164,6 +204,18 @@ void test_beacon_pct_emits_sentinel_when_battery_not_present(void) {
     TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_UNKNOWN, 0, false));
     TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_NO, 0, false));
     TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(BATTERY_CHG_YES, 0, false));
+}
+
+/* End-to-end regression for a plugged pinless board (the T-Deck): no
+ * charge-detect pin (charging starts UNKNOWN), a rail reading well above
+ * BATTERY_MV_CHARGER_RAIL_MIN, battery_infer_charging upgrades it to YES
+ * exactly as battery_get_status now does, and that YES must still drive
+ * battery_beacon_pct to the wire sentinel like a real charge-detect pin
+ * would. */
+void test_beacon_pct_emits_sentinel_for_voltage_inferred_charging(void) {
+    battery_charging_t charging = battery_infer_charging(BATTERY_CHG_UNKNOWN, 4700);
+    TEST_ASSERT_EQUAL_INT(BATTERY_CHG_YES, charging);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, battery_beacon_pct(charging, battery_mv_to_pct(4700), true));
 }
 
 /* ── battery_display_pct_ema ────────────────────────────────── */
@@ -277,6 +329,12 @@ int main(void) {
     RUN_TEST(test_charging_from_gpio_unwired_is_always_unknown);
     RUN_TEST(test_charging_from_gpio_matches_active_level);
 
+    RUN_TEST(test_infer_charging_unknown_upgrades_to_yes_above_threshold);
+    RUN_TEST(test_infer_charging_unknown_stays_unknown_at_cell_ceiling);
+    RUN_TEST(test_infer_charging_threshold_boundary);
+    RUN_TEST(test_infer_charging_never_overrides_pin_no);
+    RUN_TEST(test_infer_charging_never_overrides_pin_yes);
+
     RUN_TEST(test_reading_available_true_when_present_and_nonzero_mv);
     RUN_TEST(test_reading_available_false_when_present_but_all_samples_failed);
     RUN_TEST(test_reading_available_false_when_not_present);
@@ -285,6 +343,7 @@ int main(void) {
     RUN_TEST(test_beacon_pct_emits_sentinel_only_when_confirmed_charging);
     RUN_TEST(test_beacon_pct_emits_sentinel_when_battery_not_present);
     RUN_TEST(test_beacon_pct_emits_sentinel_when_all_samples_failed_despite_present);
+    RUN_TEST(test_beacon_pct_emits_sentinel_for_voltage_inferred_charging);
 
     RUN_TEST(test_display_pct_ema_first_call_snaps_to_raw);
     RUN_TEST(test_display_pct_ema_null_state_returns_raw_unsmoothed);

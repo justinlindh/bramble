@@ -151,4 +151,11 @@ void battery_get_status(battery_status_t* out) {
     } else {
         out->charging = BATTERY_CHG_UNKNOWN;
     }
+
+    /* No ESP board has a charge-detect pin wired today, so every one of
+     * them relies on this: a rail reading that a bare cell physically
+     * cannot produce (the T-Deck's charge rail clamps to ~4542-4798 mV,
+     * see BATTERY_MV_CHARGER_RAIL_MIN) is voltage-inferred as charging.
+     * A no-op wherever the pin logic above already reached YES or NO. */
+    out->charging = battery_infer_charging(out->charging, out->mv);
 }

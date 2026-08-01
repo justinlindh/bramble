@@ -1593,7 +1593,7 @@ export interface components {
             /** @description Estimated battery charge percentage. While charging is "yes" this is not meaningful; see charging. */
             battery_pct: number;
             /**
-             * @description Hardware-informed charging state. "unknown" covers every case the backend cannot determine a real charging state for: no charge-detect pin wired (every ESP board today, and the nRF dev kit; the T1000-E has one), the battery backend failed to initialize, or (emulator only) the emu-link batt message omitted its optional charging field. "yes" means a charger is currently driving the battery rail, which includes a charger left connected after the cell reads full, not strictly "current is flowing into the cell right now".
+             * @description Hardware-informed or voltage-inferred charging state. "unknown" covers every case the backend cannot determine a real charging state for: no charge-detect pin AND a voltage below the inference threshold, the battery backend failed to initialize, or (emulator only) the emu-link batt message omitted its optional charging field. "yes" means a charger is currently driving the battery rail, which includes a charger left connected after the cell reads full, not strictly "current is flowing into the cell right now"; boards with a charge-detect pin (currently only the T1000-E) report this from hardware, every other board infers it once voltage_mv is high enough that a real cell could not have produced it on its own (see BATTERY_MV_CHARGER_RAIL_MIN in components/battery/include/battery.h).
              * @enum {string}
              */
             charging?: "unknown" | "no" | "yes";
@@ -2331,7 +2331,7 @@ export interface components {
             /** @description Estimated battery charge percentage (0-100), derived from voltage_mv. While charging is "yes" this is not meaningful (the charge rail's voltage does not reflect the cell); treat it as unknown rather than a real level in that case. */
             percentage: number;
             /**
-             * @description Hardware-informed charging state. "unknown" covers every case the backend cannot determine a real charging state for: no charge-detect pin wired (every ESP board today, and the nRF dev kit; the T1000-E has one), the battery backend failed to initialize, or (emulator only) the emu-link batt message omitted its optional charging field. "yes" means a charger is currently driving the battery rail, which includes a charger left connected after the cell reads full, not strictly "current is flowing into the cell right now".
+             * @description Hardware-informed or voltage-inferred charging state. "unknown" covers every case the backend cannot determine a real charging state for: no charge-detect pin AND a voltage below the inference threshold, the battery backend failed to initialize, or (emulator only) the emu-link batt message omitted its optional charging field. "yes" means a charger is currently driving the battery rail, which includes a charger left connected after the cell reads full, not strictly "current is flowing into the cell right now"; boards with a charge-detect pin (currently only the T1000-E) report this from hardware, every other board infers it once voltage_mv is high enough that a real cell could not have produced it on its own (see BATTERY_MV_CHARGER_RAIL_MIN in components/battery/include/battery.h).
              * @enum {string}
              */
             charging?: "unknown" | "no" | "yes";

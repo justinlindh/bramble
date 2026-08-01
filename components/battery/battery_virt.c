@@ -60,7 +60,11 @@ void battery_init(void) { emu_link_on("batt", batt_handler, NULL); }
 void battery_get_status(battery_status_t* out) {
     out->mv = atomic_load(&s_mv);
     out->pct = battery_mv_to_pct(out->mv);
-    out->charging = (battery_charging_t)atomic_load(&s_charging);
+    /* Runs the same voltage-inference step every real backend does, so a
+     * scenario script that sends a high mv without an explicit "charging"
+     * field behaves like a real pinless board instead of silently staying
+     * UNKNOWN just because the emulator happens to have no pins to omit. */
+    out->charging = battery_infer_charging((battery_charging_t)atomic_load(&s_charging), out->mv);
     out->present = true;
 }
 

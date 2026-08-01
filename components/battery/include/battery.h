@@ -120,6 +120,33 @@ uint32_t battery_average_mv(const uint32_t* samples, const bool* valid, size_t c
  */
 battery_charging_t battery_charging_from_gpio(int chrg_gpio, int chrg_active_level, int level);
 
+/* Averaged mv at/above which the rail can only mean a charger is actively
+ * driving it, for boards with no charge-detect pin (battery_infer_charging
+ * below). Evidence class: bench-measured, T-Deck replug trace, 2026-08-01
+ * (Alice). A 1S Li-ion/LiPo cell's own chemistry caps it at 4200 mV, so
+ * anything meaningfully above that on the sense pin is not the cell; the
+ * same trace's plugged rail measured 4542-4798 mV across every capture on
+ * that board. 4350 mV sits with margin above the cell's physical ceiling
+ * (room for ADC/divider tolerance without a false positive on a genuinely
+ * full, unplugged cell) and margin below the lowest observed plugged
+ * reading (room for a weaker charger or higher-drop divider without a
+ * false negative). */
+#define BATTERY_MV_CHARGER_RAIL_MIN 4350u
+
+/**
+ * Upgrades a pin-based charging verdict using voltage alone, for the many
+ * boards with no charge-detect pin wired: an averaged mv at or above
+ * BATTERY_MV_CHARGER_RAIL_MIN is voltage a real cell cannot produce on its
+ * own (see BATTERY_MV_CHARGER_RAIL_MIN's derivation), so it is a
+ * false-positive-proof charging signal even without hardware charge
+ * detection. Only ever upgrades BATTERY_CHG_UNKNOWN to YES; a pin-based
+ * YES or NO passes through unchanged; hardware truth always wins when it
+ * exists (a pin verdict of NO at high voltage is not physically expected
+ * for a charging-status pin, and this function does not second-guess it).
+ * Pure function: host-testable in isolation.
+ */
+battery_charging_t battery_infer_charging(battery_charging_t pin_verdict, uint32_t mv);
+
 /**
  * Maps a status to the wire-level beacon battery_pct byte: 0xFF is the
  * protocol's documented "unknown/plugged in" sentinel

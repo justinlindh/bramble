@@ -7,7 +7,8 @@
  * Whitebox tests for battery_virt (the charging-aware emu-link battery).
  * Plays the broker over a socketpair (same pattern as test_radio_virt.c /
  * test_gps_virt.c) and drives battery_virt through the real battery.h
- * surface (battery_get_status). emu_link.c and battery_virt.c are both
+ * surface (battery_get_status). emu_link.c, battery_virt.c, and
+ * battery_helpers.c (battery_virt.c calls battery_infer_charging) are all
  * #included directly into this one translation unit so the test can attach
  * a socketpair via emu_link's internal emu_link_attach() double.
  */
@@ -15,6 +16,7 @@
 
 #include "../components/emu_link/emu_link.c"
 #include "../components/battery/battery_pct.c"
+#include "../components/battery/battery_helpers.c"
 #include "../components/battery/battery_virt.c"
 
 #include <stdbool.h>
