@@ -7,8 +7,11 @@
  *     handlers at runtime, so the vector table entries trampoline through
  *     function pointers. (The RIOT port does the same; the FreeRTOS port
  *     ships no implementation at all.)
- *  2. nrf52_clock_hfxo_request/release: the PHY ramps the 32MHz crystal
- *     around radio events. Refcounted because TX and RX paths both ask.
+ *  2. nrf52_clock_hfxo_request/release: declared for NimBLE's nrf5x PHY but
+ *     dead code on this port, since that PHY only calls them under
+ *     MYNEWT/RIOT_VERSION/PEBBLEOS, none of which this FreeRTOS build
+ *     defines; see the comment above their definitions for what actually
+ *     cycles the crystal here.
  *  3. LFCLK startup: RTC0 (the controller's 32768Hz time base) does not run
  *     without it, and nothing else on this target starts it. Crystal first,
  *     RC as a fallback, and the caller learns which so BLE_LL_SCA can be
@@ -77,35 +80,33 @@ void npl_freertos_hw_set_isr(int irqn, void (*addr)(void)) {
 /*  High-frequency crystal                                             */
 /* ------------------------------------------------------------------ */
 
-/* The radio needs the crystal's accuracy: a caller that proceeds on the
- * internal RC oscillator transmits slightly off-frequency and misses tight
- * receive windows (advertising survives that, catching a CONNECT_IND 150us
- * after an advertisement does not, which reads as "visible in every scan,
- * never connectable").
+/* Vestigial in this build. NimBLE's nrf5x PHY (nimble/drivers/nrf5x/src/
+ * ble_phy.c, ble_phy_rfclk_enable/disable) only calls these two functions
+ * under `#if MYNEWT || defined(RIOT_VERSION) || defined(PEBBLEOS)`; none of
+ * those are defined for this FreeRTOS/ESP-IDF-shim port, so the compiler
+ * takes the #else arm instead: a direct `nrf_clock_task_trigger(NRF_CLOCK,
+ * NRF_CLOCK_TASK_HFCLKSTART)` / `..._HFCLKSTOP`. Confirmed by disassembling
+ * the shipped ELF: ble_phy_rfclk_enable/disable are four instructions each,
+ * a single register store to the CLOCK peripheral base, no `bl` into this
+ * file at all.
  *
- * So the crystal is started once, at BLE bring-up, and left running: this
- * function is called from the link layer's ISR on every radio event, and
- * spinning there for the ~360us startup starves every task in the system
- * (measured: the mesh stopped draining its receive queue and the heartbeat
- * task stopped entirely within seconds). Keeping HFXO on costs idle current,
- * which is P3's problem to solve with a proper power model, not something to
- * buy here with a busy-wait in an interrupt.
+ * The real owner of HFXO cycling on this port is therefore unmodified
+ * upstream NimBLE: nimble/controller/src/ble_ll_rfmgmt.c already requests
+ * the crystal MYNEWT_VAL_BLE_LL_RFMGMT_ENABLE_TIME (1500us, see
+ * nrf/config/nimble/syscfg/syscfg.h) ahead of each radio event and stops it
+ * afterward, through those same raw ble_phy_rfclk_* writes. HFXO already
+ * cycles off between BLE events without anything in this file, and that
+ * was true before the HFXO-release task that added this comment, not
+ * something the task delivered.
  *
- * There is deliberately no refcount. Nothing stops the crystal, so a count
- * would have no reader, and maintaining one meant masking interrupts inside
- * a function the link layer calls from its ISR on every radio event. Both
- * register writes below are idempotent, so two contexts repeating them race
- * harmlessly.
- *
- * Honest caveat for whoever owns the power model (P3): leaving HFXO on costs
- * roughly 460uA continuously, and the "we would have to spin in an ISR"
- * argument does not actually justify keeping it that way. NimBLE's rfclk
- * management requests the clock BLE_LL_RFMGMT_ENABLE_TIME (1500us) ahead of
- * a radio event, which is over four times the ~360us startup, so a real
- * release path would have time to start it without any spin. That work needs
- * a power model and bench measurement, which is why it is not being done
- * here, but the reason to revisit is stronger than this comment first
- * implied.
+ * These two functions are kept as an integration point for a MYNEWT/RIOT/
+ * PEBBLEOS build variant, or for a second HFXO consumer other than the
+ * radio if one ever appears on this port (SAADC does not need HFXO for its
+ * own conversions; there is no USBD on this target, which would). If
+ * either shows up, ble_phy_rfclk_enable/disable need a one-line patch in
+ * nrf/patches/ to route through these functions instead of the raw
+ * register writes, the same mechanism already used for
+ * nimble-isr-safe-critical.patch and nimble-dup-pdu-during-enc-start.patch.
  */
 void nrf52_clock_hfxo_request(void) {
     if (!nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
@@ -115,35 +116,53 @@ void nrf52_clock_hfxo_request(void) {
 }
 
 void nrf52_clock_hfxo_release(void) {
-    /* Deliberately does NOT stop the crystal; see the request path. */
+    /* Deliberately does NOT stop the crystal. With no live caller in this
+     * build there is no real usage pattern to refcount against; inventing
+     * one here would be guessing at semantics a future real caller should
+     * define instead. */
 }
 
 /* ------------------------------------------------------------------ */
 /*  Low-frequency clock                                                */
 /* ------------------------------------------------------------------ */
 
+/* nRF52 anomaly 192: LFRC calibration produces a frequency error above the
+ * datasheet's specified 500ppm without this undocumented-register write.
+ * No symbolic name for it exists in the public nRF52 SVD/HAL; nrfx's own
+ * driver pokes the same raw address (drivers/src/nrfx_clock.c:514,722),
+ * which is not linked into this target (this file calls the HAL directly
+ * instead), so the workaround has to be repeated here by hand. */
+#define NRF52_ANOMALY_192_REG ((volatile uint32_t*)0x40000C34)
+
 bool nimble_glue_start_lfclk(void) {
-    /* The high-frequency crystal goes first, and above the low-frequency
-     * early return below rather than after it. Waiting for HFXO is only safe
-     * in task context, and this is the one place that runs there; if the
-     * low-frequency clock happens to be up already (a reset that leaves CLOCK
-     * configured), returning early would leave the crystal to
-     * nrf52_clock_hfxo_request, which the radio ISR calls and which
-     * deliberately does not wait. The first radio events would then run on
-     * the RC oscillator, which is exactly the "visible in every scan, never
-     * connectable" failure described above.
+    /* This still blocks on HFXO directly, not through
+     * nrf52_clock_hfxo_request (dead code on this port; see above),
+     * because task context is the one safe place in the boot path to spin,
+     * and LFCLK bring-up needs HFXO itself for the RC-calibration branch
+     * below. It is a local, single-owner start/stop scoped to this
+     * function's own window: nothing else here depends on the crystal, so
+     * there is nothing to refcount, only start-before-use and
+     * stop-after-use on every exit path.
+     *
+     * Stopping HFXO before returning (this function used to leave it
+     * running) shrinks the boot-time window it is on for no reason: with
+     * HFXO cycling already owned by NimBLE's rfmgmt (see above), the gap
+     * this closes is only between LFCLK bring-up finishing and rfmgmt's
+     * own first enable/release cycle, which can be well after boot and
+     * long before any radio activity actually needs the crystal. Once BLE
+     * activity starts, rfmgmt owns cycling exactly as it always has.
      */
-    if (!nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
-        nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
-        nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTART);
-        while (!nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
-        }
+    nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
+    nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTART);
+    while (!nrf_clock_hf_is_running(NRF_CLOCK, NRF_CLOCK_HFCLK_HIGH_ACCURACY)) {
     }
 
     boot_trace_mark(BT_HFXO_OK, 0);
 
     if (nrf_clock_lf_is_running(NRF_CLOCK)) {
-        return nrf_clock_lf_actv_src_get(NRF_CLOCK) == NRF_CLOCK_LFCLK_XTAL;
+        bool xtal = nrf_clock_lf_actv_src_get(NRF_CLOCK) == NRF_CLOCK_LFCLK_XTAL;
+        nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTOP);
+        return xtal;
     }
 
     nrf_clock_lf_src_set(NRF_CLOCK, NRF_CLOCK_LFCLK_XTAL);
@@ -155,6 +174,7 @@ bool nimble_glue_start_lfclk(void) {
     for (int i = 0; i < 1000000; i++) {
         if (nrf_clock_event_check(NRF_CLOCK, NRF_CLOCK_EVENT_LFCLKSTARTED)) {
             ESP_LOGI(TAG, "LFCLK running on the 32.768kHz crystal");
+            nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTOP);
             return true;
         }
     }
@@ -165,8 +185,74 @@ bool nimble_glue_start_lfclk(void) {
     nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_LFCLKSTART);
     while (!nrf_clock_event_check(NRF_CLOCK, NRF_CLOCK_EVENT_LFCLKSTARTED)) {
     }
-    /* The RC source needs periodic calibration to hold its accuracy. */
+
+    /* The RC source needs calibration against HFCLK to hold its accuracy,
+     * which is the one real dependency this function has on HFXO: the
+     * calibration task requires the high-accuracy HFCLK running for its
+     * duration. The wait below is bounded rather than an unconditional
+     * spin: if calibration does not complete, boot proceeds with an
+     * uncalibrated RC oscillator rather than hanging forever.
+     * MYNEWT_VAL_BLE_LL_SCA (nrf/config/nimble/syscfg/syscfg.h) is a fixed
+     * 250ppm figure chosen for a calibrated RC fallback; an uncalibrated
+     * LFRC can drift past that, and the link layer has no runtime signal
+     * to learn it did not get calibrated, so the honest consequence of
+     * hitting this fallback is a higher risk of missed connection events
+     * until the next periodic recalibration. The 1000000-iteration bound
+     * reuses the same unscaled loop budget as the crystal-detection wait
+     * above rather than a datasheet CAL-duration figure; no such figure was
+     * looked up for this bound; it is a generous margin, not a measurement.
+     */
+    nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_DONE);
+    *NRF52_ANOMALY_192_REG = 0x00000002;
     nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_CAL);
+    bool calibrated = false;
+    for (int i = 0; i < 1000000; i++) {
+        if (nrf_clock_event_check(NRF_CLOCK, NRF_CLOCK_EVENT_DONE)) {
+            calibrated = true;
+            break;
+        }
+    }
+    nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_DONE);
+    *NRF52_ANOMALY_192_REG = 0x00000000;
+    if (!calibrated) {
+        ESP_LOGW(TAG, "LFRC calibration did not complete, proceeding uncalibrated");
+    }
+
+    nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTOP);
     ESP_LOGW(TAG, "no 32.768kHz crystal, LFCLK running on the RC oscillator");
     return false;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Audit: other HFCLK/HFXO touchers in nrf/                           */
+/* ------------------------------------------------------------------ */
+
+/* This file, including this function's own local start/stop above, is the
+ * only place in nrf/ that touches the CLOCK peripheral's HFCLK tasks or
+ * events; grepping the tree for HFCLK/hfxo/HFXO outside this file and its
+ * header turns up nothing else. Peripherals were checked against HFXO
+ * cycling on and off between BLE events, which NimBLE's rfmgmt already did
+ * before this file changed (see above):
+ *
+ *  - Console UARTE (nrf/shim/console_uart.c): non-RADIO peripherals derive
+ *    their PCLK from whichever HFCLK source is currently active: HFINT
+ *    (the internal RC oscillator) whenever HFXO is stopped, which per
+ *    rfmgmt is most of the time BLE is idle. 115200 8n1 needs combined
+ *    transmit/receive clock accuracy within roughly 2 percent. The nRF52840
+ *    Product Specification lists HFINT's fTOL_HFINT as +/-1.5 percent
+ *    typical but +/-8 percent at the guaranteed max corner, four times over
+ *    that budget: the typical corner stays in budget on HFINT with no code
+ *    change, the guaranteed-max corner does not, and nothing here has
+ *    measured which corner the devkit's part actually sits at. Bench
+ *    verification of console integrity under real HFXO cycling is Task 8's
+ *    job, not this comment's.
+ *  - SAADC (battery voltage sampling, not yet implemented: a later task in
+ *    this same power/battery spec): n/a, does not exist in this tree yet,
+ *    and does not need HFXO for its own conversion timing when it lands.
+ *  - SPIM2 (the LR1110 radio's SPI bus, nrf/src/lr11xx_hal_nrf.c, 8MHz):
+ *    same as UARTE, HFCLK-domain-sourced from whichever source is active
+ *    rather than requiring HFXO specifically, so unaffected by HFXO
+ *    cycling on/off the same way UARTE is. There is no USBD instance on
+ *    this target (USBD does require HFXO); that only matters the day this
+ *    target grows a USB peripheral.
+ */

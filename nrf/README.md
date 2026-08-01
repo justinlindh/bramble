@@ -7,7 +7,9 @@ and the platform seams are shimmed (`shim/`).
 
 The port landed in phases, and the measured tables below keep their phase
 labels: P0 protocol core on the dev kit, P1 LoRa radio, P2 BLE RPC + flash
-persistence, P3 GNSS (below; power management within P3 not yet started).
+persistence, P3 GNSS (below; power management is a separate, in-progress
+pass across CPU idle sleep and HFXO clock handling, see the GNSS section
+for the current state and what is still bench-pending).
 
 Status, stated per the repo's honesty conventions: builds, boots, and runs
 as a live peer on the bench mesh from the Wio-WM1110 dev kit, with the
@@ -43,9 +45,29 @@ a UART.
 
 GNSS (P3) is implemented for the AG3335 module (see below) and bench-verified
 on the physical T1000-E, 2026-07-31 (see the GNSS section for what was
-checked). Still absent: power management (P3, the 32MHz crystal stays on, so
-battery life is untuned) and outdoor cold-start TTFF, which the bench pass
-did not measure. Not a supported device yet.
+checked).
+
+Power management, corrected from an earlier version of this README that
+claimed the 32MHz crystal (HFXO) stays on continuously: it does not, and
+never did on this port. NimBLE's link-layer rfmgmt (upstream, unmodified)
+already duty-cycles HFXO off between BLE events, requesting it 1500us
+ahead of each radio event, through direct CLOCK-peripheral register writes
+(source-verified: `nimble/controller/src/ble_ll_rfmgmt.c`; binary-verified
+by disassembling the shipped ELF, where `ble_phy_rfclk_enable/disable` are
+raw register stores, not calls into this project's own glue code in
+`src/nimble_glue.c`, which is vestigial on this FreeRTOS build). What this
+project's own power work has changed: the CPU's idle task now sleeps via
+WFE instead of busy-spinning at 64MHz (binary-verified against the fetched
+FreeRTOS kernel source), the boot path now stops HFXO once LFCLK bring-up
+finishes instead of leaving it on until BLE's first natural duty cycle,
+and nRF52840 anomaly 192 (LFRC calibration frequency error) is now worked
+around in the RC-oscillator fallback path (both source-verified against
+Nordic's documented errata and nrfx's own reference implementation, not
+yet bench-tested since every board on the bench fleet has a 32.768kHz
+crystal fitted, so that fallback path never runs). Bench-pending: overall
+current draw under real BLE activity and idle, and outdoor cold-start
+TTFF, which the GNSS bench pass did not measure. Not a supported device
+yet.
 
 ## Build
 
@@ -226,9 +248,11 @@ went out and waking it again at `last_send + interval - GPS_DUTY_WARM_MARGIN_S`,
 matching the policy. A 45-minute soak ran with a byte-stable heap, mesh RX
 observed every minute, and zero stream-buffer overruns throughout.
 
-Still unverified: power management and current draw (the next work, see
-above), outdoor cold-start TTFF, and reacquisition after a multi-hour park
-where ephemeris has gone stale. Airoha's published AG3335 chip
+Still bench-pending: overall current draw under real duty cycling (see the
+power-management note above for what has landed source- and
+binary-verified versus what still needs a bench), outdoor cold-start TTFF,
+and reacquisition after a multi-hour park where ephemeris has gone stale.
+Airoha's published AG3335 chip
 specification states a cold-start time to first fix under 25 seconds and a
 tracking sensitivity of -167 dBm; Airoha does not publish current
 consumption figures for the chip, so none are cited here.
