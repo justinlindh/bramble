@@ -2209,8 +2209,8 @@ target_include_directories(test_gps_virt PRIVATE
 )
 target_link_libraries(test_gps_virt pthread)
 
-# Virtual battery driver: charging-aware emu-link mapping (wave 2; whitebox
-# include of battery_virt.c + battery_pct.c + emu_link.c)
+# Virtual battery driver: charging-aware emu-link mapping (whitebox include
+# of battery_virt.c + battery_pct.c + emu_link.c)
 add_executable(test_battery_virt
     test_battery_virt.c
     unity/unity.c
