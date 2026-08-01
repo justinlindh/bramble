@@ -1,8 +1,13 @@
 #include "unity.h"
 #include "board_config.h"
 #include "boards/heltec_v3.h"
+#include "boards/heltec_v4.h"
+#include "boards/tdeck_plus.h"
 #include "boards/bramble_pager.h"
 #include "boards/virtual_pager.h"
+#include "boards/virtual_heltec.h"
+#include "boards/wio_wm1110.h"
+#include "boards/t1000e.h"
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -107,10 +112,9 @@ void test_bramble_pager_profile_has_expected_peripheral_pins(void) {
     TEST_ASSERT_EQUAL_INT(0, cfg->battery.adc_channel);
     TEST_ASSERT_EQUAL_INT(2, cfg->battery.divider_factor);
 
-    /* No board has a charge-detect pin wired yet (wave 2): every profile
-     * ships {-1, 0, -1} explicitly, since the struct's designated
-     * initializers mean an omitted .charge would zero-init to
-     * {chrg_gpio=0, ...}, silently misreading GPIO0 as a charge pin. */
+    /* No board has a charge-detect pin wired yet (wave 2); see
+     * test_all_board_profiles_default_no_charge_pin below for the same
+     * assertion across every profile, not just this one. */
     TEST_ASSERT_EQUAL_INT(-1, cfg->charge.chrg_gpio);
     TEST_ASSERT_EQUAL_INT(0, cfg->charge.chrg_active_level);
     TEST_ASSERT_EQUAL_INT(-1, cfg->charge.vbus_gpio);
@@ -203,6 +207,27 @@ void test_virtual_pager_profile_matches_bramble_pager_pins(void) {
     TEST_ASSERT_EQUAL_INT(real->epd_display.busy, virt->epd_display.busy);
 }
 
+/*
+ * Wave 2: board_config.h's charge struct uses designated initializers, so
+ * a board profile that omitted .charge would silently zero-init to
+ * {chrg_gpio=0, chrg_active_level=0, vbus_gpio=0}, misreading GPIO0 as a
+ * wired charge-detect pin. No board has real pins today, so every one of
+ * the 8 profiles must ship the explicit "not wired" sentinel
+ * {-1, 0, -1}; this checks all of them, not just bramble_pager (which has
+ * its own copy above as part of its broader peripheral-pin contract).
+ */
+void test_all_board_profiles_default_no_charge_pin(void) {
+    const bramble_board_config_t* profiles[] = {
+        &board_heltec_v3,     &board_heltec_v4,      &board_tdeck_plus, &board_bramble_pager,
+        &board_virtual_pager, &board_virtual_heltec, &board_wio_wm1110, &board_t1000e,
+    };
+    for (size_t i = 0; i < sizeof(profiles) / sizeof(profiles[0]); i++) {
+        TEST_ASSERT_EQUAL_INT(-1, profiles[i]->charge.chrg_gpio);
+        TEST_ASSERT_EQUAL_INT(0, profiles[i]->charge.chrg_active_level);
+        TEST_ASSERT_EQUAL_INT(-1, profiles[i]->charge.vbus_gpio);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_heltec_v4_profile_identity_and_caps);
@@ -215,5 +240,6 @@ int main(void) {
     RUN_TEST(test_bramble_pager_profile_has_expected_peripheral_pins);
     RUN_TEST(test_virtual_pager_profile_has_bramble_pager_caps_plus_virtual_marker);
     RUN_TEST(test_virtual_pager_profile_matches_bramble_pager_pins);
+    RUN_TEST(test_all_board_profiles_default_no_charge_pin);
     return UNITY_END();
 }
