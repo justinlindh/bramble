@@ -31,8 +31,7 @@ void setUp(void) {
     s_broker_fd = -1;
     /* Reset battery_virt's module state between tests: no first-batt-
      * message-yet is the pre-init default (4000 mV, UNKNOWN). */
-    atomic_store(&s_mv, BATTERY_VIRT_DEFAULT_MV);
-    atomic_store(&s_charging, BATTERY_CHG_UNKNOWN);
+    atomic_store(&s_state, BATT_STATE_PACK(BATTERY_VIRT_DEFAULT_MV, BATTERY_CHG_UNKNOWN));
 }
 
 void tearDown(void) {
