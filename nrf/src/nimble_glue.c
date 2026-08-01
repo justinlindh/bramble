@@ -246,9 +246,10 @@ bool nimble_glue_start_lfclk(void) {
  *    measured which corner the devkit's part actually sits at. Bench
  *    verification of console integrity under real HFXO cycling is Task 8's
  *    job, not this comment's.
- *  - SAADC (battery voltage sampling, not yet implemented: a later task in
- *    this same power/battery spec): n/a, does not exist in this tree yet,
- *    and does not need HFXO for its own conversion timing when it lands.
+ *  - SAADC (battery voltage sampling, nrf/shim/battery_saadc.c, the
+ *    T1000-E's real ADC + charge-detect backend): does not need HFXO for
+ *    its own conversion timing, unaffected by HFXO cycling the same way
+ *    UARTE and SPIM2 below are.
  *  - SPIM2 (the LR1110 radio's SPI bus, nrf/src/lr11xx_hal_nrf.c, 8MHz):
  *    same as UARTE, HFCLK-domain-sourced from whichever source is active
  *    rather than requiring HFXO specifically, so unaffected by HFXO
