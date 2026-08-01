@@ -27,9 +27,11 @@ vi.mock('../../src/store/actions', () => ({
   showOnMap: vi.fn(),
 }));
 
-const polls: { fn: () => unknown; interval: number }[] = [];
+const polls: { fn: () => unknown; interval: number; enabled: boolean }[] = [];
 vi.mock('../../src/hooks/usePoll', () => ({
-  usePoll: (fn: () => unknown, interval: number) => { polls.push({ fn, interval }); },
+  usePoll: (fn: () => unknown, interval: number, options?: { enabled?: boolean }) => {
+    polls.push({ fn, interval, enabled: options?.enabled ?? true });
+  },
 }));
 
 vi.mock('../../src/pages/Nodes/RouteTable', () => ({
@@ -77,12 +79,12 @@ describe('Nodes refresh policy', () => {
     expect(loadNeighbors).toHaveBeenCalledTimes(1);
   });
 
-  it('gates every poll on connection state', async () => {
+  it('gates every poll on connection state', () => {
     state = baseState('disconnected');
     render(<Nodes />);
-    for (const p of polls) await p.fn();
-    expect(loadRoutes).not.toHaveBeenCalled();
-    expect(loadPeerLocations).not.toHaveBeenCalled();
+    // Both polls are registered but disabled, so usePoll skips their ticks
+    // rather than each caller wrapping the loader in a no-op.
+    expect(polls.map(p => p.enabled)).toEqual([false, false]);
     expect(loadNeighbors).not.toHaveBeenCalled();
   });
 });
