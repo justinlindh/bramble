@@ -71,6 +71,12 @@ static int g_token_rc;
 static char g_nvs_origins[256];
 static int g_reboot_calls;
 
+/* Controllable wifi_manager_nvs_set_creds result, from the shared strong
+ * override in stubs/wifi_manager_nvs_stub.c (see that file for why it is a
+ * separate translation unit rather than defined here alongside the rest of
+ * this suite's stubs). */
+extern int g_wifi_set_creds_rc;
+
 int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
     if (g_token_rc < 0)
         return g_token_rc;
@@ -213,6 +219,7 @@ void setUp(void) {
     g_nvs_origins[0] = '\0';
     g_reboot_calls = 0;
     g_now_us = 1000000;
+    g_wifi_set_creds_rc = 0;
 
     /* Reset the module's statics between tests. */
     s_client_count = 0;
@@ -787,6 +794,17 @@ void test_config_post_requires_an_ssid(void) {
     TEST_ASSERT_EQUAL(HTTPD_400_BAD_REQUEST, fake_last_http_resp()->err_code);
 }
 
+/* An NVS write failure must not claim success or reboot into whatever
+ * credentials (if any) were actually persisted. */
+void test_config_post_nvs_write_failure_does_not_reboot(void) {
+    g_wifi_set_creds_rc = -1;
+    TEST_ASSERT_EQUAL(ESP_FAIL,
+                      config_post("ssid=Home&pass=hunter2&token=" GOOD_TOKEN, NULL, NULL, NULL));
+    TEST_ASSERT_EQUAL(0, g_reboot_calls);
+    TEST_ASSERT_TRUE(fake_last_http_resp()->is_err);
+    TEST_ASSERT_EQUAL(HTTPD_500_INTERNAL_SERVER_ERROR, fake_last_http_resp()->err_code);
+}
+
 void test_config_post_with_an_empty_body_is_a_bad_request(void) {
     TEST_ASSERT_EQUAL(ESP_FAIL, config_post(NULL, NULL, NULL, NULL));
     TEST_ASSERT_EQUAL(0, g_reboot_calls);
@@ -863,6 +881,7 @@ int main(void) {
     RUN_TEST(test_config_post_from_a_foreign_origin_is_forbidden);
     RUN_TEST(test_config_post_with_a_valid_token_skips_the_csrf_gate);
     RUN_TEST(test_config_post_requires_an_ssid);
+    RUN_TEST(test_config_post_nvs_write_failure_does_not_reboot);
     RUN_TEST(test_config_post_with_an_empty_body_is_a_bad_request);
     RUN_TEST(test_configured_extra_origin_is_allowed_without_a_token);
 
