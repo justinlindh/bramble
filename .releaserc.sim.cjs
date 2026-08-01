@@ -16,21 +16,44 @@ const wrapped = {
   releaseNotesGenerator: require('@semantic-release/release-notes-generator'),
 };
 
+// THE RULE (audited 2026-08-01 alongside .releaserc.firmware.cjs, same
+// method: check what historical commits under each scope actually
+// touched): every scope whose commits change simulator/* releases sim.
+// `gosim` (simulator/gosim, the Go mesh engine) and `sim-ui` (simulator/ui,
+// its browser front end) are both used exclusively for work inside
+// simulator/, the exact directory tree this config releases, but neither
+// was in the original single-scope rule, so real simulator commits under
+// those names cut no sim release. Not added: `emulator`/`emu`/`emu_link`/
+// `emulator-qemu` (the IDF linux-target harness under emulator/, a
+// different directory with no release config of its own) and `reliability`
+// (its scope is dominated by firmware work; the rare commit that also
+// touches simulator/engine as a side effect does not warrant folding a
+// firmware-implementation scope into this config).
+const SIM_SCOPES = ['sim', 'gosim', 'sim-ui'];
+
+function releaseRulesFor(scopes) {
+  return scopes.flatMap((scope) => [
+    { breaking: true, scope, release: 'major' },
+    { revert: true, scope, release: 'patch' },
+    { type: 'feat', scope, release: 'minor' },
+    { type: 'fix', scope, release: 'patch' },
+    { type: 'perf', scope, release: 'patch' },
+  ]);
+}
+
+const scopeAlternation = SIM_SCOPES.join('|');
+
 module.exports = {
   branches: ['main'],
   tagFormat: 'sim-v${version}',
   plugins: [
     [squashExpander, {
       _wrapped: wrapped,
-      // Wrapped commit-analyzer options. Scope-gated: only commits scoped
-      // to sim release sim.
+      // Wrapped commit-analyzer options. Scope-gated: every scope in
+      // SIM_SCOPES releases sim; see the audit comment above.
       preset: 'conventionalcommits',
       releaseRules: [
-        { breaking: true, scope: 'sim', release: 'major' },
-        { revert: true, scope: 'sim', release: 'patch' },
-        { type: 'feat', scope: 'sim', release: 'minor' },
-        { type: 'fix', scope: 'sim', release: 'patch' },
-        { type: 'perf', scope: 'sim', release: 'patch' },
+        ...releaseRulesFor(SIM_SCOPES),
         // Suppress the preset default rules for any OTHER scope so an
         // out-of-scope fix/feat never leaks a sim release. The negated glob
         // is deliberate: a plain { scope: '*', release: false } would also
@@ -41,13 +64,15 @@ module.exports = {
         // scopes returns `false` for out-of-scope commits (blocking the
         // default-rule fallback) while leaving in-scope commits to the
         // specific rules.
-        { scope: '!(sim)', release: false }
+        { scope: `!(${scopeAlternation})`, release: false }
       ],
       // Wrapped release-notes-generator options: only list sim-scoped
       // commits so the GitHub release notes stay component-specific.
       writerOpts: {
         transform: (commit) => {
-          if (!commit.scope || !/(^|,)sim(,|$)/.test(commit.scope)) return;
+          if (!commit.scope) return;
+          const scopes = commit.scope.split(',');
+          if (!scopes.some((s) => SIM_SCOPES.includes(s))) return;
           const typeMap = { feat: 'Features', fix: 'Bug Fixes', perf: 'Performance Improvements' };
           if (!typeMap[commit.type]) return;
           return { ...commit, type: typeMap[commit.type], shortHash: commit.hash && commit.hash.substring(0, 7) };
