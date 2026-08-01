@@ -12,13 +12,14 @@ So: string literals under components/ui_graphics may contain ASCII only. Non-ASC
 goes through an LV_SYMBOL_* macro, which is guaranteed to have a glyph. Comments are
 exempt (they are never drawn).
 
-That "guaranteed" used to be a manual check: wave 2 added LV_SYMBOL_CHARGE and its
-codepoint was verified by hand against lv_font_montserrat_12's compiled glyph set,
-which means nothing caught it if that verification had been wrong. This script also
-resolves every LV_SYMBOL_* identifier used under components/ui_graphics to its real
-codepoint and checks that codepoint is actually baked into the compiled font, so a
-symbol name that exists as a macro but was dropped from (or never had) a glyph fails
-the same way a raw non-ASCII literal does.
+That "guaranteed" used to be a manual check: the battery charging indicator added
+LV_SYMBOL_CHARGE and its codepoint was verified by hand against
+lv_font_montserrat_12's compiled glyph set, which means nothing caught it if that
+verification had been wrong. This script also resolves every LV_SYMBOL_* identifier
+used under components/ui_graphics to its real codepoint and checks that codepoint is
+actually baked into the compiled font, so a symbol name that exists as a macro but
+was dropped from (or never had) a glyph fails the same way a raw non-ASCII literal
+does.
 """
 
 import re
@@ -47,15 +48,30 @@ SYMBOL_USE = re.compile(r"\bLV_SYMBOL_[A-Z0-9_]+\b")
 # CI path, which deliberately never fetches managed_components, see docs/ci.md)
 # falls back to the frozen snapshot below.
 #
-# Snapshotted 2026-08-01 from managed_components/lvgl__lvgl at the version pinned by
-# components/ui_graphics/idf_component.yml (lvgl ~9.2): lv_symbol_def.h's macro
-# bodies decoded as UTF-8 (not its trailing decimal/hex comment, which disagrees
-# with the real bytes for at least one symbol, LV_SYMBOL_FILE: comment says 0xF158,
-# the actual encoded bytes are 0xF15B, which is also what the font's glyph table
-# uses), and lv_font_montserrat_12.c's compiled glyph range (confirmed identical to
-# the 14 and 16 variants also enabled by this build). Regenerate by rerunning this
-# script's loaders against a freshly fetched managed_components/ after any lvgl
-# version bump in idf_component.yml, and paste the printed literals back in here.
+# Snapshotted 2026-08-01 from managed_components/lvgl__lvgl at lvgl 9.2.2:
+# lv_symbol_def.h's macro bodies decoded as UTF-8 (not its trailing decimal/hex
+# comment, which disagrees with the real bytes for at least one symbol,
+# LV_SYMBOL_FILE: comment says 0xF158, the actual encoded bytes are 0xF15B,
+# which is also what the font's glyph table uses), and lv_font_montserrat_12.c's
+# compiled glyph range (confirmed identical to the 14 and 16 variants also
+# enabled by this build). Regenerate by rerunning this script's loaders against
+# a freshly fetched managed_components/ after any lvgl version bump, and paste
+# the printed literals back in here, updating _SNAPSHOT_LVGL_VERSION below to
+# match.
+#
+# components/ui_graphics/idf_component.yml pins lvgl/lvgl to the FLOATING range
+# "~9.2" (any 9.2.x), not an exact version: dependencies.lock is what actually
+# pins a build to one resolved version (9.2.2 as of this snapshot), and that
+# lockfile can change (a dependency bump elsewhere regenerates it) without this
+# file's author noticing. quality.yml's host-tests job never fetches
+# managed_components/, so it always takes the fallback path below; if the lock
+# ever drifted to a newer 9.2.x with different glyph data, that job would keep
+# silently passing against stale data forever. _snapshot_is_confirmed_compatible()
+# below is the guard: it reads the lockfile's actual pinned version and fails
+# loudly (not silently) if it no longer matches _SNAPSHOT_LVGL_VERSION, instead
+# of trusting the frozen tables unconditionally.
+_SNAPSHOT_LVGL_VERSION = "9.2.2"
+
 _FALLBACK_SYMBOL_CODEPOINTS = {
     "LV_SYMBOL_AUDIO": 0xF001,
     "LV_SYMBOL_BACKSPACE": 0xF55A,
@@ -151,6 +167,43 @@ _FONT_SPARSE_RANGE = re.compile(
 )
 
 
+_LOCKFILE_LVGL_VERSION = re.compile(r"lvgl/lvgl:\n(?:[ \t]+.*\n)*?[ \t]+version:\s*([0-9][0-9.]*)")
+
+
+def _locked_lvgl_version():
+    """Return the lvgl/lvgl version pinned in the root dependencies.lock: the
+    version ESP-IDF's component manager actually resolves to for a real
+    build. (idf_component.yml's own "~9.2" is a floating range, not a pin;
+    the lockfile is what a build actually gets, until something regenerates
+    it.) None if the lockfile is missing or its lvgl entry cannot be parsed.
+    """
+    lock_path = REPO_ROOT / "dependencies.lock"
+    try:
+        text = lock_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = _LOCKFILE_LVGL_VERSION.search(text)
+    return match.group(1) if match else None
+
+
+def _snapshot_is_confirmed_compatible():
+    """(ok, reason) for whether the frozen fallback tables above can be
+    trusted for this run. Only called when managed_components/ is absent
+    (the live path is always preferred when it is present, see main()).
+    Refuses to pass on an unreadable or mismatched lockfile: an unconfirmed
+    snapshot is a hard failure, not a warning, because the whole point of
+    this script is catching drift nothing else would notice."""
+    locked = _locked_lvgl_version()
+    if locked is None:
+        return False, f"could not read lvgl/lvgl's pinned version from {REPO_ROOT / 'dependencies.lock'}"
+    if locked != _SNAPSHOT_LVGL_VERSION:
+        return False, (
+            f"dependencies.lock pins lvgl {locked}, but the frozen glyph "
+            f"snapshot above was captured from lvgl {_SNAPSHOT_LVGL_VERSION}"
+        )
+    return True, None
+
+
 def _load_symbol_table():
     """Return {LV_SYMBOL_NAME: codepoint}, live from managed_components if
     fetched, else the frozen snapshot above."""
@@ -239,6 +292,29 @@ def offending_symbols(source: str, symbol_table: dict, font_codepoints: frozense
 
 
 def main() -> int:
+    managed_components_present = (REPO_ROOT / "managed_components/lvgl__lvgl").exists()
+
+    # The live path (reading managed_components/ directly) is always
+    # preferred and needs no version confirmation: it IS the current
+    # vendor source. The frozen fallback below it is a snapshot of a past
+    # run of that live path, so before trusting it, confirm the version it
+    # was captured from still matches what a real build would actually
+    # fetch (see _snapshot_is_confirmed_compatible's docstring for why this
+    # cannot be skipped: it is exactly the path host-tests-only CI always
+    # takes).
+    if not managed_components_present:
+        ok, reason = _snapshot_is_confirmed_compatible()
+        if not ok:
+            print("FAILED: cannot confirm the frozen LVGL glyph snapshot is still valid")
+            print(f"  {reason}")
+            print("\nThis check has no live managed_components/ to verify against here (the")
+            print("host-tests-only CI path never fetches it), so it refuses to trust a")
+            print("snapshot it cannot confirm still matches the pinned lvgl version instead")
+            print("of silently passing against data that may no longer be accurate.")
+            print("Regenerate the snapshot (see the comment above _SNAPSHOT_LVGL_VERSION)")
+            print("against the currently locked lvgl version and update that constant.")
+            return 1
+
     symbol_table = _load_symbol_table()
     font_codepoints = _load_font_codepoints()
 
