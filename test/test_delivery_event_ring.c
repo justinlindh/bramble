@@ -37,9 +37,12 @@ void test_seq_monotonic_after_wrap(void) {
     TEST_ASSERT_EQUAL_UINT32(DELIVERY_EVENT_RING_CAPACITY + 3u,
                              delivery_event_ring_latest_seq(&ring));
 
-    /* After overflow the ring holds exactly its capacity: list_since from 0
-     * walks header.count records, so a full-capacity result also proves the
-     * occupancy cap. */
+    /* After overflow the ring must hold exactly its capacity. Assert the
+     * occupancy directly on the transparent struct: the list_since check
+     * below caps its walk at out_max, so on its own it would only prove
+     * count >= capacity, not the exact cap. */
+    TEST_ASSERT_EQUAL_UINT32(DELIVERY_EVENT_RING_CAPACITY, ring.header.count);
+
     got = delivery_event_ring_list_since(&ring, 0u, out, DELIVERY_EVENT_RING_CAPACITY);
     TEST_ASSERT_EQUAL_UINT32(DELIVERY_EVENT_RING_CAPACITY, got);
 
