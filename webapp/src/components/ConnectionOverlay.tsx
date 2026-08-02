@@ -3,6 +3,7 @@ import { connect, refreshDevices } from '../store/actions';
 import { BLETransport } from '../transport/BLETransport';
 import { useStore } from '../store/index';
 import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
+import { isAuthError } from '../lib/errors';
 import { isEmbeddedShell } from '../utils/platform';
 import type { TransportType } from '../types/bramble';
 import { IconUsb, IconBluetooth, IconMonitor, IconWifi, IconWarning } from './Icons';
@@ -103,7 +104,7 @@ export function ConnectionOverlay() {
   const connectionCapabilities = useStore(s => s.connectionCapabilities);
 
   const isConnecting = connectionState === 'connecting';
-  const authError = /1008|unauthorized|auth/i.test(connectionError ?? '');
+  const authError = isAuthError(connectionError);
 
   useEffect(() => {
     refreshDevices();
