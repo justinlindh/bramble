@@ -8,7 +8,7 @@ import { createTransport, BrambleClient } from '../../transport';
 import { fetchConnectionCapabilities } from '../../lib/connectionMode';
 import { formatAddrHex } from '../../utils/address';
 import { isAndroidShell } from '../../utils/platform';
-import { friendlyErrorFrom } from '../../lib/errors';
+import { friendlyErrorFrom, isAuthError, isUnknownMethodError } from '../../lib/errors';
 import type { TransportType } from '../../types/bramble';
 import {
   initMessageStore,
@@ -53,11 +53,6 @@ const SERIAL_RPC_READY_ATTEMPTS = 8;
 const SERIAL_RPC_READY_TIMEOUT_MS = 1500;
 const SERIAL_RPC_READY_RETRY_DELAY_MS = 350;
 
-function isUnknownMethodError(error: unknown): boolean {
-  const message = (error as Error)?.message ?? '';
-  return /not\s+found|unknown\s+method|method\s+not\s+found/i.test(message);
-}
-
 async function probeRpcReadiness(): Promise<void> {
   const client = requireClient();
   try {
@@ -86,7 +81,7 @@ async function verifyBrambleNode(): Promise<boolean> {
       // An auth-required node answers the allowlisted ping, so a 1008/auth error
       // here means a real node we simply cannot fully use yet: treat it as
       // reachable and let the init RPCs surface the auth-required state.
-      if (/1008|unauthorized|auth/i.test((error as Error)?.message ?? '')) return true;
+      if (isAuthError(error)) return true;
       if (attempt < NODE_VERIFY_ATTEMPTS) {
         await new Promise(r => setTimeout(r, SERIAL_RPC_READY_RETRY_DELAY_MS));
       }
@@ -166,7 +161,7 @@ export async function connect(
         await session.client.rpc('bramble.getStatus', {}, 4000);
       } catch (e) {
         const msg = (e as Error)?.message ?? '';
-        const authy = /unauthorized|1008|auth/i.test(msg) || (!handshakeValidated && /-1005/.test(msg));
+        const authy = isAuthError(msg) || (!handshakeValidated && /-1005/.test(msg));
         if (authy) {
           throw new Error('This node requires an auth token. Enter the token and reconnect.');
         }

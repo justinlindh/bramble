@@ -34,6 +34,33 @@ export function friendlyError(raw: string): string {
 // undefined/null, message-less objects, non-string primitives) gets a
 // generic fallback instead of rendering "undefined" or "[object Object]".
 export function friendlyErrorFrom(e: unknown): string {
-  const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+  const raw = messageOf(e);
   return raw ? friendlyError(raw) : 'Something went wrong. Check the connection and retry.';
+}
+
+// Pull a usable message string out of an unknown thrown value (an Error, a
+// plain string like a stored connectionError, or something message-less), so
+// the classifiers below accept whatever a call site happens to hold.
+function messageOf(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object' && typeof (e as { message?: unknown }).message === 'string') {
+    return (e as { message: string }).message;
+  }
+  return '';
+}
+
+// The node rejected the call for missing or failed authentication: a 1008
+// WebSocket close, an "unauthorized" body, or any auth-tagged message. This is
+// the firmware's auth-error text contract in one place; the app decides whether
+// to prompt for a token based on it, so update the pattern here when the
+// wording changes rather than in each caller.
+export function isAuthError(e: unknown): boolean {
+  return /1008|unauthorized|auth/i.test(messageOf(e));
+}
+
+// The RPC method is not implemented by this firmware build (an older node that
+// predates a newer method). Callers use this to fall back to a legacy call
+// shape or to skip an optional feature.
+export function isUnknownMethodError(e: unknown): boolean {
+  return /not\s+found|unknown\s+method|method\s+not\s+found/i.test(messageOf(e));
 }

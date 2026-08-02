@@ -7,6 +7,7 @@ import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { parseAddr } from '../../lib/addr';
+import { isUnknownMethodError } from '../../lib/errors';
 import { mergeBroadcastRecipient } from '../../lib/broadcastRecipients';
 import { isAndroidShell } from '../../utils/platform';
 import type { RelayHop, MessageTier, ProbeResponse, Message } from '../../types/bramble';
@@ -347,9 +348,7 @@ export async function syncDeliveryEventReplay(): Promise<void> {
   try {
     replay = await session.client.rpc<DeliveryReplayResponse>('bramble.getDeliveryEvents', { sinceEventSeq });
   } catch (error) {
-    const msg = (error as Error)?.message ?? '';
-    const unsupported = /not\s+found|unknown\s+method|method\s+not\s+found/i.test(msg);
-    if (unsupported) return;
+    if (isUnknownMethodError(error)) return;
     replay = await session.client.rpc<DeliveryReplayResponse>('bramble.getDeliveryEvents', { since_event_seq: sinceEventSeq });
   }
 
