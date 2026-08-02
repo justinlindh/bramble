@@ -95,10 +95,20 @@ static StaticSemaphore_t s_done_buf;
 /* Shared by both the per-sample DONE wait and the boot-time calibration
  * wait: nrfx dispatches NRFX_SAADC_EVT_DONE to the handler registered with
  * simple_mode_set and NRFX_SAADC_EVT_CALIBRATEDONE to the one registered
- * with offset_calibrate (nrfx_saadc.c's saadc_event_end_handle); they are
- * never in flight at the same time on this backend (calibration completes,
- * one way or another, before the first sample loop runs), so one handler
- * and one semaphore covers both. */
+ * with offset_calibrate (nrfx_saadc.c's saadc_event_end_handle). One handler
+ * and one semaphore covers both, but NOT because they can be assumed to
+ * never overlap in time: a slow calibration can still complete after
+ * battery_init has given up waiting on it and moved on to normal sampling.
+ * What actually makes sharing safe is that every caller drains s_done to
+ * empty immediately before starting a wait it cares about (see
+ * read_one_sample_mv and the calibration-timeout cleanup in battery_init),
+ * so a late give from something this code has already stopped waiting on
+ * can never be mistaken for the completion of a different, later
+ * operation. Discovered on physical-hardware bench testing (T8): without
+ * that draining, a calibration that completed after its own bounded wait
+ * timed out left a stale give that the *first* real sample's wait consumed
+ * instantly, before EasyDMA had written anything, handing back a
+ * fabricated "valid" 0 mV sample. */
 static void saadc_event_handler(nrfx_saadc_evt_t const* p_event) {
     if (p_event->type == NRFX_SAADC_EVT_DONE || p_event->type == NRFX_SAADC_EVT_CALIBRATEDONE) {
         BaseType_t woken = pdFALSE;
@@ -211,6 +221,19 @@ void battery_init(void) {
                  (int)err);
     } else if (xSemaphoreTake(s_done, pdMS_TO_TICKS(SAADC_WAIT_MS)) != pdTRUE) {
         ESP_LOGW(TAG, "nrfx_saadc_offset_calibrate timed out (continuing uncalibrated)");
+        /* Close the door deterministically: without this, a CALIBRATEDONE
+         * that arrives after this point gives s_done for nothing waiting on
+         * it here, and that stale give survives to falsely satisfy the
+         * *first* real sample's wait instead (see saadc_event_handler's
+         * comment for the full hazard this caused on bench). Unlike the
+         * sample-timeout path below, this does NOT need a follow-up drain:
+         * nrfx_saadc_abort() during NRF_SAADC_STATE_CALIBRATION triggers
+         * STOP, and nrfx_saadc_irq_handler's STOPPED case explicitly
+         * special-cases calibration, if STOP lands before CALIBRATEDONE
+         * the calibration is simply abandoned and the event handler is
+         * never invoked at all (verified against the vendored
+         * nrfx_saadc.c), so no further give is coming to drain. */
+        nrfx_saadc_abort();
     }
 
     /* CHRG/VBUS detect: plain inputs, no pull (see file header for the
@@ -223,6 +246,17 @@ void battery_init(void) {
     s_initialized = true;
     ESP_LOGI(TAG, "SAADC battery ADC initialized (pin %d, gain 1/5, 14-bit)", BOARD_PIN_VBAT_ADC);
 }
+
+/* File-scope, not a stack local: the whole point of read_one_sample_mv's
+ * conversion is asynchronous (EasyDMA writes it from an ISR sometime after
+ * mode_trigger returns), and a stack slot from a function that has already
+ * returned (the timeout path, before this fix) is memory a later write can
+ * land in after it has been reused for something else entirely. A single
+ * static instance is safe because every access is already serialized by
+ * s_lock across the whole averaging loop (battery_get_status), so there is
+ * never more than one conversion using it at a time. The timeout path's
+ * abort() is kept anyway as belt-and-braces. */
+static int16_t s_raw;
 
 /* One oneshot SAADC conversion at the pin, pre-divider. battery_get_status
  * averages BATTERY_AVG_SAMPLE_COUNT of these through the shared
@@ -237,8 +271,18 @@ void battery_init(void) {
  * mode); the actual conversion completes later, asynchronously, and
  * saadc_event_handler signals s_done from the SAADC ISR when it does. */
 static bool read_one_sample_mv(uint32_t* out_mv) {
-    int16_t raw = 0;
-    nrfx_err_t err = nrfx_saadc_buffer_set(&raw, 1);
+    /* Drain any stale give before starting this conversion's wait. Under
+     * s_lock, with no conversion of ours in flight yet, a pending give
+     * here cannot be a real answer: it can only be a leftover from
+     * something earlier that this code already stopped waiting on (a late
+     * offset-calibration completion, or a previous sample's timeout-abort
+     * redelivering its DONE after that sample's own drain gave up). See
+     * saadc_event_handler's comment for why leaving it unconsumed is a
+     * real bug, not a theoretical one: it was observed on bench. */
+    while (xSemaphoreTake(s_done, 0) == pdTRUE) {
+    }
+
+    nrfx_err_t err = nrfx_saadc_buffer_set(&s_raw, 1);
     if (err != NRFX_SUCCESS) {
         ESP_LOGW(TAG, "saadc buffer_set failed: %d", (int)err);
         return false;
@@ -252,19 +296,22 @@ static bool read_one_sample_mv(uint32_t* out_mv) {
         /* The peripheral did not signal completion inside a generous bound:
          * treat it as a failed sample rather than waiting forever (that
          * unbounded wait is the bug this rework removes). Abort the
-         * still-possibly-in-flight conversion first: `raw` is this
-         * function's stack slot, and if the conversion completes after we
-         * have already returned, EasyDMA would write into memory that no
-         * longer belongs to it. The abort's own completion is expected to
-         * signal s_done a second time; drain that (best-effort, same
-         * bound) so it doesn't masquerade as a real result on the *next*
-         * sample's wait. */
+         * still-possibly-in-flight conversion: belt-and-braces now that
+         * s_raw is static rather than a reclaimed stack slot, but aborting
+         * is still the right move regardless, since it also stops the
+         * peripheral from being left mid-conversion when the next sample's
+         * pre-trigger drain and buffer_set run. The abort's own completion
+         * is expected to signal s_done a second time (verified: aborting a
+         * SIMPLE_MODE_SAMPLE conversion's STOP task also triggers END, per
+         * nrfx_saadc_irq_handler); drain that (best-effort, same bound) so
+         * it doesn't masquerade as a real result on the *next* sample's
+         * wait, on top of that sample's own pre-trigger drain. */
         nrfx_saadc_abort();
         ESP_LOGW(TAG, "saadc sample timed out, aborting");
         (void)xSemaphoreTake(s_done, pdMS_TO_TICKS(SAADC_WAIT_MS));
         return false;
     }
-    *out_mv = raw_to_pin_mv(raw);
+    *out_mv = raw_to_pin_mv(s_raw);
     return true;
 }
 
