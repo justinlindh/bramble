@@ -8,6 +8,7 @@ import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventSt
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { parseAddr } from '../../lib/addr';
 import { isUnknownMethodError } from '../../lib/errors';
+import { mergeBroadcastRecipient } from '../../lib/broadcastRecipients';
 import { isAndroidShell } from '../../utils/platform';
 import type { RelayHop, MessageTier, ProbeResponse, Message } from '../../types/bramble';
 import type { RpcSchemas, WirePartial } from '../../types/rpc';
@@ -415,31 +416,14 @@ function applyDeliveryEventToMessage(message: Message, event: DeliveryEventRecor
     if (payload.addr === undefined || !payload.status) return message;
     const existing = message.broadcastRecipients ?? [];
     const idx = existing.findIndex(r => r.addr === payload.addr);
-    const incomingTs = payload.deliveredAtMs ?? event.ts;
-
-    if (idx < 0) {
-      return {
-        ...message,
-        broadcastRecipients: [...existing, {
-          addr: payload.addr,
-          status: payload.status,
-          hopCount: payload.hopCount ?? 0,
-          deliveredAtMs: incomingTs,
-        }],
-      };
-    }
-
-    if (existing[idx].deliveredAtMs > incomingTs) return message;
-
-    const merged = [...existing];
-    merged[idx] = {
-      ...existing[idx],
+    const incoming = {
       addr: payload.addr,
       status: payload.status,
-      hopCount: payload.hopCount ?? existing[idx].hopCount,
-      deliveredAtMs: incomingTs,
+      hopCount: payload.hopCount ?? (idx >= 0 ? existing[idx].hopCount : 0),
+      deliveredAtMs: payload.deliveredAtMs ?? event.ts,
     };
-    return { ...message, broadcastRecipients: merged };
+    const merged = mergeBroadcastRecipient(existing, incoming);
+    return merged === existing ? message : { ...message, broadcastRecipients: merged };
   }
 
   return message;

@@ -302,7 +302,7 @@ func TestScenarioPinsPHY(t *testing.T) {
 func TestExtNodeCollisionOnOverlappingAirtime(t *testing.T) {
 	h := newEmuHarness()
 	defer h.close()
-	h.setLBT(false) // let overlapping transmissions actually collide
+	h.disableLBT() // let overlapping transmissions actually collide
 	path := filepath.Join(t.TempDir(), "emu.sock")
 	if err := h.startBroker(path); err != nil {
 		t.Fatal(err)
@@ -342,7 +342,7 @@ func TestExtNodeCollisionOnOverlappingAirtime(t *testing.T) {
 func TestExtNodeSingleTxNoCollisionDelivered(t *testing.T) {
 	h := newEmuHarness()
 	defer h.close()
-	h.setLBT(false)
+	h.disableLBT()
 	path := filepath.Join(t.TempDir(), "emu.sock")
 	if err := h.startBroker(path); err != nil {
 		t.Fatal(err)

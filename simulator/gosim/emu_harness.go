@@ -58,9 +58,10 @@ func (h *emuHarness) reserveSlot(x, y float32, label string) {
 	h.sim.broker.reserveSlot(x, y, label, "")
 }
 
-// setLBT toggles listen-before-talk on the shared radio config (off lets
-// overlapping transmissions actually collide instead of being backed off).
-func (h *emuHarness) setLBT(on bool) { h.sim.radio.lbt_enabled = C.bool(on) }
+// disableLBT turns off listen-before-talk on the shared radio config, letting
+// overlapping transmissions actually collide instead of being backed off. This
+// mirrors radioHarness.disableLBT for the emu-link harness.
+func (h *emuHarness) disableLBT() { h.sim.radio.lbt_enabled = C.bool(false) }
 
 // advance pushes the simulation clock forward by deltaUs and processes every
 // event and broker action that has come due, exactly as the real-time loop
