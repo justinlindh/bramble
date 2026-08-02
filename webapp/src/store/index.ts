@@ -118,20 +118,40 @@ export function conversationIdForMessage(msg: Message): string {
   return conversationTargetForMessage(msg).id;
 }
 
+// A conversation id decoded back into its kind and payload: the inverse of the
+// 'broadcast' / 'ch:{index}' / 'dm:{addr}' scheme that conversationTargetForMessage
+// produces. The scheme is built in one place (conversationIdForMessage) and is
+// now decoded in one place too, so no caller re-parses the id string by hand,
+// which is what caused #124, #153, #168, and #189.
+export type ParsedConversationId =
+  | { kind: 'broadcast' }
+  | { kind: 'channel'; index: number }
+  | { kind: 'dm'; addr: number }
+  | { kind: 'unknown' };
+
+export function parseConversationId(id: string): ParsedConversationId {
+  if (id === 'broadcast') return { kind: 'broadcast' };
+  if (id.startsWith('ch:')) return { kind: 'channel', index: Number(id.slice(3)) };
+  if (id.startsWith('dm:')) return { kind: 'dm', addr: Number(id.slice(3)) };
+  return { kind: 'unknown' };
+}
+
 function formatAddr(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
-  if (id === 'broadcast') return 'Broadcast';
-  if (id.startsWith('ch:')) {
-    const idx = Number(id.slice(3));
-    const ch = config?.channels?.find(c => c.index === idx);
-    return ch?.name?.trim() ? ch.name : `ch-${idx}`;
+  const parsed = parseConversationId(id);
+  switch (parsed.kind) {
+    case 'broadcast':
+      return 'Broadcast';
+    case 'channel': {
+      const ch = config?.channels?.find(c => c.index === parsed.index);
+      return ch?.name?.trim() ? ch.name : `ch-${parsed.index}`;
+    }
+    case 'dm': {
+      const name = peerNames?.get(parsed.addr);
+      return name ? name : formatAddr0x(parsed.addr);
+    }
+    case 'unknown':
+      return id;
   }
-  if (id.startsWith('dm:')) {
-    const addr = Number(id.slice(3));
-    const name = peerNames?.get(addr);
-    if (name) return name;
-    return formatAddr0x(addr);
-  }
-  return id;
 }
 
 function persistUnreads(conversations: Map<string, any>, config: BrambleConfig | null): void {
@@ -228,9 +248,9 @@ export const useStore = create<AppState & Actions>((set) => ({
 
     const convs = new Map(state.conversations);
     for (const [id, conv] of convs) {
-      if (id.startsWith('ch:')) {
-        const chIdx = Number(id.slice(3));
-        if (!validChannelIndexes.has(chIdx)) {
+      const parsed = parseConversationId(id);
+      if (parsed.kind === 'channel') {
+        if (!validChannelIndexes.has(parsed.index)) {
           // Channel was deleted: remove stale conversation (BUG-07 fix)
           convs.delete(id);
         } else {
@@ -241,7 +261,7 @@ export const useStore = create<AppState & Actions>((set) => ({
 
     // If active conversation was a deleted channel, fall back to broadcast
     const activeId = state.activeConversationId;
-    const activeGone = activeId.startsWith('ch:') && !convs.has(activeId);
+    const activeGone = parseConversationId(activeId).kind === 'channel' && !convs.has(activeId);
 
     return {
       config: c,

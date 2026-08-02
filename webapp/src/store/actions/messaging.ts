@@ -2,7 +2,7 @@
 // delivery-event replay and correlation, broadcast telemetry, probe flows,
 // incoming-message handling, and native notifications.
 import { session, requireClient, LAST_NODE_ADDR_KEY } from './client';
-import { useStore, conversationIdForMessage } from '../index';
+import { useStore, conversationIdForMessage, parseConversationId } from '../index';
 import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
@@ -782,13 +782,13 @@ function maybeNotifyIncoming(msg: Message): void {
 }
 
 function conversationTitleFor(conversationId: string, senderName: string, store: ReturnType<typeof useStore.getState>): string {
-  if (conversationId === 'broadcast') return 'Broadcast';
-  if (conversationId.startsWith('ch:')) {
-    const idx = Number(conversationId.slice(3));
-    const ch = store.config?.channels?.find(c => c.index === idx);
-    return ch?.name?.trim() ? ch.name : `Channel ${idx}`;
+  const parsed = parseConversationId(conversationId);
+  if (parsed.kind === 'broadcast') return 'Broadcast';
+  if (parsed.kind === 'channel') {
+    const ch = store.config?.channels?.find(c => c.index === parsed.index);
+    return ch?.name?.trim() ? ch.name : `Channel ${parsed.index}`;
   }
-  // dm: title is the peer, which is the sender for an incoming DM.
+  // dm (and any unmatched id) titles as the peer, which is the sender for an incoming DM.
   return senderName;
 }
 

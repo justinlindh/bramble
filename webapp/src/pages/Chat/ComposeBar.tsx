@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import type { MessageTier } from '../../types/bramble';
 import { sendMessage, shareLocationOnce } from '../../store/actions';
-import { useStore } from '../../store/index';
+import { useStore, parseConversationId } from '../../store/index';
 import { IconCritical, IconBroadcast, IconSend } from '../../components/Icons';
 import { showToast } from '../../components/Toast';
 import { friendlyErrorFrom } from '../../lib/errors';
@@ -37,20 +37,18 @@ interface ComposeBarProps {
   conversationId: string;
 }
 
-// Parse a conversationId into a sendMessage call signature
+// Map a conversationId to a sendMessage call signature.
 function parseConversation(convId: string): { dest: number; channelIndex?: number } {
-  if (convId === 'broadcast') {
-    return { dest: 0xffffffff };
+  const parsed = parseConversationId(convId);
+  switch (parsed.kind) {
+    case 'channel':
+      return { dest: 0xfffffffe, channelIndex: parsed.index };
+    case 'dm':
+      return { dest: parsed.addr };
+    case 'broadcast':
+    case 'unknown':
+      return { dest: 0xffffffff };
   }
-  if (convId.startsWith('ch:')) {
-    const idx = parseInt(convId.slice(3), 10);
-    return { dest: 0xfffffffe, channelIndex: idx };
-  }
-  if (convId.startsWith('dm:')) {
-    const addr = parseInt(convId.slice(3), 10);
-    return { dest: addr };
-  }
-  return { dest: 0xffffffff };
 }
 
 const TIER_OPTIONS: Array<{ value: MessageTier; label: ReactNode; title: string }> = [
