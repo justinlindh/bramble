@@ -194,8 +194,9 @@ type scenarioRunResult struct {
 }
 
 // runScenarioHeadless loads scenarioPath and drains its event queue to
-// completion (or until the scenario's duration_ms elapses), matching
-// RunHeadless's own loop.
+// completion (or until the scenario's duration_ms elapses) via the same
+// drainInstant core RunHeadless uses, so a duration-truncated scenario reports
+// identical sim_ended drops here as it does under the real headless binary.
 func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
 	var mu sync.Mutex
 	var lines []string
@@ -224,22 +225,7 @@ func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
 	}
 
 	sim.mu.Lock()
-	sim.state = StateRunning
-	var evt C.sim_event_t
-	for eventQueuePop(&sim.events, &evt) {
-		ts := getEventTimestamp(&evt)
-		if sim.duration > 0 && ts > sim.duration {
-			// Drain remaining events past duration without dispatching them,
-			// same truncation RunHeadless applies.
-			for eventQueuePop(&sim.events, &evt) {
-			}
-			break
-		}
-		sim.simTime = ts
-		setSimTime(ts)
-		sim.dispatchEvent(&evt)
-	}
-	sim.complete()
+	sim.drainInstant()
 	sim.mu.Unlock()
 
 	sim.restoreStdout(50 * time.Millisecond)

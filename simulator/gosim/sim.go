@@ -1506,40 +1506,51 @@ func RunHeadless(scenarioPath string) error {
 
 	// Process all events instantly
 	sim.mu.Lock()
-	sim.state = StateRunning
-	var evt C.sim_event_t
-	for eventQueuePop(&sim.events, &evt) {
-		ts := getEventTimestamp(&evt)
-		if sim.duration > 0 && ts > sim.duration {
-			// Count remaining generate_message events as dropped
-			if evt._type == C.EVT_GENERATE_MESSAGE {
-				C.metrics_record_packet_dropped(&sim.metrics)
-				sim.emitJSON(map[string]any{
-					"type": "message_dropped", "timestamp_us": sim.duration,
-					"reason": "sim_ended",
-				})
-			}
-			// Drain remaining events past duration
-			for eventQueuePop(&sim.events, &evt) {
-				if evt._type == C.EVT_GENERATE_MESSAGE {
-					C.metrics_record_packet_dropped(&sim.metrics)
-					sim.emitJSON(map[string]any{
-						"type": "message_dropped", "timestamp_us": sim.duration,
-						"reason": "sim_ended",
-					})
-				}
-			}
-			break
-		}
-		sim.simTime = ts
-		setSimTime(ts)
-		sim.dispatchEvent(&evt)
-	}
-	sim.complete()
+	sim.drainInstant()
 	sim.mu.Unlock()
 
 	// Flush pipe
 	sim.restoreStdout(100 * time.Millisecond)
 
 	return nil
+}
+
+// drainInstant runs the virtual-time event loop to completion and then calls
+// complete(), the shared core of both headless entry points (RunHeadless and
+// bridge.go's runScenarioHeadless). Events scheduled past sim.duration are not
+// dispatched; any generate_message among them is counted as a drop and reported
+// as a sim_ended message_dropped, so a scenario truncated by its duration
+// reports the same drops however it was launched. The caller must hold sim.mu.
+func (s *Sim) drainInstant() {
+	s.state = StateRunning
+	var evt C.sim_event_t
+	for eventQueuePop(&s.events, &evt) {
+		ts := getEventTimestamp(&evt)
+		if s.duration > 0 && ts > s.duration {
+			// Drain the event that crossed the duration plus everything after
+			// it, counting each generate_message as a sim_ended drop.
+			s.recordDropIfMessage(&evt)
+			for eventQueuePop(&s.events, &evt) {
+				s.recordDropIfMessage(&evt)
+			}
+			break
+		}
+		s.simTime = ts
+		setSimTime(ts)
+		s.dispatchEvent(&evt)
+	}
+	s.complete()
+}
+
+// recordDropIfMessage counts a past-duration generate_message event as a dropped
+// packet and emits the matching sim_ended message_dropped event. Other event
+// types past the duration are simply discarded.
+func (s *Sim) recordDropIfMessage(evt *C.sim_event_t) {
+	if evt._type == C.EVT_GENERATE_MESSAGE {
+		C.metrics_record_packet_dropped(&s.metrics)
+		s.emitJSON(map[string]any{
+			"type": "message_dropped", "timestamp_us": s.duration,
+			"reason": "sim_ended",
+		})
+	}
 }
