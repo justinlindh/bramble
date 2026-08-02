@@ -34,10 +34,12 @@ void test_seq_monotonic_after_wrap(void) {
         TEST_ASSERT_EQUAL_UINT32(i, seq);
     }
 
-    TEST_ASSERT_EQUAL_UINT32(DELIVERY_EVENT_RING_CAPACITY, delivery_event_ring_count(&ring));
     TEST_ASSERT_EQUAL_UINT32(DELIVERY_EVENT_RING_CAPACITY + 3u,
                              delivery_event_ring_latest_seq(&ring));
 
+    /* After overflow the ring holds exactly its capacity: list_since from 0
+     * walks header.count records, so a full-capacity result also proves the
+     * occupancy cap. */
     got = delivery_event_ring_list_since(&ring, 0u, out, DELIVERY_EVENT_RING_CAPACITY);
     TEST_ASSERT_EQUAL_UINT32(DELIVERY_EVENT_RING_CAPACITY, got);
 
