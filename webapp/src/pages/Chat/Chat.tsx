@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { useStore } from '../../store/index';
+import { useStore, parseConversationId, formatConversationLabel } from '../../store/index';
 import { useConversation, useMyAddress } from '../../store/selectors';
 import { IconChat, IconBroadcast, IconHash, IconRoutes, IconLock, IconWarning } from '../../components/Icons';
 import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
@@ -20,11 +20,14 @@ export function isNearBottom(el: { scrollTop: number; clientHeight: number; scro
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
 export function getEmptyHint(convId: string): string {
-  return convId === 'broadcast'
-    ? 'Broadcast messages will appear here. All nodes in range will receive them.'
-    : convId.startsWith('ch:')
-    ? 'Channel messages will appear here.'
-    : 'Send a message to start this conversation.';
+  switch (parseConversationId(convId).kind) {
+    case 'broadcast':
+      return 'Broadcast messages will appear here. All nodes in range will receive them.';
+    case 'channel':
+      return 'Channel messages will appear here.';
+    default:
+      return 'Send a message to start this conversation.';
+  }
 }
 
 function EmptyMessages({ convId, loading }: { convId: string; loading?: boolean }) {
@@ -205,9 +208,10 @@ function ChatHeader({ conversationId, onToggleDetail, onToggleSidebar }: { conve
   const showRoutes = useStore(s => s.showRoutes);
   const setShowRoutes = useStore(s => s.setShowRoutes);
 
-  const isChannel = conversationId.startsWith('ch:');
-  const isDm = conversationId.startsWith('dm:');
-  const dmAddr = isDm ? parseInt(conversationId.slice(3), 10) : 0;
+  const parsed = parseConversationId(conversationId);
+  const isChannel = parsed.kind === 'channel';
+  const isDm = parsed.kind === 'dm';
+  const dmAddr = parsed.kind === 'dm' ? parsed.addr : 0;
 
   return (
     <div
@@ -227,15 +231,15 @@ function ChatHeader({ conversationId, onToggleDetail, onToggleSidebar }: { conve
       <div className={styles.chatHeaderText}>
         {isDm ? (
           <DmHeaderInfo addr={dmAddr} />
-        ) : conversationId === 'broadcast' ? (
+        ) : parsed.kind === 'broadcast' ? (
           <>
             <span className={styles.chatTitle}><IconBroadcast size={16} /> Broadcast</span>
             <span className={styles.chatSubtitle}>All nodes in range</span>
           </>
-        ) : isChannel ? (
+        ) : parsed.kind === 'channel' ? (
           <>
-            <span className={styles.chatTitle}><IconHash size={14} /> {conv?.label ?? config?.channels?.find(c => c.index === Number(conversationId.slice(3)))?.name ?? `ch-${conversationId.slice(3)}`}</span>
-            <span className={styles.chatSubtitle}>Channel {conversationId.slice(3)}</span>
+            <span className={styles.chatTitle}><IconHash size={14} /> {conv?.label ?? formatConversationLabel(conversationId, undefined, config)}</span>
+            <span className={styles.chatSubtitle}>Channel {parsed.index}</span>
           </>
         ) : (
           <span className={styles.chatTitle}>{conv?.label ?? conversationId}</span>
@@ -291,9 +295,9 @@ export function Chat() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [sidebarOpen]);
 
-  const isChannel = activeConversationId.startsWith('ch:');
-  const isDm = activeConversationId.startsWith('dm:');
-  const dmAddr = isDm ? parseInt(activeConversationId.slice(3), 10) : 0;
+  const parsed = parseConversationId(activeConversationId);
+  const isDm = parsed.kind === 'dm';
+  const dmAddr = parsed.kind === 'dm' ? parsed.addr : 0;
   const dmVerification = useStore(s => (isDm ? s.peerVerifications.get(dmAddr) : undefined));
 
   return (
@@ -315,9 +319,9 @@ export function Chat() {
       </div>
       <div className={styles.pane}>
         <ChatHeader conversationId={activeConversationId} onToggleDetail={toggleDetail} onToggleSidebar={() => setSidebarOpen(v => !v)} />
-        {showDetail && isChannel ? (
+        {showDetail && parsed.kind === 'channel' ? (
           <ChannelDetailPanel
-            channelIndex={parseInt(activeConversationId.slice(3), 10)}
+            channelIndex={parsed.index}
             onClose={() => setShowDetail(false)}
           />
         ) : showDetail && isDm ? (

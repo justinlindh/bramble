@@ -121,9 +121,10 @@ export function conversationIdForMessage(msg: Message): string {
 
 // A conversation id decoded back into its kind and payload: the inverse of the
 // 'broadcast' / 'ch:{index}' / 'dm:{addr}' scheme that conversationTargetForMessage
-// produces. The scheme is built in one place (conversationIdForMessage) and is
-// now decoded in one place too, so no caller re-parses the id string by hand,
-// which is what caused #124, #153, #168, and #189.
+// produces. Decoding lives here alone, so no caller re-parses the id string by
+// hand, which is what caused #124, #153, #168, and #189. (The one deliberate
+// exception is messageDb's v1 migration, which detects the retired
+// 'dm:{hex}-{hex}' format this parser never handled.)
 export type ParsedConversationId =
   | { kind: 'broadcast' }
   | { kind: 'channel'; index: number }
@@ -137,7 +138,9 @@ export function parseConversationId(id: string): ParsedConversationId {
   return { kind: 'unknown' };
 }
 
-function formatAddr(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
+// Display label for a conversation bucket. Exported so UI headers can render
+// the same name policy the store uses when it labels conversations.
+export function formatConversationLabel(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
   const parsed = parseConversationId(id);
   switch (parsed.kind) {
     case 'broadcast':
@@ -255,7 +258,7 @@ export const useStore = create<AppState & Actions>((set) => ({
           // Channel was deleted: remove stale conversation (BUG-07 fix)
           convs.delete(id);
         } else {
-          convs.set(id, { ...conv, label: formatAddr(id, names, c) });
+          convs.set(id, { ...conv, label: formatConversationLabel(id, names, c) });
         }
       }
     }
@@ -315,7 +318,7 @@ export const useStore = create<AppState & Actions>((set) => ({
       
       const newConv = {
         id: convId,
-        label: formatAddr(convId, state.peerNames, state.config),
+        label: formatConversationLabel(convId, state.peerNames, state.config),
         peerAddr: target.peerAddr,
         channelIndex: target.channelIndex,
         lastMessage: msg.text.slice(0, 60),
@@ -432,7 +435,7 @@ export const useStore = create<AppState & Actions>((set) => ({
         if (shouldUpdate) {
           convs.set(convId, {
             id: convId,
-            label: formatAddr(convId, state.peerNames, state.config),
+            label: formatConversationLabel(convId, state.peerNames, state.config),
             peerAddr: target.peerAddr,
             channelIndex: target.channelIndex,
             lastMessage: msg.text.slice(0, 60),

@@ -69,7 +69,7 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
   const { dest } = parseConversation(conversationId);
 
   // For broadcast conversation, force tier to 'broadcast'
-  const isBroadcastConv = conversationId === 'broadcast';
+  const isBroadcastConv = parseConversationId(conversationId).kind === 'broadcast';
   const effectiveTier: MessageTier = isBroadcastConv ? 'broadcast' : tier;
 
   const bytes = useMemo(() => byteLength(text), [text]);

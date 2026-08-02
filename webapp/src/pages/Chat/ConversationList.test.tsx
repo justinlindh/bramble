@@ -7,7 +7,10 @@ vi.mock('../../store/actions', () => ({
   addChannel: vi.fn(),
 }));
 
-vi.mock('../../store/index', () => ({
+// Keep the real module (parseConversationId and friends) and only stub the
+// store hook.
+vi.mock('../../store/index', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../store/index')>()),
   useStore: (selector: any) => selector({
     config: {
       channels: [

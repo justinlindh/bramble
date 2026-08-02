@@ -93,7 +93,7 @@ export interface Message {
 // ─── Conversations ─────────────────────────────────────────────────────
 
 export interface Conversation {
-  /** 'dm:0x{addr}' or 'ch:{index}' */
+  /** 'broadcast', 'dm:{addr}' (decimal), or 'ch:{index}'; see parseConversationId in store/index.ts */
   id: string;
   label: string;
   peerAddr?: number;        // set for DMs
