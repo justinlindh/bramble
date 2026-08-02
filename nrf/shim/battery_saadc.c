@@ -51,6 +51,63 @@ static SemaphoreHandle_t s_lock;
 static StaticSemaphore_t s_lock_buf;
 
 /*
+ * Bench (T8, physical T1000-E) found the blocking NULL-handler path hangs
+ * the mesh task outright: an A/B build with battery_null instead of this
+ * backend beacons within 2 minutes, this backend never beacons. The
+ * suspect (unproven, do not treat as fact elsewhere) is nrfy_saadc's
+ * blocking helpers spinning unbounded on EVENTS_END/EVENTS_CALIBRATEDONE
+ * (haly/nrfy_saadc.h): if that spin never resolves, it never will, and
+ * there is no way to time out a bare while(!event){} loop from outside it.
+ *
+ * The fix is to never let nrfx busy-wait on our behalf at all: every SAADC
+ * operation runs in event-handler (non-blocking) mode, and this code does
+ * its own bounded wait on a binary semaphore that the event handler signals
+ * from ISR context. A timeout here is a real, catchable failure (the sample
+ * or calibration attempt fails), not a permanent lockup.
+ *
+ * IRQ priority: nrfx_saadc_init() is given NRFX_SAADC_DEFAULT_CONFIG_IRQ_
+ * PRIORITY (7, from nrf/config's nrfx_config_nrf52840.h template). This
+ * build's FreeRTOSConfig.h sets configPRIO_BITS=3 and
+ * configMAX_SYSCALL_INTERRUPT_PRIORITY=(2 << (8-3)), i.e. priority level 2;
+ * FreeRTOS's rule is that any ISR calling a FromISR API must sit at a
+ * priority level numerically >= that threshold, so 7 (numerically above 2)
+ * is safe. This mirrors the two established idioms already in this port:
+ * gps_t1000e.c's UARTE1 handler (default priority, also 7) calls
+ * xSemaphoreGiveFromISR/portYIELD_FROM_ISR at that same level, and
+ * radio_lr1110.c explicitly documents choosing GPIOTE priority 6 for the
+ * same reason ("stays below, numerically above, the FreeRTOS max-syscall
+ * priority so the ISR may use the FromISR API"). Getting this backwards
+ * (a priority numerically below the threshold, i.e. 0 or 1) would let the
+ * ISR run above where FreeRTOS's critical-section masking applies, so a
+ * FromISR call from it corrupts kernel state instead of hanging; nothing
+ * here overrides the default, so this build is not exposed to that.
+ */
+static SemaphoreHandle_t s_done;
+static StaticSemaphore_t s_done_buf;
+
+/* Generous relative to a real oneshot conversion (tens of microseconds:
+ * 10us acquisition plus 14-bit conversion time) or a real calibration
+ * (documented as similarly short); if this fires, the peripheral is
+ * actually stuck, not just slow, which is exactly the condition the old
+ * blocking code could never detect or recover from. */
+#define SAADC_WAIT_MS 25
+
+/* Shared by both the per-sample DONE wait and the boot-time calibration
+ * wait: nrfx dispatches NRFX_SAADC_EVT_DONE to the handler registered with
+ * simple_mode_set and NRFX_SAADC_EVT_CALIBRATEDONE to the one registered
+ * with offset_calibrate (nrfx_saadc.c's saadc_event_end_handle); they are
+ * never in flight at the same time on this backend (calibration completes,
+ * one way or another, before the first sample loop runs), so one handler
+ * and one semaphore covers both. */
+static void saadc_event_handler(nrfx_saadc_evt_t const* p_event) {
+    if (p_event->type == NRFX_SAADC_EVT_DONE || p_event->type == NRFX_SAADC_EVT_CALIBRATEDONE) {
+        BaseType_t woken = pdFALSE;
+        xSemaphoreGiveFromISR(s_done, &woken);
+        portYIELD_FROM_ISR(woken);
+    }
+}
+
+/*
  * SAADC full-scale for gain 1/5 against the 0.6V internal reference:
  * V_fullscale = V_ref / gain = 0.6V / (1/5) = 3.0V, matching Meshtastic's
  * AR_INTERNAL_3_0 (AREF_VOLTAGE 3.0) for this exact board. A 14-bit oneshot
@@ -104,6 +161,11 @@ static uint32_t raw_to_pin_mv(int16_t raw) {
 #endif
 
 void battery_init(void) {
+    /* Created before anything can wait on it, same ordering discipline as
+     * s_lock below: nothing touches the SAADC until s_initialized is true,
+     * and both statics exist well before that point. */
+    s_done = xSemaphoreCreateBinaryStatic(&s_done_buf);
+
     nrfx_saadc_channel_t channel = NRFX_SAADC_DEFAULT_CHANNEL_SE(BATTERY_SAADC_AIN, 0);
     channel.channel_config.gain = NRF_SAADC_GAIN1_5;
     channel.channel_config.reference = NRF_SAADC_REFERENCE_INTERNAL;
@@ -120,11 +182,11 @@ void battery_init(void) {
         return;
     }
 
-    /* Simple mode, NULL event handler: blocking oneshot conversions, no IRQ
-     * plumbing needed. nrfx_saadc_mode_trigger() busy-waits for the END
-     * event itself (nrfy_saadc_sample_start). */
+    /* Simple mode, real event handler: every conversion is triggered and
+     * completes asynchronously (see the file header for why the NULL,
+     * blocking-mode alternative is gone). */
     err = nrfx_saadc_simple_mode_set(1u << 0, NRF_SAADC_RESOLUTION_14BIT,
-                                     NRF_SAADC_OVERSAMPLE_DISABLED, NULL);
+                                     NRF_SAADC_OVERSAMPLE_DISABLED, saadc_event_handler);
     if (err != NRFX_SUCCESS) {
         ESP_LOGE(TAG, "nrfx_saadc_simple_mode_set failed: %d", (int)err);
         return;
@@ -136,11 +198,19 @@ void battery_init(void) {
      * temperature; a tracker sees real temperature swings, but a periodic
      * recal is Task 8/bench-validation scope (needs a call site and cadence
      * decision against real drift data), so this is the one-shot at boot.
-     * Blocking (NULL handler), saves and restores the driver's mode state
-     * internally, safe to call after simple_mode_set. */
-    err = nrfx_saadc_offset_calibrate(NULL);
+     * Evented (the same saadc_event_handler, dispatched on
+     * NRFX_SAADC_EVT_CALIBRATEDONE) with a bounded wait, not the blocking
+     * NULL-handler path: that path's internal busy-wait is exactly the
+     * pattern suspected of hanging sample conversions, so it gets the same
+     * treatment here. A calibration that fails to start, or times out,
+     * logs a warning and continues uncalibrated: a few LSB of offset error
+     * is a correctness nit, not a reason to abandon boot. */
+    err = nrfx_saadc_offset_calibrate(saadc_event_handler);
     if (err != NRFX_SUCCESS) {
-        ESP_LOGW(TAG, "nrfx_saadc_offset_calibrate failed: %d (continuing uncalibrated)", (int)err);
+        ESP_LOGW(TAG, "nrfx_saadc_offset_calibrate failed to start: %d (continuing uncalibrated)",
+                 (int)err);
+    } else if (xSemaphoreTake(s_done, pdMS_TO_TICKS(SAADC_WAIT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "nrfx_saadc_offset_calibrate timed out (continuing uncalibrated)");
     }
 
     /* CHRG/VBUS detect: plain inputs, no pull (see file header for the
@@ -161,7 +231,11 @@ void battery_init(void) {
  * success via the return value: a failed conversion is excluded from the
  * average (battery_average_mv's valid mask) rather than folded in as a
  * fabricated 0 mV sample, which would corrupt the whole reading toward a
- * false low battery instead of just being one fewer sample in the mean. */
+ * false low battery instead of just being one fewer sample in the mean.
+ *
+ * mode_trigger() returns as soon as the trigger is issued (event-handler
+ * mode); the actual conversion completes later, asynchronously, and
+ * saadc_event_handler signals s_done from the SAADC ISR when it does. */
 static bool read_one_sample_mv(uint32_t* out_mv) {
     int16_t raw = 0;
     nrfx_err_t err = nrfx_saadc_buffer_set(&raw, 1);
@@ -172,6 +246,22 @@ static bool read_one_sample_mv(uint32_t* out_mv) {
     err = nrfx_saadc_mode_trigger();
     if (err != NRFX_SUCCESS) {
         ESP_LOGW(TAG, "saadc mode_trigger failed: %d", (int)err);
+        return false;
+    }
+    if (xSemaphoreTake(s_done, pdMS_TO_TICKS(SAADC_WAIT_MS)) != pdTRUE) {
+        /* The peripheral did not signal completion inside a generous bound:
+         * treat it as a failed sample rather than waiting forever (that
+         * unbounded wait is the bug this rework removes). Abort the
+         * still-possibly-in-flight conversion first: `raw` is this
+         * function's stack slot, and if the conversion completes after we
+         * have already returned, EasyDMA would write into memory that no
+         * longer belongs to it. The abort's own completion is expected to
+         * signal s_done a second time; drain that (best-effort, same
+         * bound) so it doesn't masquerade as a real result on the *next*
+         * sample's wait. */
+        nrfx_saadc_abort();
+        ESP_LOGW(TAG, "saadc sample timed out, aborting");
+        (void)xSemaphoreTake(s_done, pdMS_TO_TICKS(SAADC_WAIT_MS));
         return false;
     }
     *out_mv = raw_to_pin_mv(raw);
