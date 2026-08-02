@@ -57,10 +57,6 @@ uint32_t delivery_event_ring_append(delivery_event_ring_t* ring,
     return stored.event_seq;
 }
 
-uint32_t delivery_event_ring_count(const delivery_event_ring_t* ring) {
-    return ring ? ring->header.count : 0u;
-}
-
 uint32_t delivery_event_ring_latest_seq(const delivery_event_ring_t* ring) {
     if (!ring || ring->header.count == 0u || ring->header.next_seq == 0u) {
         return 0u;
