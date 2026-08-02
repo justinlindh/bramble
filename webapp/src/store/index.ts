@@ -24,6 +24,7 @@ import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 import type { SavedDevice } from '../lib/deviceBook';
 import { formatAddrHex, formatAddr0x } from '../utils/address';
 import { DEFAULT_CAPABILITIES } from '../lib/connectionMode';
+import { mergeBroadcastRecipient } from '../lib/broadcastRecipients';
 
 const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
 const ACTIVE_TAB_KEY = 'bramble-active-tab';
@@ -352,16 +353,8 @@ export const useStore = create<AppState & Actions>((set) => ({
       messages: state.messages.map(m => {
         if (m.broadcastId !== broadcastId) return m;
         const existing = m.broadcastRecipients ?? [];
-        const idx = existing.findIndex(r => r.addr === recipient.addr);
-        if (idx < 0) {
-          return { ...m, broadcastRecipients: [...existing, recipient] };
-        }
-        if (existing[idx].deliveredAtMs > recipient.deliveredAtMs) {
-          return m;
-        }
-        const next = [...existing];
-        next[idx] = { ...existing[idx], ...recipient };
-        return { ...m, broadcastRecipients: next };
+        const next = mergeBroadcastRecipient(existing, recipient);
+        return next === existing ? m : { ...m, broadcastRecipients: next };
       }),
     })),
 
