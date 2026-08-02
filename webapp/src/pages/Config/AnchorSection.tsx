@@ -17,6 +17,7 @@ import {
 import { setAnchor, getIdentity, setEndorsement, loadAnchorStatus } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
+import { useTimedFlag } from '../../hooks/useTimedFlag';
 import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './AnchorSection.module.css';
 
@@ -90,7 +91,7 @@ export function AnchorSection() {
   const [pendingAnchor, setPendingAnchor] = useState<ClientAnchor | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showPendingQR, setShowPendingQR] = useState(false);
-  const [backupCopied, setBackupCopied] = useState(false);
+  const [backupCopied, flashBackupCopied, resetBackupCopied] = useTimedFlag(2000);
 
   const [importInput, setImportInput] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
@@ -144,7 +145,7 @@ export function AnchorSection() {
   // -- Generate a new anchor (mandatory-backup flow) --------------------------
   const onGenerate = () => {
     setGenerateError(null);
-    setBackupCopied(false);
+    resetBackupCopied();
     try {
       const { seedHex } = generateAnchorKeypair();
       // Held in component state only. NOT written to localStorage and NOT sent
@@ -173,8 +174,7 @@ export function AnchorSection() {
     if (!pendingAnchor) return;
     try {
       await navigator.clipboard.writeText(encodeAnchorBackup(pendingAnchor.seedHex));
-      setBackupCopied(true);
-      setTimeout(() => setBackupCopied(false), 2000);
+      flashBackupCopied();
     } catch {
       // Clipboard unavailable; the field is still selectable/copyable by hand.
     }
