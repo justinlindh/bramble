@@ -176,7 +176,11 @@ invoke (`ci-ccache-env.sh` included: both jobs run it to configure the compiler
 cache, so editing it must re-run them), plus the `.esp-idf-version` pin, keyed
 as one bucket (a `flash.sh`-only change re-running the emulator is a harmless
 over-match, and over-matching here is always safe). `release_config` is exactly
-what the `Release config` job loads. `docker_firmware_builder` is the
+what the `Release config` job's scope-gating step loads; `ota_index` (the OTA
+firmware-index generator, validator, their schema fixtures, and the validator
+test) gates that job's separate validator step, kept out of `release_config` so
+an index-tooling change does not drag in the release job's `npm ci`.
+`docker_firmware_builder` is the
 firmware-builder image's build context (`docker/firmware-builder/`): that leg
 builds a toolchain image FROM `espressif/idf` and does not `COPY` `main/` or
 `components/`, so it gets its own area instead of riding on `firmware`.
@@ -283,7 +287,7 @@ signal) naming the mismatch and pointing at this file.
 | `Detect changed areas` (via reusable `detect`) | always | no |
 | `Host tests` | `firmware`, `host_test`, `coverage_tooling`, or `ci_core` | yes |
 | `Parser fuzzing` | `firmware`, `host_test`, or `ci_core` | yes |
-| `Release config` | `release_config` or `ci_core` | yes |
+| `Release config` (step-gated) | `release_config`, `ota_index`, or `ci_core` | yes |
 | `nRF52840 build` | `firmware`, `nrf`, or `ci_core` | yes |
 | `gosim integration` | `firmware`, `simulator`, `coverage_tooling`, or `ci_core` | yes |
 | `Board build smoke (heltec-v3)` (+ `tdeck-plus`, `heltec-v4`, `bramble-pager`), step-gated | `firmware`, `idf_build_scripts`, `size_tooling`, or `ci_core` | yes |
@@ -348,6 +352,18 @@ loads the real `.releaserc.<component>.cjs` files and asserts, per component,
 that an in-scope `fix`/`feat`/`perf`/breaking commit cuts the right release
 level while out-of-scope and non-releasing commits do not, so a scope-gating
 regression that would silently stop every binary from publishing fails the PR.
+
+The same job hosts a second, independent release/publish node test: the OTA
+firmware-index validator (`node test/test-validate-firmware-index.js`), gated on
+its own `ota_index` area. It pins `scripts/validate-firmware-index.js` to
+`docs/ota-release-schema.md` (the validator `scripts/publish-firmware-release.sh`
+runs on the `index.json` it generates), so a schema regression that would ship an
+index the OTA journey cannot consume fails the PR. The two tests share the pod
+because both need only node, but each is gated on its OWN area at the STEP level:
+an `ota_index`-only change runs the validator step and skips the `npm ci` +
+scope-gating steps, a `release_config`-only change does the reverse, and
+`ci_core` forces both. The `Release config` context name is unchanged, so branch
+protection needs no new required context.
 
 `Board build smoke` is a four-way matrix over `heltec-v3`, `tdeck-plus`,
 `heltec-v4`, and `bramble-pager`: the same four targets `scripts/ci-build-firmware.sh`

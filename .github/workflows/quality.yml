@@ -322,16 +322,22 @@ jobs:
 
   release-config:
     name: Release config
-    # The per-component semantic-release configs (.releaserc.<component>.cjs)
-    # and the squash-expander they wrap decide whether any binary ever
-    # publishes. A silent scope-gating regression here stops every release, so
-    # this cheap check runs whenever a release config, the release scripts, or
-    # the pinned release toolchain changes (release_config = .releaserc.* +
-    # scripts/release/ + the root package.json/package-lock.json); ci_core forces
-    # it for the safety rule. It no longer piggybacks on the broad firmware area,
-    # so an ordinary firmware code change stops spinning up this pod.
+    # Two release/publish-pipeline node tests share this pod because both need
+    # only a node runtime and nothing else. The steps are gated INDIVIDUALLY on
+    # their own areas (not the job) so neither pays the other's cost:
+    #   - release_config (.releaserc.* + scripts/release/ + root package.json):
+    #     the per-component semantic-release configs and the squash-expander they
+    #     wrap decide whether any binary ever publishes; a silent scope-gating
+    #     regression stops every release. That test needs npm ci.
+    #   - ota_index: the OTA firmware-index validator that publish-firmware-release.sh
+    #     runs on its generated index.json; a schema regression would ship an index
+    #     the OTA journey cannot consume. That test needs no deps.
+    # The job runs whenever either area (or ci_core, the safety rule) changed, and
+    # each step's if: keeps an index-only change off npm ci and a config-only change
+    # off the validator test. The context name is unchanged so branch protection is
+    # untouched.
     needs: detect
-    if: needs.detect.outputs.release_config == 'true' || needs.detect.outputs.ci_core == 'true'
+    if: needs.detect.outputs.release_config == 'true' || needs.detect.outputs.ota_index == 'true' || needs.detect.outputs.ci_core == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
@@ -346,13 +352,22 @@ jobs:
         # the test exercise the versions that actually cut releases: a
         # hand-listed set of major ranges here could drift from the release job
         # and pass against code the pipeline never runs.
+        if: needs.detect.outputs.release_config == 'true' || needs.detect.outputs.ci_core == 'true'
         run: npm ci --no-audit --no-fund
       - name: Release-rule scope-gating regression
         # Asserts, per component, that an in-scope fix/feat/perf/breaking cuts
         # the right release level and that out-of-scope / non-releasing commits
         # do not. Guards the { scope: '*', release: false } catch-all bug that
         # suppressed every component release.
+        if: needs.detect.outputs.release_config == 'true' || needs.detect.outputs.ci_core == 'true'
         run: node scripts/release/semantic-release-squash-expander.test.cjs
+      - name: OTA firmware-index validator
+        # Pins scripts/validate-firmware-index.js to docs/ota-release-schema.md:
+        # a schema-complete index validates, one missing required fields fails
+        # and names them. No npm deps: it spawns node against the committed
+        # fixtures.
+        if: needs.detect.outputs.ota_index == 'true' || needs.detect.outputs.ci_core == 'true'
+        run: node test/test-validate-firmware-index.js
 
   gosim-integration:
     name: gosim integration
