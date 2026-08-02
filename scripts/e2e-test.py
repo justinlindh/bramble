@@ -25,7 +25,6 @@ import sys
 import time
 import argparse
 from dataclasses import dataclass, field
-from typing import Any, Optional
 
 # ── Transport Abstraction ────────────────────────────────────────────
 
@@ -398,7 +397,7 @@ async def test_set_mailbox(ctx: TestContext):
         ok = r.get("result", {}).get("ok") is True
         # Disable
         await timed_rpc(ctx.node1, "bramble.setMailbox", {"enabled": False})
-        ctx.record("setMailbox", ok, ms, f"enabled→disabled")
+        ctx.record("setMailbox", ok, ms, "enabled→disabled")
     except Exception as e:
         ctx.record("setMailbox", False, 0, error=str(e))
 
@@ -526,7 +525,7 @@ async def run_tests(node1_spec: str, node2_spec: str):
     node2 = make_transport(node2_spec)
 
     print(f"\n{'='*60}")
-    print(f"Bramble E2E Test Suite")
+    print("Bramble E2E Test Suite")
     print(f"{'='*60}")
     print(f"  Node 1 (Alice): {node1.label()}")
     print(f"  Node 2 (Bob):   {node2.label()}")
@@ -536,14 +535,14 @@ async def run_tests(node1_spec: str, node2_spec: str):
     print("Connecting to nodes...")
     try:
         await node1.connect()
-        print(f"  ✅ Node 1 connected")
+        print("  ✅ Node 1 connected")
     except Exception as e:
         print(f"  ❌ Node 1 connect failed: {e}")
         return 1
 
     try:
         await node2.connect()
-        print(f"  ✅ Node 2 connected")
+        print("  ✅ Node 2 connected")
     except Exception as e:
         print(f"  ❌ Node 2 connect failed: {e}")
         await node1.close()
@@ -566,7 +565,7 @@ async def run_tests(node1_spec: str, node2_spec: str):
         ctx.node2_name = node2.label()
 
     print(f"\n{'='*60}")
-    print(f"Node identities:")
+    print("Node identities:")
     print(f"  Node 1: {ctx.node1_name!r} ({node1.label()})")
     print(f"  Node 2: {ctx.node2_name!r} ({node2.label()})")
     print(f"{'='*60}\n")
