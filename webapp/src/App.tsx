@@ -75,11 +75,11 @@ export default function App() {
   // simply goes quiet would linger forever on a purely event-driven client.
   // This is the only remaining getNeighbors poll in the app: the Nodes tab used
   // to run a second one every 5 seconds on top of it.
-  usePoll(isConnected ? loadNeighbors : () => Promise.resolve(), 60_000);
+  usePoll(loadNeighbors, 60_000, { enabled: isConnected });
 
   // Global provisioning poll: keeps the UNPROVISIONED (inert) banner live on
   // every tab and makes it vanish the moment a key is set on this node.
-  usePoll(isConnected ? loadNetworkKeyStatus : () => Promise.resolve(), 10_000);
+  usePoll(loadNetworkKeyStatus, 10_000, { enabled: isConnected });
 
   useEffect(() => {
     loadConnectionCapabilities();

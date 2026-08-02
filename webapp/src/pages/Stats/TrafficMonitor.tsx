@@ -140,21 +140,15 @@ export function TrafficMonitor() {
   const [directionFilter, setDirectionFilter] = useState<TrafficDirection | 'all'>(persistedFilters.direction);
   const [bucketFilter, setBucketFilter] = useState<AirtimeBucket | 'all'>(persistedFilters.bucket);
 
-  usePoll(
-    () => {
-      if (!isConnected) return;
-      return loadTrafficDebugStatus();
-    },
-    5000,
-  );
+  usePoll(loadTrafficDebugStatus, 5000, { enabled: isConnected });
 
   usePoll(
     () => {
-      if (!isConnected) return;
       const highestSeq = trafficEvents.length > 0 ? trafficEvents[trafficEvents.length - 1].seq : undefined;
       return loadTrafficEvents(highestSeq);
     },
     2000,
+    { enabled: isConnected },
   );
 
   useEffect(() => {
