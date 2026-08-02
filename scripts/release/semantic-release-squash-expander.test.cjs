@@ -375,6 +375,10 @@ async function runReleaseRuleRegression() {
         ["firmware", "fix(settings): fix a T-Deck settings screen bug", "patch"],
         ["firmware", "fix(emulator): fix a linux-target-only bug", null],
         ["firmware", "fix(some-unknown-scope): not a real scope", null],
+        // `build` is in the audit's "Deliberately EXCLUDED" list (CI and
+        // build-script plumbing, per .releaserc.firmware.cjs): a build-scoped
+        // commit must NOT cut a firmware release, so this pins the exclusion.
+        ["firmware", "fix(build): tweak an ESP-IDF build script", null],
         // Webapp: anchor is pure webapp (previously matched no rule at
         // all); chat is dual-scoped (also releases firmware for the same
         // commit, see the firmware table above); settings is deliberately
