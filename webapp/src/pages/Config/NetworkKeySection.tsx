@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTimedFlag } from '../../hooks/useTimedFlag';
 import { encodeNetworkKeyShare, parseNetworkKeyShare } from '../../utils/networkKeyShare';
 import { setNetworkKey, generateNetworkKey, loadNetworkKeyStatus } from '../../store/actions';
 import { useStore } from '../../store/index';
@@ -29,7 +30,7 @@ export function NetworkKeySection() {
   const [confirmRekey, setConfirmRekey] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showGeneratedShare, setShowGeneratedShare] = useState(false);
-  const [hexCopied, setHexCopied] = useState(false);
+  const [hexCopied, flashHexCopied, resetHexCopied] = useTimedFlag(2000);
 
   const [pasteInput, setPasteInput] = useState('');
   const [showScan, setShowScan] = useState(false);
@@ -63,7 +64,7 @@ export function NetworkKeySection() {
     try {
       const { key, fingerprint } = await generateNetworkKey();
       setGenerated({ hex: key, uri: encodeNetworkKeyShare(key), fp: fingerprint });
-      setHexCopied(false);
+      resetHexCopied();
       await refreshStatus();
     } catch (e) {
       setGenerateError(friendlyErrorFrom(e));
@@ -76,8 +77,7 @@ export function NetworkKeySection() {
     if (!generated) return;
     try {
       await navigator.clipboard.writeText(generated.hex);
-      setHexCopied(true);
-      setTimeout(() => setHexCopied(false), 2000);
+      flashHexCopied();
     } catch {
       // Clipboard API unavailable; the field below is still selectable/copyable by hand.
     }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { EscapeDialog } from './EscapeDialog';
+import { useTimedFlag } from '../hooks/useTimedFlag';
 import styles from './QRShareModal.module.css';
 
 interface QRShareModalProps {
@@ -17,7 +18,7 @@ export function QRShareModal({
   onClose,
 }: QRShareModalProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, flashCopied] = useTimedFlag(2000);
   const [copyError, setCopyError] = useState<string | null>(null);
 
   // Render QR code into canvas. qrcode is loaded on demand to keep it out of
@@ -41,8 +42,7 @@ export function QRShareModal({
     setCopyError(null);
     try {
       await navigator.clipboard.writeText(shareString);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      flashCopied();
       return;
     } catch {
       // Fallback for older/locked-down clipboard APIs.
@@ -53,8 +53,7 @@ export function QRShareModal({
         try {
           const ok = document.execCommand('copy');
           if (ok) {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+            flashCopied();
             return;
           }
         } catch {
