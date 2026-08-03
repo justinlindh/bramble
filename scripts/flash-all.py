@@ -24,7 +24,6 @@ import os
 import re
 import shlex
 import subprocess
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -272,7 +271,7 @@ def verify_usb_boot(port: str, timeout_s: int = 30) -> tuple[bool, str]:
 
     # If we got readable lines but no markers, the device is probably fine
     # but just quiet. Count readable (non-garbage) lines as weak evidence.
-    readable = [l for l in collected if len(l) > 5 and l.isprintable()]
+    readable = [line for line in collected if len(line) > 5 and line.isprintable()]
     if len(readable) >= 3:
         return True, f"boot likely OK: {len(readable)} readable lines but no marker (device may be idle)"
 
