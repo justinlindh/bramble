@@ -17,7 +17,6 @@ import {
   handleIncomingMessage,
   handleAck,
   handleBroadcastDelivery,
-  handleDeliveryUpdate,
   handleProbeAck,
   handleProbeComplete,
 } from './messaging';
@@ -217,7 +216,6 @@ export async function connect(
     // A GPS fix acquired mid-session must refresh the map: without this the
     // self position only appears after a manual reload.
     session.client.subscribe('bramble.onGpsEvent', () => { loadPeerLocations().catch(() => {}); });
-    session.client.subscribe('delivery.update', (params) => handleDeliveryUpdate(params));
     session.client.subscribe('bramble.onNeighborChange', () => loadNeighbors());
     // NOTE: no firmware build emits bramble.onRouteUpdate today (nothing in
     // main/ or components/ calls rpc_notify with it, and it is absent from
