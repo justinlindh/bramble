@@ -108,12 +108,4 @@ bool anomaly_check_rreq_retx(rreq_retx_tracker_t* t, uint32_t dest_addr, uint64_
 void anomaly_check_partition(node_array_t* nodes, float radio_range, uint64_t now_us,
                              FILE* emit_out);
 
-/* Legacy shim: used by old call sites that only passed route_flap_tracker_t */
-static inline bool anomaly_check_route_flap_legacy(route_flap_tracker_t* tracker,
-                                                   uint32_t dest_addr, uint32_t next_hop,
-                                                   uint64_t now_us, FILE* emit_out,
-                                                   const char* node_id) {
-    return anomaly_check_route_flap(tracker, dest_addr, next_hop, now_us, emit_out, node_id);
-}
-
 #endif /* SIM_ANOMALY_H */
