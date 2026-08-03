@@ -29,3 +29,6 @@ done
 
 dir="$(cd "$(dirname "$0")" && pwd)"
 node "$dir/build-firmware-index.js" "$OTA_ROOT" "$OTA_ROOT/index.json"
+# Fail the publish rather than ship an index that the OTA journey cannot
+# consume: validate the generated file against docs/ota-release-schema.md.
+node "$dir/validate-firmware-index.js" "$OTA_ROOT/index.json"

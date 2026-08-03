@@ -5,15 +5,15 @@
       "published_at": "2026-02-24T09:00:00Z",
       "channel": "stable",
       "artifacts": [
-        { "board": "heltec-v3", "file": "/ota/stable/v1.2.3/heltec-v3/bootloader.bin" },
-        { "board": "heltec-v3", "file": "/ota/stable/v1.2.3/heltec-v3/partition-table.bin" },
-        { "board": "heltec-v3", "file": "/ota/stable/v1.2.3/heltec-v3/bramble.bin" },
-        { "board": "tdeck-plus", "file": "/ota/stable/v1.2.3/tdeck-plus/bootloader.bin" },
-        { "board": "tdeck-plus", "file": "/ota/stable/v1.2.3/tdeck-plus/partition-table.bin" },
-        { "board": "tdeck-plus", "file": "/ota/stable/v1.2.3/tdeck-plus/bramble.bin" },
-        { "board": "heltec-v4", "file": "/ota/stable/v1.2.3/heltec-v4/bootloader.bin" },
-        { "board": "heltec-v4", "file": "/ota/stable/v1.2.3/heltec-v4/partition-table.bin" },
-        { "board": "heltec-v4", "file": "/ota/stable/v1.2.3/heltec-v4/bramble.bin" }
+        { "board": "heltec-v3", "file": "/ota/stable/v1.2.3/heltec-v3/bootloader.bin", "sha256": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809", "size": 24576 },
+        { "board": "heltec-v3", "file": "/ota/stable/v1.2.3/heltec-v3/partition-table.bin", "sha256": "2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a", "size": 3072 },
+        { "board": "heltec-v3", "file": "/ota/stable/v1.2.3/heltec-v3/bramble.bin", "sha256": "3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b", "size": 1421312 },
+        { "board": "tdeck-plus", "file": "/ota/stable/v1.2.3/tdeck-plus/bootloader.bin", "sha256": "4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c", "size": 24576 },
+        { "board": "tdeck-plus", "file": "/ota/stable/v1.2.3/tdeck-plus/partition-table.bin", "sha256": "5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", "size": 3072 },
+        { "board": "tdeck-plus", "file": "/ota/stable/v1.2.3/tdeck-plus/bramble.bin", "sha256": "6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e", "size": 1458176 },
+        { "board": "heltec-v4", "file": "/ota/stable/v1.2.3/heltec-v4/bootloader.bin", "sha256": "708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f", "size": 24576 },
+        { "board": "heltec-v4", "file": "/ota/stable/v1.2.3/heltec-v4/partition-table.bin", "sha256": "8192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70", "size": 3072 },
+        { "board": "heltec-v4", "file": "/ota/stable/v1.2.3/heltec-v4/bramble.bin", "sha256": "92a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081", "size": 1423360 }
       ]
     },
     {
@@ -21,15 +21,15 @@
       "published_at": "2026-02-24T10:00:00Z",
       "channel": "stable",
       "artifacts": [
-        { "board": "heltec-v3", "file": "/ota/stable/not-semver/heltec-v3/bootloader.bin" },
-        { "board": "heltec-v3", "file": "/ota/stable/not-semver/heltec-v3/partition-table.bin" },
-        { "board": "heltec-v3", "file": "/ota/stable/not-semver/heltec-v3/bramble.bin" },
-        { "board": "tdeck-plus", "file": "/ota/stable/not-semver/tdeck-plus/bootloader.bin" },
-        { "board": "tdeck-plus", "file": "/ota/stable/not-semver/tdeck-plus/partition-table.bin" },
-        { "board": "tdeck-plus", "file": "/ota/stable/not-semver/tdeck-plus/bramble.bin" },
-        { "board": "heltec-v4", "file": "/ota/stable/not-semver/heltec-v4/bootloader.bin" },
-        { "board": "heltec-v4", "file": "/ota/stable/not-semver/heltec-v4/partition-table.bin" },
-        { "board": "heltec-v4", "file": "/ota/stable/not-semver/heltec-v4/bramble.bin" }
+        { "board": "heltec-v3", "file": "/ota/stable/not-semver/heltec-v3/bootloader.bin", "sha256": "a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192", "size": 24576 },
+        { "board": "heltec-v3", "file": "/ota/stable/not-semver/heltec-v3/partition-table.bin", "sha256": "b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3", "size": 3072 },
+        { "board": "heltec-v3", "file": "/ota/stable/not-semver/heltec-v3/bramble.bin", "sha256": "c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4", "size": 1421312 },
+        { "board": "tdeck-plus", "file": "/ota/stable/not-semver/tdeck-plus/bootloader.bin", "sha256": "d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5", "size": 24576 },
+        { "board": "tdeck-plus", "file": "/ota/stable/not-semver/tdeck-plus/partition-table.bin", "sha256": "e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6", "size": 3072 },
+        { "board": "tdeck-plus", "file": "/ota/stable/not-semver/tdeck-plus/bramble.bin", "sha256": "f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7", "size": 1458176 },
+        { "board": "heltec-v4", "file": "/ota/stable/not-semver/heltec-v4/bootloader.bin", "sha256": "091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8", "size": 24576 },
+        { "board": "heltec-v4", "file": "/ota/stable/not-semver/heltec-v4/partition-table.bin", "sha256": "1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c", "size": 3072 },
+        { "board": "heltec-v4", "file": "/ota/stable/not-semver/heltec-v4/bramble.bin", "sha256": "2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d", "size": 1423360 }
       ]
     }
   ]
