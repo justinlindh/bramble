@@ -22,9 +22,4 @@ bool sdcard_is_present(void);
  */
 const char* sdcard_get_mount_point(void);
 
-/**
- * Unmount SD card and free resources.
- */
-void sdcard_deinit(void);
-
 #endif /* BRAMBLE_SDCARD_H */

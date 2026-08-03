@@ -254,12 +254,6 @@ bool keyboard_poll(char* out) {
     return buffer_pop(out);
 }
 
-bool keyboard_has_data(void) {
-    if (!initialized)
-        return false;
-    return !buffer_empty();
-}
-
 i2c_master_bus_handle_t keyboard_get_i2c_bus(void) { return bus_handle; }
 
 void keyboard_set_backlight(uint8_t brightness) {
@@ -307,8 +301,6 @@ bool keyboard_inject_char(char c) {
     (void)c;
     return false;
 }
-
-bool keyboard_has_data(void) { return false; }
 
 void keyboard_set_backlight(uint8_t brightness) { (void)brightness; }
 

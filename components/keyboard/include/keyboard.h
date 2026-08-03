@@ -42,12 +42,6 @@ bool keyboard_poll(char* out);
 bool keyboard_inject_char(char c);
 
 /**
- * Check if keyboard has data pending.
- * Returns true if at least one key is buffered.
- */
-bool keyboard_has_data(void);
-
-/**
  * Set keyboard backlight brightness via I2C command to keyboard MCU.
  * brightness: 0 = off, 255 = maximum.  Values are passed directly to the
  * MCU as a PWM duty cycle; if the MCU firmware treats it as on/off only,
