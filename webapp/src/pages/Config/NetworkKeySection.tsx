@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTimedFlag } from '../../hooks/useTimedFlag';
+import { copyWithFallback } from '../../utils/clipboard';
 import { encodeNetworkKeyShare, parseNetworkKeyShare } from '../../utils/networkKeyShare';
 import { setNetworkKey, generateNetworkKey, loadNetworkKeyStatus } from '../../store/actions';
 import { useStore } from '../../store/index';
@@ -75,11 +76,10 @@ export function NetworkKeySection() {
 
   const handleCopyHex = async () => {
     if (!generated) return;
-    try {
-      await navigator.clipboard.writeText(generated.hex);
+    // copyWithFallback swallows its own failure and returns false; the field
+    // below is still selectable/copyable by hand, so a false result just skips the flash.
+    if (await copyWithFallback(generated.hex)) {
       flashHexCopied();
-    } catch {
-      // Clipboard API unavailable; the field below is still selectable/copyable by hand.
     }
   };
 
