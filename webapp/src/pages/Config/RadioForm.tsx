@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import type { RadioConfig } from "../../types/bramble";
 import { saveRadio } from "../../store/actions";
+import { useTimedFlag } from "../../hooks/useTimedFlag";
 import { friendlyErrorFrom } from "../../lib/errors";
 import styles from "./RadioForm.module.css";
 
@@ -42,7 +43,7 @@ export function RadioForm({ radio }: RadioFormProps) {
   const [persisted, setPersisted] = useState<RadioConfig>(radio);
   const [form, setForm] = useState<RadioConfig>(radio);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, flashSaved, resetSaved] = useTimedFlag(2000);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -63,12 +64,11 @@ export function RadioForm({ radio }: RadioFormProps) {
 
     setSaving(true);
     setError("");
-    setSaved(false);
+    resetSaved();
     try {
       await saveRadio(form);
       setPersisted(form);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      flashSaved();
     } catch (err) {
       setError(friendlyErrorFrom(err));
     } finally {
@@ -79,7 +79,7 @@ export function RadioForm({ radio }: RadioFormProps) {
   const handleRevert = () => {
     setForm(persisted);
     setError("");
-    setSaved(false);
+    resetSaved();
   };
 
   return (
