@@ -35,16 +35,12 @@ static bool g_intermediate_rrep_enabled = true;
 
 void bridge_set_intermediate_rrep_enabled(bool enabled) { g_intermediate_rrep_enabled = enabled; }
 
-bool bridge_get_intermediate_rrep_enabled(void) { return g_intermediate_rrep_enabled; }
-
 /* ─── Flood transport on/off switch (Flooding F1 Task 1) ────────────────── */
 /* See bridge.h's doc comment: mirrors firmware's s_flood_transport. Default
  * false (reactive unchanged, matching firmware's shipped NVS default). */
 static bool g_flood_transport_enabled = false;
 
 void bridge_set_flood_transport_enabled(bool enabled) { g_flood_transport_enabled = enabled; }
-
-bool bridge_get_flood_transport_enabled(void) { return g_flood_transport_enabled; }
 
 /* ─── Flood-transport origination hop budget (Flooding F1 finalize) ──────── */
 /* Mirrors firmware's s_flood_hop_limit: the operator-settable hop_limit a
@@ -56,8 +52,6 @@ bool bridge_get_flood_transport_enabled(void) { return g_flood_transport_enabled
 static uint8_t g_flood_hop_limit = FLOOD_HOP_LIMIT_DEFAULT;
 
 void bridge_set_flood_hop_limit(uint8_t hops) { g_flood_hop_limit = flood_hop_limit_clamp(hops); }
-
-uint8_t bridge_get_flood_hop_limit(void) { return g_flood_hop_limit; }
 
 /* ─── Originated-receipt TX kind (receipt reliability campaign Task 2) ───── */
 /* See bridge.h's doc comment. Default TX_KIND_RECEIPT, what firmware really
@@ -71,8 +65,6 @@ void bridge_set_broadcast_receipt_tx_kind(int kind) {
         g_broadcast_receipt_tx_kind = (tx_kind_t)kind;
     }
 }
-
-int bridge_get_broadcast_receipt_tx_kind(void) { return (int)g_broadcast_receipt_tx_kind; }
 
 /* ─── RREQ source-route install trust (issue #74 attack repro) ──────────── */
 /* Firmware's handle_rreq, after answering an RREQ, installs a route back
@@ -90,8 +82,6 @@ int bridge_get_broadcast_receipt_tx_kind(void) { return (int)g_broadcast_receipt
 static int g_rreq_src_route_trust = RREQ_SRC_ROUTE_OFF;
 
 void bridge_set_rreq_src_route_trust(int trust) { g_rreq_src_route_trust = trust; }
-
-int bridge_get_rreq_src_route_trust(void) { return g_rreq_src_route_trust; }
 
 /* Install the reverse route toward the RREQ source that firmware's handle_rreq
  * installs after answering an RREQ, gated on g_rreq_src_route_trust. The sim
@@ -273,15 +263,6 @@ static relay_path_entry_t* relay_path_get(uint32_t packet_id) {
         }
     }
     return NULL;
-}
-
-static void relay_path_remove(uint32_t packet_id) {
-    for (int i = 0; i < MAX_RELAY_PATHS; i++) {
-        if (g_relay_paths[i].active && g_relay_paths[i].packet_id == packet_id) {
-            g_relay_paths[i].active = false;
-            return;
-        }
-    }
 }
 
 /* ─── Broadcast receipt-return dedup (receipt reliability campaign Task 1) ─
@@ -467,19 +448,6 @@ sim_event_t bridge_make_tick_event(uint64_t ts_us, const char* node_id, uint32_t
     return e;
 }
 
-sim_event_t bridge_make_node_event(event_type_t type, uint64_t ts_us, const char* node_id,
-                                   uint32_t addr, float x, float y) {
-    sim_event_t e;
-    memset(&e, 0, sizeof(e));
-    e.type = type;
-    e.timestamp_us = ts_us;
-    strncpy(e.data.node.node_id, node_id, NODE_ID_LEN - 1);
-    e.data.node.addr = addr;
-    e.data.node.x = x;
-    e.data.node.y = y;
-    return e;
-}
-
 sim_event_t bridge_make_generate_msg_event(uint64_t ts_us, const char* node_id,
                                            uint32_t dest_addr) {
     sim_event_t e;
@@ -499,15 +467,6 @@ sim_event_t bridge_make_interference_start(uint64_t ts_us, float cx, float cy, f
     e.data.interference.center_x = cx;
     e.data.interference.center_y = cy;
     e.data.interference.radius = radius;
-    return e;
-}
-
-sim_event_t bridge_make_interference_end(uint64_t ts_us, int zone_index) {
-    sim_event_t e;
-    memset(&e, 0, sizeof(e));
-    e.type = EVT_INTERFERENCE_END;
-    e.timestamp_us = ts_us;
-    e.data.interference.zone_index = zone_index;
     return e;
 }
 

@@ -225,11 +225,8 @@ uint64_t bridge_get_event_timestamp(const sim_event_t* e);
 
 /* ─── Event construction helpers ───────────────────────────────────────── */
 sim_event_t bridge_make_tick_event(uint64_t ts_us, const char* node_id, uint32_t tick_seq);
-sim_event_t bridge_make_node_event(event_type_t type, uint64_t ts_us, const char* node_id,
-                                   uint32_t addr, float x, float y);
 sim_event_t bridge_make_generate_msg_event(uint64_t ts_us, const char* node_id, uint32_t dest_addr);
 sim_event_t bridge_make_interference_start(uint64_t ts_us, float cx, float cy, float radius);
-sim_event_t bridge_make_interference_end(uint64_t ts_us, int zone_index);
 /* Test-only injection: builds an EVT_RECEIVE_PACKET event directly (normally
  * only sim_radio_broadcast produces these), so Go tests can drive
  * bridge_handle_receive_packet with a hand-built frame without going through
@@ -335,7 +332,6 @@ void bridge_init(void);
  * run's setting.
  */
 void bridge_set_intermediate_rrep_enabled(bool enabled);
-bool bridge_get_intermediate_rrep_enabled(void);
 
 /*
  * Issue #74 attack-repro toggle: the trust class _handle_rreq uses for the
@@ -348,7 +344,6 @@ bool bridge_get_intermediate_rrep_enabled(void);
  * such switch (it always installs as ROUTE_SRC_BREADCRUMB now).
  */
 void bridge_set_rreq_src_route_trust(int trust);
-int bridge_get_rreq_src_route_trust(void);
 
 /*
  * Flooding F1 Task 1: the unicast flood transport toggle (firmware's
@@ -365,7 +360,6 @@ int bridge_get_rreq_src_route_trust(void);
  * "flood_transport" JSON field), so no run leaks a previous run's setting.
  */
 void bridge_set_flood_transport_enabled(bool enabled);
-bool bridge_get_flood_transport_enabled(void);
 
 /*
  * Flooding F1 finalize: the flood-transport origination hop budget (firmware's
@@ -379,7 +373,6 @@ bool bridge_get_flood_transport_enabled(void);
  * run leaks a previous run's value.
  */
 void bridge_set_flood_hop_limit(uint8_t hops);
-uint8_t bridge_get_flood_hop_limit(void);
 
 /*
  * Receipt reliability campaign Task 2: which tx_kind_t an ORIGINATED
@@ -399,7 +392,6 @@ uint8_t bridge_get_flood_hop_limit(void);
  * JSON field, so no run leaks a previous run's arm.
  */
 void bridge_set_broadcast_receipt_tx_kind(int kind);
-int bridge_get_broadcast_receipt_tx_kind(void);
 
 /*
  * bridge_handle_receipt_tx (receipt reliability campaign Task 2):
