@@ -202,7 +202,7 @@ That is a missing tool, not a failing check. The tools these targets need:
 | `ci-quality-cppcheck` | `cppcheck` | <https://cppcheck.sourceforge.io/> or your package manager |
 | `ci-quality-actionlint`, `ci-fw-actionlint` | `actionlint` | <https://github.com/rhysd/actionlint> (`ci-fw-actionlint` falls back to `go run` if Go is installed) |
 | `ci-quality-ruff` | `uvx` | <https://docs.astral.sh/uv/> |
-| `ci-quality-clang-format`, `ci-fw-clang-format` | `clang-format` | your LLVM package |
+| `ci-fw-clang-format` | `clang-format` | your LLVM package |
 | `ci-quality-board-build` | ESP-IDF v5.4.1 | [BUILDING.md](BUILDING.md) |
 
 You do not need all of them. CI runs the full set; locally, install the ones

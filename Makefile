@@ -2,9 +2,9 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 .PHONY: help setup-hooks ci check-fast ci-quality ci-firmware-quality ci-webapp-quality \
-	ci-quality-host-tests ci-quality-shellcheck ci-quality-ruff ci-quality-clang-format ci-quality-cppcheck ci-quality-board-build \
+	ci-quality-host-tests ci-quality-shellcheck ci-quality-ruff ci-quality-cppcheck ci-quality-board-build \
 	ci-fw-clang-format ci-fw-shellcheck ci-fw-actionlint \
-	ci-web-lint ci-web-typecheck ci-web-typecheck-electron ci-web-unit ci-web-build ci-web-smoke
+	ci-web-typecheck ci-web-typecheck-electron ci-web-unit ci-web-build ci-web-smoke
 
 setup-hooks:
 	git config core.hooksPath githooks
@@ -48,7 +48,7 @@ help:
 	@echo "  make ci                 # run all local CI parity checks"
 	@echo "  make ci-quality         # host tests, board build, broader script sweep"
 	@echo "  make ci-firmware-quality# the strict lint gates CI runs in Static checks"
-	@echo "  make ci-webapp-quality  # webapp lint, typecheck, unit tests, build, smoke"
+	@echo "  make ci-webapp-quality  # webapp typecheck, unit tests, build, smoke"
 	@echo "  make check-fast         # webapp typecheck + unit tests (what the pre-commit hook runs)"
 	@echo "Packaging targets"
 	@echo "  make package-linux      # Electron AppImage + deb + pacman (webapp/release/)"
@@ -61,7 +61,7 @@ check-fast: ci-web-typecheck ci-web-typecheck-electron ci-web-unit
 
 ci: ci-quality ci-firmware-quality ci-webapp-quality
 
-ci-quality: ci-quality-host-tests ci-quality-shellcheck ci-quality-ruff ci-quality-clang-format ci-quality-cppcheck ci-quality-board-build
+ci-quality: ci-quality-host-tests ci-quality-shellcheck ci-quality-ruff ci-quality-cppcheck ci-quality-board-build
 
 ci-quality-host-tests:
 	bash test/run_all_tests.sh
@@ -81,9 +81,6 @@ ci-quality-ruff:
 	command -v uvx >/dev/null
 	uvx --from 'ruff==0.12.10' ruff check scripts --select E9,F63,F7,F82
 
-ci-quality-clang-format:
-	bash scripts/lint/run-clang-format-check.sh --strict
-
 ci-quality-cppcheck:
 	command -v cppcheck >/dev/null
 	cppcheck --enable=warning,performance,portability --std=c11 --quiet --error-exitcode=2 --suppress=normalCheckLevelMaxBranches main components
@@ -94,6 +91,9 @@ ci-quality-board-build:
 
 ci-firmware-quality: ci-fw-clang-format ci-fw-shellcheck ci-fw-actionlint
 
+# The strict clang-format sweep lives here only. firmware-quality.yml is the
+# single workflow that runs it, so `make ci` runs it once, not once per
+# aggregate.
 ci-fw-clang-format:
 	bash scripts/lint/run-clang-format-check.sh --strict
 
@@ -109,10 +109,7 @@ ci-fw-actionlint:
 		go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .github/workflows/*.yml; \
 	fi
 
-ci-webapp-quality: ci-web-lint ci-web-typecheck ci-web-typecheck-electron ci-web-unit ci-web-build ci-web-smoke
-
-ci-web-lint:
-	npm run lint --prefix webapp
+ci-webapp-quality: ci-web-typecheck ci-web-typecheck-electron ci-web-unit ci-web-build ci-web-smoke
 
 ci-web-typecheck:
 	npm run typecheck --prefix webapp
@@ -123,8 +120,14 @@ ci-web-typecheck-electron:
 ci-web-unit:
 	npm run test:unit --prefix webapp
 
+# vite directly, not `npm run build`: that script is
+# `npm run typecheck && vite build` and ci-web-typecheck above already ran
+# that exact tsc over this checkout. The emitted bundle is identical; only the
+# redundant typecheck is dropped. This matches the Build step in
+# webapp-quality.yml. `npm run build` keeps its typecheck for standalone local
+# use, where nothing ran tsc beforehand.
 ci-web-build:
-	npm run build --prefix webapp
+	cd webapp && npx vite build
 
 ci-web-smoke:
 	npm run test:e2e:smoke --prefix webapp
