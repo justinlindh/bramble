@@ -199,7 +199,6 @@ interface Actions {
   setPeerName: (addr: number, name: string) => void;
   resetNodeData: () => void;
   setTrafficDebugStatus: (s: TrafficDebugStatus) => void;
-  addTrafficEvent: (e: TrafficEvent) => void;
   addTrafficEvents: (events: TrafficEvent[]) => void;
   setNetworkKeyStatus: (s: NetworkKeyStatus | null) => void;
   setAnchorStatus: (s: AnchorStatus | null) => void;
@@ -464,11 +463,9 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   setTrafficDebugStatus: (s) => set({ trafficDebugStatus: s }),
 
-  addTrafficEvent: (e) =>
-    set(state => ({
-      trafficEvents: [...state.trafficEvents, e].slice(-1000), // Keep last 1000 events
-    })),
-
+  // Both the live push (one event) and the poll (a batch) land here, so the
+  // live path gets the same seq-dedup and seq-ordering the poll relies on: a
+  // duplicate seq replaces rather than appends, and the list stays sorted.
   addTrafficEvents: (events) =>
     set(state => {
       // Merge by seq, keeping newest
