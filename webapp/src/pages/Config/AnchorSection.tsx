@@ -18,6 +18,7 @@ import { setAnchor, getIdentity, setEndorsement, loadAnchorStatus } from '../../
 import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
 import { useTimedFlag } from '../../hooks/useTimedFlag';
+import { copyWithFallback } from '../../utils/clipboard';
 import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './AnchorSection.module.css';
 
@@ -172,11 +173,10 @@ export function AnchorSection() {
 
   const handleCopyBackup = async () => {
     if (!pendingAnchor) return;
-    try {
-      await navigator.clipboard.writeText(encodeAnchorBackup(pendingAnchor.seedHex));
+    // copyWithFallback swallows its own failure and returns false; the field
+    // is still selectable/copyable by hand, so a false result just skips the flash.
+    if (await copyWithFallback(encodeAnchorBackup(pendingAnchor.seedHex))) {
       flashBackupCopied();
-    } catch {
-      // Clipboard unavailable; the field is still selectable/copyable by hand.
     }
   };
 

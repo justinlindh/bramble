@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { EscapeDialog } from './EscapeDialog';
 import { useTimedFlag } from '../hooks/useTimedFlag';
+import { copyWithFallback } from '../utils/clipboard';
 import styles from './QRShareModal.module.css';
 
 interface QRShareModalProps {
@@ -40,26 +41,9 @@ export function QRShareModal({
 
   const handleCopy = async () => {
     setCopyError(null);
-    try {
-      await navigator.clipboard.writeText(shareString);
+    if (await copyWithFallback(shareString)) {
       flashCopied();
-      return;
-    } catch {
-      // Fallback for older/locked-down clipboard APIs.
-      const el = document.getElementById('qr-share-string') as HTMLInputElement | null;
-      if (el) {
-        el.focus();
-        el.select();
-        try {
-          const ok = document.execCommand('copy');
-          if (ok) {
-            flashCopied();
-            return;
-          }
-        } catch {
-          // handled below
-        }
-      }
+    } else {
       setCopyError('Could not copy automatically. Please select and copy manually.');
     }
   };
