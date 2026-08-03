@@ -6,7 +6,6 @@ import {
   __resetBroadcastTelemetryForTests,
   handleAck,
   handleBroadcastDelivery,
-  handleDeliveryUpdate,
   initMessageStore,
   registerBroadcastSendTelemetry,
 } from '../../src/store/actions';
@@ -132,7 +131,7 @@ describe('delivery persistence hydration + live merge', () => {
     expect(updated?.broadcastRecipients?.some(r => r.addr === 0xC0DE)).toBe(true);
   });
 
-  it('handles delivery.update notifications for ack and broadcast statuses', async () => {
+  it('persists ack and broadcast delivery statuses', async () => {
     const msg = makeMessage({
       id: 'msg-update',
       packetId: 'pkt-update',
@@ -143,15 +142,13 @@ describe('delivery persistence hydration + live merge', () => {
     useStore.getState().addMessage(msg);
     registerBroadcastSendTelemetry(msg.id, { packetId: 'pkt-update', broadcastId: 'bcast-update' });
 
-    handleDeliveryUpdate({
-      kind: 'ack',
+    handleAck({
       packet_id: 'pkt-update',
       status: 'delivered',
       relayPath: [{ addr: 'BEEF', rssi: -70 }],
     });
 
-    handleDeliveryUpdate({
-      kind: 'broadcast_delivery',
+    handleBroadcastDelivery({
       broadcast_id: 'bcast-update',
       recipient: 'CAFE',
       status: 'delivered',

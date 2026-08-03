@@ -534,30 +534,6 @@ export function handleBroadcastDelivery(params: unknown): void {
   });
 }
 
-export function handleDeliveryUpdate(params: unknown): void {
-  const p = params as Record<string, unknown>;
-  const kind = String(p.kind ?? p.eventType ?? p.event_type ?? '').toLowerCase();
-
-  if (kind === 'ack' || kind === 'delivery_ack') {
-    handleAck(params);
-    return;
-  }
-
-  if (kind === 'broadcast_delivery' || kind === 'broadcast') {
-    handleBroadcastDelivery(params);
-    return;
-  }
-
-  if (p.packet_id || p.packetId) {
-    handleAck(params);
-    return;
-  }
-
-  if (p.broadcast_id || p.broadcastId) {
-    handleBroadcastDelivery(params);
-  }
-}
-
 export async function sendMessage(
   dest: number,
   text: string,
