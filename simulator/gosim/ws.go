@@ -105,9 +105,6 @@ func (h *Hub) readPump(c *Client) {
 			log.Printf("ws: bad json: %v", err)
 			continue
 		}
-		if cmd.Type == "set_broadcast_telemetry_mode" && cmd.TelemetryMode == "" {
-			cmd.TelemetryMode = "full"
-		}
 
 		// Auto-load default scenario if sim is idle
 		if h.sim.State() == StateIdle && cmd.Type != "load" && cmd.Type != "start" {
