@@ -10,8 +10,10 @@ on:
 permissions:
   contents: read
 
+# Per-SHA group for main pushes so a merge train cannot cancel the pending
+# run of an already-merged commit; see the note in quality.yml.
 concurrency:
-  group: webapp-quality-${{ github.workflow }}-${{ github.ref }}
+  group: webapp-quality-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
