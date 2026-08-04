@@ -128,3 +128,10 @@ scopes `deps`/`deps-dev` never cut releases.
 State what is verified and how (which suite, which hardware). Simulation
 results are labeled as simulation. Unexecuted plans are not documented as
 capabilities. When a claim cannot be verified, it does not ship.
+
+Docs describe the state of current `main`, not deltas. No temporal
+language ("now", "currently", "no longer", "unchanged", "the landscape
+moved") and no narration of what a doc or the project used to say; git
+history holds the deltas. Dates are for pinning verification ("verified
+against upstream 2026-07-08", "bench-verified 2026-07-31") or labeling
+measurements, never for narrating our own changes.
