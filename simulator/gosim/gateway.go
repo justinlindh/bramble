@@ -110,11 +110,12 @@ type phyEnableResult struct {
 }
 
 // onPhyFrameParams is the bramble.onPhyFrame notification payload: a raw frame
-// the node received on the real channel, hex-encoded, plus radio metadata.
+// the node received on the real channel, hex-encoded, plus its carrier. The
+// notification also carries the node's measured rssi/snr, but the bridge does
+// not consume them: the ether reprices signal quality per virtual receiver, so
+// the gateway's single measured pair has nowhere to go in this model.
 type onPhyFrameParams struct {
 	Frame string `json:"frame"`
-	RSSI  int    `json:"rssi"`
-	SNR   int    `json:"snr"`
 	Freq  int64  `json:"freq"` // carrier in Hz
 }
 
