@@ -10,8 +10,14 @@ on:
 permissions:
   contents: read
 
+# PR runs share a per-ref group and newer pushes cancel older runs. Main
+# pushes get a per-SHA group instead: a shared group would let a rapid merge
+# train cancel the pending run of an already-merged commit (GitHub keeps at
+# most one pending run per group), leaving that commit on trunk with no
+# quality run and the badge showing the cancelled run as failing (observed
+# 2026-08-04, commits f6a8760f and 30f108d4).
 concurrency:
-  group: quality-${{ github.workflow }}-${{ github.ref }}
+  group: quality-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
