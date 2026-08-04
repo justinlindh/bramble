@@ -49,21 +49,35 @@ export async function loadConnectionCapabilities(): Promise<void> {
 // ─── Connection ─────────────────────────────────────────────────────────
 
 const SERIAL_RPC_READY_ATTEMPTS = 8;
-const SERIAL_RPC_READY_TIMEOUT_MS = 1500;
-const SERIAL_RPC_READY_RETRY_DELAY_MS = 350;
+const NODE_VERIFY_ATTEMPTS = 2;
+const RPC_READY_TIMEOUT_MS = 1500;
+const RPC_READY_RETRY_DELAY_MS = 350;
 
 async function probeRpcReadiness(): Promise<void> {
   const client = requireClient();
   try {
-    await client.rpc('bramble.ping', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
+    await client.rpc('bramble.ping', undefined, RPC_READY_TIMEOUT_MS);
     return;
   } catch (error) {
     if (!isUnknownMethodError(error)) throw error;
   }
-  await client.rpc('bramble.getStatus', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
+  await client.rpc('bramble.getStatus', undefined, RPC_READY_TIMEOUT_MS);
 }
 
-const NODE_VERIFY_ATTEMPTS = 2;
+// Poll `probe` up to `attempts` times, sleeping RPC_READY_RETRY_DELAY_MS between
+// tries, and resolve true on the first attempt that returns true. Each caller's
+// distinct "what counts as ready" rule (an auth error is still a real node; a
+// failure just means keep waiting) lives in its own probe closure, so this owns
+// only the shared retry cadence.
+async function pollReady(attempts: number, probe: () => Promise<boolean>): Promise<boolean> {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (await probe()) return true;
+    if (attempt < attempts) {
+      await new Promise(r => setTimeout(r, RPC_READY_RETRY_DELAY_MS));
+    }
+  }
+  return false;
+}
 
 // Confirm the freshly opened transport actually speaks Bramble before we report
 // "Connected". A socket that opens but is not a Bramble node (a wrong IP/port
@@ -72,7 +86,7 @@ const NODE_VERIFY_ATTEMPTS = 2;
 // (issue #91). ping/getStatus is on the unauthenticated allowlist, so this also
 // works against an auth-required node.
 async function verifyBrambleNode(): Promise<boolean> {
-  for (let attempt = 1; attempt <= NODE_VERIFY_ATTEMPTS; attempt += 1) {
+  return pollReady(NODE_VERIFY_ATTEMPTS, async () => {
     try {
       await probeRpcReadiness();
       return true;
@@ -80,31 +94,26 @@ async function verifyBrambleNode(): Promise<boolean> {
       // An auth-required node answers the allowlisted ping, so a 1008/auth error
       // here means a real node we simply cannot fully use yet: treat it as
       // reachable and let the init RPCs surface the auth-required state.
-      if (isAuthError(error)) return true;
-      if (attempt < NODE_VERIFY_ATTEMPTS) {
-        await new Promise(r => setTimeout(r, SERIAL_RPC_READY_RETRY_DELAY_MS));
-      }
+      return isAuthError(error);
     }
-  }
-  return false;
+  });
 }
 
 async function ensureSerialRpcReady(): Promise<boolean> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= SERIAL_RPC_READY_ATTEMPTS; attempt += 1) {
+  const ready = await pollReady(SERIAL_RPC_READY_ATTEMPTS, async () => {
     try {
       await probeRpcReadiness();
       return true;
     } catch (error) {
       lastError = error;
-      if (attempt < SERIAL_RPC_READY_ATTEMPTS) {
-        await new Promise(r => setTimeout(r, SERIAL_RPC_READY_RETRY_DELAY_MS));
-      }
+      return false;
     }
+  });
+  if (!ready) {
+    console.warn(`[serial-rpc] readiness probe exhausted: ${((lastError as Error)?.message ?? 'startup timeout')}`);
   }
-
-  console.warn(`[serial-rpc] readiness probe exhausted: ${((lastError as Error)?.message ?? 'startup timeout')}`);
-  return false;
+  return ready;
 }
 
 export async function connect(
