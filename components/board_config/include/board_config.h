@@ -40,7 +40,7 @@ typedef int gpio_num_t;
 /* Radio oscillator type */
 typedef enum {
     RADIO_OSC_TCXO_DIO3 = 0, /* TCXO controlled by DIO3 (e.g., Heltec V3) */
-    RADIO_OSC_CRYSTAL,       /* Crystal oscillator (e.g., T-Deck Plus) */
+    RADIO_OSC_CRYSTAL,       /* Plain crystal (XTAL), no DIO3 TCXO control */
 } radio_osc_type_t;
 
 /* Radio regulator type */
