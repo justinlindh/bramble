@@ -259,7 +259,7 @@ void test_rrep_rx_decide_originator_delivers(void) {
 
     discovery_start(&dtbl, ADDR_C, QUERY, 1000);
 
-    rrep_rx_decision_t d = rrep_rx_decide(&rrep, ADDR_A, 210, &dtbl, &rev_a);
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, 210, &dtbl, &rev_a);
 
     TEST_ASSERT_EQUAL(RREP_RX_DELIVER, d.action);
     TEST_ASSERT_EQUAL(ADDR_C, d.deliver_dest);
@@ -281,7 +281,7 @@ void test_rrep_rx_decide_intermediate_forwards(void) {
 
     reverse_route_add(&rev_b, QUERY, ADDR_A, 1000);
 
-    rrep_rx_decision_t d = rrep_rx_decide(&rrep, ADDR_B, 180, &dtbl, &rev_b);
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, 180, &dtbl, &rev_b);
 
     TEST_ASSERT_EQUAL(RREP_RX_FORWARD, d.action);
     TEST_ASSERT_EQUAL(ADDR_A, d.forward_to);
@@ -303,7 +303,7 @@ void test_rrep_rx_decide_unsolicited_drops_without_install(void) {
 
     /* No pd, no reverse route for this query: we never participated in this
      * discovery, so the participation gate drops before install. */
-    rrep_rx_decision_t d = rrep_rx_decide(&rrep, ADDR_B, 150, &dtbl, &rev_b);
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, 150, &dtbl, &rev_b);
 
     TEST_ASSERT_EQUAL(RREP_RX_DROP, d.action);
     TEST_ASSERT_FALSE(d.install_route);
