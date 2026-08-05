@@ -9,7 +9,7 @@ function formatMs(ms: number): string {
   return `${ms}ms`;
 }
 
-function formatRefill(refillAtMs: number): string {
+export function formatRefill(refillAtMs: number): string {
   const diffMs = refillAtMs - Date.now();
   if (diffMs <= 0) return 'now';
   const s = Math.ceil(diffMs / 1000);
