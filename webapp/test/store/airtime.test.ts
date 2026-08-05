@@ -1,45 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import { normalizeAirtime } from '../../src/store/actions';
+import { formatRefill } from '../../src/pages/Stats/AirtimeCard';
 
-// We need to test normalizeAirtime which is not exported.
-// Extract the logic into a testable function and test the behavior.
-// For now, we inline the normalizer logic to test it directly.
-
-interface AirtimeTier {
-  name: 'critical' | 'normal' | 'broadcast';
-  remainingMs: number;
-  maxMs: number;
-  usedPct: number;
-  refillAtMs: number;
-}
-
-interface AirtimeStatus {
-  tiers: [AirtimeTier, AirtimeTier, AirtimeTier];
-}
-
-const REFILL_INTERVAL_MS = 3600000;
-
-// Mirror of normalizeAirtime from actions.ts (must stay in sync)
-function normalizeAirtime(raw: any): AirtimeStatus {
-  if (raw.tiers) return raw as AirtimeStatus;
-  const nextRefillMs = raw.next_refill_ms ?? 3600000;
-  const refillAtMs = Date.now() + (nextRefillMs > 0 ? nextRefillMs : REFILL_INTERVAL_MS);
-  return {
-    tiers: [
-      { name: 'critical', remainingMs: raw.critical_remaining_ms ?? 0, maxMs: raw.critical_max_ms ?? 36000, usedPct: 0, refillAtMs },
-      { name: 'normal', remainingMs: raw.normal_remaining_ms ?? 0, maxMs: raw.normal_max_ms ?? 18000, usedPct: 0, refillAtMs },
-      { name: 'broadcast', remainingMs: raw.broadcast_remaining_ms ?? 0, maxMs: raw.broadcast_max_ms ?? 18000, usedPct: 0, refillAtMs },
-    ].map(t => ({ ...t, usedPct: t.maxMs > 0 ? Math.round(100 * (t.maxMs - t.remainingMs) / t.maxMs) : 0 })) as [AirtimeTier, AirtimeTier, AirtimeTier],
-  };
-}
-
-// Mirror of formatRefill from AirtimeCard.tsx
-function formatRefill(refillAtMs: number): string {
-  const diffMs = refillAtMs - Date.now();
-  if (diffMs <= 0) return 'now';
-  const s = Math.ceil(diffMs / 1000);
-  if (s >= 60) return `in ${Math.floor(s / 60)}m ${s % 60}s`;
-  return `in ${s}s`;
-}
+// These exercise the real normalizeAirtime (store/actions/telemetry.ts) and
+// formatRefill (Stats/AirtimeCard.tsx). Earlier this file kept hand-copied
+// mirrors of both, which silently drifted from production (the mirror never
+// grew the receipt lane); importing the real implementations removes that
+// drift hazard.
 
 describe('normalizeAirtime: firmware flat format', () => {
   it('maps firmware fields to tier objects', () => {
@@ -158,11 +125,9 @@ describe('normalizeAirtime: firmware flat format', () => {
     }
   });
 
-  it('handles zero next_refill_ms (just refilled, should show ~1hr)', () => {
-    // When firmware just triggered a refill, next_refill_ms = 0
-    // This SHOULD mean "just refilled, next one in 1 hour"
-    // But the current code computes refillAtMs = Date.now() + 0 = now → "refills now"
-    // This is THE BUG: next_refill_ms=0 means "refill is overdue/just happened"
+  it('treats zero next_refill_ms as a full interval (just refilled)', () => {
+    // When firmware just triggered a refill, next_refill_ms = 0. That means
+    // "just refilled, next one in a full interval", not "refills now".
     const now = Date.now();
     const raw = {
       critical_remaining_ms: 36000,
@@ -176,10 +141,7 @@ describe('normalizeAirtime: firmware flat format', () => {
 
     const result = normalizeAirtime(raw);
 
-    // next_refill_ms=0 after a refill means the budget was JUST refilled
-    // The refillAtMs should be ~1 hour from now, not "now"
     for (const tier of result.tiers) {
-      // next_refill_ms=0 should be treated as "just refilled, next in 1hr"
       expect(tier.refillAtMs).toBeGreaterThan(now + 3500000);
     }
   });
@@ -199,6 +161,27 @@ describe('normalizeAirtime: firmware flat format', () => {
     expect(result.tiers[1].remainingMs).toBe(0);
     expect(result.tiers[2].remainingMs).toBe(0);
     expect(result.tiers[0].usedPct).toBe(100);
+  });
+
+  it('adds the receipt lane when the firmware reports it', () => {
+    const raw = {
+      critical_remaining_ms: 36000,
+      normal_remaining_ms: 18000,
+      broadcast_remaining_ms: 18000,
+      critical_max_ms: 36000,
+      normal_max_ms: 18000,
+      broadcast_max_ms: 18000,
+      receipt_remaining_ms: 6000,
+      receipt_max_ms: 12000,
+      next_refill_ms: 3600000,
+    };
+
+    const result = normalizeAirtime(raw);
+
+    expect(result.tiers.map(t => t.name)).toEqual(['critical', 'normal', 'broadcast', 'receipt']);
+    const receipt = result.tiers.find(t => t.name === 'receipt')!;
+    expect(receipt.remainingMs).toBe(6000);
+    expect(receipt.usedPct).toBe(50);
   });
 });
 
