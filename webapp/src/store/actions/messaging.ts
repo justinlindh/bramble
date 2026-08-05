@@ -869,16 +869,22 @@ function normalizeProbeResponder(r: ProbeResponderWire, roundsTotal: number): Pr
   };
 }
 
+// Probe ids arrive as either a hex string (firmware snake_case probe_id) or a
+// number; parse the string form, pass a number through, and yield undefined
+// when neither field is present. Shared by the per-ack and batch handlers so
+// the two paths cannot drift on the fallback order.
+function parseProbeId(raw: { probeId?: string | number; probe_id?: string | number }): number | undefined {
+  if (typeof raw.probeId === 'string') return parseInt(raw.probeId, 16);
+  if (typeof raw.probe_id === 'string') return parseInt(raw.probe_id, 16);
+  return raw.probeId ?? raw.probe_id ?? undefined;
+}
+
 export function handleProbeAck(params: unknown): void {
   const raw = params as ProbeAckWire;
 
   const roundsTotal = Math.max(1, Number(raw.rounds_total ?? raw.roundsTotal ?? (raw.seen_rounds ? 3 : 1)));
   const ack = normalizeProbeResponder(raw, roundsTotal);
-  const probeId = typeof raw.probeId === 'string'
-    ? parseInt(raw.probeId, 16)
-    : typeof raw.probe_id === 'string'
-    ? parseInt(raw.probe_id, 16)
-    : (raw.probeId ?? raw.probe_id ?? undefined);
+  const probeId = parseProbeId(raw);
 
   const store = useStore.getState();
   const prev = store.probeResult;
@@ -896,11 +902,7 @@ export function handleProbeAck(params: unknown): void {
 
 export function handleProbeComplete(params: unknown): void {
   const p = params as ProbeCompleteWire;
-  const probeId = typeof p.probeId === 'string'
-    ? parseInt(p.probeId, 16)
-    : typeof p.probe_id === 'string'
-    ? parseInt(p.probe_id, 16)
-    : (p.probeId ?? p.probe_id);
+  const probeId = parseProbeId(p);
 
   const store = useStore.getState();
   const prev = store.probeResult;
