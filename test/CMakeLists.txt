@@ -1615,6 +1615,7 @@ add_executable(test_traffic_debug
 )
 target_include_directories(test_traffic_debug PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
 )
 
 # Board profile contract tests (Heltec V4)

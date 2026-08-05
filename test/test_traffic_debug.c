@@ -5,28 +5,10 @@
 
 #include "traffic_debug.h"
 
-/* Module API from traffic_debug.h */
-/* Packet types from packet.h */
-#define PKT_TYPE_ACK 0x01
-#define PKT_TYPE_RREQ 0x02
-#define PKT_TYPE_RREP 0x03
-#define PKT_TYPE_RERR 0x04
-#define PKT_TYPE_BEACON 0x05
-#define PKT_TYPE_KEY_EXCHANGE 0x06
-#define PKT_TYPE_DELIVERY_RECEIPT 0x07
-#define PKT_TYPE_DATA 0x0A
-#define PKT_TYPE_STORE_REQUEST 0x0B
-#define PKT_TYPE_STORE_ACK 0x0C
-#define PKT_TYPE_MAILBOX_DELIVERY 0x0D
-#define PKT_TYPE_MAILBOX_QUERY 0x0E
-#define PKT_TYPE_PROBE 0x12
-#define PKT_TYPE_PROBE_ACK 0x13
-#define PKT_TYPE_LOCATION 0x14
-
-/* Airtime tiers from airtime_budget.h */
-#define AIRTIME_TIER_NORMAL 0x01
-#define AIRTIME_TIER_CRITICAL 0x02
-#define AIRTIME_TIER_BROADCAST 0x03
+/* Packet types and airtime tiers come from their defining headers, the same
+ * source of truth the classifier under test uses. */
+#include "airtime_budget.h"
+#include "packet.h"
 
 static traffic_debug_t td;
 static traffic_event_t events[32];
@@ -72,6 +54,8 @@ void test_classify_maintenance_packets(void) {
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
                       traffic_debug_classify_packet(PKT_TYPE_MAILBOX_QUERY));
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE, traffic_debug_classify_packet(PKT_TYPE_LOCATION));
+    TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
+                      traffic_debug_classify_packet(PKT_TYPE_IDENTITY_ATTESTATION));
 }
 
 void test_classify_other_packets(void) {
