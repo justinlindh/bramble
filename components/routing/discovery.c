@@ -233,18 +233,10 @@ bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_ba
     return r;
 }
 
-rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint32_t self_addr,
-                                  uint8_t link_metric, pending_discovery_table_t* pd,
-                                  reverse_route_table_t* rev) {
+rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint8_t link_metric,
+                                  pending_discovery_table_t* pd, reverse_route_table_t* rev) {
     rrep_rx_decision_t d;
     memset(&d, 0, sizeof(d));
-
-    /* self_addr is currently unused: it only fed the pre-fix next_hop
-     * ternary, removed now that rrep.next_hop directly carries the
-     * forwarder's address (see rrep_forward/rrep_build_destination). Kept
-     * in the signature since it is part of the documented interface and
-     * callers already pass it. */
-    (void)self_addr;
 
     /* next_hop is whichever node actually delivered this RREP to us:
      * rrep_build_destination/rrep_forward write the sender's own address
