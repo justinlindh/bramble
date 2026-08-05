@@ -7,10 +7,16 @@ interface CapabilitiesResponse {
   localLanReason?: string;
 }
 
+// Shown to the user when direct LAN connect is unavailable (hosted mode).
+// Single source of truth: the default capabilities below and the connection
+// overlay's fallback both reference it so the copy cannot drift.
+export const LOCAL_LAN_UNAVAILABLE_REASON =
+  'LAN direct connect is unavailable in hosted mode. Use USB or Bluetooth.';
+
 export const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   mode: 'hosted',
   localLanAllowed: false,
-  localLanReason: 'LAN direct connect is unavailable in hosted mode. Use USB or Bluetooth.',
+  localLanReason: LOCAL_LAN_UNAVAILABLE_REASON,
 };
 
 // Embedded shells (Electron file://, Android WebView asset origin) load the
