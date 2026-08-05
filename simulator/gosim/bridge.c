@@ -770,8 +770,8 @@ static void _handle_rrep(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
      * source address is not needed here: rrep.next_hop already carries the
      * forwarder's own address. */
     int node_idx = (int)(rx - nodes->nodes);
-    rrep_rx_decision_t d = rrep_rx_decide(&rrep, rx->addr, rrep.route_metric,
-                                          &rx->pending_discoveries, &rx->reverse_routes);
+    rrep_rx_decision_t d =
+        rrep_rx_decide(&rrep, rrep.route_metric, &rx->pending_discoveries, &rx->reverse_routes);
 
     if (d.install_route) {
         route_install(&rx->routes, d.route_dest, d.route_next_hop, d.route_hops, d.route_metric,
