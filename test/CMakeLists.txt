@@ -1316,7 +1316,7 @@ target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_rpc_add_channel_contract PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=96
 )
 target_compile_options(test_rpc_add_channel_contract PRIVATE
     -Wno-error=unused-parameter
@@ -1350,7 +1350,7 @@ target_include_directories(test_rpc_set_auth_token_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_rpc_set_auth_token_contract PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=96
 )
 target_compile_options(test_rpc_set_auth_token_contract PRIVATE
     -Wno-error=unused-parameter
@@ -1408,7 +1408,7 @@ target_include_directories(test_rpc_anchor_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_rpc_anchor_contract PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=96
 )
 target_compile_options(test_rpc_anchor_contract PRIVATE
     -Wno-error=unused-parameter
@@ -1442,7 +1442,7 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_rpc_get_config_channel_export PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=96
 )
 target_compile_options(test_rpc_get_config_channel_export PRIVATE
     -Wno-error=unused-parameter
@@ -1476,7 +1476,7 @@ target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_mesh_broadcast_delivery PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=96
 )
 target_compile_options(test_mesh_broadcast_delivery PRIVATE
     -Wno-error=unused-parameter
@@ -1685,7 +1685,7 @@ target_include_directories(test_rpc_methods_firmware PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_rpc_methods_firmware PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=96
 )
 target_compile_options(test_rpc_methods_firmware PRIVATE
     -Wno-error=unused-parameter
@@ -1745,7 +1745,7 @@ target_include_directories(test_rpc_scratch_isolation PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_rpc_scratch_isolation PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=96
 )
 target_compile_options(test_rpc_scratch_isolation PRIVATE
     -Wno-error=unused-parameter
@@ -1981,7 +1981,7 @@ target_include_directories(test_host_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_host_rpc_methods PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=96
 )
 target_compile_options(test_host_rpc_methods PRIVATE
     -Wno-error=unused-parameter

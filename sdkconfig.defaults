@@ -59,7 +59,7 @@ CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT=75
 # NOTE: Heltec V3 uses CP2102 UART bridge; console stays on UART (default).
 # T-Deck Plus and Heltec V4 use native USB-JTAG; console overridden in their
 # board-specific sdkconfig.defaults.* files.
-CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+CONFIG_BRAMBLE_RPC_MAX_METHODS=96
 
 # OTA image signing: Secure Boot V2 RSA-3072 app signatures WITHOUT eFuses.
 # Every build appends a signature block to bramble.bin; OTA updates verify the

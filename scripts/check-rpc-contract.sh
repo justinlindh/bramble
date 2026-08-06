@@ -118,6 +118,34 @@ PY
     fi
 fi
 
+# Method-table capacity check: rpc_register() silently drops methods past
+# CONFIG_BRAMBLE_RPC_MAX_METHODS (boot logs an error nobody reads and the
+# method is simply absent at runtime). 1.9.0 shipped with 69 registrations
+# against a 64-entry table, losing getBeaconPolicy and the phy.* debug
+# surface on every device. The name-symmetry checks above cannot see this
+# because the spec and the registry still agree textually. Fail when the
+# registration count reaches any configured cap, counting duplicate
+# registrations too (each one consumes a table slot).
+count_all=$(grep -c 'rpc_register("' "$FIRMWARE_SRC")
+caps=$(grep -rhoE 'CONFIG_BRAMBLE_RPC_MAX_METHODS[= ][0-9]+' \
+    sdkconfig.defaults sdkconfig.defaults.* nrf/shim/include/sdkconfig.h \
+    emulator/node/sdkconfig.defaults emulator/node/sdkconfig.defaults.* 2>/dev/null \
+    | grep -oE '[0-9]+$' | sort -n -u)
+kconfig_default=$(grep -A8 'config BRAMBLE_RPC_MAX_METHODS' components/rpc/Kconfig | grep -oE 'default [0-9]+' | grep -oE '[0-9]+' | head -1)
+caps=$(printf '%s\n%s\n' "$caps" "$kconfig_default" | grep -E '^[0-9]+$' | sort -n -u)
+if [ -z "$caps" ]; then
+    fail=1
+    echo "::error::could not extract any CONFIG_BRAMBLE_RPC_MAX_METHODS value; capacity check is broken" >&2
+else
+    min_cap=$(printf '%s\n' "$caps" | head -1)
+    if [ "$count_all" -ge "$min_cap" ]; then
+        fail=1
+        echo "::error::$count_all rpc_register() calls in $FIRMWARE_SRC but the smallest configured" >&2
+        echo "  CONFIG_BRAMBLE_RPC_MAX_METHODS is $min_cap: registrations past the cap are silently" >&2
+        echo "  dropped at boot. Raise the cap in every sdkconfig default (and the Kconfig default)." >&2
+    fi
+fi
+
 count=$(printf '%s\n' "$fw_methods" | wc -l)
 if [ "$fail" -ne 0 ]; then
     echo "RPC contract check FAILED: spec and firmware registry have drifted." >&2

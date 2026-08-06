@@ -6,7 +6,7 @@ CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 
 # V4 uses ESP32-S3 USB Serial/JTAG for console (no UART over USB)
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+CONFIG_BRAMBLE_RPC_MAX_METHODS=96
 
 # BLE: the V4 is the BLE-capable profile. The base defaults compile BT out
 # (WiFi-first); enable NimBLE here so the Settings > Conn > BLE mode actually

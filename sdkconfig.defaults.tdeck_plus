@@ -85,4 +85,4 @@ CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 # the mesh task can block on spi_device_acquire_bus() during display flushes.
 # 5s is too tight when LVGL does rapid redraws + LBT backoff stacks up.
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
-CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+CONFIG_BRAMBLE_RPC_MAX_METHODS=96
