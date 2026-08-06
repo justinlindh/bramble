@@ -49,6 +49,8 @@ extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_
 extern int mesh_get_channel_count(void);
 extern const char* mesh_get_channel_name(int index);
 extern const char* mesh_get_peer_name(uint32_t addr);
+extern size_t mesh_delivery_receipts_for_message(uint32_t message_id, uint32_t* out, size_t out_max,
+                                                 size_t* total_unique);
 extern bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified,
                                        bool* key_changed);
 
@@ -230,6 +232,29 @@ static void format_compact_hop_name(char* out, size_t out_len, uint32_t hop_addr
     } else {
         snprintf(out, out_len, "%04lX", (unsigned long)(hop_addr & 0xFFFFUL));
     }
+}
+
+/* Builds the receipts line for an expanded outgoing bubble from the delivery
+ * event ring (per-recipient records for broadcast deliveries and DM acks).
+ * The ring is bounded local history, so receipts for old messages can have
+ * rotated out; with no matching records the line reflects the message
+ * status instead of implying receipts are still pending. */
+static void build_receipt_summary(char* out, size_t out_len, uint32_t packet_id,
+                                  msg_status_t status) {
+    uint32_t addrs[4];
+    size_t total = 0;
+    size_t shown = mesh_delivery_receipts_for_message(packet_id, addrs, 4, &total);
+    if (total == 0) {
+        if (status == MSG_STATUS_DELIVERED) {
+            snprintf(out, out_len, "Delivered");
+            return;
+        }
+        if (status == MSG_STATUS_FAILED) {
+            snprintf(out, out_len, "Not delivered");
+            return;
+        }
+    }
+    chat_format_receipt_summary(out, out_len, addrs, shown, total, format_compact_hop_name);
 }
 
 static bool append_text(char* out, size_t out_len, size_t* pos, const char* text) {
@@ -445,7 +470,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
         /* The multi-hop route is not appended to the meta here: a delivered
          * multi-hop bubble exposes it on demand via the SELECT route toggle
-         * (chat_message_has_inline_route_toggle), so the always-on meta stays
+         * (chat_message_has_details_toggle), so the always-on meta stays
          * uncluttered. */
 
         if (have_age) {
@@ -474,10 +499,9 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         lv_style_set_text_color(meta_style, meta_color);
     }
 
-    bool can_show_route = chat_message_has_inline_route_toggle(
-        is_mine, msg->status, msg->route_hop_count, msg->packet_id);
-    bool route_expanded =
-        can_show_route && s_selected_packet_id != 0 && msg->packet_id == s_selected_packet_id;
+    bool can_expand = chat_message_has_details_toggle(is_mine, msg->packet_id);
+    /* can_expand guarantees packet_id != 0, so the equality alone selects. */
+    bool route_expanded = can_expand && msg->packet_id == s_selected_packet_id;
 
     /* Hug a single line that fits under the cap; wrap (and cap the bubble
      * width) otherwise. lv_spangroup_get_expand_width measures from font
@@ -494,24 +518,38 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         lv_obj_set_width(bubble, CHAT_BUBBLE_MAX_W);
     }
 
-    if (can_show_route) {
+    if (can_expand) {
         if (route_expanded) {
-            char route_buf[200];
-            format_route_text(route_buf, sizeof(route_buf), msg->route_hop_count, msg->route_hops);
+            /* The route line renders only when a route was recorded; a
+             * routeless message (pending, or delivered direct) shows just
+             * the receipts line rather than a placeholder. */
+            if (msg->route_hop_count > 0) {
+                char route_buf[200];
+                format_route_text(route_buf, sizeof(route_buf), msg->route_hop_count,
+                                  msg->route_hops);
 
-            lv_obj_t* route_lbl = lv_label_create(bubble);
-            lv_label_set_text(route_lbl, route_buf);
-            lv_label_set_long_mode(route_lbl, LV_LABEL_LONG_DOT);
-            lv_obj_set_width(route_lbl, LV_PCT(100));
-            lv_obj_set_style_text_font(route_lbl, &lv_font_montserrat_10, 0);
-            lv_obj_set_style_text_color(route_lbl, BR_COLOR_TEXT_SEC, 0);
+                lv_obj_t* route_lbl = lv_label_create(bubble);
+                lv_label_set_text(route_lbl, route_buf);
+                lv_label_set_long_mode(route_lbl, LV_LABEL_LONG_DOT);
+                lv_obj_set_width(route_lbl, LV_PCT(100));
+                lv_obj_set_style_text_font(route_lbl, &lv_font_montserrat_10, 0);
+                lv_obj_set_style_text_color(route_lbl, BR_COLOR_TEXT_SEC, 0);
+            }
+
+            char receipt_buf[128];
+            build_receipt_summary(receipt_buf, sizeof(receipt_buf), msg->packet_id, msg->status);
+
+            lv_obj_t* receipt_lbl = lv_label_create(bubble);
+            lv_label_set_text(receipt_lbl, receipt_buf);
+            lv_label_set_long_mode(receipt_lbl, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(receipt_lbl, LV_PCT(100));
+            lv_obj_set_style_text_font(receipt_lbl, &lv_font_montserrat_10, 0);
+            lv_obj_set_style_text_color(receipt_lbl, BR_COLOR_TEXT_SEC, 0);
         }
 
-        if (msg->packet_id != 0) {
-            lv_obj_add_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_add_event_cb(bubble, msg_bubble_click_cb, LV_EVENT_CLICKED,
-                                (void*)(uintptr_t)msg->packet_id);
-        }
+        lv_obj_add_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(bubble, msg_bubble_click_cb, LV_EVENT_CLICKED,
+                            (void*)(uintptr_t)msg->packet_id);
     }
 }
 

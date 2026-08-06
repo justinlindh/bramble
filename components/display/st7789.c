@@ -112,9 +112,14 @@ static void st7789_init_sequence(void) {
     st7789_write_cmd(ST7789_COLMOD);
     st7789_write_byte(0x55);
 
-    /* Memory access control: landscape, RGB, left-to-right for 320×240 */
+    /* Memory access control: landscape (MV, MX), left-to-right for 320×240,
+     * RGB subpixel order (BGR bit clear) matching LVGL's RGB565 framebuffer.
+     * A wrong subpixel-order bit here is invisible to the bench screenshot
+     * RPC, which re-renders upstream of the panel: verification is eyes on
+     * the glass. The GT911 touch mapping depends on the MV/MX rotation bits
+     * (see touch_gt911.c). */
     st7789_write_cmd(ST7789_MADCTL);
-    st7789_write_byte(0x68);
+    st7789_write_byte(0x60);
 
     /* Porch control */
     st7789_write_cmd(ST7789_PORCTRL);

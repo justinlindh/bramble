@@ -66,6 +66,18 @@ uint32_t delivery_event_ring_latest_seq(const delivery_event_ring_t* ring);
 size_t delivery_event_ring_list_since(const delivery_event_ring_t* ring, uint32_t since_event_seq,
                                       delivery_event_record_t* out, size_t out_max);
 
+/*
+ * Collects the unique recipient addresses that have a delivery record
+ * (DM ack or broadcast delivery) for message_id. Writes up to out_max
+ * addresses in first-seen order and returns the number written; when
+ * total_unique is non-NULL it receives the full unique count (capped at
+ * an internal dedupe bound of 64), so a caller showing a few names can
+ * still report the true total.
+ */
+size_t delivery_event_ring_receipts_for_message(const delivery_event_ring_t* ring,
+                                                uint32_t message_id, uint32_t* out, size_t out_max,
+                                                size_t* total_unique);
+
 #ifdef __cplusplus
 }
 #endif

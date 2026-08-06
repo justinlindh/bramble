@@ -795,6 +795,20 @@ uint32_t mesh_delivery_events_latest_seq(void) {
     return latest;
 }
 
+size_t mesh_delivery_receipts_for_message(uint32_t message_id, uint32_t* out, size_t out_max,
+                                          size_t* total_unique) {
+    size_t written = 0u;
+    if (total_unique)
+        *total_unique = 0u;
+    if (!s_delivery_event_mutex)
+        return 0u;
+    xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
+    written = delivery_event_ring_receipts_for_message(s_delivery_event_ring, message_id, out,
+                                                       out_max, total_unique);
+    xSemaphoreGive(s_delivery_event_mutex);
+    return written;
+}
+
 size_t mesh_delivery_events_list_since(uint32_t since_event_seq, delivery_event_record_t* out,
                                        size_t out_max) {
     size_t count = 0u;
