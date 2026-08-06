@@ -81,19 +81,9 @@ bool sdcard_is_present(void) { return s_mounted; }
 
 const char* sdcard_get_mount_point(void) { return s_mounted ? MOUNT_POINT : NULL; }
 
-void sdcard_deinit(void) {
-    if (s_mounted) {
-        esp_vfs_fat_sdcard_unmount(MOUNT_POINT, s_card);
-        s_mounted = false;
-        s_card = NULL;
-        ESP_LOGI(TAG, "SD card unmounted");
-    }
-}
-
 #else
 /* Host build stubs */
 int sdcard_init(void) { return -1; }
 bool sdcard_is_present(void) { return false; }
 const char* sdcard_get_mount_point(void) { return NULL; }
-void sdcard_deinit(void) {}
 #endif /* ESP_PLATFORM */

@@ -52,12 +52,6 @@ void mock_radio_send(mock_radio_t* radio, int from_node, const uint8_t* data, si
     }
 }
 
-bool mock_radio_has_packet(mock_radio_t* radio, int node) {
-    if (!mock_radio_valid_node(radio, node))
-        return false;
-    return radio->rx_queues[node].count > 0;
-}
-
 bool mock_radio_recv(mock_radio_t* radio, int node, mock_packet_t* pkt) {
     if (!mock_radio_valid_node(radio, node))
         return false;

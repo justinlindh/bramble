@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { NodeStatus, BrambleConfig } from '../../types/bramble';
 import { formatAddr0x } from '../../utils/address';
+import { copyWithFallback } from '../../utils/clipboard';
 import styles from './SystemInfo.module.css';
 
 function formatUptime(seconds: number): string {
@@ -17,34 +18,6 @@ function formatBytes(bytes: number): string {
   if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
   if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(1)} KB`;
   return `${bytes} B`;
-}
-
-async function copyWithFallback(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // Fall back to legacy copy path below.
-  }
-
-  try {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.setAttribute('readonly', '');
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    textarea.style.left = '-9999px';
-    document.body.appendChild(textarea);
-    textarea.select();
-
-    const copied = typeof document.execCommand === 'function' && document.execCommand('copy');
-    document.body.removeChild(textarea);
-    return copied;
-  } catch {
-    return false;
-  }
 }
 
 interface Row {

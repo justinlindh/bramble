@@ -114,7 +114,7 @@ const FIRMWARE_SCOPES = [
   // button, gps, indicators, display all gate a virtual backend onto the
   // linux target and a real one onto the device; see the `peripherals`
   // entry in components/gps/CMakeLists.txt for the pattern).
-  'board', 'build', 'display', 'peripherals', 'sleep', 'touch',
+  'board', 'display', 'peripherals', 'sleep', 'touch',
   // Per-board profiles: each of these scopes' commits land in
   // main/boards/* or a board-specific driver.
   'heltec-v4', 'pager', 'tdeck',

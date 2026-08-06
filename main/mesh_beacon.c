@@ -63,7 +63,7 @@ int send_beacon(void) {
         battery_beacon_pct(bstat.charging, bstat.pct, battery_reading_available(&bstat));
     beacon.tx_queue_depth = 0;
     beacon.neighbor_count = (uint8_t)neighbor_count(&s_neighbors);
-    beacon.flags = s_mailbox_enabled ? MAILBOX_BEACON_FLAG : 0;
+    beacon.flags = s_mailbox_enabled ? BEACON_FLAG_MAILBOX : 0;
     /* Timesync: piggyback network time on beacon when synchronized */
     if (s_timesync.synchronized) {
         beacon.network_time = (uint32_t)timesync_get_network_time(&s_timesync, now_ms());

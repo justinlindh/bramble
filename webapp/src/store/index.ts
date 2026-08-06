@@ -24,6 +24,7 @@ import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 import type { SavedDevice } from '../lib/deviceBook';
 import { formatAddrHex, formatAddr0x } from '../utils/address';
 import { DEFAULT_CAPABILITIES } from '../lib/connectionMode';
+import { mergeBroadcastRecipient } from '../lib/broadcastRecipients';
 
 const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
 const ACTIVE_TAB_KEY = 'bramble-active-tab';
@@ -118,20 +119,43 @@ export function conversationIdForMessage(msg: Message): string {
   return conversationTargetForMessage(msg).id;
 }
 
-function formatAddr(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
-  if (id === 'broadcast') return 'Broadcast';
-  if (id.startsWith('ch:')) {
-    const idx = Number(id.slice(3));
-    const ch = config?.channels?.find(c => c.index === idx);
-    return ch?.name?.trim() ? ch.name : `ch-${idx}`;
+// A conversation id decoded back into its kind and payload: the inverse of the
+// 'broadcast' / 'ch:{index}' / 'dm:{addr}' scheme that conversationTargetForMessage
+// produces. Decoding lives here alone, so no caller re-parses the id string by
+// hand, which is what caused #124, #153, #168, and #189. (The one deliberate
+// exception is messageDb's v1 migration, which detects the retired
+// 'dm:{hex}-{hex}' format this parser never handled.)
+export type ParsedConversationId =
+  | { kind: 'broadcast' }
+  | { kind: 'channel'; index: number }
+  | { kind: 'dm'; addr: number }
+  | { kind: 'unknown' };
+
+export function parseConversationId(id: string): ParsedConversationId {
+  if (id === 'broadcast') return { kind: 'broadcast' };
+  if (id.startsWith('ch:')) return { kind: 'channel', index: Number(id.slice(3)) };
+  if (id.startsWith('dm:')) return { kind: 'dm', addr: Number(id.slice(3)) };
+  return { kind: 'unknown' };
+}
+
+// Display label for a conversation bucket. Exported so UI headers can render
+// the same name policy the store uses when it labels conversations.
+export function formatConversationLabel(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
+  const parsed = parseConversationId(id);
+  switch (parsed.kind) {
+    case 'broadcast':
+      return 'Broadcast';
+    case 'channel': {
+      const ch = config?.channels?.find(c => c.index === parsed.index);
+      return ch?.name?.trim() ? ch.name : `ch-${parsed.index}`;
+    }
+    case 'dm': {
+      const name = peerNames?.get(parsed.addr);
+      return name ? name : formatAddr0x(parsed.addr);
+    }
+    case 'unknown':
+      return id;
   }
-  if (id.startsWith('dm:')) {
-    const addr = Number(id.slice(3));
-    const name = peerNames?.get(addr);
-    if (name) return name;
-    return formatAddr0x(addr);
-  }
-  return id;
 }
 
 function persistUnreads(conversations: Map<string, any>, config: BrambleConfig | null): void {
@@ -175,7 +199,6 @@ interface Actions {
   setPeerName: (addr: number, name: string) => void;
   resetNodeData: () => void;
   setTrafficDebugStatus: (s: TrafficDebugStatus) => void;
-  addTrafficEvent: (e: TrafficEvent) => void;
   addTrafficEvents: (events: TrafficEvent[]) => void;
   setNetworkKeyStatus: (s: NetworkKeyStatus | null) => void;
   setAnchorStatus: (s: AnchorStatus | null) => void;
@@ -228,20 +251,20 @@ export const useStore = create<AppState & Actions>((set) => ({
 
     const convs = new Map(state.conversations);
     for (const [id, conv] of convs) {
-      if (id.startsWith('ch:')) {
-        const chIdx = Number(id.slice(3));
-        if (!validChannelIndexes.has(chIdx)) {
+      const parsed = parseConversationId(id);
+      if (parsed.kind === 'channel') {
+        if (!validChannelIndexes.has(parsed.index)) {
           // Channel was deleted: remove stale conversation (BUG-07 fix)
           convs.delete(id);
         } else {
-          convs.set(id, { ...conv, label: formatAddr(id, names, c) });
+          convs.set(id, { ...conv, label: formatConversationLabel(id, names, c) });
         }
       }
     }
 
     // If active conversation was a deleted channel, fall back to broadcast
     const activeId = state.activeConversationId;
-    const activeGone = activeId.startsWith('ch:') && !convs.has(activeId);
+    const activeGone = parseConversationId(activeId).kind === 'channel' && !convs.has(activeId);
 
     return {
       config: c,
@@ -294,7 +317,7 @@ export const useStore = create<AppState & Actions>((set) => ({
       
       const newConv = {
         id: convId,
-        label: formatAddr(convId, state.peerNames, state.config),
+        label: formatConversationLabel(convId, state.peerNames, state.config),
         peerAddr: target.peerAddr,
         channelIndex: target.channelIndex,
         lastMessage: msg.text.slice(0, 60),
@@ -332,16 +355,8 @@ export const useStore = create<AppState & Actions>((set) => ({
       messages: state.messages.map(m => {
         if (m.broadcastId !== broadcastId) return m;
         const existing = m.broadcastRecipients ?? [];
-        const idx = existing.findIndex(r => r.addr === recipient.addr);
-        if (idx < 0) {
-          return { ...m, broadcastRecipients: [...existing, recipient] };
-        }
-        if (existing[idx].deliveredAtMs > recipient.deliveredAtMs) {
-          return m;
-        }
-        const next = [...existing];
-        next[idx] = { ...existing[idx], ...recipient };
-        return { ...m, broadcastRecipients: next };
+        const next = mergeBroadcastRecipient(existing, recipient);
+        return next === existing ? m : { ...m, broadcastRecipients: next };
       }),
     })),
 
@@ -419,7 +434,7 @@ export const useStore = create<AppState & Actions>((set) => ({
         if (shouldUpdate) {
           convs.set(convId, {
             id: convId,
-            label: formatAddr(convId, state.peerNames, state.config),
+            label: formatConversationLabel(convId, state.peerNames, state.config),
             peerAddr: target.peerAddr,
             channelIndex: target.channelIndex,
             lastMessage: msg.text.slice(0, 60),
@@ -448,11 +463,9 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   setTrafficDebugStatus: (s) => set({ trafficDebugStatus: s }),
 
-  addTrafficEvent: (e) =>
-    set(state => ({
-      trafficEvents: [...state.trafficEvents, e].slice(-1000), // Keep last 1000 events
-    })),
-
+  // Both the live push (one event) and the poll (a batch) land here, so the
+  // live path gets the same seq-dedup and seq-ordering the poll relies on: a
+  // duplicate seq replaces rather than appends, and the list stays sorted.
   addTrafficEvents: (events) =>
     set(state => {
       // Merge by seq, keeping newest

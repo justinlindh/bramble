@@ -10,7 +10,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 let state: any;
 
-vi.mock('../../store/index', () => ({
+// Keep the real module (parseConversationId, formatConversationLabel) and only
+// stub the store hook.
+vi.mock('../../store/index', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../store/index')>()),
   useStore: (selector: any) => selector(state),
 }));
 

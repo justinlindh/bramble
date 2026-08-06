@@ -3,7 +3,7 @@ import type { Conversation } from '../../types/bramble';
 import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock, IconWarning } from '../../components/Icons';
 import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
 import { addChannel } from '../../store/actions';
-import { useStore } from '../../store/index';
+import { useStore, parseConversationId } from '../../store/index';
 import { friendlyErrorFrom } from '../../lib/errors';
 import { EscapeDialog } from '../../components/EscapeDialog';
 import styles from './ConversationList.module.css';
@@ -44,8 +44,9 @@ export function buildChannelItems(config: any, conversations: Map<string, Conver
 export function filterDmConversations(conversations: Map<string, Conversation>, knownPeerAddrs?: Set<number>) {
   const hasKnownPeers = (knownPeerAddrs?.size ?? 0) > 0;
   return [...conversations.values()].filter(c => {
-    if (!c.id.startsWith('dm:')) return false;
-    const addr = c.peerAddr ?? parseInt(c.id.slice(3), 10);
+    const parsed = parseConversationId(c.id);
+    if (parsed.kind !== 'dm') return false;
+    const addr = c.peerAddr ?? parsed.addr;
     if (addr === BROADCAST_ADDR) return false;
     if (!hasKnownPeers) return true;
     return knownPeerAddrs!.has(addr);
@@ -59,7 +60,10 @@ export function parseDmHexAddress(input: string): number | null {
 }
 
 function DmItem({ conv, active, onSelect }: { conv: Conversation; active: boolean; onSelect: (id: string) => void }) {
-  const addr = conv.peerAddr ?? parseInt(conv.id.slice(3), 10);
+  // DmItem only renders conversations filterDmConversations already vetted as
+  // DMs, so the non-dm arm is unreachable.
+  const parsed = parseConversationId(conv.id);
+  const addr = conv.peerAddr ?? (parsed.kind === 'dm' ? parsed.addr : NaN);
   const { displayName, fullHex, status } = usePeerInfo(addr);
   // Lazy-loaded once per peer so the badge can show without opening the DM first.
   const verification = usePeerVerification(addr);

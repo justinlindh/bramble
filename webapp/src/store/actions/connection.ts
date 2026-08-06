@@ -8,7 +8,7 @@ import { createTransport, BrambleClient } from '../../transport';
 import { fetchConnectionCapabilities } from '../../lib/connectionMode';
 import { formatAddrHex } from '../../utils/address';
 import { isAndroidShell } from '../../utils/platform';
-import { friendlyErrorFrom } from '../../lib/errors';
+import { friendlyErrorFrom, isAuthError, isUnknownMethodError } from '../../lib/errors';
 import type { TransportType } from '../../types/bramble';
 import {
   initMessageStore,
@@ -17,7 +17,6 @@ import {
   handleIncomingMessage,
   handleAck,
   handleBroadcastDelivery,
-  handleDeliveryUpdate,
   handleProbeAck,
   handleProbeComplete,
 } from './messaging';
@@ -50,26 +49,35 @@ export async function loadConnectionCapabilities(): Promise<void> {
 // ─── Connection ─────────────────────────────────────────────────────────
 
 const SERIAL_RPC_READY_ATTEMPTS = 8;
-const SERIAL_RPC_READY_TIMEOUT_MS = 1500;
-const SERIAL_RPC_READY_RETRY_DELAY_MS = 350;
-
-function isUnknownMethodError(error: unknown): boolean {
-  const message = (error as Error)?.message ?? '';
-  return /not\s+found|unknown\s+method|method\s+not\s+found/i.test(message);
-}
+const NODE_VERIFY_ATTEMPTS = 2;
+const RPC_READY_TIMEOUT_MS = 1500;
+const RPC_READY_RETRY_DELAY_MS = 350;
 
 async function probeRpcReadiness(): Promise<void> {
   const client = requireClient();
   try {
-    await client.rpc('bramble.ping', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
+    await client.rpc('bramble.ping', undefined, RPC_READY_TIMEOUT_MS);
     return;
   } catch (error) {
     if (!isUnknownMethodError(error)) throw error;
   }
-  await client.rpc('bramble.getStatus', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
+  await client.rpc('bramble.getStatus', undefined, RPC_READY_TIMEOUT_MS);
 }
 
-const NODE_VERIFY_ATTEMPTS = 2;
+// Poll `probe` up to `attempts` times, sleeping RPC_READY_RETRY_DELAY_MS between
+// tries, and resolve true on the first attempt that returns true. Each caller's
+// distinct "what counts as ready" rule (an auth error is still a real node; a
+// failure just means keep waiting) lives in its own probe closure, so this owns
+// only the shared retry cadence.
+async function pollReady(attempts: number, probe: () => Promise<boolean>): Promise<boolean> {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (await probe()) return true;
+    if (attempt < attempts) {
+      await new Promise(r => setTimeout(r, RPC_READY_RETRY_DELAY_MS));
+    }
+  }
+  return false;
+}
 
 // Confirm the freshly opened transport actually speaks Bramble before we report
 // "Connected". A socket that opens but is not a Bramble node (a wrong IP/port
@@ -78,7 +86,7 @@ const NODE_VERIFY_ATTEMPTS = 2;
 // (issue #91). ping/getStatus is on the unauthenticated allowlist, so this also
 // works against an auth-required node.
 async function verifyBrambleNode(): Promise<boolean> {
-  for (let attempt = 1; attempt <= NODE_VERIFY_ATTEMPTS; attempt += 1) {
+  return pollReady(NODE_VERIFY_ATTEMPTS, async () => {
     try {
       await probeRpcReadiness();
       return true;
@@ -86,31 +94,26 @@ async function verifyBrambleNode(): Promise<boolean> {
       // An auth-required node answers the allowlisted ping, so a 1008/auth error
       // here means a real node we simply cannot fully use yet: treat it as
       // reachable and let the init RPCs surface the auth-required state.
-      if (/1008|unauthorized|auth/i.test((error as Error)?.message ?? '')) return true;
-      if (attempt < NODE_VERIFY_ATTEMPTS) {
-        await new Promise(r => setTimeout(r, SERIAL_RPC_READY_RETRY_DELAY_MS));
-      }
+      return isAuthError(error);
     }
-  }
-  return false;
+  });
 }
 
 async function ensureSerialRpcReady(): Promise<boolean> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= SERIAL_RPC_READY_ATTEMPTS; attempt += 1) {
+  const ready = await pollReady(SERIAL_RPC_READY_ATTEMPTS, async () => {
     try {
       await probeRpcReadiness();
       return true;
     } catch (error) {
       lastError = error;
-      if (attempt < SERIAL_RPC_READY_ATTEMPTS) {
-        await new Promise(r => setTimeout(r, SERIAL_RPC_READY_RETRY_DELAY_MS));
-      }
+      return false;
     }
+  });
+  if (!ready) {
+    console.warn(`[serial-rpc] readiness probe exhausted: ${((lastError as Error)?.message ?? 'startup timeout')}`);
   }
-
-  console.warn(`[serial-rpc] readiness probe exhausted: ${((lastError as Error)?.message ?? 'startup timeout')}`);
-  return false;
+  return ready;
 }
 
 export async function connect(
@@ -166,7 +169,7 @@ export async function connect(
         await session.client.rpc('bramble.getStatus', {}, 4000);
       } catch (e) {
         const msg = (e as Error)?.message ?? '';
-        const authy = /unauthorized|1008|auth/i.test(msg) || (!handshakeValidated && /-1005/.test(msg));
+        const authy = isAuthError(msg) || (!handshakeValidated && /-1005/.test(msg));
         if (authy) {
           throw new Error('This node requires an auth token. Enter the token and reconnect.');
         }
@@ -222,7 +225,6 @@ export async function connect(
     // A GPS fix acquired mid-session must refresh the map: without this the
     // self position only appears after a manual reload.
     session.client.subscribe('bramble.onGpsEvent', () => { loadPeerLocations().catch(() => {}); });
-    session.client.subscribe('delivery.update', (params) => handleDeliveryUpdate(params));
     session.client.subscribe('bramble.onNeighborChange', () => loadNeighbors());
     // NOTE: no firmware build emits bramble.onRouteUpdate today (nothing in
     // main/ or components/ calls rpc_notify with it, and it is absent from

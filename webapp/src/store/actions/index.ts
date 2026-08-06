@@ -15,7 +15,6 @@ export {
   loadMessages,
   registerBroadcastSendTelemetry,
   handleBroadcastDelivery,
-  handleDeliveryUpdate,
   sendMessage,
   handleAck,
   normalizeIncomingRealtimeMessage,

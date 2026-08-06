@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { EscapeDialog } from './EscapeDialog';
+import { useTimedFlag } from '../hooks/useTimedFlag';
+import { copyWithFallback } from '../utils/clipboard';
 import styles from './QRShareModal.module.css';
 
 interface QRShareModalProps {
@@ -17,7 +19,7 @@ export function QRShareModal({
   onClose,
 }: QRShareModalProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, flashCopied] = useTimedFlag(2000);
   const [copyError, setCopyError] = useState<string | null>(null);
 
   // Render QR code into canvas. qrcode is loaded on demand to keep it out of
@@ -39,28 +41,9 @@ export function QRShareModal({
 
   const handleCopy = async () => {
     setCopyError(null);
-    try {
-      await navigator.clipboard.writeText(shareString);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-      return;
-    } catch {
-      // Fallback for older/locked-down clipboard APIs.
-      const el = document.getElementById('qr-share-string') as HTMLInputElement | null;
-      if (el) {
-        el.focus();
-        el.select();
-        try {
-          const ok = document.execCommand('copy');
-          if (ok) {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-            return;
-          }
-        } catch {
-          // handled below
-        }
-      }
+    if (await copyWithFallback(shareString)) {
+      flashCopied();
+    } else {
       setCopyError('Could not copy automatically. Please select and copy manually.');
     }
   };

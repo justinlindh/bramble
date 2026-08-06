@@ -110,11 +110,12 @@ type phyEnableResult struct {
 }
 
 // onPhyFrameParams is the bramble.onPhyFrame notification payload: a raw frame
-// the node received on the real channel, hex-encoded, plus radio metadata.
+// the node received on the real channel, hex-encoded, plus its carrier. The
+// notification also carries the node's measured rssi/snr, but the bridge does
+// not consume them: the ether reprices signal quality per virtual receiver, so
+// the gateway's single measured pair has nowhere to go in this model.
 type onPhyFrameParams struct {
 	Frame string `json:"frame"`
-	RSSI  int    `json:"rssi"`
-	SNR   int    `json:"snr"`
 	Freq  int64  `json:"freq"` // carrier in Hz
 }
 
@@ -329,37 +330,34 @@ func (g *Gateway) keepalive(stop <-chan struct{}) {
 	}
 }
 
-// sendNode writes one JSON-RPC line to the serial link (guarded: phy.tx and
-// keepalive both write).
-func (g *Gateway) sendNode(v any) error {
+// writeLine marshals v to a newline-terminated JSON line and writes it to w
+// under mu. link names the destination for the not-open error. Both serial and
+// ether writers are shared by concurrent writers, so the lock guards every
+// write.
+func writeLine(mu *sync.Mutex, w io.Writer, link string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	g.nodeMu.Lock()
-	defer g.nodeMu.Unlock()
-	if g.nodeW == nil {
-		return fmt.Errorf("gateway: node link not open")
+	mu.Lock()
+	defer mu.Unlock()
+	if w == nil {
+		return fmt.Errorf("gateway: %s link not open", link)
 	}
-	_, err = g.nodeW.Write(b)
+	_, err = w.Write(b)
 	return err
+}
+
+// sendNode writes one JSON-RPC line to the serial link (guarded: phy.tx and
+// keepalive both write).
+func (g *Gateway) sendNode(v any) error {
+	return writeLine(&g.nodeMu, g.nodeW, "node", v)
 }
 
 // sendEther writes one emu-link line to the broker (guarded).
 func (g *Gateway) sendEther(v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-	g.etherMu.Lock()
-	defer g.etherMu.Unlock()
-	if g.etherW == nil {
-		return fmt.Errorf("gateway: ether link not open")
-	}
-	_, err = g.etherW.Write(b)
-	return err
+	return writeLine(&g.etherMu, g.etherW, "ether", v)
 }
 
 func (g *Gateway) deviceLabel() string {

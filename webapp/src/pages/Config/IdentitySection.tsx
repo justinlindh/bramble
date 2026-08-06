@@ -6,6 +6,7 @@ import { QRShareModal } from '../../components/QRShareModal';
 import { encodeNodeShare } from '../../utils/channelShare';
 import { formatAddr0x } from '../../utils/address';
 import { IconKey, IconNodes } from '../../components/Icons';
+import { useTimedFlag } from '../../hooks/useTimedFlag';
 import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './IdentitySection.module.css';
 
@@ -21,7 +22,7 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
     setName(identity.name);
   }, [identity.name]);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, flashSaved, resetSaved] = useTimedFlag(2000);
   const [error, setError] = useState('');
   const [showNodeShare, setShowNodeShare] = useState(false);
 
@@ -29,11 +30,10 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
     e.preventDefault();
     setSaving(true);
     setError('');
-    setSaved(false);
+    resetSaved();
     try {
       await saveNodeName(name.trim().slice(0, 32));
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      flashSaved();
     } catch (err) {
       setError(friendlyErrorFrom(err));
     } finally {

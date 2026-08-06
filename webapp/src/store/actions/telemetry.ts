@@ -345,5 +345,5 @@ export async function loadTrafficEvents(sinceSeq?: number): Promise<void> {
 
 export function handleTrafficEvent(params: unknown): void {
   const event = normalizeTrafficEvent(params as TrafficEventWire);
-  useStore.getState().addTrafficEvent(event);
+  useStore.getState().addTrafficEvents([event]);
 }

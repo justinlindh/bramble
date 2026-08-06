@@ -199,10 +199,9 @@ typedef struct {
     uint32_t deliver_dest; /* RREP_RX_DELIVER: pd->dest_addr to flush */
 } rrep_rx_decision_t;
 
-/* self_addr, link_metric (already link-penalized by the caller), and the
- * node's pending-discovery / reverse-route tables. */
-rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint32_t self_addr,
-                                  uint8_t link_metric, pending_discovery_table_t* pd,
-                                  reverse_route_table_t* rev);
+/* link_metric (already link-penalized by the caller) and the node's
+ * pending-discovery / reverse-route tables. */
+rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint8_t link_metric,
+                                  pending_discovery_table_t* pd, reverse_route_table_t* rev);
 
 #endif

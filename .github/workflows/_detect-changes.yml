@@ -39,6 +39,9 @@ on:
       release_config:
         description: .releaserc.* or scripts/release/ (the release-rule inputs) touched
         value: ${{ jobs.detect.outputs.release_config }}
+      ota_index:
+        description: the OTA firmware-index generator/validator, their schema fixtures, or the validator test touched (re-runs the index validator test)
+        value: ${{ jobs.detect.outputs.ota_index }}
       docker_firmware_builder:
         description: docker/firmware-builder/ (the firmware-builder image build context) touched
         value: ${{ jobs.detect.outputs.docker_firmware_builder }}
@@ -80,6 +83,7 @@ jobs:
       api: ${{ steps.detect.outputs.api }}
       idf_build_scripts: ${{ steps.detect.outputs.idf_build_scripts }}
       release_config: ${{ steps.detect.outputs.release_config }}
+      ota_index: ${{ steps.detect.outputs.ota_index }}
       docker_firmware_builder: ${{ steps.detect.outputs.docker_firmware_builder }}
       coverage_tooling: ${{ steps.detect.outputs.coverage_tooling }}
       size_tooling: ${{ steps.detect.outputs.size_tooling }}
@@ -212,6 +216,16 @@ jobs:
           # lockfile is release tooling only (the webapp has its own under
           # webapp/), so it belongs here and nowhere else.
           release_config=$(area_changed '^\.releaserc\.|^scripts/release/|^package(-lock)?\.json$')
+          # ota_index is the OTA publish index tooling that the Release config
+          # job's validator step exercises: the generator and validator scripts,
+          # their schema fixtures, and the node test that pins the validator to
+          # docs/ota-release-schema.md. It is its own area (not folded into
+          # release_config) so an index-tooling-only change runs the cheap
+          # validator step WITHOUT the release job's npm ci + scope-gating test,
+          # and a release-config-only change skips the validator step; ci_core
+          # forces both for the safety rule. build-firmware-index.js is included
+          # because the validator guards exactly its output.
+          ota_index=$(area_changed '^scripts/(build|validate)-firmware-index\.js$|^test/fixtures/firmware-index-(valid|invalid)\.json$|^test/test-validate-firmware-index\.js$')
           # docker_firmware_builder is the firmware-builder image's build context.
           # Its Docker leg builds with context docker/firmware-builder/ (a
           # toolchain image FROM espressif/idf), so it reads only that dir and
@@ -260,6 +274,7 @@ jobs:
             echo "api=${api}"
             echo "idf_build_scripts=${idf_build_scripts}"
             echo "release_config=${release_config}"
+            echo "ota_index=${ota_index}"
             echo "docker_firmware_builder=${docker_firmware_builder}"
             echo "coverage_tooling=${coverage_tooling}"
             echo "size_tooling=${size_tooling}"
@@ -268,4 +283,4 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           echo "Resolved diff range: ${diff_range:-<unresolved>}"
-          echo "firmware=${firmware} host_test=${host_test} simulator=${simulator} emulator=${emulator} webapp=${webapp} web_flasher=${web_flasher} api=${api} idf_build_scripts=${idf_build_scripts} release_config=${release_config} docker_firmware_builder=${docker_firmware_builder} coverage_tooling=${coverage_tooling} size_tooling=${size_tooling} nrf=${nrf} ci_core=${ci_core}"
+          echo "firmware=${firmware} host_test=${host_test} simulator=${simulator} emulator=${emulator} webapp=${webapp} web_flasher=${web_flasher} api=${api} idf_build_scripts=${idf_build_scripts} release_config=${release_config} ota_index=${ota_index} docker_firmware_builder=${docker_firmware_builder} coverage_tooling=${coverage_tooling} size_tooling=${size_tooling} nrf=${nrf} ci_core=${ci_core}"

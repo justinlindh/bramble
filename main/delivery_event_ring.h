@@ -57,7 +57,6 @@ void delivery_event_ring_init(delivery_event_ring_t* ring);
 uint32_t delivery_event_ring_append(delivery_event_ring_t* ring,
                                     const delivery_event_record_t* event);
 
-uint32_t delivery_event_ring_count(const delivery_event_ring_t* ring);
 uint32_t delivery_event_ring_latest_seq(const delivery_event_ring_t* ring);
 
 /*

@@ -2,11 +2,13 @@
 // delivery-event replay and correlation, broadcast telemetry, probe flows,
 // incoming-message handling, and native notifications.
 import { session, requireClient, LAST_NODE_ADDR_KEY } from './client';
-import { useStore, conversationIdForMessage } from '../index';
+import { useStore, conversationIdForMessage, parseConversationId } from '../index';
 import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { parseAddr } from '../../lib/addr';
+import { isUnknownMethodError } from '../../lib/errors';
+import { mergeBroadcastRecipient } from '../../lib/broadcastRecipients';
 import { isAndroidShell } from '../../utils/platform';
 import type { RelayHop, MessageTier, ProbeResponse, Message } from '../../types/bramble';
 import type { RpcSchemas, WirePartial } from '../../types/rpc';
@@ -346,9 +348,7 @@ export async function syncDeliveryEventReplay(): Promise<void> {
   try {
     replay = await session.client.rpc<DeliveryReplayResponse>('bramble.getDeliveryEvents', { sinceEventSeq });
   } catch (error) {
-    const msg = (error as Error)?.message ?? '';
-    const unsupported = /not\s+found|unknown\s+method|method\s+not\s+found/i.test(msg);
-    if (unsupported) return;
+    if (isUnknownMethodError(error)) return;
     replay = await session.client.rpc<DeliveryReplayResponse>('bramble.getDeliveryEvents', { since_event_seq: sinceEventSeq });
   }
 
@@ -416,31 +416,14 @@ function applyDeliveryEventToMessage(message: Message, event: DeliveryEventRecor
     if (payload.addr === undefined || !payload.status) return message;
     const existing = message.broadcastRecipients ?? [];
     const idx = existing.findIndex(r => r.addr === payload.addr);
-    const incomingTs = payload.deliveredAtMs ?? event.ts;
-
-    if (idx < 0) {
-      return {
-        ...message,
-        broadcastRecipients: [...existing, {
-          addr: payload.addr,
-          status: payload.status,
-          hopCount: payload.hopCount ?? 0,
-          deliveredAtMs: incomingTs,
-        }],
-      };
-    }
-
-    if (existing[idx].deliveredAtMs > incomingTs) return message;
-
-    const merged = [...existing];
-    merged[idx] = {
-      ...existing[idx],
+    const incoming = {
       addr: payload.addr,
       status: payload.status,
-      hopCount: payload.hopCount ?? existing[idx].hopCount,
-      deliveredAtMs: incomingTs,
+      hopCount: payload.hopCount ?? (idx >= 0 ? existing[idx].hopCount : 0),
+      deliveredAtMs: payload.deliveredAtMs ?? event.ts,
     };
-    return { ...message, broadcastRecipients: merged };
+    const merged = mergeBroadcastRecipient(existing, incoming);
+    return merged === existing ? message : { ...message, broadcastRecipients: merged };
   }
 
   return message;
@@ -549,30 +532,6 @@ export function handleBroadcastDelivery(params: unknown): void {
     hopCount,
     deliveredAtMs,
   });
-}
-
-export function handleDeliveryUpdate(params: unknown): void {
-  const p = params as Record<string, unknown>;
-  const kind = String(p.kind ?? p.eventType ?? p.event_type ?? '').toLowerCase();
-
-  if (kind === 'ack' || kind === 'delivery_ack') {
-    handleAck(params);
-    return;
-  }
-
-  if (kind === 'broadcast_delivery' || kind === 'broadcast') {
-    handleBroadcastDelivery(params);
-    return;
-  }
-
-  if (p.packet_id || p.packetId) {
-    handleAck(params);
-    return;
-  }
-
-  if (p.broadcast_id || p.broadcastId) {
-    handleBroadcastDelivery(params);
-  }
 }
 
 export async function sendMessage(
@@ -782,13 +741,13 @@ function maybeNotifyIncoming(msg: Message): void {
 }
 
 function conversationTitleFor(conversationId: string, senderName: string, store: ReturnType<typeof useStore.getState>): string {
-  if (conversationId === 'broadcast') return 'Broadcast';
-  if (conversationId.startsWith('ch:')) {
-    const idx = Number(conversationId.slice(3));
-    const ch = store.config?.channels?.find(c => c.index === idx);
-    return ch?.name?.trim() ? ch.name : `Channel ${idx}`;
+  const parsed = parseConversationId(conversationId);
+  if (parsed.kind === 'broadcast') return 'Broadcast';
+  if (parsed.kind === 'channel') {
+    const ch = store.config?.channels?.find(c => c.index === parsed.index);
+    return ch?.name?.trim() ? ch.name : `Channel ${parsed.index}`;
   }
-  // dm: title is the peer, which is the sender for an incoming DM.
+  // dm (and any unmatched id) titles as the peer, which is the sender for an incoming DM.
   return senderName;
 }
 
@@ -910,16 +869,22 @@ function normalizeProbeResponder(r: ProbeResponderWire, roundsTotal: number): Pr
   };
 }
 
+// Probe ids arrive as either a hex string (firmware snake_case probe_id) or a
+// number; parse the string form, pass a number through, and yield undefined
+// when neither field is present. Shared by the per-ack and batch handlers so
+// the two paths cannot drift on the fallback order.
+function parseProbeId(raw: { probeId?: string | number; probe_id?: string | number }): number | undefined {
+  if (typeof raw.probeId === 'string') return parseInt(raw.probeId, 16);
+  if (typeof raw.probe_id === 'string') return parseInt(raw.probe_id, 16);
+  return raw.probeId ?? raw.probe_id ?? undefined;
+}
+
 export function handleProbeAck(params: unknown): void {
   const raw = params as ProbeAckWire;
 
   const roundsTotal = Math.max(1, Number(raw.rounds_total ?? raw.roundsTotal ?? (raw.seen_rounds ? 3 : 1)));
   const ack = normalizeProbeResponder(raw, roundsTotal);
-  const probeId = typeof raw.probeId === 'string'
-    ? parseInt(raw.probeId, 16)
-    : typeof raw.probe_id === 'string'
-    ? parseInt(raw.probe_id, 16)
-    : (raw.probeId ?? raw.probe_id ?? undefined);
+  const probeId = parseProbeId(raw);
 
   const store = useStore.getState();
   const prev = store.probeResult;
@@ -937,11 +902,7 @@ export function handleProbeAck(params: unknown): void {
 
 export function handleProbeComplete(params: unknown): void {
   const p = params as ProbeCompleteWire;
-  const probeId = typeof p.probeId === 'string'
-    ? parseInt(p.probeId, 16)
-    : typeof p.probe_id === 'string'
-    ? parseInt(p.probe_id, 16)
-    : (p.probeId ?? p.probe_id);
+  const probeId = parseProbeId(p);
 
   const store = useStore.getState();
   const prev = store.probeResult;
