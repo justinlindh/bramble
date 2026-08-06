@@ -3,6 +3,7 @@
 #include "ui_zone.h"
 #include "theme/bramble_theme.h"
 #include "traffic_debug.h"
+#include "packet.h"
 #include "esp_log.h"
 #include <stdio.h>
 #include <string.h>
@@ -17,49 +18,48 @@ extern traffic_debug_t* mesh_get_traffic_debug(void);
 
 /* -------------------------------------------------------------------------
  * Packet type → short display name (max 5 chars)
+ *
+ * Cases come from the PKT_TYPE_* constants in packet.h, the same source of
+ * truth the traffic classifier uses. Hand-copied hex mirrors used to live
+ * here and drifted from the protocol: they carried names for type codes that
+ * were never assigned (0x08/0x09/0x0F/0x10/0x11) and never grew
+ * PKT_TYPE_IDENTITY_ATTESTATION, so a real attestation rendered as raw hex.
+ * Any genuinely unknown type falls through to the hex default below.
  * ------------------------------------------------------------------------- */
 static const char* pkt_type_name(uint8_t pkt_type) {
     switch (pkt_type) {
-    case 0x01:
+    case PKT_TYPE_ACK:
         return "ACK";
-    case 0x02:
+    case PKT_TYPE_RREQ:
         return "RREQ";
-    case 0x03:
+    case PKT_TYPE_RREP:
         return "RREP";
-    case 0x04:
+    case PKT_TYPE_RERR:
         return "RERR";
-    case 0x05:
+    case PKT_TYPE_BEACON:
         return "BCN";
-    case 0x06:
+    case PKT_TYPE_KEY_EXCHANGE:
         return "KEY";
-    case 0x07:
+    case PKT_TYPE_DELIVERY_RECEIPT:
         return "DLVR";
-    case 0x08:
-        return "CONG";
-    case 0x09:
-        return "TSYNC";
-    case 0x0A:
+    case PKT_TYPE_DATA:
         return "DATA";
-    case 0x0B:
+    case PKT_TYPE_STORE_REQUEST:
         return "SREQ";
-    case 0x0C:
+    case PKT_TYPE_STORE_ACK:
         return "SACK";
-    case 0x0D:
+    case PKT_TYPE_MAILBOX_DELIVERY:
         return "MBOX";
-    case 0x0E:
+    case PKT_TYPE_MAILBOX_QUERY:
         return "MBQ";
-    case 0x0F:
-        return "EMRG";
-    case 0x10:
-        return "ECNX";
-    case 0x11:
-        return "CODE";
-    case 0x12:
+    case PKT_TYPE_PROBE:
         return "PROB";
-    case 0x13:
+    case PKT_TYPE_PROBE_ACK:
         return "PACK";
-    case 0x14:
+    case PKT_TYPE_LOCATION:
         return "LOC";
+    case PKT_TYPE_IDENTITY_ATTESTATION:
+        return "IDENT";
     default: {
         static char unk[6];
         snprintf(unk, sizeof(unk), "%02X", pkt_type);
