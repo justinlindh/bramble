@@ -20,6 +20,11 @@ CONFIG_BRAMBLE_BOARD_TDECK_PLUS=y
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_BT_CONTROLLER_ENABLED=y
+# NimBLE host task stack: mirror the heltec_v4 profile's 8192. The 4096
+# default is the stack size that has overflowed twice before in this
+# firmware for tasks doing GATT callbacks plus NVS persist writes.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
+CONFIG_BT_NIMBLE_TASK_STACK_SIZE=8192
 
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.tdeck_plus.csv"
