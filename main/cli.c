@@ -10,9 +10,11 @@
  */
 
 #include "cli.h"
+#include "ble_server.h"
 #include "mesh_task.h"
 #include "rpc_dispatcher.h"
 #include "rpc_methods.h"
+#include "ui.h"
 #include "wifi_manager.h"
 #include "esp_console.h"
 #include "esp_log.h"
@@ -240,6 +242,36 @@ static int cmd_name(int argc, char** argv) {
     return ret;
 }
 
+/* ── Command: connmode ──────────────────────────────────────────────── */
+
+static int cmd_connmode(int argc, char** argv) {
+    if (argc < 2) {
+        printf("Conn mode: %s (BLE %s in this build)\n",
+               conn_mode_get() == CONN_MODE_BLE ? "BLE" : "WiFi",
+               ble_server_supported() ? "available" : "not included");
+        printf("Usage: connmode wifi|ble (takes effect after reboot)\n");
+        return 0;
+    }
+    if (strcmp(argv[1], "wifi") == 0) {
+        conn_mode_set(CONN_MODE_WIFI);
+        printf("Conn mode set: WiFi (reboot to apply)\n");
+        return 0;
+    }
+    if (strcmp(argv[1], "ble") == 0) {
+        if (!ble_server_supported()) {
+            /* Honest refusal, same policy as the settings UIs: a switch
+             * would reboot into a node with no transport at all. */
+            printf("BLE not included in this build\n");
+            return 1;
+        }
+        conn_mode_set(CONN_MODE_BLE);
+        printf("Conn mode set: BLE (reboot to apply)\n");
+        return 0;
+    }
+    printf("Usage: connmode wifi|ble\n");
+    return 1;
+}
+
 /* ── Command: reboot ────────────────────────────────────────────────── */
 
 static int cmd_reboot(int argc, char** argv) {
@@ -263,6 +295,7 @@ static int cmd_help(int argc, char** argv) {
     printf("  status                 Node status\n");
     printf("  name [name]            Show or set node name\n");
     printf("  wifi status|set|clear  WiFi management\n");
+    printf("  connmode [wifi|ble]    Show or set connectivity mode\n");
     printf("  reboot                 Restart device\n");
     printf("  help                   This help\n");
     return 0;
@@ -402,6 +435,7 @@ void cli_init(bramble_identity_t* identity) {
         {.command = "send", .help = "Send to address", .func = cmd_send},
         {.command = "name", .help = "Show or set node name", .func = cmd_name},
         {.command = "wifi", .help = "WiFi management", .func = cmd_wifi},
+        {.command = "connmode", .help = "Show or set connectivity mode", .func = cmd_connmode},
         {.command = "reboot", .help = "Restart device", .func = cmd_reboot},
         {.command = "help", .help = "Show commands", .func = cmd_help},
     };

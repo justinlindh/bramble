@@ -36,6 +36,10 @@
 #include "mdns.h"
 #endif
 #include "ble_server.h"
+#if CONFIG_BT_ENABLED
+/* esp_bt_mem_release: reclaim the unused BT controller RAM on WiFi boots. */
+#include "esp_bt.h"
+#endif
 #include "esp_system.h"
 #include "battery.h"
 #include "alerts.h"
@@ -217,11 +221,7 @@ conn_mode_t conn_mode_get(void) {
     if (mode == CONN_MODE_BOTH || mode >= CONN_MODE_COUNT)
         mode = CONN_MODE_WIFI;
 
-#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
-    return conn_mode_resolve_boot((conn_mode_t)mode, true);
-#else
-    return conn_mode_resolve_boot((conn_mode_t)mode, false);
-#endif
+    return conn_mode_resolve_boot((conn_mode_t)mode, ble_server_supported());
 }
 
 void conn_mode_set(conn_mode_t mode) {
@@ -1332,10 +1332,15 @@ void app_main(void) {
     }
 #endif
 
-    /* Read connectivity mode */
+    /* Read connectivity mode. conn_mode_get already falls back to WiFi when
+     * the build carries no BLE stack; say so instead of silently booting a
+     * different mode than the one persisted. */
     conn_mode_t boot_mode = conn_mode_get();
     static const char* mode_str[] = {"WiFi", "BLE"};
     ESP_LOGI(TAG, "Connectivity mode: %s", mode_str[boot_mode]);
+    if (!ble_server_supported()) {
+        ESP_LOGI(TAG, "BLE: unsupported in this build (stub transport); WiFi only");
+    }
 
     /* Init RPC dispatcher and register methods BEFORE transports
      * so ws_server/ble notify registrations aren't wiped by rpc_init() */
@@ -1374,6 +1379,17 @@ void app_main(void) {
     /* Init WiFi if selected */
     if (boot_mode == CONN_MODE_WIFI) {
         ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
+#if CONFIG_BT_ENABLED
+        /* Connectivity modes are exclusive and a mode switch always reboots,
+         * so a WiFi boot never starts the BT controller. Hand its static RAM
+         * (BT .bss/.data, internal DRAM) back to the heap instead of letting
+         * it sit unused; the release is one-way per boot, which the
+         * reboot-to-switch model makes safe. */
+        esp_err_t bt_rel = esp_bt_mem_release(ESP_BT_MODE_BLE);
+        if (bt_rel != ESP_OK) {
+            ESP_LOGW(TAG, "esp_bt_mem_release failed: %s", esp_err_to_name(bt_rel));
+        }
+#endif
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
         show_boot_status("WiFi: starting...");
 #endif
@@ -1671,7 +1687,18 @@ void app_main(void) {
             if (ui.settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) {
                 conn_mode_t new_mode = (conn_mode_t)ui.settings_cursor;
                 conn_mode_t old_mode = conn_mode_get();
-                if (new_mode != old_mode) {
+                if (new_mode == CONN_MODE_BLE && !ble_server_supported()) {
+                    /* Honest refusal: this build has no BLE stack, so a
+                     * switch would reboot into a node with no transport. */
+                    ESP_LOGW(TAG, "BLE not included in this build; mode unchanged");
+                    display_clear();
+                    const char* msg = "BLE: not in build";
+                    int msg_x = (DISPLAY_WIDTH - (int)strlen(msg) * FONT_W) / 2;
+                    display_draw_text(msg_x, DISPLAY_HEIGHT / 2 - FONT_H / 2, msg);
+                    display_flush();
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    ui.screen_dirty = true;
+                } else if (new_mode != old_mode) {
                     conn_mode_set(new_mode);
                     ESP_LOGI(TAG, "Connectivity mode changed to %d, rebooting...", new_mode);
 

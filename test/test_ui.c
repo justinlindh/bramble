@@ -335,8 +335,15 @@ void test_trackball_settings_edit_cancel_with_left(void) {
 }
 
 void test_conn_mode_resolve_boot_keeps_supported_modes(void) {
+    TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_WIFI, true));
     TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_WIFI, false));
-    TEST_ASSERT_EQUAL(CONN_MODE_BLE, conn_mode_resolve_boot(CONN_MODE_BLE, false));
+    TEST_ASSERT_EQUAL(CONN_MODE_BLE, conn_mode_resolve_boot(CONN_MODE_BLE, true));
+}
+
+void test_conn_mode_resolve_boot_ble_unsupported_falls_back_to_wifi(void) {
+    /* Persisted BLE mode on a stub-BLE build must boot WiFi, not a node
+     * with no transport at all. */
+    TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_BLE, false));
 }
 
 void test_conn_mode_resolve_boot_normalizes_legacy_both(void) {
@@ -882,6 +889,7 @@ int main(void) {
     RUN_TEST(test_gps_screen_reachable_going_backward_when_available);
     RUN_TEST(test_trackball_select_on_messages_opens_compose);
     RUN_TEST(test_conn_mode_resolve_boot_keeps_supported_modes);
+    RUN_TEST(test_conn_mode_resolve_boot_ble_unsupported_falls_back_to_wifi);
     RUN_TEST(test_conn_mode_resolve_boot_normalizes_legacy_both);
     RUN_TEST(test_trackball_settings_row_navigation_when_not_editing);
     RUN_TEST(test_settings_gps_row_skipped_when_unavailable);

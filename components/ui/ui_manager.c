@@ -413,9 +413,15 @@ void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
     note_screen_change(state, before);
 }
 
-conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool low_sram_board) {
-    (void)low_sram_board;
+conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool ble_supported) {
     if (requested == CONN_MODE_BOTH) {
+        return CONN_MODE_WIFI;
+    }
+    if (requested == CONN_MODE_BLE && !ble_supported) {
+        /* Persisted BLE mode on a build whose BLE stack is a stub (for
+         * example a value carried over in NVS from a BLE-capable image).
+         * Booting "BLE" would leave the node with no transport at all, so
+         * fall back to WiFi instead. */
         return CONN_MODE_WIFI;
     }
     return requested;

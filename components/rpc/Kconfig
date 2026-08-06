@@ -14,9 +14,12 @@ config BRAMBLE_RPC_MAX_RESPONSE
 
 config BRAMBLE_RPC_MAX_METHODS
     int "Max registered RPC methods"
-    # 64, not 40: the firmware registers 61 methods and every shipped profile
-    # already overrode this to 64; a 40 default silently drops registrations
-    # on any build that forgets the override (the nRF target nearly did).
-    default 64
+    # Must exceed the number of rpc_register() calls in main/rpc_methods.c
+    # with headroom: the table silently drops registrations past the cap
+    # (boot logs an error nobody reads and the method is just absent at
+    # runtime; this shipped on 1.9.0, losing getBeaconPolicy and phy.*).
+    # scripts/check-rpc-contract.sh fails CI when the registration count
+    # reaches any configured cap.
+    default 96
 
 endmenu
