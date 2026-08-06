@@ -427,8 +427,7 @@ void handle_rrep(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
      * rrep_rx_decide, a pure host-testable function in components/routing.
      * The link penalty subtracts from the higher-is-better path metric. */
     uint8_t metric = metric_apply_link_penalty(rrep.route_metric, (int8_t)rssi, snr);
-    rrep_rx_decision_t d =
-        rrep_rx_decide(&rrep, s_identity->address, metric, &s_pending_disc, &s_reverse_routes);
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, metric, &s_pending_disc, &s_reverse_routes);
 
     if (d.install_route) {
         route_install(&s_routes, d.route_dest, d.route_next_hop, d.route_hops, d.route_metric,

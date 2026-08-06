@@ -5,6 +5,7 @@ import { useStore } from '../store/index';
 import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
 import { isAuthError } from '../lib/errors';
 import { isEmbeddedShell } from '../utils/platform';
+import { LOCAL_LAN_UNAVAILABLE_REASON } from '../lib/connectionMode';
 import type { TransportType } from '../types/bramble';
 import { IconUsb, IconBluetooth, IconMonitor, IconWifi, IconWarning } from './Icons';
 import { DeviceList } from './DeviceList';
@@ -174,7 +175,7 @@ export function ConnectionOverlay() {
   const hasSerial = 'serial' in navigator;
   const hasBluetooth = 'bluetooth' in navigator;
   const wifiAllowed = connectionCapabilities.localLanAllowed;
-  const wifiReason = connectionCapabilities.localLanReason || 'LAN direct connect is unavailable in hosted mode. Use USB or Bluetooth.';
+  const wifiReason = connectionCapabilities.localLanReason || LOCAL_LAN_UNAVAILABLE_REASON;
   const runtimeBadge = connectionCapabilities.mode === 'local' ? 'Local LAN' : 'Hosted';
 
   useEffect(() => {

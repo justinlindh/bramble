@@ -39,7 +39,6 @@ type emuInbound struct {
 	SF      int    `json:"sf"`      // tx: spreading factor (adopted; see adoptReportedPHY)
 	BW      int    `json:"bw"`      // tx: bandwidth (adopted; see adoptReportedPHY)
 	CR      int    `json:"cr"`      // tx: coding rate (adopted; see adoptReportedPHY)
-	Power   int    `json:"power"`   // tx: dBm (advisory: link budget stays scenario-owned)
 	Seq     int    `json:"seq"`     // fb: frame sequence
 	Kind    string `json:"kind"`    // fb: "partial" | "full"
 	FB      string `json:"fb"`      // fb: base64 packed 1bpp framebuffer (opaque)
