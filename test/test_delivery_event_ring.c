@@ -97,6 +97,29 @@ void test_receipts_for_message_dedupes_and_filters(void) {
     TEST_ASSERT_EQUAL_HEX32(0xBB, out[1]);
 }
 
+void test_receipts_for_message_first_seen_order_after_wrap(void) {
+    /* Cross the wrap (test capacity is 4): the oldest surviving record must
+     * come first, exercising the oldest-index start the wrapped scan uses. */
+    delivery_event_ring_t ring;
+    delivery_event_ring_init(&ring);
+    for (uint32_t i = 0; i < 6; i++) {
+        delivery_event_record_t ev = make_event(7);
+        ev.recipient_addr = 0x200u + i;
+        delivery_event_ring_append(&ring, &ev);
+    }
+    /* Records for recipients 0x200 and 0x201 were overwritten; survivors are
+     * 0x202..0x205 with 0x202 the oldest. */
+    uint32_t out[4] = {0};
+    size_t total = 0;
+    size_t written = delivery_event_ring_receipts_for_message(&ring, 7, out, 4, &total);
+    TEST_ASSERT_EQUAL_UINT32(4, (uint32_t)written);
+    TEST_ASSERT_EQUAL_UINT32(4, (uint32_t)total);
+    TEST_ASSERT_EQUAL_HEX32(0x202, out[0]);
+    TEST_ASSERT_EQUAL_HEX32(0x203, out[1]);
+    TEST_ASSERT_EQUAL_HEX32(0x204, out[2]);
+    TEST_ASSERT_EQUAL_HEX32(0x205, out[3]);
+}
+
 void test_receipts_for_message_total_beyond_out_max(void) {
     /* The test build overrides ring capacity to 4, so use 4 distinct
      * recipients and a smaller out buffer: total must still count them all. */
@@ -138,6 +161,7 @@ int main(void) {
     RUN_TEST(test_wrap_preserves_chronological_order);
     RUN_TEST(test_since_seq_filters_by_threshold);
     RUN_TEST(test_receipts_for_message_dedupes_and_filters);
+    RUN_TEST(test_receipts_for_message_first_seen_order_after_wrap);
     RUN_TEST(test_receipts_for_message_total_beyond_out_max);
     return UNITY_END();
 }

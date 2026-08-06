@@ -25,9 +25,8 @@ typedef struct {
 } chat_delivery_badge_t;
 
 chat_delivery_badge_t chat_message_delivery_badge(msg_status_t status);
-/* An outgoing message with a packet id can always expand its details panel
- * (status, route when known, delivery receipts). Gating this on DELIVERED or
- * on a recorded route made most sent bubbles silently un-tappable. */
+/* An outgoing message with a packet id can always expand its details panel:
+ * status, route when known, delivery receipts. */
 bool chat_message_has_details_toggle(bool is_outgoing, uint32_t packet_id);
 
 /* Formats a receipt summary like "Delivered to 3: Alic, Bob, Carl" or

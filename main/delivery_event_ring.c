@@ -107,7 +107,7 @@ size_t delivery_event_ring_receipts_for_message(const delivery_event_ring_t* rin
 
     /* Chronological order like list_since: oldest first, so the first
      * receipt to arrive is the first name shown. */
-    uint32_t start = (ring->header.count > ring->header.capacity) ? ring->header.write_index : 0u;
+    uint32_t start = ring_oldest_index(ring);
     for (uint32_t i = 0; i < count; i++) {
         const delivery_event_record_t* e = &ring->records[(start + i) % ring->header.capacity];
         if (e->message_id != message_id || e->recipient_addr == 0)
@@ -121,8 +121,12 @@ size_t delivery_event_ring_receipts_for_message(const delivery_event_ring_t* rin
         }
         if (dup)
             continue;
-        if (seen_count < RECEIPT_DEDUPE_MAX)
-            seen[seen_count++] = e->recipient_addr;
+        /* Emit only addresses the dedupe set can track: past the cap a new
+         * address could neither be deduplicated on later retries nor counted
+         * in total_unique, so it is dropped instead of emitted inconsistently. */
+        if (seen_count >= RECEIPT_DEDUPE_MAX)
+            continue;
+        seen[seen_count++] = e->recipient_addr;
         if (out && written < out_max)
             out[written++] = e->recipient_addr;
     }
