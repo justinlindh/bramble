@@ -68,7 +68,11 @@ defaults:
 jobs:
   detect:
     name: Detect changed areas
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # The github context inside a workflow_call is the CALLER's event, so this
+    # sees the same pull_request payload as the calling job. Fork-head PRs run
+    # GitHub-hosted so fork code never reaches the self-hosted pool; same-repo
+    # PRs, pushes, and dispatches follow RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     # 10, not 5: the job is a full-history checkout plus one git diff, and
     # the checkout alone has been observed at 4m49s on loaded pods; a 5m
     # ceiling turned pod slowness into a red gate twice on one PR.

@@ -40,7 +40,10 @@ jobs:
       needs.detect.outputs.host_test == 'true' ||
       needs.detect.outputs.coverage_tooling == 'true' ||
       needs.detect.outputs.ci_core == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Fork-head PRs run GitHub-hosted so fork code never reaches the
+    # self-hosted pool; same-repo PRs, pushes, and dispatches follow
+    # RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -111,7 +114,10 @@ jobs:
     # scope it reports success having done no work. That is what the
     # always-report contract in docs/ci.md requires.
     needs: detect
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Fork-head PRs run GitHub-hosted so fork code never reaches the
+    # self-hosted pool; same-repo PRs, pushes, and dispatches follow
+    # RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
       # Every board reports its own result. Cancelling siblings on the first
@@ -218,7 +224,10 @@ jobs:
       needs.detect.outputs.firmware == 'true' ||
       needs.detect.outputs.host_test == 'true' ||
       needs.detect.outputs.ci_core == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Fork-head PRs run GitHub-hosted so fork code never reaches the
+    # self-hosted pool; same-repo PRs, pushes, and dispatches follow
+    # RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -257,7 +266,10 @@ jobs:
       needs.detect.outputs.firmware == 'true' ||
       needs.detect.outputs.nrf == 'true' ||
       needs.detect.outputs.ci_core == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Fork-head PRs run GitHub-hosted so fork code never reaches the
+    # self-hosted pool; same-repo PRs, pushes, and dispatches follow
+    # RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -344,7 +356,10 @@ jobs:
     # untouched.
     needs: detect
     if: needs.detect.outputs.release_config == 'true' || needs.detect.outputs.ota_index == 'true' || needs.detect.outputs.ci_core == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Fork-head PRs run GitHub-hosted so fork code never reaches the
+    # self-hosted pool; same-repo PRs, pushes, and dispatches follow
+    # RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -385,7 +400,10 @@ jobs:
       needs.detect.outputs.simulator == 'true' ||
       needs.detect.outputs.coverage_tooling == 'true' ||
       needs.detect.outputs.ci_core == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Fork-head PRs run GitHub-hosted so fork code never reaches the
+    # self-hosted pool; same-repo PRs, pushes, and dispatches follow
+    # RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -435,7 +453,10 @@ jobs:
       needs.detect.outputs.emulator == 'true' ||
       needs.detect.outputs.idf_build_scripts == 'true' ||
       needs.detect.outputs.ci_core == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Fork-head PRs run GitHub-hosted so fork code never reaches the
+    # self-hosted pool; same-repo PRs, pushes, and dispatches follow
+    # RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     # Sized for the scenario suite's starvation headroom, not the healthy
     # path: emu-dm-desync may legitimately use up to ~21 min of wall clock on
     # a CPU-starved pod (see the budget comment in

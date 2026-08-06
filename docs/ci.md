@@ -45,17 +45,48 @@ on:
 ```
 
 `pull_request` fires once per PR (and on every update to the PR head). `push`
-fires only on `main`, i.e. post-merge. Every gating job now also runs on
-`pull_request`; there are no post-merge-only jobs left. There is no per-branch `push` trigger, so a
-PR gets exactly one wave of checks instead of two overlapping waves (a
-`pull_request` wave and a `push`-to-`fix/**` wave) that previously each ran to
-completion in separate concurrency groups and doubled the queue. `webapp-quality.yml`
-gained the `pull_request` trigger it previously lacked, so it now gates PRs the
-same way as the other two.
+fires only on `main`, i.e. post-merge. Every gating job also runs on
+`pull_request`; there are no post-merge-only jobs. There is no per-branch
+`push` trigger: with one, a PR would get two overlapping waves (a
+`pull_request` wave and a `push`-to-`fix/**` wave) running to completion in
+separate concurrency groups, doubling the queue.
 
 Each workflow sets `concurrency` keyed on the ref with
 `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, so a new push
 to a PR cancels the superseded PR run but never cancels a `main` run.
+
+### Fork pull requests never touch the self-hosted pool
+
+The repo is public, so fork-origin work is fenced twice.
+
+First, the repository Actions setting "Require approval for all external
+contributors" (REST:
+`repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval`,
+policy `all_external_contributors`) holds every workflow run on a fork-head PR
+until a maintainer approves it, on every push, regardless of the author's
+contribution history. The weaker default (`first_time_contributors`) would
+grant permanent unapproved runs to anyone with a single merged commit, which
+is the wrong trade for self-hosted runners. This setting lives in
+repository configuration, not in this tree; treat this paragraph as the
+contract and restore the policy if it ever drifts.
+
+Second, every job that targets the pool selects its runner with
+
+```yaml
+runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
+```
+
+so an approved fork-head run executes on GitHub-hosted runners and fork code
+never reaches the pool; for same-repo PRs, `main` pushes, and dispatches the
+fork test is false or absent, so they follow `RUNNER_LABEL`.
+The expression is defense-in-depth, not the boundary: a `pull_request` run
+takes its workflow definitions from the PR's merge ref, so a fork PR can edit
+the expression out. The approval gate above is what stands between an
+untrusted author and any run at all, and reviewing the diff (including
+workflow edits) before approving is what keeps a tampered `runs-on` off the
+pool. The workflows that hold write tokens (`claude.yml`, `cache-cleanup.yml`)
+are author-association-gated or run no repository code, and both are pinned to
+GitHub-hosted runners; their in-file comments carry the details.
 
 ## The always-report contract (do not break this)
 

@@ -38,7 +38,9 @@ jobs:
     # contract in docs/ci.md). The title was already validated by whichever
     # run last saw it change.
     if: github.event.action != 'edited' || github.event.changes.title != null
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Fork-head PRs run GitHub-hosted so fork code never reaches the
+    # self-hosted pool; same-repo PRs and dispatches follow RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     # Every other job on the self-hosted pool bounds itself; this one inherited
     # the 360-minute default, so a hung checkout could hold a pool pod for six
     # hours. The work here is a checkout and two commitlint invocations.
