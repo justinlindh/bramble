@@ -45,7 +45,10 @@ jobs:
       needs.detect.outputs.api == 'true' ||
       needs.detect.outputs.coverage_tooling == 'true' ||
       needs.detect.outputs.ci_core == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Fork-head PRs run GitHub-hosted so fork code never reaches the
+    # self-hosted pool; same-repo PRs, pushes, and dispatches follow
+    # RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -141,7 +144,10 @@ jobs:
     name: web-flasher tests
     needs: detect
     if: needs.detect.outputs.web_flasher == 'true' || needs.detect.outputs.ci_core == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    # Fork-head PRs run GitHub-hosted so fork code never reaches the
+    # self-hosted pool; same-repo PRs, pushes, and dispatches follow
+    # RUNNER_LABEL.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
