@@ -82,6 +82,16 @@ static const char* bramble_hardware(void) {
     return "unknown";
 }
 
+/* Lowercase-hex encode n bytes into out, which must hold 2*n + 1 bytes (the
+ * trailing NUL included). Used by the RPC handlers that surface a pubkey,
+ * network key, or 4-byte fingerprint as a hex string. */
+static void bytes_to_hex(const uint8_t* in, size_t n, char* out) {
+    for (size_t i = 0; i < n; i++) {
+        snprintf(out + i * 2, 3, "%02x", in[i]);
+    }
+    out[2 * n] = '\0';
+}
+
 typedef struct __attribute__((packed)) {
     int32_t latitude_e7;
     int32_t longitude_e7;
@@ -367,10 +377,7 @@ static int handle_get_identity(const cJSON* params, cJSON* result) {
      * the whole key to request an anchor endorsement; address/pubkey_hash are
      * only truncated hashes. */
     char ed_hex[2 * BRAMBLE_ED25519_PUBKEY_SIZE + 1];
-    for (int i = 0; i < BRAMBLE_ED25519_PUBKEY_SIZE; i++) {
-        snprintf(ed_hex + i * 2, 3, "%02x", s_identity->ed25519_public_key[i]);
-    }
-    ed_hex[2 * BRAMBLE_ED25519_PUBKEY_SIZE] = '\0';
+    bytes_to_hex(s_identity->ed25519_public_key, BRAMBLE_ED25519_PUBKEY_SIZE, ed_hex);
     cJSON_AddStringToObject(result, "ed25519_pub", ed_hex);
     return 0;
 }
@@ -1082,10 +1089,7 @@ static int handle_get_network_key_status(const cJSON* params, cJSON* result) {
     uint8_t fp[4];
     network_key_fingerprint(fp);
     char hex[9];
-    for (int i = 0; i < 4; i++) {
-        snprintf(hex + i * 2, 3, "%02x", fp[i]);
-    }
-    hex[8] = '\0';
+    bytes_to_hex(fp, 4, hex);
     cJSON_AddStringToObject(result, "fingerprint", hex);
     return 0;
 }
@@ -1116,10 +1120,7 @@ static int handle_generate_network_key(const cJSON* params, cJSON* result) {
     }
 
     char key_hex[65];
-    for (int i = 0; i < 32; i++) {
-        snprintf(key_hex + i * 2, 3, "%02x", key[i]);
-    }
-    key_hex[64] = '\0';
+    bytes_to_hex(key, 32, key_hex);
     memset(key, 0, sizeof(key)); /* wipe local copy; never log the key */
     cJSON_AddStringToObject(result, "key", key_hex);
 
@@ -1128,10 +1129,7 @@ static int handle_generate_network_key(const cJSON* params, cJSON* result) {
     uint8_t fp[4];
     network_key_fingerprint(fp);
     char fp_hex[9];
-    for (int i = 0; i < 4; i++) {
-        snprintf(fp_hex + i * 2, 3, "%02x", fp[i]);
-    }
-    fp_hex[8] = '\0';
+    bytes_to_hex(fp, 4, fp_hex);
     cJSON_AddStringToObject(result, "fingerprint", fp_hex);
     return 0;
 }
@@ -1188,10 +1186,7 @@ static int handle_get_anchor_status(const cJSON* params, cJSON* result) {
         uint8_t fp[4];
         identity_anchor_fingerprint(fp);
         char hex[9];
-        for (int i = 0; i < 4; i++) {
-            snprintf(hex + i * 2, 3, "%02x", fp[i]);
-        }
-        hex[8] = '\0';
+        bytes_to_hex(fp, 4, hex);
         cJSON_AddStringToObject(result, "anchor_fingerprint", hex);
     }
     /* endorsed = we hold a cert that ACTUALLY verifies against the CURRENT
