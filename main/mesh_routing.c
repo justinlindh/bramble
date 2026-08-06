@@ -92,12 +92,7 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
                  broken_dest);
         return;
     }
-    rerr.seq[0] = (uint8_t)(rerr_seq >> 40);
-    rerr.seq[1] = (uint8_t)(rerr_seq >> 32);
-    rerr.seq[2] = (uint8_t)(rerr_seq >> 24);
-    rerr.seq[3] = (uint8_t)(rerr_seq >> 16);
-    rerr.seq[4] = (uint8_t)(rerr_seq >> 8);
-    rerr.seq[5] = (uint8_t)rerr_seq;
+    bramble_seq48_pack(rerr.seq, rerr_seq);
     /* SEC-H1 (STAGED): re-signed on every call, including re-origination,
      * since this function builds a fresh struct each time (fresh
      * reporter_addr/packet_id/seq), and reporter_addr/seq are now
@@ -283,12 +278,7 @@ void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
                      rreq.query_id);
             return;
         }
-        rrep.seq[0] = (uint8_t)(rrep_seq >> 40);
-        rrep.seq[1] = (uint8_t)(rrep_seq >> 32);
-        rrep.seq[2] = (uint8_t)(rrep_seq >> 24);
-        rrep.seq[3] = (uint8_t)(rrep_seq >> 16);
-        rrep.seq[4] = (uint8_t)(rrep_seq >> 8);
-        rrep.seq[5] = (uint8_t)rrep_seq;
+        bramble_seq48_pack(rrep.seq, rrep_seq);
         rrep_sign(&rrep);
 
         /* Route RREP back toward the previous hop */
@@ -353,12 +343,7 @@ void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
                      rreq.query_id);
             return;
         }
-        rrep.seq[0] = (uint8_t)(rrep_seq >> 40);
-        rrep.seq[1] = (uint8_t)(rrep_seq >> 32);
-        rrep.seq[2] = (uint8_t)(rrep_seq >> 24);
-        rrep.seq[3] = (uint8_t)(rrep_seq >> 16);
-        rrep.seq[4] = (uint8_t)(rrep_seq >> 8);
-        rrep.seq[5] = (uint8_t)rrep_seq;
+        bramble_seq48_pack(rrep.seq, rrep_seq);
         rrep_sign(&rrep);
 
         send_rrep(&rrep);
@@ -414,9 +399,7 @@ void handle_rrep(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
      * MAC-covered, so an attacker cannot dodge the window by mutating it).
      * Checked after rrep_verify and strictly before route_install, so a
      * replayed RREP never resurrects a stale route. */
-    uint64_t rrep_seq = ((uint64_t)rrep.seq[0] << 40) | ((uint64_t)rrep.seq[1] << 32) |
-                        ((uint64_t)rrep.seq[2] << 24) | ((uint64_t)rrep.seq[3] << 16) |
-                        ((uint64_t)rrep.seq[4] << 8) | (uint64_t)rrep.seq[5];
+    uint64_t rrep_seq = bramble_seq48_unpack(rrep.seq);
     if (!control_replay_ok(rrep.src_addr, rrep_seq)) {
         ESP_LOGW(TAG, "RREP replay query=%08" PRIX32 " src=%08" PRIX32, rrep.query_id,
                  rrep.src_addr);
@@ -501,9 +484,7 @@ void handle_rerr(const uint8_t* data, uint8_t len) {
      * window by mutating either). Checked after rerr_verify and strictly
      * before any teardown effect (route_marked_broken, forwarding,
      * failfast), so a replayed RERR never re-tears-down a live route. */
-    uint64_t rerr_seq = ((uint64_t)rerr.seq[0] << 40) | ((uint64_t)rerr.seq[1] << 32) |
-                        ((uint64_t)rerr.seq[2] << 24) | ((uint64_t)rerr.seq[3] << 16) |
-                        ((uint64_t)rerr.seq[4] << 8) | (uint64_t)rerr.seq[5];
+    uint64_t rerr_seq = bramble_seq48_unpack(rerr.seq);
     if (!control_replay_ok(rerr.reporter_addr, rerr_seq)) {
         ESP_LOGW(TAG, "RERR replay reporter=%08" PRIX32 " dest=%08" PRIX32, rerr.reporter_addr,
                  rerr.broken_dest);

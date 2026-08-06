@@ -2711,13 +2711,7 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
 
     /* Fresh origin seq per origination (mirrors control_seq_next), written
      * before the MAC since the MAC covers it. */
-    uint64_t seq = ++ext->ident_seq;
-    att.seq[0] = (uint8_t)(seq >> 40);
-    att.seq[1] = (uint8_t)(seq >> 32);
-    att.seq[2] = (uint8_t)(seq >> 24);
-    att.seq[3] = (uint8_t)(seq >> 16);
-    att.seq[4] = (uint8_t)(seq >> 8);
-    att.seq[5] = (uint8_t)seq;
+    bramble_seq48_pack(att.seq, ++ext->ident_seq);
     ident_relay_sign(&att);
 
     outbound_packet_t pkt;
