@@ -49,8 +49,8 @@ extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_
 extern int mesh_get_channel_count(void);
 extern const char* mesh_get_channel_name(int index);
 extern const char* mesh_get_peer_name(uint32_t addr);
-extern size_t mesh_delivery_receipts_for_message(uint32_t message_id, uint32_t* out,
-                                                 size_t out_max, size_t* total_unique);
+extern size_t mesh_delivery_receipts_for_message(uint32_t message_id, uint32_t* out, size_t out_max,
+                                                 size_t* total_unique);
 extern bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified,
                                        bool* key_changed);
 

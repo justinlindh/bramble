@@ -90,8 +90,8 @@ size_t delivery_event_ring_list_since(const delivery_event_ring_t* ring, uint32_
 #define RECEIPT_DEDUPE_MAX 64u
 
 size_t delivery_event_ring_receipts_for_message(const delivery_event_ring_t* ring,
-                                                uint32_t message_id, uint32_t* out,
-                                                size_t out_max, size_t* total_unique) {
+                                                uint32_t message_id, uint32_t* out, size_t out_max,
+                                                size_t* total_unique) {
     if (total_unique)
         *total_unique = 0;
     if (!ring || message_id == 0)
@@ -107,9 +107,7 @@ size_t delivery_event_ring_receipts_for_message(const delivery_event_ring_t* rin
 
     /* Chronological order like list_since: oldest first, so the first
      * receipt to arrive is the first name shown. */
-    uint32_t start = (ring->header.count > ring->header.capacity)
-                         ? ring->header.write_index
-                         : 0u;
+    uint32_t start = (ring->header.count > ring->header.capacity) ? ring->header.write_index : 0u;
     for (uint32_t i = 0; i < count; i++) {
         const delivery_event_record_t* e = &ring->records[(start + i) % ring->header.capacity];
         if (e->message_id != message_id || e->recipient_addr == 0)

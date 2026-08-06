@@ -75,8 +75,8 @@ size_t delivery_event_ring_list_since(const delivery_event_ring_t* ring, uint32_
  * still report the true total.
  */
 size_t delivery_event_ring_receipts_for_message(const delivery_event_ring_t* ring,
-                                                uint32_t message_id, uint32_t* out,
-                                                size_t out_max, size_t* total_unique);
+                                                uint32_t message_id, uint32_t* out, size_t out_max,
+                                                size_t* total_unique);
 
 #ifdef __cplusplus
 }

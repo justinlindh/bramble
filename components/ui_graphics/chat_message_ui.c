@@ -57,8 +57,6 @@ int chat_format_receipt_summary(char* out, size_t out_len, const uint32_t* addrs
     return (int)pos;
 }
 
-
-
 int chat_format_age(uint32_t age_s, char* buf, size_t buf_len) {
     if (!buf || buf_len == 0)
         return 0;
