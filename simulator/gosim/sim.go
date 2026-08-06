@@ -1477,6 +1477,26 @@ func shouldFilterLine(line []byte) bool {
 	return false
 }
 
+// loadHeadless starts the C-stdout pipe reader and loads scenarioPath under the
+// sim lock, the prologue both headless entry points (RunHeadless and bridge.go's
+// runScenarioHeadless) share. It flushes stdout and returns an error if the
+// scenario does not reach StateLoaded, so callers cannot drift on the
+// lock/restoreStdout-on-failure ordering. The caller creates the sim first
+// (each supplies its own broadcast callback) and drives the drain afterward.
+func (sim *Sim) loadHeadless(scenarioPath string) error {
+	go sim.readPipe()
+
+	sim.mu.Lock()
+	sim.cmdLoad(Command{Scenario: scenarioPath})
+	sim.mu.Unlock()
+
+	if sim.State() != StateLoaded {
+		sim.restoreStdout(0)
+		return fmt.Errorf("failed to load scenario %s", scenarioPath)
+	}
+	return nil
+}
+
 // RunHeadless loads a scenario and processes all events instantly, for CLI mode.
 func RunHeadless(scenarioPath string) error {
 	sim, err := NewSim(scenarioPath, nil, true)
@@ -1484,17 +1504,8 @@ func RunHeadless(scenarioPath string) error {
 		return err
 	}
 
-	// Start pipe reader
-	go sim.readPipe()
-
-	// Load scenario
-	sim.mu.Lock()
-	sim.cmdLoad(Command{Scenario: scenarioPath})
-	sim.mu.Unlock()
-
-	if sim.State() != StateLoaded {
-		sim.restoreStdout(0)
-		return fmt.Errorf("failed to load scenario")
+	if err := sim.loadHeadless(scenarioPath); err != nil {
+		return err
 	}
 
 	// Task 7: a scenario with external firmware nodes runs on the wall clock so

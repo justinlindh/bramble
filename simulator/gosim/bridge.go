@@ -8,7 +8,6 @@ package main
 */
 import "C"
 import (
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -210,18 +209,11 @@ func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
 	}
 
 	// C-side fprintf JSON (message_sent, message_delivered, etc.) only
-	// reaches our broadcast callback via the pipe reader goroutine, exactly
-	// as RunHeadless starts it; Go-side emitJSON calls (metrics, sim_ready)
-	// go straight to broadcast and do not depend on this.
-	go sim.readPipe()
-
-	sim.mu.Lock()
-	sim.cmdLoad(Command{Scenario: scenarioPath})
-	sim.mu.Unlock()
-
-	if sim.State() != StateLoaded {
-		sim.restoreStdout(0)
-		return nil, fmt.Errorf("runScenarioHeadless: failed to load scenario %s", scenarioPath)
+	// reaches our broadcast callback via the pipe reader goroutine that
+	// loadHeadless starts, exactly as RunHeadless does; Go-side emitJSON calls
+	// (metrics, sim_ready) go straight to broadcast and do not depend on this.
+	if err := sim.loadHeadless(scenarioPath); err != nil {
+		return nil, err
 	}
 
 	sim.mu.Lock()
