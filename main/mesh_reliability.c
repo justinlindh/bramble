@@ -458,16 +458,8 @@ void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
         .rssi_at_dest = rssi,
         .hop_count = 1,
         .relay_path = {s_identity->address}, /* destination is first hop */
-        .seq =
-            {
-                (uint8_t)(ack_seq >> 40),
-                (uint8_t)(ack_seq >> 32),
-                (uint8_t)(ack_seq >> 24),
-                (uint8_t)(ack_seq >> 16),
-                (uint8_t)(ack_seq >> 8),
-                (uint8_t)ack_seq,
-            },
     };
+    bramble_seq48_pack(ack.seq, ack_seq);
     /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
      * hop_count/hop_limit is set (those are excluded from the MAC and
      * legitimately change per relay hop); seq is set above and IS covered
@@ -552,9 +544,7 @@ void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
      * Checked after ack_verify and strictly before BOTH the forward branch
      * and the for-us effects below (pending_ack_remove, msg_store_update),
      * so a replayed ACK never cancels a live retransmission or forwards. */
-    uint64_t ack_seq = ((uint64_t)ack.seq[0] << 40) | ((uint64_t)ack.seq[1] << 32) |
-                       ((uint64_t)ack.seq[2] << 24) | ((uint64_t)ack.seq[3] << 16) |
-                       ((uint64_t)ack.seq[4] << 8) | (uint64_t)ack.seq[5];
+    uint64_t ack_seq = bramble_seq48_unpack(ack.seq);
     if (!control_replay_ok(ack.src_addr, ack_seq)) {
         ESP_LOGW(TAG, "ACK replay pkt=%08" PRIX32 " src=%08" PRIX32, ack.ack_packet_id,
                  ack.src_addr);
@@ -752,9 +742,7 @@ void handle_delivery_receipt(const uint8_t* data, uint8_t len, int16_t rssi, int
      * it). Checked after receipt_verify and strictly before BOTH the
      * forward branch and the for-us effect (the broadcast delivery
      * notification), so a replayed receipt never re-notifies or forwards. */
-    uint64_t receipt_seq = ((uint64_t)receipt.seq[0] << 40) | ((uint64_t)receipt.seq[1] << 32) |
-                           ((uint64_t)receipt.seq[2] << 24) | ((uint64_t)receipt.seq[3] << 16) |
-                           ((uint64_t)receipt.seq[4] << 8) | (uint64_t)receipt.seq[5];
+    uint64_t receipt_seq = bramble_seq48_unpack(receipt.seq);
     if (!control_replay_ok(receipt.src_addr, receipt_seq)) {
         ESP_LOGW(TAG, "Delivery receipt replay pkt=%08" PRIX32 " src=%08" PRIX32,
                  receipt.orig_packet_id, receipt.src_addr);
