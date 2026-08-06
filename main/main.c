@@ -36,6 +36,10 @@
 #include "mdns.h"
 #endif
 #include "ble_server.h"
+#if CONFIG_BT_ENABLED
+/* esp_bt_mem_release: reclaim the unused BT controller RAM on WiFi boots. */
+#include "esp_bt.h"
+#endif
 #include "esp_system.h"
 #include "battery.h"
 #include "alerts.h"
@@ -1375,6 +1379,17 @@ void app_main(void) {
     /* Init WiFi if selected */
     if (boot_mode == CONN_MODE_WIFI) {
         ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
+#if CONFIG_BT_ENABLED
+        /* Connectivity modes are exclusive and a mode switch always reboots,
+         * so a WiFi boot never starts the BT controller. Hand its static RAM
+         * (BT .bss/.data, internal DRAM) back to the heap instead of letting
+         * it sit unused; the release is one-way per boot, which the
+         * reboot-to-switch model makes safe. */
+        esp_err_t bt_rel = esp_bt_mem_release(ESP_BT_MODE_BLE);
+        if (bt_rel != ESP_OK) {
+            ESP_LOGW(TAG, "esp_bt_mem_release failed: %s", esp_err_to_name(bt_rel));
+        }
+#endif
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
         show_boot_status("WiFi: starting...");
 #endif
