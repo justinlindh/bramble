@@ -218,7 +218,10 @@ conn_mode_t conn_mode_get(void) {
         nvs_get_u8(nvs, NVS_KEY_CONN_MODE, &mode);
         nvs_close(nvs);
     }
-    if (mode == CONN_MODE_BOTH || mode >= CONN_MODE_COUNT)
+    /* Explicit allowlist: the enum is sparse (2 is the retired BOTH slot,
+     * still normalized to WiFi so stale devices do not silently go dark)
+     * and Off sits above it at 3, so a range check cannot work. */
+    if (mode != CONN_MODE_WIFI && mode != CONN_MODE_BLE && mode != CONN_MODE_OFF)
         mode = CONN_MODE_WIFI;
 
     return conn_mode_resolve_boot((conn_mode_t)mode, ble_server_supported());
@@ -749,13 +752,13 @@ static void render_screen(ui_state_t* ui) {
             if (ui->settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) {
                 display_draw_text(2, y, "Connectivity Mode:");
                 y += LINE_H + 4;
-                static const char* mode_names[] = {"WiFi", "BLE"};
                 conn_mode_t current = conn_mode_get();
-                for (int i = 0; i < CONN_MODE_COUNT; i++) {
+                for (int i = 0; i < CONN_MODE_UI_COUNT; i++) {
                     char ml[32];
+                    conn_mode_t m = conn_mode_from_ui_index(i);
                     const char* arrow = (i == ui->settings_cursor) ? ">" : " ";
-                    const char* mark = (i == (int)current) ? " *" : "";
-                    snprintf(ml, sizeof(ml), "%s %s%s", arrow, mode_names[i], mark);
+                    const char* mark = (m == current) ? " *" : "";
+                    snprintf(ml, sizeof(ml), "%s %s%s", arrow, conn_mode_name(m), mark);
                     display_draw_text(2, y, ml);
                     y += LINE_H;
                 }
@@ -811,7 +814,6 @@ static void render_screen(ui_state_t* ui) {
             int y = CONTENT_Y;
 
             conn_mode_t cur_mode = conn_mode_get();
-            static const char* mnames[] = {"WiFi", "BLE"};
             loc_share_mode_t cur_loc = location_share_mode_get();
             static const char* loc_names[] = {"Off", "Coarse", "Exact"};
 
@@ -819,7 +821,7 @@ static void render_screen(ui_state_t* ui) {
             {
                 const char* sel =
                     (ui->settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) ? ">" : " ";
-                snprintf(line, sizeof(line), "%sConn: %s", sel, mnames[cur_mode]);
+                snprintf(line, sizeof(line), "%sConn: %s", sel, conn_mode_name(cur_mode));
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
@@ -1336,8 +1338,7 @@ void app_main(void) {
      * the build carries no BLE stack; say so instead of silently booting a
      * different mode than the one persisted. */
     conn_mode_t boot_mode = conn_mode_get();
-    static const char* mode_str[] = {"WiFi", "BLE"};
-    ESP_LOGI(TAG, "Connectivity mode: %s", mode_str[boot_mode]);
+    ESP_LOGI(TAG, "Connectivity mode: %s", conn_mode_name(boot_mode));
     if (!ble_server_supported()) {
         ESP_LOGI(TAG, "BLE: unsupported in this build (stub transport); WiFi only");
     }
@@ -1376,20 +1377,23 @@ void app_main(void) {
     msg_store_init();
 #endif
 
-    /* Init WiFi if selected */
-    if (boot_mode == CONN_MODE_WIFI) {
-        ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
 #if CONFIG_BT_ENABLED
+    if (boot_mode != CONN_MODE_BLE) {
         /* Connectivity modes are exclusive and a mode switch always reboots,
-         * so a WiFi boot never starts the BT controller. Hand its static RAM
-         * (BT .bss/.data, internal DRAM) back to the heap instead of letting
-         * it sit unused; the release is one-way per boot, which the
-         * reboot-to-switch model makes safe. */
+         * so a WiFi or Off boot never starts the BT controller. Hand its
+         * static RAM (BT .bss/.data, internal DRAM) back to the heap instead
+         * of letting it sit unused; the release is one-way per boot, which
+         * the reboot-to-switch model makes safe. */
         esp_err_t bt_rel = esp_bt_mem_release(ESP_BT_MODE_BLE);
         if (bt_rel != ESP_OK) {
             ESP_LOGW(TAG, "esp_bt_mem_release failed: %s", esp_err_to_name(bt_rel));
         }
+    }
 #endif
+
+    /* Init WiFi if selected */
+    if (boot_mode == CONN_MODE_WIFI) {
+        ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
         show_boot_status("WiFi: starting...");
 #endif
@@ -1685,7 +1689,7 @@ void app_main(void) {
             ui.settings_confirmed = false;
             ui.settings_editing = false;
             if (ui.settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) {
-                conn_mode_t new_mode = (conn_mode_t)ui.settings_cursor;
+                conn_mode_t new_mode = conn_mode_from_ui_index(ui.settings_cursor);
                 conn_mode_t old_mode = conn_mode_get();
                 if (new_mode == CONN_MODE_BLE && !ble_server_supported()) {
                     /* Honest refusal: this build has no BLE stack, so a
@@ -1704,17 +1708,16 @@ void app_main(void) {
 
                     /* Show confirmation before reboot */
                     display_clear();
-                    static const char* mnames[] = {"WiFi", "BLE"};
 
                     const char* msg1 = "Mode changed:";
                     int msg1_x = (DISPLAY_WIDTH - strlen(msg1) * FONT_W) / 2;
                     int msg1_y = DISPLAY_HEIGHT / 4;
                     display_draw_text(msg1_x, msg1_y, msg1);
 
-                    int mode_w = strlen(mnames[new_mode]) * FONT_W * 2;
+                    int mode_w = strlen(conn_mode_name(new_mode)) * FONT_W * 2;
                     int mode_x = (DISPLAY_WIDTH - mode_w) / 2;
                     int mode_y = msg1_y + FONT_H + 8;
-                    display_draw_text_large(mode_x, mode_y, mnames[new_mode]);
+                    display_draw_text_large(mode_x, mode_y, conn_mode_name(new_mode));
 
                     const char* msg2 = "Rebooting...";
                     int msg2_x = (DISPLAY_WIDTH - strlen(msg2) * FONT_W) / 2;

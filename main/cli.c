@@ -246,10 +246,9 @@ static int cmd_name(int argc, char** argv) {
 
 static int cmd_connmode(int argc, char** argv) {
     if (argc < 2) {
-        printf("Conn mode: %s (BLE %s in this build)\n",
-               conn_mode_get() == CONN_MODE_BLE ? "BLE" : "WiFi",
+        printf("Conn mode: %s (BLE %s in this build)\n", conn_mode_name(conn_mode_get()),
                ble_server_supported() ? "available" : "not included");
-        printf("Usage: connmode wifi|ble (takes effect after reboot)\n");
+        printf("Usage: connmode wifi|ble|off (takes effect after reboot)\n");
         return 0;
     }
     if (strcmp(argv[1], "wifi") == 0) {
@@ -268,7 +267,14 @@ static int cmd_connmode(int argc, char** argv) {
         printf("Conn mode set: BLE (reboot to apply)\n");
         return 0;
     }
-    printf("Usage: connmode wifi|ble\n");
+    if (strcmp(argv[1], "off") == 0) {
+        /* No transport needed: valid on every build. Recovery from Off is
+         * this console or the on-device settings UI. */
+        conn_mode_set(CONN_MODE_OFF);
+        printf("Conn mode set: Off (reboot to apply; WiFi and BLE disabled)\n");
+        return 0;
+    }
+    printf("Usage: connmode wifi|ble|off\n");
     return 1;
 }
 

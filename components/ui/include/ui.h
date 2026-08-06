@@ -20,8 +20,16 @@ typedef enum {
     CONN_MODE_WIFI = 0,
     CONN_MODE_BLE = 1,
     CONN_MODE_BOTH = 2, /* legacy persisted value; normalized to WiFi */
-    CONN_MODE_COUNT = 2 /* exposed modes are exclusive: WiFi or BLE */
+    CONN_MODE_OFF = 3,  /* no WiFi, no BLE; LoRa mesh and USB serial unaffected */
 } conn_mode_t;
+
+/* Exposed modes in UI order (WiFi, BLE, Off). Enum values are persisted and
+ * sparse (2 is the retired BOTH slot), so UI indexes and enum values need
+ * explicit mapping; indexing arrays by conn_mode_t is a bug. */
+#define CONN_MODE_UI_COUNT 3
+conn_mode_t conn_mode_from_ui_index(int index);
+int conn_mode_to_ui_index(conn_mode_t mode);
+const char* conn_mode_name(conn_mode_t mode);
 
 typedef enum {
     BTN_NONE = 0,
