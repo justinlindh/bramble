@@ -109,16 +109,8 @@ esp_err_t mesh_build_broadcast_delivery_receipt_packet(
         .hop_count = 1,
         .total_latency = 0,
         .relay_path = {local_addr},
-        .seq =
-            {
-                (uint8_t)(seq >> 40),
-                (uint8_t)(seq >> 32),
-                (uint8_t)(seq >> 24),
-                (uint8_t)(seq >> 16),
-                (uint8_t)(seq >> 8),
-                (uint8_t)seq,
-            },
     };
+    bramble_seq48_pack(receipt.seq, seq);
     /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
      * hop_count/hop_limit is set (excluded from the MAC, legitimately
      * change per relay hop); seq is set above and IS covered (ws 1.3b). */

@@ -302,6 +302,28 @@ typedef struct {
     uint8_t seq[6];       /* 48-bit origin seq, big-endian (Phase 3) */
 } bramble_identity_attestation_t;
 
+/*
+ * 48-bit control-plane sequence (ws 1.3b) pack/unpack. The seq field on the
+ * ACK/RREP/RERR/BEACON/delivery-receipt/attestation frames above is a
+ * big-endian 6-byte array; these two helpers are the single definition of that
+ * byte order, so no build or parse site can transcribe the shifts differently
+ * (a drift here is exactly the freshness/replay bug the seq field defends
+ * against).
+ */
+static inline void bramble_seq48_pack(uint8_t out[6], uint64_t seq) {
+    out[0] = (uint8_t)(seq >> 40);
+    out[1] = (uint8_t)(seq >> 32);
+    out[2] = (uint8_t)(seq >> 24);
+    out[3] = (uint8_t)(seq >> 16);
+    out[4] = (uint8_t)(seq >> 8);
+    out[5] = (uint8_t)seq;
+}
+
+static inline uint64_t bramble_seq48_unpack(const uint8_t in[6]) {
+    return ((uint64_t)in[0] << 40) | ((uint64_t)in[1] << 32) | ((uint64_t)in[2] << 24) |
+           ((uint64_t)in[3] << 16) | ((uint64_t)in[4] << 8) | (uint64_t)in[5];
+}
+
 /* Serialize/deserialize functions. Return ESP_OK or ESP_ERR_INVALID_SIZE. */
 esp_err_t bramble_header_serialize(const bramble_header_t* h, uint8_t* buf, size_t len);
 esp_err_t bramble_header_deserialize(bramble_header_t* h, const uint8_t* buf, size_t len);
