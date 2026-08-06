@@ -112,9 +112,15 @@ static void st7789_init_sequence(void) {
     st7789_write_cmd(ST7789_COLMOD);
     st7789_write_byte(0x55);
 
-    /* Memory access control: landscape, RGB, left-to-right for 320×240 */
+    /* Memory access control: landscape, left-to-right for 320×240, RGB
+     * subpixel order (bit 3 clear) matching LVGL's RGB565 framebuffer.
+     * Setting the BGR bit (0x68) swaps red and blue on the glass while
+     * screenshots stay correct, because the bench screenshot RPC re-renders
+     * upstream of the panel: blue #1A4B91 sent bubbles displayed as orange
+     * #914B1A. Rotation bits (MV, MX) are unchanged, so the GT911 touch
+     * mapping is unaffected. */
     st7789_write_cmd(ST7789_MADCTL);
-    st7789_write_byte(0x68);
+    st7789_write_byte(0x60);
 
     /* Porch control */
     st7789_write_cmd(ST7789_PORCTRL);

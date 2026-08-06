@@ -1,5 +1,6 @@
 #include "delivery_event_ring.h"
 
+#include <stdbool.h>
 #include <string.h>
 
 #define DELIVERY_EVENT_RING_MAGIC 0x44565247u /* "DVRG" */
@@ -83,5 +84,52 @@ size_t delivery_event_ring_list_since(const delivery_event_ring_t* ring, uint32_
         }
     }
 
+    return written;
+}
+
+#define RECEIPT_DEDUPE_MAX 64u
+
+size_t delivery_event_ring_receipts_for_message(const delivery_event_ring_t* ring,
+                                                uint32_t message_id, uint32_t* out,
+                                                size_t out_max, size_t* total_unique) {
+    if (total_unique)
+        *total_unique = 0;
+    if (!ring || message_id == 0)
+        return 0;
+
+    uint32_t seen[RECEIPT_DEDUPE_MAX];
+    size_t seen_count = 0;
+    size_t written = 0;
+
+    uint32_t count = ring->header.count;
+    if (count > ring->header.capacity)
+        count = ring->header.capacity;
+
+    /* Chronological order like list_since: oldest first, so the first
+     * receipt to arrive is the first name shown. */
+    uint32_t start = (ring->header.count > ring->header.capacity)
+                         ? ring->header.write_index
+                         : 0u;
+    for (uint32_t i = 0; i < count; i++) {
+        const delivery_event_record_t* e = &ring->records[(start + i) % ring->header.capacity];
+        if (e->message_id != message_id || e->recipient_addr == 0)
+            continue;
+        bool dup = false;
+        for (size_t j = 0; j < seen_count; j++) {
+            if (seen[j] == e->recipient_addr) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup)
+            continue;
+        if (seen_count < RECEIPT_DEDUPE_MAX)
+            seen[seen_count++] = e->recipient_addr;
+        if (out && written < out_max)
+            out[written++] = e->recipient_addr;
+    }
+
+    if (total_unique)
+        *total_unique = seen_count;
     return written;
 }

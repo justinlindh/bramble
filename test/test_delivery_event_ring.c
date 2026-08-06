@@ -71,6 +71,51 @@ void test_wrap_preserves_chronological_order(void) {
     }
 }
 
+void test_receipts_for_message_dedupes_and_filters(void) {
+    delivery_event_ring_t ring;
+    delivery_event_ring_init(&ring);
+
+    delivery_event_record_t ev = make_event(7);
+    ev.recipient_addr = 0xAA;
+    delivery_event_ring_append(&ring, &ev);
+    /* Duplicate receipt from the same recipient (retry) collapses. */
+    delivery_event_ring_append(&ring, &ev);
+    ev.recipient_addr = 0xBB;
+    delivery_event_ring_append(&ring, &ev);
+    /* Different message and a zero recipient are both ignored. */
+    delivery_event_record_t other = make_event(9);
+    delivery_event_ring_append(&ring, &other);
+    ev.recipient_addr = 0;
+    delivery_event_ring_append(&ring, &ev);
+
+    uint32_t out[4] = {0};
+    size_t total = 0;
+    size_t written = delivery_event_ring_receipts_for_message(&ring, 7, out, 4, &total);
+    TEST_ASSERT_EQUAL_UINT32(2, (uint32_t)written);
+    TEST_ASSERT_EQUAL_UINT32(2, (uint32_t)total);
+    TEST_ASSERT_EQUAL_HEX32(0xAA, out[0]);
+    TEST_ASSERT_EQUAL_HEX32(0xBB, out[1]);
+}
+
+void test_receipts_for_message_total_beyond_out_max(void) {
+    /* The test build overrides ring capacity to 4, so use 4 distinct
+     * recipients and a smaller out buffer: total must still count them all. */
+    delivery_event_ring_t ring;
+    delivery_event_ring_init(&ring);
+    for (uint32_t i = 0; i < 4; i++) {
+        delivery_event_record_t ev = make_event(7);
+        ev.recipient_addr = 0x100u + i;
+        delivery_event_ring_append(&ring, &ev);
+    }
+    uint32_t out[2] = {0};
+    size_t total = 0;
+    size_t written = delivery_event_ring_receipts_for_message(&ring, 7, out, 2, &total);
+    TEST_ASSERT_EQUAL_UINT32(2, (uint32_t)written);
+    TEST_ASSERT_EQUAL_UINT32(4, (uint32_t)total);
+    TEST_ASSERT_EQUAL_HEX32(0x100, out[0]);
+    TEST_ASSERT_EQUAL_HEX32(0x101, out[1]);
+}
+
 void test_since_seq_filters_by_threshold(void) {
     delivery_event_ring_t ring;
     delivery_event_record_t out[DELIVERY_EVENT_RING_CAPACITY];
@@ -92,5 +137,7 @@ int main(void) {
     RUN_TEST(test_seq_monotonic_after_wrap);
     RUN_TEST(test_wrap_preserves_chronological_order);
     RUN_TEST(test_since_seq_filters_by_threshold);
+    RUN_TEST(test_receipts_for_message_dedupes_and_filters);
+    RUN_TEST(test_receipts_for_message_total_beyond_out_max);
     return UNITY_END();
 }

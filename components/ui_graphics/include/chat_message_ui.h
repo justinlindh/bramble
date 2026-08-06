@@ -25,8 +25,21 @@ typedef struct {
 } chat_delivery_badge_t;
 
 chat_delivery_badge_t chat_message_delivery_badge(msg_status_t status);
-bool chat_message_has_inline_route_toggle(bool is_outgoing, msg_status_t status,
-                                          uint8_t route_hop_count, uint32_t packet_id);
+/* An outgoing message with a packet id can always expand its details panel
+ * (status, route when known, delivery receipts). Gating this on DELIVERED or
+ * on a recorded route made most sent bubbles silently un-tappable. */
+bool chat_message_has_details_toggle(bool is_outgoing, uint32_t packet_id);
+
+/* Formats a receipt summary like "Delivered to 3: Alic, Bob, Carl" or
+ * "Delivered to 5: Alic, Bob, Carl, Dave, +1". addrs holds the first
+ * shown_count unique recipients; total is the full unique-recipient count
+ * (>= shown_count). name_of writes a short display name for an address.
+ * Returns characters written. */
+typedef void (*chat_receipt_name_fn)(char* out, size_t out_len, uint32_t addr);
+int chat_format_receipt_summary(char* out, size_t out_len, const uint32_t* addrs,
+                                size_t shown_count, size_t total, chat_receipt_name_fn name_of);
+
+
 
 /* Compact age for message bubbles: "now", "5m", "3h", "2d". */
 int chat_format_age(uint32_t age_s, char* buf, size_t buf_len);

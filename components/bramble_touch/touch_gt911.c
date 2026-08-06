@@ -123,7 +123,7 @@ bool touch_read(touch_point_t* point) {
     uint16_t raw_y = (data[3] << 8) | data[2];
 
     /* Map GT911 coordinates to display 320x240.
-     * The display uses MADCTL 0x68 (MV=1, MX=1) for landscape rotation.
+     * The display uses MADCTL 0x60 (MV=1, MX=1) for landscape rotation.
      * GT911 reports in the panel's native portrait orientation, so we must
      * swap axes and invert to match the display's logical coordinates:
      *   display_x = raw_y (mapped to 0..319)

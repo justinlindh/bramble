@@ -66,6 +66,11 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr, uint32_t broad
 /* Delivery-event replay sync support */
 bool mesh_supports_delivery_event_sync(void);
 uint32_t mesh_delivery_events_latest_seq(void);
+/* Unique recipient addresses holding a delivery record for message_id; see
+ * delivery_event_ring_receipts_for_message for the contract. */
+size_t mesh_delivery_receipts_for_message(uint32_t message_id, uint32_t* out, size_t out_max,
+                                          size_t* total_unique);
+
 size_t mesh_delivery_events_list_since(uint32_t since_event_seq, delivery_event_record_t* out,
                                        size_t out_max);
 
