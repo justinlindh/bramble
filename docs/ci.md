@@ -57,8 +57,7 @@ to a PR cancels the superseded PR run but never cancels a `main` run.
 
 ### Fork pull requests never touch the self-hosted pool
 
-The repo is public and the pool runners sit on private infrastructure, so
-fork-origin work is fenced twice.
+The repo is public, so fork-origin work is fenced twice.
 
 First, the repository Actions setting "Require approval for all external
 contributors" (REST:
@@ -67,7 +66,7 @@ policy `all_external_contributors`) holds every workflow run on a fork-head PR
 until a maintainer approves it, on every push, regardless of the author's
 contribution history. The weaker default (`first_time_contributors`) would
 grant permanent unapproved runs to anyone with a single merged commit, which
-is the wrong trade for runners on a private network. This setting lives in
+is the wrong trade for self-hosted runners. This setting lives in
 repository configuration, not in this tree; treat this paragraph as the
 contract and restore the policy if it ever drifts.
 
