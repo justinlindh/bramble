@@ -217,11 +217,7 @@ conn_mode_t conn_mode_get(void) {
     if (mode == CONN_MODE_BOTH || mode >= CONN_MODE_COUNT)
         mode = CONN_MODE_WIFI;
 
-#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
-    return conn_mode_resolve_boot((conn_mode_t)mode, true);
-#else
-    return conn_mode_resolve_boot((conn_mode_t)mode, false);
-#endif
+    return conn_mode_resolve_boot((conn_mode_t)mode, ble_server_supported());
 }
 
 void conn_mode_set(conn_mode_t mode) {
@@ -1332,10 +1328,15 @@ void app_main(void) {
     }
 #endif
 
-    /* Read connectivity mode */
+    /* Read connectivity mode. conn_mode_get already falls back to WiFi when
+     * the build carries no BLE stack; say so instead of silently booting a
+     * different mode than the one persisted. */
     conn_mode_t boot_mode = conn_mode_get();
     static const char* mode_str[] = {"WiFi", "BLE"};
     ESP_LOGI(TAG, "Connectivity mode: %s", mode_str[boot_mode]);
+    if (!ble_server_supported()) {
+        ESP_LOGI(TAG, "BLE: unsupported in this build (stub transport); WiFi only");
+    }
 
     /* Init RPC dispatcher and register methods BEFORE transports
      * so ws_server/ble notify registrations aren't wiped by rpc_init() */
@@ -1671,7 +1672,18 @@ void app_main(void) {
             if (ui.settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) {
                 conn_mode_t new_mode = (conn_mode_t)ui.settings_cursor;
                 conn_mode_t old_mode = conn_mode_get();
-                if (new_mode != old_mode) {
+                if (new_mode == CONN_MODE_BLE && !ble_server_supported()) {
+                    /* Honest refusal: this build has no BLE stack, so a
+                     * switch would reboot into a node with no transport. */
+                    ESP_LOGW(TAG, "BLE not included in this build; mode unchanged");
+                    display_clear();
+                    const char* msg = "BLE: not in build";
+                    int msg_x = (DISPLAY_WIDTH - (int)strlen(msg) * FONT_W) / 2;
+                    display_draw_text(msg_x, DISPLAY_HEIGHT / 2 - FONT_H / 2, msg);
+                    display_flush();
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    ui.screen_dirty = true;
+                } else if (new_mode != old_mode) {
                     conn_mode_set(new_mode);
                     ESP_LOGI(TAG, "Connectivity mode changed to %d, rebooting...", new_mode);
 

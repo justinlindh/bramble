@@ -170,8 +170,10 @@ int ui_format_msg_line(const ui_msg_line_t* m, char* buf, size_t buf_len);
 int ui_format_uptime(uint32_t uptime_sec, char* buf, size_t buf_len);
 
 /* Normalize persisted connectivity mode at boot.
- * Legacy WiFi+BLE values are coerced to WiFi (exclusive mode policy).
+ * Legacy WiFi+BLE values are coerced to WiFi (exclusive mode policy), and a
+ * persisted BLE mode falls back to WiFi when the build has no BLE stack
+ * (ble_supported = ble_server_supported()).
  */
-conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool low_sram_board);
+conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool ble_supported);
 
 #endif

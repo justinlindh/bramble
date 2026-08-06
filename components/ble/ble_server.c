@@ -624,6 +624,8 @@ static void on_reset(int reason) { ESP_LOGW(TAG, "BLE host reset: reason=%d", re
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
+bool ble_server_supported(void) { return true; }
+
 /* Default BLE name when the operator has not named the node: "Bramble-XXXX"
  * carrying the low 16 bits of the node address, the same short form the mDNS
  * hostname (bramble-%04x) and the webapp's formatAddrShort already use. A

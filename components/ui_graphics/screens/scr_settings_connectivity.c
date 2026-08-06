@@ -4,6 +4,7 @@
 #include "ui_toast.h"
 #include "ui_zone.h"
 #include "ui.h"
+#include "ble_server.h"
 #include "wifi_manager.h"
 #include "esp_system.h"
 #include "esp_log.h"
@@ -31,6 +32,12 @@ static void conn_apply_cb(lv_event_t* e) {
         return;
 
     conn_mode_t new_mode = (conn_mode_t)lv_dropdown_get_selected(s_conn_dropdown);
+    if (new_mode == CONN_MODE_BLE && !ble_server_supported()) {
+        /* Honest refusal: this build has no BLE stack, so applying would
+         * reboot into a node with no transport at all. */
+        ui_toast_show("BLE not included in this build");
+        return;
+    }
     if (new_mode == conn_mode_get()) {
         ui_toast_show("Mode unchanged");
         return;
