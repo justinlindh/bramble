@@ -61,7 +61,7 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
         int value_count;
         switch (state->settings_item_cursor) {
         case UI_SETTINGS_ITEM_CONN_MODE:
-            value_count = CONN_MODE_COUNT;
+            value_count = CONN_MODE_UI_COUNT;
             break;
         case UI_SETTINGS_ITEM_LOCATION:
             value_count = LOC_SHARE_COUNT;
@@ -413,7 +413,44 @@ void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
     note_screen_change(state, before);
 }
 
+conn_mode_t conn_mode_from_ui_index(int index) {
+    switch (index) {
+    case 1:
+        return CONN_MODE_BLE;
+    case 2:
+        return CONN_MODE_OFF;
+    default:
+        return CONN_MODE_WIFI;
+    }
+}
+
+int conn_mode_to_ui_index(conn_mode_t mode) {
+    switch (mode) {
+    case CONN_MODE_BLE:
+        return 1;
+    case CONN_MODE_OFF:
+        return 2;
+    default: /* WiFi, plus legacy BOTH which normalizes to WiFi */
+        return 0;
+    }
+}
+
+const char* conn_mode_name(conn_mode_t mode) {
+    switch (mode) {
+    case CONN_MODE_BLE:
+        return "BLE";
+    case CONN_MODE_OFF:
+        return "Off";
+    default:
+        return "WiFi";
+    }
+}
+
 conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool ble_supported) {
+    if (requested == CONN_MODE_OFF) {
+        /* Off needs no transport, so it is valid on every build. */
+        return CONN_MODE_OFF;
+    }
     if (requested == CONN_MODE_BOTH) {
         return CONN_MODE_WIFI;
     }
