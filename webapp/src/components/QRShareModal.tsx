@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { EscapeDialog } from './EscapeDialog';
-import { useTimedFlag } from '../hooks/useTimedFlag';
-import { copyWithFallback } from '../utils/clipboard';
+import { useCopyFlash } from '../hooks/useCopyFlash';
 import styles from './QRShareModal.module.css';
 
 interface QRShareModalProps {
@@ -19,7 +18,7 @@ export function QRShareModal({
   onClose,
 }: QRShareModalProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [copied, flashCopied] = useTimedFlag(2000);
+  const [copied, copy] = useCopyFlash(2000);
   const [copyError, setCopyError] = useState<string | null>(null);
 
   // Render QR code into canvas. qrcode is loaded on demand to keep it out of
@@ -41,9 +40,7 @@ export function QRShareModal({
 
   const handleCopy = async () => {
     setCopyError(null);
-    if (await copyWithFallback(shareString)) {
-      flashCopied();
-    } else {
+    if (!(await copy(shareString))) {
       setCopyError('Could not copy automatically. Please select and copy manually.');
     }
   };

@@ -17,8 +17,7 @@ import {
 import { setAnchor, getIdentity, setEndorsement, loadAnchorStatus } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
-import { useTimedFlag } from '../../hooks/useTimedFlag';
-import { copyWithFallback } from '../../utils/clipboard';
+import { useCopyFlash } from '../../hooks/useCopyFlash';
 import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './AnchorSection.module.css';
 
@@ -92,7 +91,7 @@ export function AnchorSection() {
   const [pendingAnchor, setPendingAnchor] = useState<ClientAnchor | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showPendingQR, setShowPendingQR] = useState(false);
-  const [backupCopied, flashBackupCopied, resetBackupCopied] = useTimedFlag(2000);
+  const [backupCopied, copyBackup, resetBackupCopied] = useCopyFlash(2000);
 
   const [importInput, setImportInput] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
@@ -171,13 +170,8 @@ export function AnchorSection() {
     setShowPendingQR(false);
   };
 
-  const handleCopyBackup = async () => {
-    if (!pendingAnchor) return;
-    // copyWithFallback swallows its own failure and returns false; the field
-    // is still selectable/copyable by hand, so a false result just skips the flash.
-    if (await copyWithFallback(encodeAnchorBackup(pendingAnchor.seedHex))) {
-      flashBackupCopied();
-    }
+  const handleCopyBackup = () => {
+    if (pendingAnchor) void copyBackup(encodeAnchorBackup(pendingAnchor.seedHex));
   };
 
   // -- Import / restore an anchor backup --------------------------------------
