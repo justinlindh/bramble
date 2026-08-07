@@ -29,7 +29,9 @@ static const char* tab_labels[TAB_COUNT] = {LV_SYMBOL_ENVELOPE " Chat", LV_SYMBO
 
 /* Carries the requested tab from the click dispatch to the deferred switch.
  * A single slot is correct: taps that arrive before the deferred call runs
- * are the same user resolving on one destination, and the last one wins. */
+ * are the same user resolving on one destination, and the last one wins.
+ * Two taps in one dispatch pass queue two switches that both read the final
+ * value, so the second is a redundant rebuild rather than a wrong one. */
 static bramble_tab_t s_pending_tab;
 
 static void tab_switch_async(void* arg) {
