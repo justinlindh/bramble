@@ -56,8 +56,14 @@
 // EXT_CHRG_DETECT, EXT_PWR_DETECT) and src/Power.cpp (the pin modes and the
 // isCharging()/isVbusIn() polarity, since variant.h alone does not say how
 // the detect pins are configured).
+//
+// BOARD_PIN_VBAT_ADC currently reads a DEAD divider: the divider hangs off a
+// sensor rail this port does not power, so conversions succeed and return 1
+// to 4 mV. Do NOT add a define for the rail gate (P1.06, SENSE_POWER_EN per
+// Seeed's vendor SDK) to make it read: driving that pin high stopped the
+// board within about a millisecond on hardware. See nrf/shim/battery_saadc.c.
 #define BOARD_HAS_BATTERY 1
-#define BOARD_PIN_VBAT_ADC 2           // P0.02 = AIN0, BAT_ADC
+#define BOARD_PIN_VBAT_ADC 2           // P0.02 = AIN0, BAT_ADC (reads a dead divider)
 #define BOARD_BATTERY_DIVIDER 2        // ADC_MULTIPLIER 2.0F
 #define BOARD_PIN_CHRG_DETECT (32 + 3) // P1.03, EXT_CHRG_DETECT, active LOW = charging
 #define BOARD_PIN_VBUS_DETECT 5        // P0.05, EXT_PWR_DETECT, HIGH = external power present

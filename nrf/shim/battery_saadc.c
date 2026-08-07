@@ -1,7 +1,38 @@
 /*
- * SAADC battery backend for the SenseCAP T1000-E: real cell voltage over
+ * SAADC battery backend for the SenseCAP T1000-E: cell voltage over
  * P0.02/AIN0 through a 2x divider, plus CHRG/VBUS charge detection.
  * Satisfies components/battery/include/battery.h.
+ *
+ * THE VOLTAGE READING THIS FILE PRODUCES IS WRONG, AND THE BRANCH CARRYING
+ * IT IS BLOCKED ON THAT. Read this before changing anything here.
+ *
+ * The divider on P0.02 hangs off a sensor rail that nothing in this port
+ * powers, so the SAADC measures a dead divider. The conversions still
+ * SUCCEED and return 1 to 4 mV, which is the dangerous part: there is no
+ * error for read_one_sample_mv() to detect and discard, so out->mv lands
+ * near zero with out->present true, which is a confident wrong answer
+ * rather than an honest missing one. On USB it is masked, since VBUS
+ * drives charging YES and battery_beacon_pct() substitutes the unknown
+ * sentinel; unplugged, the node beacons a real 0 percent and trips the
+ * display's low-battery floor.
+ *
+ * DO NOT "FIX" THIS BY POWERING THE RAIL. The gate is P1.06,
+ * SENSE_POWER_EN per Seeed's vendor SDK (smtc_hal_config.h in
+ * Seeed-Tracker-T1000-E-for-LoRaWAN-dev-board), and driving it high on
+ * hardware stopped the board within about a millisecond: the flash boot
+ * trace ends on the stamp written immediately after the pin write, with no
+ * failure tag from any instrumented fatal path (assert, nrfx assert, hard
+ * fault, stack overflow, malloc failure) and no rescue from the
+ * no-advertising sentinel, so the board reset or locked up rather than
+ * blocking. Brownout versus lockup is not established, and separating them
+ * needs a build that records a reset reason per boot. Until that question
+ * is answered this port does not touch that pin, and a change that drives
+ * it will brick the board it is flashed to.
+ *
+ * Charge detection below is unaffected by any of this: it needs neither the
+ * ADC nor that rail, both detect pins are plain GPIO inputs, and its
+ * verdicts were confirmed on hardware against a charger being plugged and
+ * unplugged.
  *
  * Board wiring verified 2026-08-01 against Meshtastic's
  * github.com/meshtastic/firmware, variants/nrf52840/tracker-t1000-e/
