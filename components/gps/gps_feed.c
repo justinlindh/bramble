@@ -11,6 +11,7 @@ void gps_feed_init(gps_feed_t* f, gps_fix_cb_t cb, void* ctx) {
 void gps_feed_clear_fix(gps_feed_t* f) {
     f->has_fix = false;
     f->utc_valid = false;
+    f->utc_date_valid = false;
 }
 
 void gps_feed_reset(gps_feed_t* f) {
@@ -68,6 +69,13 @@ void gps_feed_line(gps_feed_t* f, const char* line, uint64_t now_ms) {
             f->utc_valid = true;
         }
 
+        if (f->acc.utc_date_valid) {
+            f->utc_year = f->acc.utc_year;
+            f->utc_month = f->acc.utc_month;
+            f->utc_day = f->acc.utc_day;
+            f->utc_date_valid = true;
+        }
+
         if (f->cb) {
             f->cb(&f->pos, f->cb_ctx);
         }
@@ -112,6 +120,18 @@ bool gps_feed_get_utc_hm(const gps_feed_t* f, uint8_t* hour, uint8_t* min) {
         *hour = f->utc_hour;
     if (min)
         *min = f->utc_min;
+    return true;
+}
+
+bool gps_feed_get_utc_date(const gps_feed_t* f, uint16_t* year, uint8_t* month, uint8_t* day) {
+    if (!f->utc_date_valid)
+        return false;
+    if (year)
+        *year = f->utc_year;
+    if (month)
+        *month = f->utc_month;
+    if (day)
+        *day = f->utc_day;
     return true;
 }
 

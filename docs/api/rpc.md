@@ -372,6 +372,28 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 {"jsonrpc":"2.0","id":32,"method":"bramble.setNodeName","params":{"name":"ridge-01"}}
 ```
 
+#### `bramble.getTimezone`
+
+- Description: Reports the POSIX TZ specification the node renders wall-clock times in, plus the named zones the on-device picker offers.
+- Params: none.
+- Response fields: `ok` (bool), `timezone` (string), `default_timezone` (string), `configured` (bool), `presets` (array of `{label, spec}`).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":37,"method":"bramble.getTimezone","params":{}}
+```
+
+#### `bramble.setTimezone`
+
+- Description: Persists a POSIX TZ specification. UTC stays the internal source of truth; the zone is applied only where a clock is rendered. A daylight-saving zone name must carry explicit transition rules, because the ruleless form is ambiguous.
+- Params: `timezone` (string).
+- Response fields: `ok` (bool), `timezone` (string), `error` (string, when `ok` is false).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":38,"method":"bramble.setTimezone","params":{"timezone":"PST8PDT,M3.2.0,M11.1.0"}}
+```
+
 #### `bramble.setBacklight`
 
 - Description: Sets display backlight (board-dependent).

@@ -24,6 +24,9 @@ typedef struct {
     uint64_t antenna_until_ms; /* 0 = no active warning */
     uint8_t utc_hour, utc_min;
     bool utc_valid;
+    uint16_t utc_year;
+    uint8_t utc_month, utc_day;
+    bool utc_date_valid;
     uint32_t rx_bytes_total;
     uint32_t rx_lines_total;
     char chip_banner[GPS_FEED_MAX_LINE]; /* first $PAIR021* line seen, else "" */
@@ -40,6 +43,10 @@ void gps_feed_line(gps_feed_t* f, const char* line, uint64_t now_ms);
 bool gps_feed_has_fix(const gps_feed_t* f);
 bool gps_feed_get_position(const gps_feed_t* f, bramble_position_t* out);
 bool gps_feed_get_utc_hm(const gps_feed_t* f, uint8_t* hour, uint8_t* min);
+/* UTC calendar date from the last RMC sentence. Reported separately from the
+ * time of day because the two come from different sentences: a receiver that
+ * has emitted GGA but not yet RMC has a time and no date. */
+bool gps_feed_get_utc_date(const gps_feed_t* f, uint16_t* year, uint8_t* month, uint8_t* day);
 void gps_feed_get_stats(const gps_feed_t* f, uint64_t now_ms, gps_stats_t* out);
 /* Clears the current fix and its UTC latch (has_fix, utc_valid) without
  * touching anything else: sats/antenna stats, rx counters, the chip banner,

@@ -4,11 +4,12 @@ import { RadioForm } from './RadioForm';
 import { ChannelManager } from './ChannelManager';
 import { PeerManager } from './PeerManager';
 import { LocationSection } from './LocationSection';
+import { TimeZoneSection } from './TimeZoneSection';
 import { TrafficDebugSection } from './TrafficDebugSection';
 import { DeviceManagementSection } from './DeviceManagementSection';
 import { NetworkKeySection } from './NetworkKeySection';
 import { AnchorSection } from './AnchorSection';
-import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation, IconWarning, IconDatabase, IconLock } from '../../components/Icons';
+import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation, IconWarning, IconDatabase, IconLock, IconClock } from '../../components/Icons';
 import { messageDb } from '../../store/messageDb';
 import { deliveryEventStore } from '../../store/deliveryEventStore';
 import { clearUnreadCounts } from '../../store/unreadStore';
@@ -73,6 +74,12 @@ export function Config() {
       <section className={styles.section}>
         <h2><IconLocation size={18} /> Location</h2>
         <LocationSection location={config.location} neighbors={neighbors ?? []} channels={config.channels} gpsAvailable={status?.gpsAvailable} gpsEnabled={status?.gpsEnabled} />
+      </section>
+
+      {/* ── Time Zone ── */}
+      <section className={styles.section}>
+        <h2><IconClock size={18} /> Time Zone</h2>
+        <TimeZoneSection />
       </section>
 
       {/* ── Network Key ── */}

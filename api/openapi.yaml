@@ -526,6 +526,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/SetNodeNameResponse'
 
+  /rpc/bramble.getTimezone:
+    post:
+      operationId: getTimezone
+      summary: Report the configured display timezone
+      description: >
+        Returns the POSIX TZ specification the node renders wall-clock times
+        in, together with the named zones the on-device picker offers. Clients
+        read the preset list from here rather than carrying their own copy of
+        the specs.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '200':
+          description: Current timezone configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTimezoneResponse'
+
+  /rpc/bramble.setTimezone:
+    post:
+      operationId: setTimezone
+      summary: Set the display timezone
+      description: >
+        Persists a POSIX TZ specification, for example
+        "PST8PDT,M3.2.0,M11.1.0". UTC remains the internal source of truth;
+        the zone is applied only where a clock is rendered. A specification
+        naming a daylight-saving zone must also carry explicit transition
+        rules, since the ruleless form is ambiguous and guessing would produce
+        a silently wrong clock.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetTimezoneParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Effective timezone after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetTimezoneResponse'
+
   /rpc/bramble.addChannel:
     post:
       operationId: addChannel
@@ -2770,6 +2820,65 @@ components:
         name:
           type: string
           description: The applied node name.
+
+    TimezonePreset:
+      type: object
+      description: A named zone offered by the on-device picker.
+      required: [label, spec]
+      properties:
+        label:
+          type: string
+          description: Human-facing zone name, for example "US Pacific".
+        spec:
+          type: string
+          description: POSIX TZ specification the label maps to.
+
+    GetTimezoneResponse:
+      type: object
+      description: Response from bramble.getTimezone.
+      required: [ok, timezone, default_timezone, configured, presets]
+      properties:
+        ok:
+          type: boolean
+        timezone:
+          type: string
+          description: Effective POSIX TZ specification used to render clocks.
+        default_timezone:
+          type: string
+          description: Compiled-in default, used when nothing valid is stored.
+        configured:
+          type: boolean
+          description: True when a zone is stored, as opposed to the default.
+        presets:
+          type: array
+          description: Named zones the on-device picker offers.
+          items:
+            $ref: '#/components/schemas/TimezonePreset'
+
+    SetTimezoneParams:
+      type: object
+      required: [timezone]
+      properties:
+        timezone:
+          type: string
+          description: >
+            POSIX TZ specification, for example "PST8PDT,M3.2.0,M11.1.0" or
+            "UTC0".
+          maxLength: 63
+
+    SetTimezoneResponse:
+      type: object
+      description: Response from bramble.setTimezone.
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        timezone:
+          type: string
+          description: Effective timezone after the change.
+        error:
+          type: string
+          description: Error message when ok=false.
 
     AddChannelParams:
       type: object

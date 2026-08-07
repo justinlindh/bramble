@@ -189,6 +189,20 @@ export interface PeerLocation {
   lastUpdatedMs: number;
 }
 
+/** A named zone the node offers in its on-device picker. */
+export interface TimezonePreset {
+  label: string;
+  spec: string;
+}
+
+/** The zone the node renders its own clock in, as reported by getTimezone. */
+export interface TimezoneInfo {
+  timezone: string;
+  defaultTimezone: string;
+  configured: boolean;
+  presets: TimezonePreset[];
+}
+
 export interface LocationConfig {
   enabled: boolean;
   /** Current/default policy tier used for periodic sharing */

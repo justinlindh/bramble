@@ -24,6 +24,13 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
     return false;
 }
 
+bool gps_get_utc_date(uint16_t* year, uint8_t* month, uint8_t* day) {
+    (void)year;
+    (void)month;
+    (void)day;
+    return false;
+}
+
 void gps_get_stats(gps_stats_t* out) {
     if (out != NULL) {
         memset(out, 0, sizeof(*out));

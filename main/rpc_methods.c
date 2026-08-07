@@ -26,6 +26,8 @@
 #include "ota_progress.h"
 #include "ota_rollback.h"
 #include "ota_url.h"
+#include "bramble_tz.h"
+#include "tz_store.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "board_config.h"
@@ -971,6 +973,67 @@ static int handle_set_node_name(const cJSON* params, cJSON* result) {
     ESP_LOGI(TAG, "Node name set to: %s", name);
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "name", name);
+    return 0;
+}
+
+/* bramble.getTimezone: the zone the status-bar clock renders in, plus the
+ * named zones the on-device picker offers. Clients read the preset list from
+ * here rather than carrying their own copy of the specs. */
+static int handle_get_timezone(const cJSON* params, cJSON* result) {
+    (void)params;
+
+    char spec[BRAMBLE_TZ_SPEC_MAX];
+    tz_store_get(spec, sizeof(spec));
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "timezone", spec);
+    cJSON_AddStringToObject(result, "default_timezone", BRAMBLE_TZ_DEFAULT_SPEC);
+    cJSON_AddBoolToObject(result, "configured", tz_store_is_configured());
+
+    cJSON* presets = cJSON_AddArrayToObject(result, "presets");
+    if (presets) {
+        for (size_t i = 0; i < bramble_tz_preset_count(); i++) {
+            const bramble_tz_preset_t* p = bramble_tz_preset(i);
+            cJSON* entry = cJSON_CreateObject();
+            if (!entry) {
+                break;
+            }
+            cJSON_AddStringToObject(entry, "label", p->label);
+            cJSON_AddStringToObject(entry, "spec", p->spec);
+            cJSON_AddItemToArray(presets, entry);
+        }
+    }
+    return 0;
+}
+
+/* bramble.setTimezone: persist a POSIX TZ specification, e.g.
+ * "PST8PDT,M3.2.0,M11.1.0". UTC remains the internal source of truth; the
+ * zone is applied only when a clock is rendered. */
+static int handle_set_timezone(const cJSON* params, cJSON* result) {
+    const char* spec = cJSON_GetStringValue(cJSON_GetObjectItem(params, "timezone"));
+    if (!spec || spec[0] == '\0') {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    int rc = tz_store_set(spec);
+    if (rc == -1) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error",
+                                "not a POSIX TZ specification (for example "
+                                "PST8PDT,M3.2.0,M11.1.0); a daylight name requires "
+                                "explicit transition rules");
+        return 0;
+    }
+    if (rc != 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "failed to persist timezone");
+        return 0;
+    }
+
+    char now[BRAMBLE_TZ_SPEC_MAX];
+    tz_store_get(now, sizeof(now));
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "timezone", now);
     return 0;
 }
 
@@ -3401,6 +3464,8 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.sendProbe", handle_send_probe);
     rpc_register("bramble.setRadio", handle_set_radio);
     rpc_register("bramble.setNodeName", handle_set_node_name);
+    rpc_register("bramble.getTimezone", handle_get_timezone);
+    rpc_register("bramble.setTimezone", handle_set_timezone);
     rpc_register("bramble.setPeerVerified", handle_set_peer_verified);
     rpc_register("bramble.setAuthToken", rpc_set_auth_token);
     rpc_register("bramble.getAuthToken", rpc_get_auth_token);

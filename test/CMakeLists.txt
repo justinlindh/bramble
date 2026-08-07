@@ -1208,6 +1208,8 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1229,6 +1231,8 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1250,6 +1254,8 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1271,6 +1277,8 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1314,6 +1322,7 @@ target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
 )
 target_compile_definitions(test_rpc_add_channel_contract PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1348,6 +1357,7 @@ target_include_directories(test_rpc_set_auth_token_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
 )
 target_compile_definitions(test_rpc_set_auth_token_contract PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1374,6 +1384,8 @@ add_executable(test_rpc_anchor_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1406,6 +1418,7 @@ target_include_directories(test_rpc_anchor_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
 )
 target_compile_definitions(test_rpc_anchor_contract PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1440,6 +1453,7 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
 )
 target_compile_definitions(test_rpc_get_config_channel_export PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1474,6 +1488,7 @@ target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
 )
 target_compile_definitions(test_mesh_broadcast_delivery PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1650,6 +1665,8 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1683,6 +1700,7 @@ target_include_directories(test_rpc_methods_firmware PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
 )
 target_compile_definitions(test_rpc_methods_firmware PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1710,6 +1728,8 @@ add_executable(test_rpc_scratch_isolation
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1743,6 +1763,7 @@ target_include_directories(test_rpc_scratch_isolation PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
 )
 target_compile_definitions(test_rpc_scratch_isolation PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1946,6 +1967,8 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1979,6 +2002,7 @@ target_include_directories(test_host_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
 )
 target_compile_definitions(test_host_rpc_methods PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1998,6 +2022,16 @@ target_include_directories(test_mailbox_wrappers PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/mailbox/include
 )
 add_test(NAME test_mailbox_wrappers COMMAND test_mailbox_wrappers)
+
+# POSIX TZ local-time conversion tests (pure, no ESP deps)
+add_executable(test_timezone
+    test_timezone.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+)
+target_include_directories(test_timezone PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+)
 
 # OTA URL policy tests (pure, no ESP deps)
 add_executable(test_ota_url

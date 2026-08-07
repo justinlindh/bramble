@@ -516,8 +516,8 @@ Generates and persists the node's identity on first boot (stored in NVS): an Ed2
 Stratum-based mesh time synchronization inspired by NTP:
 
 - Sync rides the beacon: each beacon carries `network_time` and a stratum/confidence field, consumed by `timesync_handle_sync` on beacon receipt (`main/mesh_beacon.c`). The dedicated TIME_SYNC packet type was removed unshipped; the beacon is the only sync transport.
-- GPS-equipped nodes are stratum 0; other nodes adopt the best (lowest stratum) time source they hear and become stratum+1.
-- Convergence to ±1–2s across the mesh.
+- Nodes adopt the best (lowest stratum) time source they hear and become stratum+1, after `CORROBORATION_REQUIRED` distinct established sources agree.
+- No stratum-0 source is wired: nothing seeds the clock from GPS, an RTC, or an operator, and a node emits `network_time` only once already synchronized. Nodes therefore exchange offsets without any of them reaching absolute time, so `network_time` is a mesh-relative millisecond counter rather than an epoch and carries no wall-clock meaning. The status-bar clock reads UTC from a GPS fix instead (`components/ui_graphics/screens/scr_layout.c`), and `timesync_is_confident` stays false, closing the security gates that depend on it.
 
 ---
 
