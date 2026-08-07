@@ -22,6 +22,7 @@ BRAMBLE_TOKEN in the environment. Never commit token values.
 
 import argparse
 import asyncio
+import errno
 import json
 import os
 import shutil
@@ -123,6 +124,40 @@ async def rpc_enter_dfu(name: str, token: str) -> bool:
         return True
 
 
+def write_uf2(src: str, dst: str) -> bool:
+    """Writes the image to the UF2 volume and gets it onto the device.
+
+    shutil.copy() is the wrong call here and it fails in a way that costs a
+    physical DFU gesture to recover from. The bootloader reboots the instant
+    it has the last block, so the volume is gone before copy() gets to its
+    chmod step; the OSError that raises propagates out of main() before
+    anything syncs, and the image that reached the device is whatever the
+    page cache happened to have flushed. A truncated image then presents as
+    a board that will not boot, which is indistinguishable from the firmware
+    faults this port's trace page exists to diagnose.
+
+    So: no chmod, an explicit fsync while the descriptor is still valid, and
+    the disappearing volume treated as the expected ending rather than an
+    error. os.sync() afterwards covers the case where the volume outlives
+    the write.
+    """
+    try:
+        with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
+            shutil.copyfileobj(fsrc, fdst)
+            fdst.flush()
+            os.fsync(fdst.fileno())
+    except OSError as exc:
+        # EIO/ENODEV/ENOSPC here mean the bootloader took the image and
+        # reset out from under the mount, which is success. Anything else
+        # (a missing source file, a read-only mount) is a real failure.
+        if exc.errno not in (errno.EIO, errno.ENODEV, errno.ENOSPC):
+            print(f"copy failed: {exc}")
+            return False
+        print(f"volume went away during the write ({exc.strerror}): expected")
+    os.sync()
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("name", help="BLE device name, e.g. Bramble-AA36")
@@ -144,8 +179,8 @@ def main() -> int:
         print("UF2 volume never appeared")
         return 1
     print(f"mounted at {mnt}; copying image")
-    shutil.copy(args.uf2, os.path.join(mnt, "FLASH.UF2"))
-    subprocess.run(["sync"])
+    if not write_uf2(args.uf2, os.path.join(mnt, "FLASH.UF2")):
+        return 1
     print("copy complete; waiting for the app to boot")
     deadline = time.time() + 30
     while time.time() < deadline:
