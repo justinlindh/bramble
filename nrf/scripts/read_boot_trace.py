@@ -36,6 +36,10 @@ TAGS = {
 
 BT_BOOT_BEGIN = 0x14
 BT_BOOT_DONE = 0xDD
+# The rescue stamps and reboots without writing its own BOOT_BEGIN first, so it
+# starts a group of its own here; otherwise it prints under the previous failed
+# boot and reads as part of it.
+BT_FAIL_BOOTLOOP = 0xE6
 
 # nRF52840 POWER->RESETREAS bit positions.
 RESETREAS_BITS = {
@@ -101,7 +105,7 @@ def main(path):
 
     boots = []
     for tag, aux in records(blob):
-        if tag == BT_BOOT_BEGIN or not boots:
+        if tag in (BT_BOOT_BEGIN, BT_FAIL_BOOTLOOP) or not boots:
             boots.append([])
         boots[-1].append((tag, aux))
 
