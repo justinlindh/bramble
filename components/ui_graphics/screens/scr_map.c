@@ -1,11 +1,13 @@
 #include "scr_map.h"
 #include "ui_shared_state.h"
 #include "ui_zone.h"
+#include "map_zoom.h"
 #include "theme/bramble_theme.h"
 #include "location.h"
 #include "gnss_status.h"
 #include "routing.h"
 #include "esp_log.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <math.h>
 
@@ -19,13 +21,25 @@ void scr_map_clear_focus_peer(void) { s_focus_peer_addr = 0; }
 static bramble_layout_t* s_map_layout = NULL;
 static uint32_t s_map_sig = 0;
 
-/* Zoom: the horizontal half-width of the window in km. Index into the level
- * table, or ZOOM_AUTO to fit every known peer. Survives rebuilds (statics),
- * resets only on reboot. */
-static const double ZOOM_LEVELS_KM[] = {0.5, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0};
-#define ZOOM_LEVEL_COUNT ((int)(sizeof(ZOOM_LEVELS_KM) / sizeof(ZOOM_LEVELS_KM[0])))
-#define ZOOM_AUTO (-1)
-static int s_zoom_idx = ZOOM_AUTO;
+/* Zoom: an index into the map_zoom ladder, or MAP_ZOOM_AUTO to fit every known
+ * peer. Survives rebuilds (static), resets only on reboot. */
+static int s_zoom_idx = MAP_ZOOM_AUTO;
+
+/* Right-edge zoom control column, overlaid on the canvas the way every map
+ * puts its zoom buttons. Full BR_TAP_TARGET_MIN squares: the touchscreen is
+ * how this screen is actually driven, and a control you cannot hit with a
+ * thumb is no more usable than the undiscoverable trackball keys were.
+ *
+ * MAP_CANVAS_W is the inner width of map_cont: 312 wide less its 1 px border
+ * and 4 px pad per side, the coordinate space every child sits in. */
+#define MAP_CANVAS_W 302
+#define ZOOM_BTN_SIZE BR_TAP_TARGET_MIN
+#define ZOOM_BTN_X (MAP_CANVAS_W - ZOOM_BTN_SIZE - 2)
+#define ZOOM_BTN_Y_IN 2
+#define ZOOM_BTN_Y_OUT (ZOOM_BTN_Y_IN + ZOOM_BTN_SIZE + 3)
+#define ZOOM_BTN_Y_AUTO (ZOOM_BTN_Y_OUT + ZOOM_BTN_SIZE + 3)
+/* Where the scale bar has to stop so it does not run under that column. */
+#define SCALE_BAR_RIGHT_X (ZOOM_BTN_X - 8)
 
 /* lv_line keeps the caller's point array; these must outlive the objects.
  * One map instance exists at a time, so single static storage is enough. */
@@ -69,17 +83,23 @@ static double auto_zoom_km(const location_manager_t* loc, double center_lat, dou
     if (need <= 0.0)
         return 5.0;
     need *= 1.2;
-    for (int i = 0; i < ZOOM_LEVEL_COUNT; i++) {
-        if (ZOOM_LEVELS_KM[i] >= need)
-            return ZOOM_LEVELS_KM[i];
-    }
-    return ZOOM_LEVELS_KM[ZOOM_LEVEL_COUNT - 1];
+    return map_zoom_level_km(map_zoom_index_for_km(need));
 }
 
 static double resolve_zoom_km(const location_manager_t* loc, double center_lat, double center_lon) {
-    if (s_zoom_idx >= 0 && s_zoom_idx < ZOOM_LEVEL_COUNT)
-        return ZOOM_LEVELS_KM[s_zoom_idx];
+    if (s_zoom_idx != MAP_ZOOM_AUTO)
+        return map_zoom_level_km(s_zoom_idx);
     return auto_zoom_km(loc, center_lat, center_lon);
+}
+
+/* What auto would resolve to right now: the rung a step out of auto starts
+ * from, and (with no fix) the same 5 km auto_zoom_km falls back to. */
+static double current_auto_km(void) {
+    const location_manager_t* loc = ui_shared_location_state();
+    if (!loc->my_position.valid)
+        return 5.0;
+    return auto_zoom_km(loc, loc->my_position.latitude_e7 / 1e7,
+                        loc->my_position.longitude_e7 / 1e7);
 }
 
 /* Signature of everything the map draws: self position, focus, zoom, and each
@@ -147,59 +167,42 @@ static void map_arm_refresh(lv_obj_t* owner) {
     lv_obj_add_event_cb(owner, map_delete_cb, LV_EVENT_DELETE, refresh);
 }
 
-static void map_rebuild_async(void* arg) {
+/* The two zoom mutations, both written to run OUT of LVGL event dispatch.
+ *
+ * Every route into them (trackball key, on-screen button) ends in a rebuild
+ * that lv_obj_clean()s the container holding the widget whose event is still
+ * dispatching, and deleting a widget mid-dispatch is a use-after-free that
+ * already crashed this screen once. So the state change and the rebuild both
+ * live in the deferred half: the key handler calls ui_defer, and the buttons
+ * are registered with ui_zone_add_deferred_click, which is the same thing.
+ * They rebuild only on a real change, so a press against either end of the
+ * ladder costs nothing. */
+static void map_zoom_step_async(void* arg) {
+    int next = map_zoom_step(s_zoom_idx, (int)(intptr_t)arg, current_auto_km());
+    if (next == s_zoom_idx)
+        return;
+    s_zoom_idx = next;
+    map_rebuild();
+}
+
+static void map_zoom_auto_async(void* arg) {
     (void)arg;
+    if (s_zoom_idx == MAP_ZOOM_AUTO)
+        return;
+    s_zoom_idx = MAP_ZOOM_AUTO;
     map_rebuild();
 }
 
 /* Zoom keys. Trackball UP/DOWN reach us raw because the canvas is flagged
- * UI_ZONE_FLAG_CONSUMES_VERTICAL; +/-/0 come from the keyboard. The rebuild is
- * deferred because this handler's own widget is inside the container the
- * rebuild cleans (deleting a widget mid-dispatch is a use-after-free). */
+ * UI_ZONE_FLAG_CONSUMES_VERTICAL; +/-/0 come from the keyboard. */
 static void map_key_cb(lv_event_t* e) {
     uint32_t key = lv_event_get_key(e);
-    int step;
-    if (key == LV_KEY_UP || key == '+' || key == '=') {
-        step = -1; /* zoom in: smaller window */
-    } else if (key == LV_KEY_DOWN || key == '-') {
-        step = +1; /* zoom out */
-    } else if (key == '0' || key == 'f') {
-        if (s_zoom_idx == ZOOM_AUTO)
-            return;
-        s_zoom_idx = ZOOM_AUTO;
-        ui_defer(map_rebuild_async, NULL);
-        return;
-    } else {
-        return;
-    }
-
-    int idx = s_zoom_idx;
-    if (idx == ZOOM_AUTO) {
-        /* Leave auto from the level auto currently resolves to, so the first
-         * keypress is a single visible step, not a jump. */
-        const location_manager_t* loc = ui_shared_location_state();
-        double cur = 5.0;
-        if (loc->my_position.valid) {
-            cur = auto_zoom_km(loc, loc->my_position.latitude_e7 / 1e7,
-                               loc->my_position.longitude_e7 / 1e7);
-        }
-        idx = 0;
-        for (int i = 0; i < ZOOM_LEVEL_COUNT; i++) {
-            if (ZOOM_LEVELS_KM[i] >= cur) {
-                idx = i;
-                break;
-            }
-        }
-    }
-    idx += step;
-    if (idx < 0)
-        idx = 0;
-    if (idx >= ZOOM_LEVEL_COUNT)
-        idx = ZOOM_LEVEL_COUNT - 1;
-    if (idx == s_zoom_idx)
-        return;
-    s_zoom_idx = idx;
-    ui_defer(map_rebuild_async, NULL);
+    if (key == LV_KEY_UP || key == '+' || key == '=')
+        ui_defer(map_zoom_step_async, (void*)(intptr_t)-1); /* zoom in: smaller window */
+    else if (key == LV_KEY_DOWN || key == '-')
+        ui_defer(map_zoom_step_async, (void*)(intptr_t)1);
+    else if (key == '0' || key == 'f')
+        ui_defer(map_zoom_auto_async, NULL);
 }
 
 /* Centers of markers we have already given a text label. A later marker that
@@ -306,9 +309,9 @@ static void draw_scale_bar(lv_obj_t* map_cont, double zoom_km) {
     if (bar_px == 0)
         return;
 
-    int x1 = 276 - bar_px;
+    int x1 = SCALE_BAR_RIGHT_X - bar_px;
     s_scale_pts[0] = (lv_point_precise_t){x1, 124};
-    s_scale_pts[1] = (lv_point_precise_t){276, 124};
+    s_scale_pts[1] = (lv_point_precise_t){SCALE_BAR_RIGHT_X, 124};
     lv_obj_t* bar = lv_line_create(map_cont);
     lv_line_set_points(bar, s_scale_pts, 2);
     lv_obj_set_style_line_color(bar, BR_COLOR_TEXT_SEC, 0);
@@ -323,7 +326,65 @@ static void draw_scale_bar(lv_obj_t* map_cont, double zoom_km) {
     lv_label_set_text(lbl, txt);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT_SEC, 0);
-    lv_obj_align(lbl, LV_ALIGN_BOTTOM_RIGHT, -4, -8);
+    lv_obj_align(lbl, LV_ALIGN_BOTTOM_RIGHT, SCALE_BAR_RIGHT_X - MAP_CANVAS_W, -8);
+}
+
+/* One overlay zoom control. Not in either focus group and not click-focusable:
+ * the content zone still holds exactly the canvas, so tapping a button cannot
+ * light a second cursor or hand the trackball a widget it has no way to reach
+ * (LEFT/RIGHT always hop to chrome, by design). The trackball's route to zoom
+ * is the canvas keys these buttons advertise. */
+static void zoom_btn(lv_obj_t* parent, const char* text, const lv_font_t* font, int y, bool enabled,
+                     lv_async_cb_t cb, void* ctx) {
+    lv_obj_t* btn = lv_btn_create(parent);
+    lv_obj_set_size(btn, ZOOM_BTN_SIZE, ZOOM_BTN_SIZE);
+    lv_obj_set_pos(btn, ZOOM_BTN_X, y);
+    lv_obj_set_style_radius(btn, BR_RADIUS, 0);
+    lv_obj_set_style_bg_color(btn, BR_COLOR_SURFACE_2, 0);
+    lv_obj_set_style_bg_opa(btn, enabled ? LV_OPA_90 : LV_OPA_40, 0);
+    lv_obj_set_style_border_width(btn, 1, 0);
+    lv_obj_set_style_border_color(btn, BR_COLOR_BORDER, 0);
+    lv_obj_set_style_border_opa(btn, enabled ? LV_OPA_COVER : LV_OPA_40, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_pad_all(btn, 0, 0);
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+
+    lv_obj_t* lbl = lv_label_create(btn);
+    lv_label_set_text(lbl, text);
+    lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_color(lbl, enabled ? BR_COLOR_TEXT : BR_COLOR_TEXT_SEC, 0);
+    lv_obj_center(lbl);
+
+    /* A disabled control is drawn, not dropped: the ladder's ends stay visible
+     * as ends. Its handler is simply never registered, so a stray tap is inert
+     * rather than a no-op rebuild. */
+    if (enabled)
+        ui_zone_add_deferred_click(btn, cb, ctx);
+}
+
+/* The zoom controls plus their readout, drawn last so they sit above the
+ * markers. Together they are the whole affordance: the buttons say the map
+ * zooms and how, the readout says what it is set to and whether it will
+ * re-fit itself when peers move. */
+static void draw_zoom_controls(lv_obj_t* map_cont, double zoom_km) {
+    double auto_km = current_auto_km();
+    zoom_btn(map_cont, "+", &lv_font_montserrat_18, ZOOM_BTN_Y_IN,
+             map_zoom_can_step(s_zoom_idx, -1, auto_km), map_zoom_step_async, (void*)(intptr_t)-1);
+    zoom_btn(map_cont, "-", &lv_font_montserrat_18, ZOOM_BTN_Y_OUT,
+             map_zoom_can_step(s_zoom_idx, 1, auto_km), map_zoom_step_async, (void*)(intptr_t)1);
+    zoom_btn(map_cont, "auto", &lv_font_montserrat_12, ZOOM_BTN_Y_AUTO, s_zoom_idx != MAP_ZOOM_AUTO,
+             map_zoom_auto_async, NULL);
+
+    char txt[24];
+    map_zoom_format(txt, sizeof(txt), s_zoom_idx, zoom_km);
+    lv_obj_t* lbl = lv_label_create(map_cont);
+    lv_label_set_text(lbl, txt);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_bg_color(lbl, BR_COLOR_BG, 0);
+    lv_obj_set_style_bg_opa(lbl, LV_OPA_70, 0);
+    lv_obj_set_style_pad_all(lbl, 2, 0);
+    lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 2, 2);
 }
 
 static const char* bearing_to_compass(double deg) {
@@ -400,7 +461,9 @@ void scr_map_create(bramble_layout_t* layout) {
 
     /* Create map container: a focusable content widget. Trackball UP/DOWN zoom
      * (UI_ZONE_FLAG_CONSUMES_VERTICAL), keyboard +/- too, 0 returns to auto-fit.
-     * LEFT/RIGHT still hop to chrome, so the map cannot trap focus. */
+     * LEFT/RIGHT still hop to chrome, so the map cannot trap focus. None of
+     * that is discoverable, which is what draw_zoom_controls is for; the keys
+     * are the shortcut, the buttons are the affordance. */
     lv_obj_t* map_cont = lv_obj_create(cont);
     /* Height fits the content area EXACTLY (y 38 + height = BR_CONTENT_H).
      * The old 148 overflowed the 180px content area by 6px, so the
@@ -421,10 +484,15 @@ void scr_map_create(bramble_layout_t* layout) {
     lv_group_add_obj(lv_group_get_default(), map_cont);
     lv_obj_add_event_cb(map_cont, map_key_cb, LV_EVENT_KEY, NULL);
     /* Re-focus after a zoom rebuild, but never steal from chrome: only when
-     * the content zone already held the cursor. */
+     * the content zone already held the cursor. The sync is not optional
+     * either way: adding the canvas to an empty content group auto-focuses it
+     * (lv_group_add_obj), so a rebuild that happens while the cursor sits in
+     * chrome would otherwise light BOTH the fresh canvas and the chrome tab,
+     * and nothing tells the user which one the trackball is driving. */
     if (ui_zone_current() == UI_ZONE_CONTENT) {
         lv_group_focus_obj(map_cont);
     }
+    ui_zone_sync_focus_visual();
 
     /* Draw grid crosshair lines using LVGL line objects (no canvas/buffer needed) */
     static lv_point_precise_t h_points[] = {{0, 66}, {280, 66}};
@@ -562,15 +630,8 @@ void scr_map_create(bramble_layout_t* layout) {
     lv_obj_set_style_pad_all(count_lbl, 2, 0);
     lv_obj_align(count_lbl, LV_ALIGN_BOTTOM_LEFT, 2, -2);
 
-    /* Zoom mode tag, top-right of the canvas. "auto" means fit-all; once the
-     * user zooms manually it flips to "zoom" until they press 0. */
-    lv_obj_t* zoom_lbl = lv_label_create(map_cont);
-    lv_label_set_text(zoom_lbl, s_zoom_idx == ZOOM_AUTO ? "auto" : "zoom");
-    lv_obj_set_style_text_font(zoom_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(zoom_lbl, BR_COLOR_TEXT_SEC, 0);
-    lv_obj_align(zoom_lbl, LV_ALIGN_TOP_RIGHT, -4, 2);
-
     draw_scale_bar(map_cont, zoom_km);
+    draw_zoom_controls(map_cont, zoom_km);
 
     if (s_focus_peer_addr != 0 && focused_peer_has_location) {
         /* Distance + bearing to the person you asked about: the question a
