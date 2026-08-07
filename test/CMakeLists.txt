@@ -1838,6 +1838,16 @@ target_include_directories(test_chat_message_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
 
+# Map zoom ladder: step/clamp arithmetic and the on-screen readout (pure, no LVGL)
+add_executable(test_map_zoom
+    test_map_zoom.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/map_zoom.c
+)
+target_include_directories(test_map_zoom PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
+)
+
 # GNSS three-way state classifier and formatters (pure, no LVGL, no driver)
 add_executable(test_gnss_status
     test_gnss_status.c
