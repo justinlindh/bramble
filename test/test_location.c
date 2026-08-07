@@ -312,10 +312,8 @@ void test_location_schedule_retry_never_exceeds_interval(void) {
     location_schedule_t sched;
     location_schedule_init(&sched);
 
-    location_target_t channel = {.kind = LOCATION_TARGET_CHANNEL,
-                                 .id = 0,
-                                 .tier = 0,
-                                 .interval_s = LOCATION_MIN_INTERVAL_S};
+    location_target_t channel = {
+        .kind = LOCATION_TARGET_CHANNEL, .id = 0, .tier = 0, .interval_s = LOCATION_MIN_INTERVAL_S};
 
     location_schedule_record(&sched, &channel, 0, false);
     TEST_ASSERT_TRUE(

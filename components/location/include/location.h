@@ -190,9 +190,9 @@ typedef struct {
 
 /* One resolved, enabled target for a share round. */
 typedef struct {
-    uint8_t kind;  /* LOCATION_TARGET_* */
-    uint32_t id;   /* peer address (CONTACT) or channel index (CHANNEL) */
-    uint8_t tier;  /* resolution to send at */
+    uint8_t kind; /* LOCATION_TARGET_* */
+    uint32_t id;  /* peer address (CONTACT) or channel index (CHANNEL) */
+    uint8_t tier; /* resolution to send at */
     uint16_t interval_s;
 } location_target_t;
 

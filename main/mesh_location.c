@@ -243,9 +243,9 @@ static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, u
         int nonce_ret = nonce_counter_next(nonce);
         xSemaphoreGive(s_nonce_mutex);
         if (nonce_ret == 0) {
-            enc_ret = dm_session_ratchet_encrypt(sess, &header, s_identity->address,
-                                                 session_inner, sizeof(session_inner), nonce,
-                                                 ciphertext, tag, &framed_len);
+            enc_ret = dm_session_ratchet_encrypt(sess, &header, s_identity->address, session_inner,
+                                                 sizeof(session_inner), nonce, ciphertext, tag,
+                                                 &framed_len);
             if (enc_ret == 0)
                 sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
         }
@@ -265,8 +265,7 @@ static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, u
      * shares the envelope so it carries the field, though it is never
      * relayed today (handle_location delivers dest==self/broadcast only).
      * Mandatory-provisioning (Task 2): abort if unprovisioned. */
-    if (data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET) !=
-        0) {
+    if (data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET) != 0) {
         ESP_LOGD(TAG, "unprovisioned: inert, dropping location (session) send");
         return 0;
     }

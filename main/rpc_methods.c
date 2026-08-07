@@ -1636,7 +1636,7 @@ static const char* rpc_location_source_normalize(const char* source) {
    write loops in set_location_config, which differ only in how the rule is
    keyed into NVS. */
 static location_rule_t rpc_location_rule_from_json(const cJSON* entry,
-                                                       const location_policy_t* policy) {
+                                                   const location_policy_t* policy) {
     location_rule_t rule = {
         .enabled = true,
         .tier = policy->default_tier,

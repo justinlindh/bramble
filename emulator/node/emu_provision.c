@@ -30,7 +30,7 @@
 #include "nvs.h"
 #include "nvs_keys.h"
 
-static const char *TAG = "emu_provision";
+static const char* TAG = "emu_provision";
 
 /* Parses one hex nibble, or -1 if c is not a hex digit. */
 static int hex_nibble(char c) {
@@ -46,7 +46,7 @@ static int hex_nibble(char c) {
 /* Seeds the shared network key from EMU_NETWORK_KEY. Returns 0 if a key was
  * provisioned, -1 otherwise (unset, or malformed: not exactly 64 hex chars). */
 int emu_node_seed_network_key_from_env(void) {
-    const char *hex = getenv("EMU_NETWORK_KEY");
+    const char* hex = getenv("EMU_NETWORK_KEY");
     if (!hex || !*hex)
         return -1;
 
@@ -89,7 +89,7 @@ int emu_node_seed_network_key_from_env(void) {
  * Returns 0 if a target was written, -1 otherwise.
  */
 int emu_node_seed_location_share_from_env(void) {
-    const char *channel_str = getenv("EMU_LOCATION_CHANNEL");
+    const char* channel_str = getenv("EMU_LOCATION_CHANNEL");
     if (!channel_str || !*channel_str)
         return -1;
 
@@ -101,7 +101,7 @@ int emu_node_seed_location_share_from_env(void) {
         return -1;
     }
 
-    const char *interval_str = getenv("EMU_LOCATION_INTERVAL_S");
+    const char* interval_str = getenv("EMU_LOCATION_INTERVAL_S");
     uint16_t interval_s = LOCATION_MIN_INTERVAL_S;
     if (interval_str && *interval_str) {
         int parsed = atoi(interval_str);
@@ -109,8 +109,9 @@ int emu_node_seed_location_share_from_env(void) {
             interval_s = location_policy_clamp_interval_s((uint16_t)parsed);
     }
 
-    const char *tier_str = getenv("EMU_LOCATION_TIER");
-    uint8_t tier = (tier_str && *tier_str) ? location_tier_from_string(tier_str) : LOCATION_TIER_FULL;
+    const char* tier_str = getenv("EMU_LOCATION_TIER");
+    uint8_t tier =
+        (tier_str && *tier_str) ? location_tier_from_string(tier_str) : LOCATION_TIER_FULL;
 
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
