@@ -226,8 +226,16 @@ static int try_station_mode(const char* ssid, const char* password) {
      * for battery life, so state it rather than inherit it. WIFI_PS_MAX_MODEM
      * was considered and rejected: it sleeps through beacons up to the AP's
      * listen interval, which adds user-visible latency to the WebSocket RPC
-     * session the webapp keeps open. */
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+     * session the webapp keeps open.
+     *
+     * Best effort, not fatal: a power tweak must never be able to abort the
+     * boot. ESP_ERROR_CHECK here would panic the device, which on a field
+     * unit is indistinguishable from a spontaneous reset. Losing power save
+     * costs battery life; losing the node costs the mesh. */
+    esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    if (ps_err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_set_ps failed: %s", esp_err_to_name(ps_err));
+    }
 
     ESP_LOGI(TAG, "Waiting for station connect (timeout %ds)...",
              CONFIG_BRAMBLE_WIFI_STA_TIMEOUT_S);
