@@ -245,6 +245,31 @@ static void format_compact_hop_name(char* out, size_t out_len, uint32_t hop_addr
     }
 }
 
+/* Receipt names are NOT compacted. The 4-char budget above exists so a
+ * multi-hop route chain fits one line; a receipt list wraps and has
+ * CHAT_RECEIPT_NAME_MAX of room per name, and "Delivered to 2: Shah, Thom"
+ * reads as a bug when the peers are named Shahzad and Thomas. Self and
+ * unnamed peers keep the same fallbacks as the compact form. */
+static void format_receipt_peer_name(char* out, size_t out_len, uint32_t peer_addr) {
+    if (!out || out_len == 0) {
+        return;
+    }
+
+    uint32_t self_addr = 0;
+    uint8_t self_pubkey[32];
+    if (mesh_get_identity(&self_addr, self_pubkey) == 0 && self_addr == peer_addr) {
+        snprintf(out, out_len, "You");
+        return;
+    }
+
+    const char* peer_name = mesh_get_peer_name(peer_addr);
+    if (peer_name && peer_name[0]) {
+        snprintf(out, out_len, "%s", peer_name);
+    } else {
+        snprintf(out, out_len, "%04lX", (unsigned long)(peer_addr & 0xFFFFUL));
+    }
+}
+
 /* Builds the receipts line for an expanded outgoing bubble from the delivery
  * event ring (per-recipient records for broadcast deliveries and DM acks).
  * The ring is bounded local history, so receipts for old messages can have
@@ -265,7 +290,7 @@ static void build_receipt_summary(char* out, size_t out_len, uint32_t packet_id,
             return;
         }
     }
-    chat_format_receipt_summary(out, out_len, addrs, shown, total, format_compact_hop_name);
+    chat_format_receipt_summary(out, out_len, addrs, shown, total, format_receipt_peer_name);
 }
 
 static bool append_text(char* out, size_t out_len, size_t* pos, const char* text) {
@@ -553,7 +578,10 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
                 lv_obj_set_style_text_color(route_lbl, BR_COLOR_TEXT_SEC, 0);
             }
 
-            char receipt_buf[128];
+            /* Room for "Delivered to 4: " plus four full node names and
+             * separators; 128 truncated the "+N" tail once names stopped
+             * being clipped to 7 chars. */
+            char receipt_buf[192];
             build_receipt_summary(receipt_buf, sizeof(receipt_buf), msg->packet_id, msg->status);
 
             lv_obj_t* receipt_lbl = lv_label_create(bubble);

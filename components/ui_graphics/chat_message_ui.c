@@ -54,7 +54,7 @@ int chat_format_receipt_summary(char* out, size_t out_len, const uint32_t* addrs
         return (int)strlen(out);
     size_t pos = (size_t)n;
     for (size_t i = 0; i < shown_count; i++) {
-        char name[8];
+        char name[CHAT_RECEIPT_NAME_MAX];
         name_of(name, sizeof(name), addrs[i]);
         n = snprintf(out + pos, out_len - pos, "%s%s", i ? ", " : "", name);
         if (n < 0 || (size_t)n >= out_len - pos)

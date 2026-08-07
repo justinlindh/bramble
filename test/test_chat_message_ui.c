@@ -73,6 +73,26 @@ void test_route_line_only_for_relayed_direct_messages(void) {
     TEST_ASSERT_FALSE(chat_message_route_is_informative(false, MSG_STORE_DM_CHANNEL, 3));
 }
 
+/* Receipt names must come through WHOLE. They were clipped twice (a 4-char
+ * route-line formatter reused as the receipt callback, then an 8-byte buffer
+ * inside the summary), so "Shahzad" rendered as "Shah". The callback contract
+ * now reserves CHAT_RECEIPT_NAME_MAX per name, sized for a full node name. */
+static void full_name_of(char* out, size_t out_len, uint32_t addr) {
+    if (addr == 0x11) {
+        snprintf(out, out_len, "Shahzad");
+    } else {
+        /* BRAMBLE_NODE_NAME_MAX-length worst case: 32 chars. */
+        snprintf(out, out_len, "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+    }
+}
+
+void test_receipt_summary_keeps_full_names(void) {
+    char buf[192];
+    uint32_t addrs[] = {0x11, 0x22};
+    chat_format_receipt_summary(buf, sizeof(buf), addrs, 2, 2, full_name_of);
+    TEST_ASSERT_EQUAL_STRING("Delivered to 2: Shahzad, ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", buf);
+}
+
 void test_receipt_summary_empty_reads_no_receipts(void) {
     char buf[128];
     chat_format_receipt_summary(buf, sizeof(buf), NULL, 0, 0, test_name_of);
@@ -103,6 +123,7 @@ int main(void) {
     RUN_TEST(test_details_toggle_available_for_any_outgoing_with_packet_id);
     RUN_TEST(test_receipt_summary_lists_all_when_few);
     RUN_TEST(test_receipt_summary_truncates_with_plus_n);
+    RUN_TEST(test_receipt_summary_keeps_full_names);
     RUN_TEST(test_receipt_summary_empty_reads_no_receipts);
     RUN_TEST(test_route_line_only_for_relayed_direct_messages);
     RUN_TEST(test_format_age_under_a_minute_is_now);
