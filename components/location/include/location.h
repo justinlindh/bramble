@@ -365,6 +365,74 @@ void location_store_apply(location_manager_t* mgr, const peer_location_restore_e
  */
 bool location_channel_target_is_permitted(int channel_index);
 
+/*
+ * Handshake pacing for directed targets.
+ *
+ * A directed share needs an ACTIVE DM session, and a session only exists after
+ * a handshake. A contact target on a peer nobody has ever messaged therefore
+ * has no session, and dropping the share leaves that target dead forever. The
+ * send path asks for a session instead, but a peer that is powered off, out of
+ * range or simply not answering must not draw one handshake attempt per target
+ * per share round: with LOCATION_MAX_CONTACTS targets that is real airtime and
+ * battery on a LoRa mesh.
+ *
+ * First attempt fires as soon as a target comes due with no session, then the
+ * delay doubles from LOCATION_HS_BACKOFF_START_MS to LOCATION_HS_BACKOFF_MAX_MS.
+ * The start is deliberately above LOCATION_MIN_INTERVAL_S: the share interval
+ * floor is 30s, so a shorter gate would pass on every single tick and gate
+ * nothing. Clearing a peer on session establishment returns it to the fast
+ * first attempt, so a peer that drops out and returns recovers quickly.
+ *
+ * Pure state, no radio and no locks, so the pacing is host-testable on its own.
+ */
+#define LOCATION_HS_BACKOFF_START_MS 60000U
+#define LOCATION_HS_BACKOFF_MAX_MS (30U * 60U * 1000U)
+#define LOCATION_HS_TRACK 8
+
+typedef struct {
+    uint32_t addr;
+    uint32_t next_attempt_ms;
+    uint32_t backoff_ms;
+    bool used;
+} location_hs_slot_t;
+
+typedef struct {
+    location_hs_slot_t slots[LOCATION_HS_TRACK];
+} location_hs_table_t;
+
+void location_hs_reset(location_hs_table_t* table);
+
+/*
+ * True when a handshake to addr may be attempted now, recording the attempt and
+ * growing the backoff. Wrap-safe against the mesh clock.
+ *
+ * reachable is the caller's answer to "is this peer a current neighbour", which
+ * a first-contact INIT needs because it is a unicast envelope. It is a
+ * parameter rather than a separate check at the call site so that an
+ * unreachable peer CANNOT consume anything: the table is left untouched and no
+ * attempt is recorded. A share round grants one handshake per pass, so a caller
+ * that consumed that pass on a peer it could never reach would starve a
+ * reachable target sitting later in the same round, which is the very
+ * permanently-dead-target failure this pacing exists to end.
+ *
+ * defer_first suppresses only the immediate first attempt, scheduling it one
+ * backoff step out instead. Callers set it for the higher-addressed side of a
+ * pair. Location targets are mutual in the normal case, every node targeting
+ * every other, so without this both ends fire an INIT in the same round, each
+ * installs a ratchet from the other's ephemeral, and the pair lands in the
+ * one-sided session state that silently drops messages. The proactive rekey
+ * avoids the same collision the same way, with the lower address going first.
+ * Deferring rather than refusing keeps an asymmetric config working: if only
+ * the higher-addressed node holds the target, nobody else will ever initiate,
+ * and it still does so one step later.
+ */
+bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, bool reachable,
+                                bool defer_first, uint32_t now_ms);
+
+/* Forget a peer's backoff, so its next need for a session attempts at once.
+ * Called when a session to that peer reaches ACTIVE. */
+void location_hs_clear(location_hs_table_t* table, uint32_t addr);
+
 /* Longest channel-target NVS key plus terminator ("lch_" + two digits). */
 #define LOCATION_TARGET_KEY_SIZE 16
 

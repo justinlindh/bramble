@@ -43,12 +43,19 @@ typedef struct {
 /* Per-target send pacing. Lives here rather than in NVS: it is scheduling
  * state, not configuration, and a reboot legitimately re-shares. */
 static location_schedule_t s_location_schedule;
+/* Handshake pacing for directed targets with no session. Owned solely by the
+ * mesh task. The backoff is cleared from the share round itself, on observing
+ * that a session now exists, rather than from the DM state transitions: those
+ * run on handshake_worker_task, and hooking them would make this table
+ * cross-task shared state needing a lock it does not otherwise want. */
+static location_hs_table_t s_location_hs;
 
 /* Forward declarations for intra-module static helpers. */
 static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t* policy);
 static void location_collect_targets(location_target_set_t* out);
 static bool location_build_inner(const bramble_position_t* pos, uint8_t tier, uint8_t* inner);
-static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, uint8_t tier);
+static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, uint8_t tier,
+                                     bool* needs_session);
 static uint32_t location_tx_channel(int channel_idx, const uint8_t* inner, uint8_t tier);
 static void mesh_emit_location_event(const char* event, uint32_t peer_addr, uint8_t tier,
                                      uint32_t timestamp_ms, int16_t rssi, int8_t snr,
@@ -178,27 +185,40 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
     }
 
     if (dest_addr != 0xFFFFFFFFu) {
-        return location_tx_directed(dest_addr, inner, tier);
+        /* No session request from here. This is the one-shot path
+         * (bramble.shareLocationOnce) and it runs on the RPC task, while
+         * s_location_hs is owned by the mesh task alone. Asking for a session
+         * here would make that table cross-task shared state for a caller that
+         * reports its own failure to the user anyway; the periodic tick raises
+         * the handshake for any address that is a configured target. */
+        return location_tx_directed(dest_addr, inner, tier, NULL);
     }
     /* Broadcast with no channel named: the default channel is the one this
      * node speaks on. */
     return location_tx_channel(s_default_channel_idx, inner, tier);
 }
 
-static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, uint8_t tier) {
+static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, uint8_t tier,
+                                     bool* needs_session) {
     uint32_t pkt_id = next_packet_id();
     uint8_t pkt[BRAMBLE_MAX_PACKET_SIZE] = {0};
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
 
-    /* Directed share (lcr_<addr>): only ever under the recipient's
-     * session key, never the channel key (would defeat per-contact
-     * confidentiality, the SEC-C1 point). No ACTIVE session means the
-     * send fails rather than downgrading to the channel key: location
-     * is real-time presence (RFC M6, never mailbox-deferred), so
-     * queuing this to await a handshake the way DM chat does (Task
-     * 1.4) would only deliver a stale position later, not a
-     * meaningful fix. */
+    /* Directed share (lcr_<addr>): only ever under the recipient's session
+     * key, never the channel key (would defeat per-contact confidentiality,
+     * the SEC-C1 point). No ACTIVE session reports needs_session to the
+     * caller, which asks for a handshake so the target stops being dead;
+     * downgrading to a weaker key is never the answer.
+     *
+     * The POSITION is deliberately not queued to await that handshake the way
+     * DM chat does (Task 1.4). Location is real-time presence (RFC M6, never
+     * mailbox-deferred), and the receive path already refuses a late one: it
+     * drops REPLAY_REJECT_DUP and REPLAY_BELOW_WINDOW identically rather than
+     * accepting out of order. Delivering the coordinate captured at handshake
+     * time would present a stale fix as current. The next due tick sends a
+     * fresh one instead, so the cost of establishing the session is at most
+     * one interval of latency, not a wrong position. */
     bramble_header_t header = {
         .version = BRAMBLE_VERSION,
         .type = PKT_TYPE_LOCATION,
@@ -226,6 +246,7 @@ static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, u
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
     dm_session_t* sess = dm_lookup(s_dm_table, dest_addr);
     int enc_ret = -1;
+    bool no_session = !(sess && sess->state == DM_STATE_ACTIVE);
     if (sess && sess->state == DM_STATE_ACTIVE) {
         xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
         int nonce_ret = nonce_counter_next(nonce);
@@ -240,8 +261,18 @@ static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, u
     }
     DM_MUTEX_GIVE();
 
+    if (needs_session)
+        *needs_session = no_session;
+
     if (enc_ret != 0) {
-        ESP_LOGW(TAG, "No active session for directed location share to %08" PRIX32, dest_addr);
+        if (no_session) {
+            ESP_LOGD(TAG,
+                     "No session yet for directed location share to %08" PRIX32
+                     ", requesting handshake",
+                     dest_addr);
+        } else {
+            ESP_LOGW(TAG, "Directed location share to %08" PRIX32 " failed to encrypt", dest_addr);
+        }
         return 0;
     }
 
@@ -393,6 +424,83 @@ static void mesh_emit_location_event(const char* event, uint32_t peer_addr, uint
 }
 
 /*
+ * Ask for the DM session a directed target needs, so a contact target on a
+ * peer nobody has ever messaged stops being permanently dead.
+ *
+ * Lock ordering, from the call graph rather than a scan of critical sections.
+ * This runs in the TRANSMIT phase, which holds nothing on entry, and the
+ * DH-heavy INIT is not performed here: it is queued to handshake_worker_task,
+ * the same M7 rule maybe_trigger_dm_rehandshake and maybe_schedule_dm_epoch_
+ * rekey follow from this same mesh task. xQueueSend takes only the queue's own
+ * lock, while holding nothing. So this adds NO new lock edge: the transmit
+ * phase already takes s_dm_mutex (location_tx_directed's dm_lookup) and
+ * s_nonce_mutex (nonce_counter_next, whose reserve-ceiling flush reaches NVS
+ * two frames down), which is the forward ordering. The two documented AB BA
+ * deadlocks both need NVS as the OUTER lock, and it never is here. This must
+ * never be called from location_collect_targets, which does hold the NVS shim
+ * mutex across its iteration.
+ *
+ * Gated on being a current neighbor, like the self-heal path: a first-contact
+ * INIT is a unicast DATA envelope, so a peer that is not a direct neighbor has
+ * no route for it and spraying at one buys nothing. That gate is passed INTO
+ * location_hs_should_attempt rather than checked here, so an unreachable peer
+ * records no attempt and grows no backoff.
+ *
+ * Returns true only when a handshake was actually queued. The caller latches
+ * its one-per-round budget on that, never on having called this: a peer that
+ * was skipped costs the round nothing, so a reachable target later in the same
+ * round still gets its turn.
+ */
+static bool location_request_dm_session(uint32_t peer, uint32_t t) {
+    if (peer == 0 || peer == s_identity->address)
+        return false;
+
+    /* Never open a second handshake alongside one already in flight. The chat
+     * path applies the same test (send_dm_packet's handshake_in_progress) and
+     * for the same reason: the desync self-heal, a chat send and this share
+     * round can each want a session with the same peer, and a duplicate INIT
+     * crosses the one already running exactly the way two mutual targets would.
+     * The address tie-break below only orders the two ENDS of a pair; this is
+     * what keeps this node from duelling itself. Read under the mutex and
+     * released before anything is queued, the shape maybe_schedule_dm_epoch_
+     * rekey uses. */
+    xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+    dm_session_t* existing = dm_lookup(s_dm_table, peer);
+    bool busy =
+        existing && (existing->state == DM_STATE_HANDSHAKING || existing->state == DM_STATE_ACTIVE);
+    DM_MUTEX_GIVE();
+    if (busy)
+        return false;
+
+    bool reachable = neighbor_lookup(&s_neighbors, peer) != NULL;
+    /* Only the lower-addressed side opens immediately. Both ends normally hold
+     * each other as targets, so after a fleet reboot every pair would otherwise
+     * initiate in the same round; the two INITs cross, each side installs a
+     * ratchet from the other's ephemeral, and the pair is left one-sided, which
+     * is the silent-loss shape this codebase has already been bitten by. The
+     * proactive rekey resolves the identical collision with the identical rule.
+     * The higher address is deferred rather than barred so an asymmetric
+     * configuration, where only it holds the target, still converges a step
+     * later. */
+    bool defer_first = s_identity->address > peer;
+    if (!location_hs_should_attempt(&s_location_hs, peer, reachable, defer_first, t))
+        return false;
+
+    dm_handshake_work_item_t item;
+    memset(&item, 0, sizeof(item));
+    item.src_addr = peer;
+    item.channel_idx = s_default_channel_idx;
+    item.initiate = true;
+    if (xQueueSend(s_handshake_work_q, &item, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "Handshake queue full, location session request dropped for %08" PRIX32,
+                 peer);
+        return false;
+    }
+    ESP_LOGI(TAG, "Location target %08" PRIX32 " has no session; initiating handshake", peer);
+    return true;
+}
+
+/*
  * TRANSMIT phase of a share round: nothing here holds an NVS handle, an
  * iterator, or any mutex on entry.
  *
@@ -424,6 +532,12 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
     pos.valid = true;
 
     uint32_t sent_count = 0;
+    /* At most one handshake started per round. DM_MAX_HANDSHAKING is a quarter
+     * of DM_MAX_SESSIONS while LOCATION_MAX_CONTACTS is 16, so a round that
+     * asked for every target at once could consume every handshake slot and
+     * starve chat and the desync self-heal. The remaining targets ask on
+     * subsequent rounds. */
+    bool handshake_started = false;
     for (size_t i = 0; i < targets->count; i++) {
         const location_target_t* target = &targets->items[i];
         if (!location_schedule_is_due(&s_location_schedule, target, t)) {
@@ -432,11 +546,28 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
 
         uint8_t inner[L_LOC_INNER];
         bool sent = false;
+        bool needs_session = false;
         if (location_build_inner(&pos, target->tier, inner)) {
             if (target->kind == LOCATION_TARGET_CHANNEL) {
                 sent = location_tx_channel((int)target->id, inner, target->tier) != 0;
             } else {
-                sent = location_tx_directed(target->id, inner, target->tier) != 0;
+                sent = location_tx_directed(target->id, inner, target->tier, &needs_session) != 0;
+            }
+        }
+
+        if (target->kind == LOCATION_TARGET_CONTACT) {
+            if (needs_session) {
+                /* Latch on a handshake actually being queued, not on the
+                 * attempt: a peer skipped as unreachable or still inside its
+                 * backoff must not spend the round's one slot. */
+                if (!handshake_started && location_request_dm_session(target->id, t)) {
+                    handshake_started = true;
+                }
+            } else {
+                /* A session exists, so this peer is answering: drop its
+                 * backoff, and a later outage starts from the fast first
+                 * attempt again rather than from a decayed delay. */
+                location_hs_clear(&s_location_hs, target->id);
             }
         }
 
