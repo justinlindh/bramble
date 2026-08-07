@@ -29,8 +29,14 @@ static uint16_t* fb = NULL; /* Allocated in PSRAM */
 /* SPI device handle */
 static spi_device_handle_t spi;
 static bool initialized = false;
-static bool s_rotated_180 = false;      /* API compatibility; no behavior change in Task 1 */
-static uint8_t s_backlight_level = 255; /* last level set; wake restore reads this */
+static bool s_rotated_180 = false; /* API compatibility; no behavior change in Task 1 */
+/* Power: the ST7789 backlight LEDs are one of the largest awake-state draws
+ * on battery boards (tens of mA at full duty). 200/255 (~78% duty) is barely
+ * dimmer to the eye but shaves a proportional slice of that current, so it is
+ * the boot default; bramble.setBacklight can still drive the full range. */
+#define BACKLIGHT_DEFAULT_DUTY 200
+
+static uint8_t s_backlight_level = BACKLIGHT_DEFAULT_DUTY; /* last level set; wake restore */
 
 /* Color constants (RGB565) */
 #define COLOR_BLACK 0x0000
@@ -243,12 +249,12 @@ int display_init(void) {
             .timer_sel = LEDC_TIMER_0,
             .intr_type = LEDC_INTR_DISABLE,
             .gpio_num = s_board->spi_display.backlight,
-            .duty = 255, /* full brightness */
+            .duty = BACKLIGHT_DEFAULT_DUTY, /* power: see BACKLIGHT_DEFAULT_DUTY */
             .hpoint = 0,
         };
         ledc_channel_config(&bl_channel);
-        ESP_LOGI(TAG, "Backlight LEDC initialized (GPIO%d, duty=255/255)",
-                 s_board->spi_display.backlight);
+        ESP_LOGI(TAG, "Backlight LEDC initialized (GPIO%d, duty=%d/255)",
+                 s_board->spi_display.backlight, BACKLIGHT_DEFAULT_DUTY);
     }
 
     /* Add SPI device (shared bus already initialized by board_init) */
