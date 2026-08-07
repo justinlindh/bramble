@@ -63,4 +63,46 @@ esp_err_t nvs_erase_key(nvs_handle_t h, const char* key) {
     (void)key;
     return ESP_FAIL;
 }
+esp_err_t nvs_get_u32(nvs_handle_t h, const char* key, uint32_t* out) {
+    (void)h;
+    (void)key;
+    (void)out;
+    return ESP_FAIL;
+}
+esp_err_t nvs_set_u32(nvs_handle_t h, const char* key, uint32_t val) {
+    (void)h;
+    (void)key;
+    (void)val;
+    return ESP_OK;
+}
+esp_err_t nvs_set_blob(nvs_handle_t h, const char* key, const void* value, size_t length) {
+    (void)h;
+    (void)key;
+    (void)value;
+    (void)length;
+    return ESP_OK;
+}
+/* No directory: a target linking these no-op stubs has no persistence, so the
+ * peer-location store finds nothing to restore, which is the honest answer for
+ * a simulated node with no flash. */
+esp_err_t nvs_entry_find(const char* part_name, const char* namespace_name, nvs_type_t type,
+                         nvs_iterator_t* out_iterator) {
+    (void)part_name;
+    (void)namespace_name;
+    (void)type;
+    if (out_iterator)
+        *out_iterator = NULL;
+    return ESP_FAIL;
+}
+esp_err_t nvs_entry_next(nvs_iterator_t* iterator) {
+    if (iterator)
+        *iterator = NULL;
+    return ESP_FAIL;
+}
+void nvs_entry_info(nvs_iterator_t iterator, nvs_entry_info_t* out_info) {
+    (void)iterator;
+    if (out_info)
+        out_info->key[0] = '\0';
+}
+void nvs_release_iterator(nvs_iterator_t iterator) { (void)iterator; }
 #endif /* NVS_STUBS_ENABLE */

@@ -417,6 +417,17 @@ target_include_directories(test_dedup PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
 )
 
+# Boot-trace page walking (nRF consoleless boards); the NVMC half stays on
+# the device, this is the decision logic it drives.
+add_executable(test_boot_trace
+    test_boot_trace.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src/boot_trace_scan.c
+    unity/unity.c
+)
+target_include_directories(test_boot_trace PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src
+)
+
 # Battery percentage curve (shared by the device and virtual drivers)
 add_executable(test_battery
     test_battery.c
@@ -1158,6 +1169,23 @@ target_include_directories(test_location PRIVATE
 target_compile_definitions(test_location PRIVATE NVS_STUBS_ENABLE=1)
 target_link_libraries(test_location m)
 
+# Peer-location persistence. Links stubs/nvs_fake.c instead of esp_stubs.c's
+# no-op NVS block (they define the same symbols, so never both): a store test
+# has to read back what it wrote and walk the namespace directory.
+add_executable(test_location_store
+    test_location_store.c
+    unity/unity.c
+    stubs/nvs_fake.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+)
+target_include_directories(test_location_store PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+)
+target_link_libraries(test_location_store m)
+
 # Public channel tests (includes .c directly, needs OpenSSL)
 add_executable(test_public_channel
     test_public_channel.c
@@ -1474,8 +1502,12 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
 )
+# ESP_TIMER_CUSTOM_IMPL lets the peer-location cases drive the clock: whether a
+# persisted position reads as current depends on where "now" sits relative to
+# the stored uptime, so a clock frozen at 0 cannot express the difference.
 target_compile_definitions(test_rpc_get_config_channel_export PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
+    ESP_TIMER_CUSTOM_IMPL=1
 )
 target_compile_options(test_rpc_get_config_channel_export PRIVATE
     -Wno-error=unused-parameter

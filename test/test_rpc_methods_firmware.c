@@ -398,6 +398,62 @@ void test_share_location_once_manual_nvs_succeeds(void) {
     cJSON_Delete(resp);
 }
 
+/* ── 2c-bis. setLocationConfig channel targets ────────────────────── */
+
+/* The public channel's PSK is well known, so a location target on it would
+ * broadcast exact coordinates that anyone in radio range decrypts, and the
+ * shared replay window is deliberately skipped there. The setter must refuse
+ * it outright rather than store a rule the send path would honour. */
+void test_set_location_config_rejects_public_channel_target(void) {
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"bramble.setLocationConfig\","
+        "\"params\":{\"enabled\":true,\"channel_targets\":[{\"channel\":0}]}}");
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(resp, "error"));
+    cJSON_Delete(resp);
+
+    /* Nothing was stored: the location config still reports no channel target. */
+    cJSON* cfg = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"bramble."
+                                    "getConfig\",\"params\":{}}");
+    cJSON* loc = cJSON_GetObjectItem(get_result(cfg), "location");
+    cJSON* targets = cJSON_GetObjectItem(loc, "channel_targets");
+    TEST_ASSERT_EQUAL(0, cJSON_GetArraySize(targets));
+    cJSON_Delete(cfg);
+}
+
+/* All-or-nothing: a request mixing a legal target with the public channel must
+ * apply neither, so a caller cannot smuggle the public target in behind a
+ * valid one. */
+void test_set_location_config_public_channel_rejects_whole_request(void) {
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":62,\"method\":\"bramble.setLocationConfig\","
+        "\"params\":{\"enabled\":true,\"channel_targets\":[{\"channel\":3},{\"channel\":0}]}}");
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(resp, "error"));
+    cJSON_Delete(resp);
+
+    cJSON* cfg = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":63,\"method\":\"bramble."
+                                    "getConfig\",\"params\":{}}");
+    cJSON* loc = cJSON_GetObjectItem(get_result(cfg), "location");
+    TEST_ASSERT_EQUAL(0, cJSON_GetArraySize(cJSON_GetObjectItem(loc, "channel_targets")));
+    cJSON_Delete(cfg);
+}
+
+/* A private channel target is the supported configuration and still works. */
+void test_set_location_config_accepts_private_channel_target(void) {
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":64,\"method\":\"bramble.setLocationConfig\","
+        "\"params\":{\"enabled\":true,\"channel_targets\":[{\"channel\":2,\"tier\":\"full\"}]}}");
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(get_result(resp), "ok")));
+    cJSON_Delete(resp);
+
+    cJSON* cfg = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":65,\"method\":\"bramble."
+                                    "getConfig\",\"params\":{}}");
+    cJSON* loc = cJSON_GetObjectItem(get_result(cfg), "location");
+    cJSON* targets = cJSON_GetObjectItem(loc, "channel_targets");
+    TEST_ASSERT_EQUAL(1, cJSON_GetArraySize(targets));
+    TEST_ASSERT_EQUAL(2, cJSON_GetObjectItem(cJSON_GetArrayItem(targets, 0), "channel")->valueint);
+    cJSON_Delete(cfg);
+}
+
 /* ── 2d. setWifiConfig ────────────────────────────────────────────── */
 
 void test_set_wifi_config_missing_ssid_invalid(void) {
@@ -853,6 +909,9 @@ int main(void) {
     /* shareLocationOnce */
     RUN_TEST(test_share_location_once_no_source_errors);
     RUN_TEST(test_share_location_once_manual_nvs_succeeds);
+    RUN_TEST(test_set_location_config_rejects_public_channel_target);
+    RUN_TEST(test_set_location_config_public_channel_rejects_whole_request);
+    RUN_TEST(test_set_location_config_accepts_private_channel_target);
 
     RUN_TEST(test_set_wifi_config_missing_ssid_invalid);
     RUN_TEST(test_set_wifi_config_empty_ssid_invalid);

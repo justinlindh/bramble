@@ -140,6 +140,52 @@ void maybe_schedule_dm_epoch_rekey(uint32_t t) {
     }
 }
 
+size_t mesh_dm_session_capacity(void) { return (size_t)DM_MAX_SESSIONS; }
+
+/* Read-only snapshot of the used session slots, for diagnostics that need to
+ * answer "does this peer have a session". Takes s_dm_mutex fresh per slot
+ * rather than holding it across the whole sweep, matching the discipline of
+ * maybe_schedule_dm_epoch_rekey above: the caller runs on the RPC task, and a
+ * sweep held across 32 slots would stall the mesh task's send path for no
+ * benefit. A slot that changes state mid-sweep is reported as it was when read,
+ * which is all a point-in-time snapshot ever promises.
+ *
+ * Copies metadata only. dm_session_t carries session_key, peer_id_pub and the
+ * ratchet chain keys; none of those are copied out. */
+size_t mesh_get_dm_sessions(mesh_dm_session_info_t* out, size_t max) {
+    if (!out || max == 0)
+        return 0;
+
+    uint32_t t = now_ms();
+    size_t written = 0;
+
+    for (int i = 0; i < DM_MAX_SESSIONS && written < max; i++) {
+        mesh_dm_session_info_t info;
+        memset(&info, 0, sizeof(info));
+
+        xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+        const dm_session_t* s = &s_dm_table->s[i];
+        if (s->state != DM_STATE_NONE) {
+            info.peer_addr = s->peer_addr;
+            info.established_ms_ago = (uint32_t)(t - s->established_ms);
+            info.last_active_ms_ago = (uint32_t)(t - s->last_active_ms);
+            info.msg_count = s->msg_count;
+            info.ke_epoch = s->ke_epoch;
+            info.state = (s->state == DM_STATE_ACTIVE) ? MESH_DM_SESSION_ACTIVE
+                                                       : MESH_DM_SESSION_HANDSHAKING;
+            info.verified = (s->verified != 0);
+            info.ratchet_valid = (s->ratchet.send.valid != 0);
+        }
+        DM_MUTEX_GIVE();
+
+        if (info.state == MESH_DM_SESSION_NONE)
+            continue;
+        out[written++] = info;
+    }
+
+    return written;
+}
+
 /*
  * SEC-C2 / Task 1.4: sends a chat payload under an ESTABLISHED session key
  * (dm_session_ratchet_encrypt), FLAG_ENCRYPT WITHOUT FLAG_CHANNEL. This is the DM

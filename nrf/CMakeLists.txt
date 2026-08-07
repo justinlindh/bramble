@@ -349,6 +349,7 @@ add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
   src/boot_trace.c
+  src/boot_trace_scan.c
   src/radio_lr1110.c
   src/lr11xx_hal_nrf.c
   src/lfs_nvmc.c

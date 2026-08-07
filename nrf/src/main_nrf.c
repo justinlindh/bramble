@@ -162,7 +162,12 @@ static void task_boot(void* arg) {
 /* Watchdog-of-last-resort for consoleless boards: if advertising is not up
  * two minutes after boot, stamp the last stage reached and return to the
  * bootloader so the trace page is host-readable. High priority so a
- * busy-spinning boot task cannot starve it; it sleeps its whole life. */
+ * busy-spinning boot task cannot starve it; it sleeps its whole life.
+ *
+ * This covers a HANG and only a hang: it needs 120 seconds of scheduler time
+ * to fire, so a board that resets faster than that never reaches it. The
+ * other half of the recovery story is the consecutive-failed-boot count in
+ * boot_trace_init(), which catches exactly the case this task cannot. */
 static void task_sentinel(void* arg) {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(120000));
