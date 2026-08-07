@@ -152,8 +152,8 @@ void test_update_lands_correctly_after_the_ring_wraps(void) {
     /* Oldest row still in the ring, and the newest one. */
     int oldest = 2;
     int newest = MSG_STORE_MAX + 1;
-    TEST_ASSERT_TRUE(
-        msg_store_update_status_with_route(0x100u + (uint32_t)oldest, MSG_STATUS_DELIVERED, 0, NULL));
+    TEST_ASSERT_TRUE(msg_store_update_status_with_route(0x100u + (uint32_t)oldest,
+                                                        MSG_STATUS_DELIVERED, 0, NULL));
     TEST_ASSERT_TRUE(
         msg_store_update_status_with_route(0x100u + (uint32_t)newest, MSG_STATUS_FAILED, 0, NULL));
     TEST_ASSERT_EQUAL(0, s_update_rejects);
@@ -203,7 +203,8 @@ void test_repeat_receipts_write_once(void) {
     TEST_ASSERT_EQUAL(1, s_update_calls);
 
     for (int i = 0; i < 5; i++) {
-        TEST_ASSERT_TRUE(msg_store_update_status_with_route(0x55, MSG_STATUS_DELIVERED, 2, route_b));
+        TEST_ASSERT_TRUE(
+            msg_store_update_status_with_route(0x55, MSG_STATUS_DELIVERED, 2, route_b));
     }
     TEST_ASSERT_EQUAL(1, s_update_calls);
     TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, record_for_text("all")->status);
