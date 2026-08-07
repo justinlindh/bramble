@@ -2628,6 +2628,13 @@ void mesh_task_start(bramble_identity_t* identity) {
 
     s_state_mutex = xSemaphoreCreateMutex();
     s_delivery_event_mutex = xSemaphoreCreateMutex();
+
+    /* Refill the location cache that location_init() zeroed above from the
+     * peer positions already on flash, so the map knows where its peers are
+     * without waiting for a fresh share. Deliberately here and not beside
+     * location_init: the apply phase takes s_state_mutex, which does not exist
+     * until the line above. */
+    mesh_peer_location_restore();
     /* Try PSRAM first (T-Deck Plus), fall back to internal RAM (Heltec V3/V4) */
     s_delivery_event_ring = heap_caps_calloc(1, sizeof(delivery_event_ring_t), MALLOC_CAP_SPIRAM);
     if (!s_delivery_event_ring) {
@@ -2752,13 +2759,6 @@ const char* mesh_get_node_name(void) {
     if (s_node_name[0] == '\0')
         return NULL;
     return s_node_name;
-}
-
-bool mesh_get_network_time_ms(int64_t* out_ms) {
-    if (!out_ms || !s_timesync.synchronized)
-        return false;
-    *out_ms = timesync_get_network_time(&s_timesync, now_ms());
-    return true;
 }
 
 int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]) {

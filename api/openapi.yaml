@@ -305,6 +305,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/RoutesResponse'
 
+  /rpc/bramble.getDmSessions:
+    post:
+      operationId: getDmSessions
+      summary: Get DM session table
+      description: >
+        Returns metadata for every used slot in the DM session table. A directed
+        send (a chat DM, or a per-contact location share) requires an active
+        session with the destination and is dropped without one, so this is what
+        tells a diagnostic which configured peer a node cannot currently reach
+        directly. Key material is never included.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: DM session table
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DmSessionsResponse'
+
   /rpc/bramble.getMessages:
     post:
       operationId: getMessages
@@ -525,6 +551,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SetNodeNameResponse'
+
+  /rpc/bramble.getTimezone:
+    post:
+      operationId: getTimezone
+      summary: Report the configured display timezone
+      description: >
+        Returns the POSIX TZ specification the node renders wall-clock times
+        in, together with the named zones the on-device picker offers. Clients
+        read the preset list from here rather than carrying their own copy of
+        the specs.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '200':
+          description: Current timezone configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTimezoneResponse'
+
+  /rpc/bramble.setTimezone:
+    post:
+      operationId: setTimezone
+      summary: Set the display timezone
+      description: >
+        Persists a POSIX TZ specification, for example
+        "PST8PDT,M3.2.0,M11.1.0". UTC remains the internal source of truth;
+        the zone is applied only where a clock is rendered. A specification
+        naming a daylight-saving zone must also carry explicit transition
+        rules, since the ruleless form is ambiguous and guessing would produce
+        a silently wrong clock.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetTimezoneParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Effective timezone after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetTimezoneResponse'
 
   /rpc/bramble.addChannel:
     post:
@@ -1995,7 +2071,9 @@ components:
             is rejected: its PSK is well known, so a target on it would
             broadcast exact coordinates readable by anyone in radio range, and
             the shared replay window is deliberately skipped there. Create a
-            channel with a PSK and target the index addChannel returns.
+            channel with a PSK and target the index addChannel returns. A
+            public-channel rule left in storage by an earlier build does not
+            resolve to a target, so an upgrade stops it transmitting.
         enabled:
           type: boolean
           description: Whether rule is enabled.
@@ -2045,7 +2123,7 @@ components:
     LocationPeer:
       type: object
       description: Location data for a peer node.
-      required: [addr, name, tier, position, online, lastUpdatedMs]
+      required: [addr, name, tier, online, lastUpdatedMs]
       properties:
         addr:
           type: string
@@ -2056,13 +2134,30 @@ components:
         tier:
           $ref: '#/components/schemas/LocationTier'
         position:
-          $ref: '#/components/schemas/Position'
+          allOf:
+            - $ref: '#/components/schemas/Position'
+          description: >-
+            Omitted when the peer's tier carries no coordinates, which is the
+            case for the presence tier: it reports only that the peer is
+            there. Coordinates are never synthesized for such a peer, so a
+            consumer must treat an absent position as "no position shared",
+            not as the origin.
         online:
           type: boolean
-          description: Whether the peer is currently online.
+          description: >-
+            Whether this position is recent enough to present as current.
+            False when the node cannot compute the position's age, which is
+            the case for anything persisted before the current boot: the node
+            has no wall clock, so a stored uptime reading says nothing once
+            the uptime counter has restarted. The position itself is still
+            returned, as the peer's last known one.
         lastUpdatedMs:
           type: integer
-          description: Unix timestamp (ms) of last update.
+          description: >-
+            Device uptime in milliseconds at which the position was received,
+            measured on the CURRENT boot. 0 when the node cannot express the
+            receipt time on that clock (a position carried over from an
+            earlier boot), which is also when online is false.
 
     # ── Response Schemas ─────────────────────────────────────────────────────
 
@@ -2561,6 +2656,62 @@ components:
           items:
             $ref: '#/components/schemas/Route'
 
+    DmSession:
+      type: object
+      description: >
+        One used slot of the DM session table. Metadata only: the session key,
+        the peer's cached identity key and the ratchet chain keys are never
+        returned.
+      required:
+        - address
+        - state
+        - verified
+        - ratchet_valid
+        - msg_count
+        - ke_epoch
+        - established_ms_ago
+        - last_active_ms_ago
+      properties:
+        address:
+          type: string
+          description: Peer address, 8 hex digits.
+        state:
+          type: string
+          enum: [handshaking, active]
+          description: >
+            active means directed traffic to this peer can be encrypted and
+            sent; handshaking means the key exchange has not completed.
+        verified:
+          type: boolean
+          description: Peer identity key is pinned and confirmed.
+        ratchet_valid:
+          type: boolean
+          description: Send chain is established, so a payload can be encrypted now.
+        msg_count:
+          type: integer
+          description: Messages carried by this session since it was established.
+        ke_epoch:
+          type: integer
+          description: Key-exchange epoch this session is on.
+        established_ms_ago:
+          type: integer
+          description: Milliseconds since the slot was established or re-established.
+        last_active_ms_ago:
+          type: integer
+          description: Milliseconds since the last send or receive on this session.
+
+    DmSessionsResponse:
+      type: object
+      required: [sessions, capacity]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DmSession'
+        capacity:
+          type: integer
+          description: Total slots in the session table, used or not.
+
     MessagesResponse:
       type: object
       required: [messages]
@@ -2843,6 +2994,65 @@ components:
         name:
           type: string
           description: The applied node name.
+
+    TimezonePreset:
+      type: object
+      description: A named zone offered by the on-device picker.
+      required: [label, spec]
+      properties:
+        label:
+          type: string
+          description: Human-facing zone name, for example "US Pacific".
+        spec:
+          type: string
+          description: POSIX TZ specification the label maps to.
+
+    GetTimezoneResponse:
+      type: object
+      description: Response from bramble.getTimezone.
+      required: [ok, timezone, default_timezone, configured, presets]
+      properties:
+        ok:
+          type: boolean
+        timezone:
+          type: string
+          description: Effective POSIX TZ specification used to render clocks.
+        default_timezone:
+          type: string
+          description: Compiled-in default, used when nothing valid is stored.
+        configured:
+          type: boolean
+          description: True when a zone is stored, as opposed to the default.
+        presets:
+          type: array
+          description: Named zones the on-device picker offers.
+          items:
+            $ref: '#/components/schemas/TimezonePreset'
+
+    SetTimezoneParams:
+      type: object
+      required: [timezone]
+      properties:
+        timezone:
+          type: string
+          description: >
+            POSIX TZ specification, for example "PST8PDT,M3.2.0,M11.1.0" or
+            "UTC0".
+          maxLength: 63
+
+    SetTimezoneResponse:
+      type: object
+      description: Response from bramble.setTimezone.
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        timezone:
+          type: string
+          description: Effective timezone after the change.
+        error:
+          type: string
+          description: Error message when ok=false.
 
     AddChannelParams:
       type: object

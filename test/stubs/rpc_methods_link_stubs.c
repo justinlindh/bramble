@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "esp_stubs.h"
+/* One definition of the DM session snapshot type, shared with the firmware so
+   this stub cannot drift from the struct rpc_methods.c actually reads. */
+#include "mesh_dm_session_info.h"
 #include "nvs.h"
 #include "esp_wifi.h"
 
@@ -166,6 +169,12 @@ int mesh_get_channel_security(int i, bool* h, uint16_t* e) {
 }
 void mesh_get_state(mesh_shared_state_t* o) { memset(o, 0, sizeof(*o)); }
 void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
+size_t mesh_dm_session_capacity(void) { return 0; }
+size_t mesh_get_dm_sessions(mesh_dm_session_info_t* o, size_t max) {
+    (void)o;
+    (void)max;
+    return 0;
+}
 bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified, bool* key_changed) {
     (void)addr;
     if (sas_out)
@@ -527,10 +536,25 @@ esp_err_t nvs_set_u16(nvs_handle_t h, const char* k, uint16_t v) {
     (void)v;
     return ESP_OK;
 }
+/* One real u32 cell, backing the location store's boot counter. The peer
+ * records' age depends on it, so the getPeerLocations suite needs a value that
+ * survives the set/get round trip rather than a no-op. */
+static uint32_t g_nvs_loc_u32;
+static bool g_nvs_loc_u32_present;
+
 esp_err_t nvs_set_u32(nvs_handle_t h, const char* k, uint32_t v) {
-    (void)h;
     (void)k;
-    (void)v;
+    if (h != 3)
+        return ESP_OK;
+    g_nvs_loc_u32 = v;
+    g_nvs_loc_u32_present = true;
+    return ESP_OK;
+}
+esp_err_t nvs_get_u32(nvs_handle_t h, const char* k, uint32_t* o) {
+    (void)k;
+    if (h != 3 || !o || !g_nvs_loc_u32_present)
+        return ESP_FAIL;
+    *o = g_nvs_loc_u32;
     return ESP_OK;
 }
 esp_err_t nvs_set_i8(nvs_handle_t h, const char* k, int8_t v) {

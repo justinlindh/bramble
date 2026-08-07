@@ -79,7 +79,8 @@ Notes:
   location both confidentiality and the full per-sender replay window. Add one
   with `bramble.addChannel` and target the index it returns; that index is
   per-device and nodes agree by deriving the same key from the same PSK, not by
-  occupying the same slot.
+  occupying the same slot. A public-channel rule left in storage by an earlier
+  build does not resolve to a target, so an upgrade stops it transmitting.
 - A receiver believes a position only after the network-key origin MAC
   verifies, so a node outside the network cannot originate one.
 - Each target is paced off its own `interval_s`, floored at 30 seconds.
@@ -344,6 +345,23 @@ fixed to a place where it hears nothing therefore reports the second place.
 {"jsonrpc":"2.0","id":21,"method":"bramble.getRoutes","params":{}}
 ```
 
+#### `bramble.getDmSessions`
+
+- Description: Returns metadata for every used DM session slot. A directed send
+  (a chat DM, or a per-contact location share) requires an `active` session with
+  the destination and is dropped without one, so this is what identifies a
+  configured peer the node cannot currently send to. Key material is never
+  returned.
+- Params: none.
+- Response fields: `sessions` (array; `address`, `state` (`handshaking` or
+  `active`), `verified`, `ratchet_valid`, `msg_count`, `ke_epoch`,
+  `established_ms_ago`, `last_active_ms_ago`), `capacity`.
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":24,"method":"bramble.getDmSessions","params":{}}
+```
+
 #### `bramble.getAirtime`
 
 - Description: Returns airtime budget status.
@@ -432,6 +450,28 @@ fixed to a place where it hears nothing therefore reports the second place.
 
 ```json
 {"jsonrpc":"2.0","id":32,"method":"bramble.setNodeName","params":{"name":"ridge-01"}}
+```
+
+#### `bramble.getTimezone`
+
+- Description: Reports the POSIX TZ specification the node renders wall-clock times in, plus the named zones the on-device picker offers.
+- Params: none.
+- Response fields: `ok` (bool), `timezone` (string), `default_timezone` (string), `configured` (bool), `presets` (array of `{label, spec}`).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":37,"method":"bramble.getTimezone","params":{}}
+```
+
+#### `bramble.setTimezone`
+
+- Description: Persists a POSIX TZ specification. UTC stays the internal source of truth; the zone is applied only where a clock is rendered. A daylight-saving zone name must carry explicit transition rules, because the ruleless form is ambiguous.
+- Params: `timezone` (string).
+- Response fields: `ok` (bool), `timezone` (string), `error` (string, when `ok` is false).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":38,"method":"bramble.setTimezone","params":{"timezone":"PST8PDT,M3.2.0,M11.1.0"}}
 ```
 
 #### `bramble.setBacklight`

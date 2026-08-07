@@ -224,6 +224,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.getDmSessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get DM session table
+         * @description Returns metadata for every used slot in the DM session table. A directed send (a chat DM, or a per-contact location share) requires an active session with the destination and is dropped without one, so this is what tells a diagnostic which configured peer a node cannot currently reach directly. Key material is never included.
+         */
+        post: operations["getDmSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.getMessages": {
         parameters: {
             query?: never;
@@ -418,6 +438,46 @@ export interface paths {
          * @description Sets the node name (max 32 characters).
          */
         post: operations["setNodeName"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rpc/bramble.getTimezone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the configured display timezone
+         * @description Returns the POSIX TZ specification the node renders wall-clock times in, together with the named zones the on-device picker offers. Clients read the preset list from here rather than carrying their own copy of the specs.
+         */
+        post: operations["getTimezone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rpc/bramble.setTimezone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the display timezone
+         * @description Persists a POSIX TZ specification, for example "PST8PDT,M3.2.0,M11.1.0". UTC remains the internal source of truth; the zone is applied only where a clock is rendered. A specification naming a daylight-saving zone must also carry explicit transition rules, since the ruleless form is ambiguous and guessing would produce a silently wrong clock.
+         */
+        post: operations["setTimezone"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1523,19 +1583,19 @@ export interface components {
             /** @description Override update interval in seconds. */
             interval_s?: number;
         };
-        /** @description Per-channel location sharing rule. */
+        /** @description Per-channel location sharing rule. The node broadcasts its position under this channel's key, so every holder of that key receives it and no route, DM session or prior traffic is required. The tier is the resolution the whole channel receives. A receiver additionally requires a valid network-key origin MAC before it believes the position, so a node outside the network cannot originate one. */
         LocationChannelTarget: {
-            /** @description Channel index. */
+            /** @description Channel index. Outside this range names no channel the node can share to, and setLocationConfig rejects the whole request. Channel 0 is the public channel, whose PSK is well known: targeting it makes the position readable by anyone in radio range, not only by the network. Pick a private channel to keep a group's positions within that group. */
             channel: number;
             /** @description Whether rule is enabled. */
             enabled?: boolean;
             tier?: components["schemas"]["LocationTier"];
-            /** @description Override update interval in seconds. */
+            /** @description Update interval in seconds for this target, paced independently of every other target. Floored at 30. */
             interval_s?: number;
         };
         /** @description Canonical location configuration. */
         LocationConfig: {
-            /** @description Whether location sharing is enabled. */
+            /** @description Whether location sharing is permitted. A node transmits only to the targets in contact_rules and channel_targets, so this being true with no enabled target means nothing is sent. */
             enabled: boolean;
             tier: components["schemas"]["LocationTier"];
             default_tier: components["schemas"]["LocationTier"];
@@ -1556,10 +1616,11 @@ export interface components {
             /** @description Peer display name. */
             name: string;
             tier: components["schemas"]["LocationTier"];
-            position: components["schemas"]["Position"];
-            /** @description Whether the peer is currently online. */
+            /** @description Omitted when the peer's tier carries no coordinates, which is the case for the presence tier: it reports only that the peer is there. Coordinates are never synthesized for such a peer, so a consumer must treat an absent position as "no position shared", not as the origin. */
+            position?: components["schemas"]["Position"];
+            /** @description Whether this position is recent enough to present as current. False when the node cannot compute the position's age, which is the case for anything persisted before the current boot: the node has no wall clock, so a stored uptime reading says nothing once the uptime counter has restarted. The position itself is still returned, as the peer's last known one. */
             online: boolean;
-            /** @description Unix timestamp (ms) of last update. */
+            /** @description Device uptime in milliseconds at which the position was received, measured on the CURRENT boot. 0 when the node cannot express the receipt time on that clock (a position carried over from an earlier boot), which is also when online is false. */
             lastUpdatedMs: number;
         };
         /** @description Node status information. */
@@ -1780,6 +1841,33 @@ export interface components {
         RoutesResponse: {
             routes: components["schemas"]["Route"][];
         };
+        /** @description One used slot of the DM session table. Metadata only: the session key, the peer's cached identity key and the ratchet chain keys are never returned. */
+        DmSession: {
+            /** @description Peer address, 8 hex digits. */
+            address: string;
+            /**
+             * @description active means directed traffic to this peer can be encrypted and sent; handshaking means the key exchange has not completed.
+             * @enum {string}
+             */
+            state: "handshaking" | "active";
+            /** @description Peer identity key is pinned and confirmed. */
+            verified: boolean;
+            /** @description Send chain is established, so a payload can be encrypted now. */
+            ratchet_valid: boolean;
+            /** @description Messages carried by this session since it was established. */
+            msg_count: number;
+            /** @description Key-exchange epoch this session is on. */
+            ke_epoch: number;
+            /** @description Milliseconds since the slot was established or re-established. */
+            established_ms_ago: number;
+            /** @description Milliseconds since the last send or receive on this session. */
+            last_active_ms_ago: number;
+        };
+        DmSessionsResponse: {
+            sessions: components["schemas"]["DmSession"][];
+            /** @description Total slots in the session table, used or not. */
+            capacity: number;
+        };
         MessagesResponse: {
             messages: components["schemas"]["Message"][];
         };
@@ -1926,6 +2014,37 @@ export interface components {
             ok: boolean;
             /** @description The applied node name. */
             name: string;
+        };
+        /** @description A named zone offered by the on-device picker. */
+        TimezonePreset: {
+            /** @description Human-facing zone name, for example "US Pacific". */
+            label: string;
+            /** @description POSIX TZ specification the label maps to. */
+            spec: string;
+        };
+        /** @description Response from bramble.getTimezone. */
+        GetTimezoneResponse: {
+            ok: boolean;
+            /** @description Effective POSIX TZ specification used to render clocks. */
+            timezone: string;
+            /** @description Compiled-in default, used when nothing valid is stored. */
+            default_timezone: string;
+            /** @description True when a zone is stored, as opposed to the default. */
+            configured: boolean;
+            /** @description Named zones the on-device picker offers. */
+            presets: components["schemas"]["TimezonePreset"][];
+        };
+        SetTimezoneParams: {
+            /** @description POSIX TZ specification, for example "PST8PDT,M3.2.0,M11.1.0" or "UTC0". */
+            timezone: string;
+        };
+        /** @description Response from bramble.setTimezone. */
+        SetTimezoneResponse: {
+            ok: boolean;
+            /** @description Effective timezone after the change. */
+            timezone?: string;
+            /** @description Error message when ok=false. */
+            error?: string;
         };
         AddChannelParams: {
             /** @description Channel display name. */
@@ -2963,6 +3082,37 @@ export interface operations {
             };
         };
     };
+    getDmSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description DM session table */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DmSessionsResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     getMessages: {
         parameters: {
             query?: never;
@@ -3262,6 +3412,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SetNodeNameResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getTimezone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description Current timezone configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GetTimezoneResponse"];
+                };
+            };
+        };
+    };
+    setTimezone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SetTimezoneParams"];
+            };
+        };
+        responses: {
+            /** @description Effective timezone after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetTimezoneResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */

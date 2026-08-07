@@ -5,7 +5,7 @@ import { session, requireClient } from './client';
 import { useStore } from '../index';
 import { formatAddrHex } from '../../utils/address';
 import { parseAddr } from '../../lib/addr';
-import type { BrambleConfig, LocationConfig, LocationTier } from '../../types/bramble';
+import type { BrambleConfig, LocationConfig, LocationTier, TimezoneInfo } from '../../types/bramble';
 import type { RpcSchemas, WirePartial } from '../../types/rpc';
 import { loadPeerLocations, loadStatus } from './telemetry';
 
@@ -172,6 +172,30 @@ export async function setGpsEnabled(enabled: boolean): Promise<void> {
   const result = await client.rpc('bramble.setGpsEnabled', { enabled });
   assertOk(result, 'Failed to set GPS power');
   await loadStatus(); // re-pull so gpsEnabled reflects the device's answer
+}
+
+// The node's clock zone. UTC stays the device's internal source of truth, so
+// this only affects what the device itself renders: the webapp keeps showing
+// times in the browser's own zone.
+export async function loadTimezone(): Promise<TimezoneInfo> {
+  const client = requireClient();
+  const result = (await client.rpc('bramble.getTimezone', {})) as Record<string, unknown> | null;
+  assertOk(result, 'Failed to read timezone');
+  const presets = Array.isArray(result?.presets) ? (result!.presets as Record<string, unknown>[]) : [];
+  return {
+    timezone: (result?.timezone as string) ?? 'UTC0',
+    defaultTimezone: (result?.default_timezone as string) ?? 'UTC0',
+    configured: result?.configured === true,
+    presets: presets
+      .filter((p) => typeof p.label === 'string' && typeof p.spec === 'string')
+      .map((p) => ({ label: p.label as string, spec: p.spec as string })),
+  };
+}
+
+export async function setTimezone(timezone: string): Promise<void> {
+  const client = requireClient();
+  const result = await client.rpc('bramble.setTimezone', { timezone });
+  assertOk(result, 'Failed to set timezone');
 }
 
 export async function shareLocationOnce(addr: number, tier?: LocationTier): Promise<void> {

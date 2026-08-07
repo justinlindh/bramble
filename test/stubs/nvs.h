@@ -24,6 +24,7 @@ esp_err_t nvs_set_i8(nvs_handle_t handle, const char* key, int8_t value);
 esp_err_t nvs_set_i32(nvs_handle_t handle, const char* key, int32_t value);
 esp_err_t nvs_get_u8(nvs_handle_t handle, const char* key, uint8_t* out);
 esp_err_t nvs_get_u16(nvs_handle_t handle, const char* key, uint16_t* out);
+esp_err_t nvs_get_u32(nvs_handle_t handle, const char* key, uint32_t* out);
 esp_err_t nvs_get_i32(nvs_handle_t handle, const char* key, int32_t* out);
 esp_err_t nvs_get_blob(nvs_handle_t handle, const char* key, void* out_value, size_t* length);
 esp_err_t nvs_set_blob(nvs_handle_t handle, const char* key, const void* value, size_t length);

@@ -212,9 +212,10 @@ void test_location_public_channel_is_not_a_permitted_target(void) {
 }
 
 /* Send-path guard, not just the setter: a public-channel rule already sitting
- * in NVS (written by an older build, or by any path that bypassed the setter)
- * must not resolve to a target, so the share round never transmits it. A
- * private-channel rule in the same storage still resolves. */
+ * in NVS (written by an earlier build, or by any path that bypassed the setter)
+ * must not resolve to a target, so an upgrade stops it transmitting rather than
+ * merely preventing new ones. A private-channel rule in the same storage still
+ * resolves. */
 void test_location_send_path_refuses_stored_public_channel_rule(void) {
     location_target_t target;
 
@@ -372,6 +373,18 @@ void test_location_handshake_backoff_wraps_with_the_mesh_clock(void) {
     /* Past it, also on the far side. */
     TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xDEADBEEF, true, false,
                                                 now + LOCATION_HS_BACKOFF_START_MS));
+}
+
+/* A malformed channel suffix must not fall back to channel 0, which the public
+ * channel occupies: a corrupt key becoming a public-channel target is exactly
+ * the leak the guard above exists to stop. */
+void test_location_malformed_channel_key_does_not_become_public_target(void) {
+    location_target_t target;
+
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_xx", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_0x", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_0", "1|full|60", &target));
 }
 
 /* Only the exact suffix shape the key builders emit names a target: 8 hex
@@ -619,6 +632,7 @@ int main(void) {
     RUN_TEST(test_location_unreachable_peer_does_not_consume_the_round);
     RUN_TEST(test_location_unreachable_peer_never_occupies_a_slot);
     RUN_TEST(test_location_handshake_backoff_wraps_with_the_mesh_clock);
+    RUN_TEST(test_location_malformed_channel_key_does_not_become_public_target);
     RUN_TEST(test_location_target_interval_floor);
     RUN_TEST(test_location_rule_codec_roundtrip);
     RUN_TEST(test_location_target_keys);

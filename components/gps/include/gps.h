@@ -79,6 +79,19 @@ bool gps_get_position(bramble_position_t* out);
 bool gps_get_utc_hm(uint8_t* hour, uint8_t* min);
 
 /**
+ * Get the last known UTC calendar date from GPS. Reported separately from the
+ * time of day because the two arrive in different NMEA sentences: only RMC
+ * carries a date, so a receiver can have a valid time of day before it has a
+ * date. Rendering local time needs the date, since a daylight-saving rule
+ * cannot be evaluated without knowing the day of the year.
+ * @param year: filled with the full year, e.g. 2026 (may be NULL)
+ * @param month: filled with the month 1-12 (may be NULL)
+ * @param day: filled with the day of month 1-31 (may be NULL)
+ * @return true if a valid UTC date from a current fix is available
+ */
+bool gps_get_utc_date(uint16_t* year, uint8_t* month, uint8_t* day);
+
+/**
  * Get current satellite counts and antenna health.
  * Always fills out, even when no position fix is available.
  * @param out: pointer to stats structure to fill
