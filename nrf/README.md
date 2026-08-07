@@ -5,15 +5,16 @@ and the SenseCAP T1000-E card tracker. Bare-metal FreeRTOS + nrfx, no
 ESP-IDF, no SoftDevice; the portable protocol components compile unchanged
 and the platform seams are shimmed (`shim/`).
 
-The port landed in phases, and the measured tables below keep their phase
-labels: P0 protocol core on the dev kit, P1 LoRa radio, P2 BLE RPC + flash
-persistence, P3 GNSS (below). Power management has since landed too: WFE
-idle-sleep in the idle task, a corrected account of HFXO ownership
-(NimBLE's rfmgmt always cycled the crystal; what landed here is the boot
-path stopping it after LFCLK bring-up, plus the anomaly-192 workaround in
-the RC fallback), and the T1000-E battery backend
-(`nrf/shim/battery_t1000e.c`): charge/VBUS detect plus rail-gated cell
-voltage, with the safety layers the Battery section below describes.
+The measured tables below carry the phase labels the port was built under:
+P0 protocol core on the dev kit, P1 LoRa radio, P2 BLE RPC + flash
+persistence, P3 GNSS (below).
+
+Power management covers WFE idle-sleep in the idle task, HFXO ownership
+(NimBLE's rfmgmt cycles the crystal; the boot path stops it after LFCLK
+bring-up, and the RC fallback carries the anomaly-192 workaround), and the
+T1000-E battery backend (`nrf/shim/battery_t1000e.c`): charge and VBUS
+detect plus rail-gated cell voltage, with the safety layers the Battery
+section below describes.
 
 Status, stated per the repo's honesty conventions: builds, boots, and runs
 as a live peer on the bench mesh from the Wio-WM1110 dev kit, with the
@@ -36,7 +37,7 @@ and after a reset the SAME identity, network key and BLE bond all loaded
 from flash and the node rejoined inside a minute. A 10-minute soak followed
 with continuous heartbeats and a stable heap. BLE pairing reliability: 45
 consecutive connected attempts reached encryption with zero link kills
-(the controller previously terminated ~20% of attempts; see
+(unpatched, the controller terminates ~20% of attempts; see
 `patches/nimble-dup-pdu-during-enc-start.patch`).
 
 T1000-E, verified on the physical card 2026-07-28: flashes through its
@@ -51,27 +52,28 @@ GNSS (P3) is implemented for the AG3335 module (see below) and bench-verified
 on the physical T1000-E, 2026-07-31 (see the GNSS section for what was
 checked).
 
-Power management, corrected from an earlier version of this README that
-claimed the 32MHz crystal (HFXO) stays on continuously: it does not, and
-never did on this port. NimBLE's link-layer rfmgmt (upstream, unmodified)
-already duty-cycles HFXO off between BLE events, requesting it 1500us
-ahead of each radio event, through direct CLOCK-peripheral register writes
-(source-verified: `nimble/controller/src/ble_ll_rfmgmt.c`; binary-verified
-by disassembling the shipped ELF, where `ble_phy_rfclk_enable/disable` are
-raw register stores, not calls into this project's own glue code in
-`src/nimble_glue.c`, which is vestigial on this FreeRTOS build). What this
-project's own power work has changed: the CPU's idle task now sleeps via
-WFE instead of busy-spinning at 64MHz (binary-verified against the fetched
-FreeRTOS kernel source), the boot path now stops HFXO once LFCLK bring-up
-finishes instead of leaving it on until BLE's first natural duty cycle,
-and nRF52840 anomaly 192 (LFRC calibration frequency error) is now worked
-around in the RC-oscillator fallback path (both source-verified against
-Nordic's documented errata and nrfx's own reference implementation, not
-yet bench-tested since every board on the bench fleet has a 32.768kHz
-crystal fitted, so that fallback path never runs). Bench-pending: overall
-current draw under real BLE activity and idle, and outdoor cold-start
-TTFF, which the GNSS bench pass did not measure. Not a supported device
-yet.
+Power management. The 32MHz crystal (HFXO) does not stay on continuously.
+NimBLE's link-layer rfmgmt (upstream, unmodified) duty-cycles HFXO off
+between BLE events, requesting it 1500us ahead of each radio event through
+direct CLOCK-peripheral register writes (source-verified:
+`nimble/controller/src/ble_ll_rfmgmt.c`; binary-verified by disassembling
+the shipped ELF, where `ble_phy_rfclk_enable/disable` are raw register
+stores, not calls into this project's own glue code in
+`src/nimble_glue.c`, which is vestigial on this FreeRTOS build).
+
+This port's own power work covers three things: the CPU's idle task sleeps
+via WFE rather than busy-spinning at 64MHz (binary-verified against the
+fetched FreeRTOS kernel source); the boot path stops HFXO once LFCLK
+bring-up finishes rather than leaving it on until BLE's first natural duty
+cycle; and the RC-oscillator fallback path works around nRF52840 anomaly
+192 (LFRC calibration frequency error), source-verified against Nordic's
+documented errata and nrfx's own reference implementation. That fallback
+is not bench-tested, because every board on the bench fleet has a
+32.768kHz crystal fitted and the path never runs.
+
+Bench-pending: overall current draw under real BLE activity and idle, and
+outdoor cold-start TTFF, which the GNSS bench pass did not measure. Not a
+supported device yet.
 
 ## Build
 
@@ -252,9 +254,9 @@ went out and waking it again at `last_send + interval - GPS_DUTY_WARM_MARGIN_S`,
 matching the policy. A 45-minute soak ran with a byte-stable heap, mesh RX
 observed every minute, and zero stream-buffer overruns throughout.
 
-Still bench-pending: overall current draw under real duty cycling (see the
-power-management note above for what has landed source- and
-binary-verified versus what still needs a bench), outdoor cold-start TTFF,
+Still bench-pending: overall current draw under real duty cycling (the
+power-management note above separates what is source- and binary-verified
+from what needs a bench), outdoor cold-start TTFF,
 and reacquisition after a multi-hour park where ephemeris has gone stale.
 Airoha's published AG3335 chip
 specification states a cold-start time to first fix under 25 seconds and a
