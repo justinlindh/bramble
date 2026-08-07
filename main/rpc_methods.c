@@ -2207,23 +2207,36 @@ static int handle_get_peer_locations(const cJSON* params, cJSON* result) {
                                                         &stored) == 0) {
                             cJSON* peer = cJSON_CreateObject();
 
-                            cJSON* position = cJSON_CreateObject();
-                            cJSON_AddNumberToObject(position, "lat", stored.pos.latitude_e7 / 1e7);
-                            cJSON_AddNumberToObject(position, "lon", stored.pos.longitude_e7 / 1e7);
-                            cJSON_AddNumberToObject(position, "alt", stored.pos.altitude_m);
-                            cJSON_AddNumberToObject(position, "accuracy", stored.pos.accuracy_m);
-                            cJSON_AddNumberToObject(position, "speed", stored.pos.speed_kmh);
-                            cJSON_AddNumberToObject(position, "heading",
-                                                    stored.pos.heading_deg2 * 2);
-                            cJSON_AddNumberToObject(position, "timestampMs",
-                                                    (double)stored.pos.timestamp * 1000.0);
+                            /* Only a coordinate-bearing tier gets a position.
+                             * A PRESENCE record stores an all-zero position
+                             * (location_deserialize_for_tier zeroes it and
+                             * keeps only the valid bit), so emitting one here
+                             * would report a peer who deliberately shares no
+                             * coordinates as sitting at 0,0. The in-RAM cache
+                             * applies the same rule; this is the other surface
+                             * reading the same records, and it has to agree. */
+                            if (location_tier_has_coordinates(stored.tier)) {
+                                cJSON* position = cJSON_CreateObject();
+                                cJSON_AddNumberToObject(position, "lat",
+                                                        stored.pos.latitude_e7 / 1e7);
+                                cJSON_AddNumberToObject(position, "lon",
+                                                        stored.pos.longitude_e7 / 1e7);
+                                cJSON_AddNumberToObject(position, "alt", stored.pos.altitude_m);
+                                cJSON_AddNumberToObject(position, "accuracy",
+                                                        stored.pos.accuracy_m);
+                                cJSON_AddNumberToObject(position, "speed", stored.pos.speed_kmh);
+                                cJSON_AddNumberToObject(position, "heading",
+                                                        stored.pos.heading_deg2 * 2);
+                                cJSON_AddNumberToObject(position, "timestampMs",
+                                                        (double)stored.pos.timestamp * 1000.0);
+                                cJSON_AddItemToObject(peer, "position", position);
+                            }
 
                             cJSON_AddStringToObject(peer, "addr",
                                                     info.key + PEER_LOCATION_KEY_PREFIX_LEN);
                             cJSON_AddStringToObject(peer, "name", "");
                             cJSON_AddStringToObject(peer, "tier",
                                                     location_tier_to_string(stored.tier));
-                            cJSON_AddItemToObject(peer, "position", position);
                             cJSON_AddBoolToObject(peer, "online",
                                                   location_age_is_fresh(stored.age_known,
                                                                         stored.received_ms,

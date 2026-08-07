@@ -1616,10 +1616,11 @@ export interface components {
             /** @description Peer display name. */
             name: string;
             tier: components["schemas"]["LocationTier"];
-            position: components["schemas"]["Position"];
-            /** @description Whether the peer is currently online. */
+            /** @description Omitted when the peer's tier carries no coordinates, which is the case for the presence tier: it reports only that the peer is there. Coordinates are never synthesized for such a peer, so a consumer must treat an absent position as "no position shared", not as the origin. */
+            position?: components["schemas"]["Position"];
+            /** @description Whether this position is recent enough to present as current. False when the node cannot compute the position's age, which is the case for anything persisted before the current boot: the node has no wall clock, so a stored uptime reading says nothing once the uptime counter has restarted. The position itself is still returned, as the peer's last known one. */
             online: boolean;
-            /** @description Unix timestamp (ms) of last update. */
+            /** @description Device uptime in milliseconds at which the position was received, measured on the CURRENT boot. 0 when the node cannot express the receipt time on that clock (a position carried over from an earlier boot), which is also when online is false. */
             lastUpdatedMs: number;
         };
         /** @description Node status information. */

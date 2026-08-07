@@ -320,6 +320,54 @@ void test_get_peer_locations_reads_records_written_before_the_boot_counter(void)
     cJSON_Delete(root);
 }
 
+void test_get_peer_locations_omits_a_position_for_a_presence_tier_peer(void) {
+    /* A PRESENCE share carries an online bit and no coordinates, so its stored
+     * position is all zeroes. Exporting one would report a peer who chose not
+     * to share a position as sitting at 0,0. The peer is still listed: the node
+     * does know they are there. */
+    g_nvs_allow_open = true;
+    uint32_t boot_id = location_store_begin_boot();
+    stage_peer_record("lp_10B76F29", 0, 0, LOCATION_TIER_PRESENCE, 4000, boot_id, false);
+    set_now_ms(9000);
+
+    cJSON* root = dispatch_get_peer_locations();
+    cJSON* peer_locations =
+        cJSON_GetObjectItem(cJSON_GetObjectItem(root, "result"), "peerLocations");
+    TEST_ASSERT_EQUAL(1, cJSON_GetArraySize(peer_locations));
+
+    cJSON* peer = cJSON_GetArrayItem(peer_locations, 0);
+    TEST_ASSERT_EQUAL_STRING("10B76F29", cJSON_GetObjectItem(peer, "addr")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("presence", cJSON_GetObjectItem(peer, "tier")->valuestring);
+    TEST_ASSERT_NULL_MESSAGE(cJSON_GetObjectItem(peer, "position"),
+                             "a presence-tier peer must not be given coordinates");
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(peer, "online")));
+
+    cJSON_Delete(root);
+}
+
+void test_get_peer_locations_keeps_coordinates_for_coordinate_bearing_tiers(void) {
+    /* The complement of the presence case: FULL and COARSE do carry
+     * coordinates, and gating the emit must not drop them. */
+    g_nvs_allow_open = true;
+    uint32_t boot_id = location_store_begin_boot();
+    stage_peer_record("lp_D0C9D311", 123456700, -456789000, LOCATION_TIER_FULL, 4000, boot_id,
+                      false);
+    stage_peer_record("lp_3575D5D7", 123456700, -456789000, LOCATION_TIER_COARSE, 4100, boot_id,
+                      false);
+    set_now_ms(9000);
+
+    cJSON* root = dispatch_get_peer_locations();
+    cJSON* peer_locations =
+        cJSON_GetObjectItem(cJSON_GetObjectItem(root, "result"), "peerLocations");
+    TEST_ASSERT_EQUAL(2, cJSON_GetArraySize(peer_locations));
+    for (int i = 0; i < 2; i++) {
+        cJSON* peer = cJSON_GetArrayItem(peer_locations, i);
+        TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(peer, "position"));
+    }
+
+    cJSON_Delete(root);
+}
+
 void test_get_config_returns_mailbox_enabled_false_by_default(void) {
     g_stub_mailbox_enabled = false;
 
@@ -362,6 +410,8 @@ int main(void) {
     RUN_TEST(test_get_peer_locations_exports_peer_identity_and_timestamps);
     RUN_TEST(test_get_peer_locations_reports_a_previous_boots_record_as_offline);
     RUN_TEST(test_get_peer_locations_reads_records_written_before_the_boot_counter);
+    RUN_TEST(test_get_peer_locations_omits_a_position_for_a_presence_tier_peer);
+    RUN_TEST(test_get_peer_locations_keeps_coordinates_for_coordinate_bearing_tiers);
     RUN_TEST(test_get_config_returns_mailbox_enabled_false_by_default);
     RUN_TEST(test_get_config_returns_mailbox_enabled_true_when_set);
     return UNITY_END();
