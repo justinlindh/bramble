@@ -49,6 +49,7 @@ extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_
 extern int mesh_get_channel_count(void);
 extern const char* mesh_get_channel_name(int index);
 extern const char* mesh_get_peer_name(uint32_t addr);
+extern int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]);
 extern size_t mesh_delivery_receipts_for_message(uint32_t message_id, uint32_t* out, size_t out_max,
                                                  size_t* total_unique);
 extern bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified,
@@ -225,6 +226,16 @@ static void format_compact_hop_name(char* out, size_t out_len, uint32_t hop_addr
         return;
     }
 
+    /* The local node is not in its own peer table, so a name lookup on it
+     * fails and it would render as a bare hex fragment beside named peers.
+     * "You" is both shorter than the 4-char name budget and unambiguous. */
+    uint32_t self_addr = 0;
+    uint8_t self_pubkey[32];
+    if (mesh_get_identity(&self_addr, self_pubkey) == 0 && self_addr == hop_addr) {
+        snprintf(out, out_len, "You");
+        return;
+    }
+
     const char* peer_name = mesh_get_peer_name(hop_addr);
     if (peer_name && peer_name[0]) {
         /* Compact route UI uses up to 4 chars per hop, no ellipsis. */
@@ -331,8 +342,10 @@ static void format_route_text(char* out, size_t out_len, uint8_t hop_count, cons
         return;
     }
 
-    /* Bubble width is fixed at 220 px; use compact fallback for long routes. */
-    const size_t compact_limit_chars = 28;
+    /* Bubble width is fixed at 220 px; use compact fallback for long routes.
+     * The budget counts the "Route: " label the caller renders ahead of this
+     * text, so a labelled line still fits on one row. */
+    const size_t compact_limit_chars = 21;
     size_t full_char_len = 0;
     if (format_route_compact_full(out, out_len, hop_count, hops, &full_char_len) &&
         full_char_len <= compact_limit_chars) {
@@ -520,16 +533,20 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
     if (can_expand) {
         if (route_expanded) {
-            /* The route line renders only when a route was recorded; a
-             * routeless message (pending, or delivered direct) shows just
-             * the receipts line rather than a placeholder. */
-            if (msg->route_hop_count > 0) {
+            /* The route line renders only when it says something the panel
+             * does not already state: a single-recipient message that
+             * actually traversed a relay. See
+             * chat_message_route_is_informative. */
+            if (chat_message_route_is_informative(is_mine, msg->channel_index,
+                                                  msg->route_hop_count)) {
                 char route_buf[200];
+                char route_line[220];
                 format_route_text(route_buf, sizeof(route_buf), msg->route_hop_count,
                                   msg->route_hops);
 
                 lv_obj_t* route_lbl = lv_label_create(bubble);
-                lv_label_set_text(route_lbl, route_buf);
+                snprintf(route_line, sizeof(route_line), "Route: %s", route_buf);
+                lv_label_set_text(route_lbl, route_line);
                 lv_label_set_long_mode(route_lbl, LV_LABEL_LONG_DOT);
                 lv_obj_set_width(route_lbl, LV_PCT(100));
                 lv_obj_set_style_text_font(route_lbl, &lv_font_montserrat_10, 0);
