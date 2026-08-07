@@ -107,6 +107,16 @@ lv_obj_t* ui_zone_scroll_column(lv_obj_t* parent);
  * A hop into an empty zone is refused (focus is never stranded). */
 void ui_zone_activate(ui_zone_t zone);
 
+/* Re-assert the one-visible-cursor invariant for whichever zone is current.
+ *
+ * A screen that rebuilds ITSELF, without a zone switch to reset things (the
+ * map's 5 s refresh and its zoom controls), re-adds its content widget to an
+ * empty content group, and lv_group_add_obj auto-focuses the first member. If
+ * the cursor is parked in chrome at that moment, both the fresh content widget
+ * and the chrome tab end up lit and neither is obviously the live one. Such a
+ * builder calls this after it has repopulated its group. */
+void ui_zone_sync_focus_visual(void);
+
 /* Bind input back to the content zone unconditionally and mark it current.
  * Screens call this when they (re)build their content, and ui_focus calls it
  * when a modal closes, so focus always starts in a known place. */
