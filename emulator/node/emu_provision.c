@@ -25,7 +25,10 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "location.h"
 #include "network_key.h"
+#include "nvs.h"
+#include "nvs_keys.h"
 
 static const char *TAG = "emu_provision";
 
@@ -66,5 +69,75 @@ int emu_node_seed_network_key_from_env(void) {
 
     network_key_set_provisioned(key);
     ESP_LOGI(TAG, "network key seeded from EMU_NETWORK_KEY (emulator provisioning)");
+    return 0;
+}
+
+/*
+ * Seeds a channel location-share target from the environment.
+ *
+ * Location sharing is configured over RPC (bramble.setLocationConfig), and
+ * emu-link carries no RPC, so a headless scenario has no in-band way to turn
+ * sharing on. This writes the same location namespace RPC writes, through the
+ * same rule codec and key builder the send path reads back, so a scenario
+ * exercises the real policy tick rather than a shortcut around it.
+ *
+ * EMU_LOCATION_CHANNEL is the channel index to share to; unset or blank is a
+ * no-op and the node shares nothing, which is the privacy-first default every
+ * other scenario keeps. EMU_LOCATION_INTERVAL_S and EMU_LOCATION_TIER are
+ * optional overrides.
+ *
+ * Returns 0 if a target was written, -1 otherwise.
+ */
+int emu_node_seed_location_share_from_env(void) {
+    const char *channel_str = getenv("EMU_LOCATION_CHANNEL");
+    if (!channel_str || !*channel_str)
+        return -1;
+
+    int channel_index = atoi(channel_str);
+    char key[LOCATION_TARGET_KEY_SIZE];
+    if (!location_channel_key(key, sizeof(key), channel_index)) {
+        ESP_LOGW(TAG, "EMU_LOCATION_CHANNEL=%s is outside the channel-target key space; ignoring",
+                 channel_str);
+        return -1;
+    }
+
+    const char *interval_str = getenv("EMU_LOCATION_INTERVAL_S");
+    uint16_t interval_s = LOCATION_MIN_INTERVAL_S;
+    if (interval_str && *interval_str) {
+        int parsed = atoi(interval_str);
+        if (parsed > 0)
+            interval_s = location_policy_clamp_interval_s((uint16_t)parsed);
+    }
+
+    const char *tier_str = getenv("EMU_LOCATION_TIER");
+    uint8_t tier = (tier_str && *tier_str) ? location_tier_from_string(tier_str) : LOCATION_TIER_FULL;
+
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
+        ESP_LOGW(TAG, "location namespace unavailable; not seeding a share target");
+        return -1;
+    }
+
+    location_rule_t rule = {.enabled = true, .tier = tier, .interval_s = interval_s};
+    char value[48];
+    location_rule_format(value, sizeof(value), &rule);
+
+    esp_err_t err = nvs_set_u8(nvs, "enabled", 1);
+    if (err == ESP_OK)
+        err = nvs_set_u16(nvs, "interval_s", interval_s);
+    if (err == ESP_OK)
+        err = nvs_set_str(nvs, "def_tier", location_tier_to_string(tier));
+    if (err == ESP_OK)
+        err = nvs_set_str(nvs, key, value);
+    if (err == ESP_OK)
+        err = nvs_commit(nvs);
+    nvs_close(nvs);
+
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "location share seed failed: %d", err);
+        return -1;
+    }
+
+    ESP_LOGI(TAG, "location share seeded from env: %s=%s (emulator provisioning)", key, value);
     return 0;
 }

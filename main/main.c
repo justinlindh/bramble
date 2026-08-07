@@ -64,6 +64,10 @@ void emu_node_flash_persist_init(void);
 /* Scripted-send hook (emu_autosend.c): originates a message on cue in a
  * scenario. No-op unless EMU_AUTO_SEND is set. */
 int emu_node_start_autosend(void);
+/* Location-share seed (emu_provision.c): writes a channel share target into
+ * the location namespace so the real policy tick drives a scenario. No-op
+ * unless EMU_LOCATION_CHANNEL is set. */
+int emu_node_seed_location_share_from_env(void);
 #endif
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
@@ -1621,6 +1625,11 @@ void app_main(void) {
     /* Emulator only: arm the scripted sender (no-op unless EMU_AUTO_SEND is set)
      * now that the mesh send path is live. */
     emu_node_start_autosend();
+    /* Emulator only: seed a location share target (no-op unless
+     * EMU_LOCATION_CHANNEL is set). The mesh task's policy tick reads the
+     * location namespace on every pass, so writing it here is picked up on
+     * the next tick. */
+    emu_node_seed_location_share_from_env();
 #endif
 
     while (1) {
