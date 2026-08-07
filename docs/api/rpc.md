@@ -42,7 +42,7 @@ Accepted params (all optional for partial updates):
   - `tier` (string, optional)
   - `interval_s` (number, optional)
 - `channel_targets` (array of objects):
-  - `channel` (number)
+  - `channel` (number, 0 to 15)
   - `enabled` (bool, optional)
   - `tier` (string, optional)
   - `interval_s` (number, optional)
@@ -53,10 +53,23 @@ Response:
 { "ok": true }
 ```
 
-Compatibility notes:
+Notes:
 
+- `enabled` is a permission, not an activity. A node transmits only to its
+  targets, so `enabled: true` with no enabled contact rule or channel target
+  sends nothing.
+- A contact target is unicast under that peer's DM session key and needs an
+  active session, which needs a route. A channel target is broadcast under the
+  channel key and needs no session, no route and no prior traffic, which is
+  what makes it work on a mesh whose members have only ever broadcast. Its
+  tier is the resolution every member of the channel receives.
+- Each target is paced off its own `interval_s`, floored at 30 seconds.
+- A `channel` outside 0 to 15 names no channel the node can share to, and the
+  whole request is rejected with an invalid-params error rather than stored as
+  a rule that never fires.
 - Existing `default_tier` and `interval_s` fields remain supported.
-- Contact rules are stored and read only from canonical `lcr_XXXXXXXX` keys.
+- Contact rules are stored and read only from canonical `lcr_XXXXXXXX` keys,
+  and channel targets from `lch_NN` keys.
 - Legacy `lc_XXXXXXXX` contact keys are no longer read or maintained.
 
 ### `bramble.getConfig` (location section)

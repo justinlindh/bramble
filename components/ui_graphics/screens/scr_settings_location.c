@@ -40,21 +40,32 @@ static lv_obj_t* s_loc_tier_dd = NULL;
 static lv_obj_t* s_loc_interval_dd = NULL;
 static lv_obj_t* s_loc_source_lbl = NULL;
 static lv_obj_t* s_loc_last_share_lbl = NULL;
+/* Shown only while sharing is switched on with nothing to send to. */
+static lv_obj_t* s_loc_no_target_lbl = NULL;
 static location_ui_state_t s_loc_state;
 
 /* ── Location peer targets ───────────────────────────────────────────────── */
 
-/* Per-peer contact record stored in NVS blob "ct_data" under "bramble_loc" */
+/*
+ * Peer targets are the canonical location-share rules: one NVS key per peer,
+ * LOCATION_CONTACT_RULE_PREFIX plus the address, holding the shared rule
+ * string. This is the same storage bramble.setLocationConfig writes and the
+ * only storage the send path reads, so a target added here transmits and
+ * shows up in getConfig, and one added from the app shows up here.
+ */
 typedef struct {
     uint32_t addr;
-    uint8_t tier; /* LOCATION_UI_TIER_* : 0xFF = use global */
-    uint8_t enabled;
-} loc_contact_nvs_t;
+    bool enabled;
+} loc_contact_ui_t;
 
 #define LOC_CONTACT_UI_MAX LOCATION_MAX_CONTACTS /* 16 */
 
-static loc_contact_nvs_t s_loc_contacts[LOC_CONTACT_UI_MAX];
+static loc_contact_ui_t s_loc_contacts[LOC_CONTACT_UI_MAX];
 static int s_loc_contact_count = 0;
+/* Channel targets are configured from the app, not from this screen, but they
+ * are targets, so the summary has to count them or it reports "no targets" on
+ * a node that is sharing to a channel. */
+static int s_loc_channel_target_count = 0;
 
 static int location_contacts_find(uint32_t addr) {
     for (int i = 0; i < s_loc_contact_count; i++) {
@@ -64,60 +75,195 @@ static int location_contacts_find(uint32_t addr) {
     return -1;
 }
 
-static void location_contacts_load(void) {
-    s_loc_contact_count = 0;
-    nvs_handle_t nvs;
-    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK)
-        return;
-    size_t len = sizeof(s_loc_contacts);
-    nvs_get_blob(nvs, "ct_data", s_loc_contacts, &len);
-    if (len > 0 && (len % sizeof(loc_contact_nvs_t)) == 0) {
-        s_loc_contact_count = (int)(len / sizeof(loc_contact_nvs_t));
-        if (s_loc_contact_count > LOC_CONTACT_UI_MAX)
-            s_loc_contact_count = LOC_CONTACT_UI_MAX;
-    }
-    nvs_close(nvs);
-}
+/*
+ * One-time carry-over of the legacy "ct_data" blob.
+ *
+ * That blob was private to this screen: nothing else read it, so peers
+ * toggled on here were never transmitted to and never appeared in the app.
+ * Rewriting each record as a canonical rule key makes those selections real,
+ * and the blob is erased so this runs once.
+ */
+static void location_contacts_migrate_legacy_blob(void) {
+    typedef struct {
+        uint32_t addr;
+        uint8_t tier; /* LOCATION_UI_TIER_* : 0xFF = use global */
+        uint8_t enabled;
+    } legacy_contact_t;
 
-static void location_contacts_save(void) {
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK)
         return;
-    nvs_set_blob(nvs, "ct_data", s_loc_contacts,
-                 (size_t)(s_loc_contact_count) * sizeof(loc_contact_nvs_t));
+
+    legacy_contact_t legacy[LOC_CONTACT_UI_MAX];
+    size_t len = sizeof(legacy);
+    if (nvs_get_blob(nvs, "ct_data", legacy, &len) != ESP_OK || len == 0 ||
+        (len % sizeof(legacy_contact_t)) != 0) {
+        nvs_close(nvs);
+        return;
+    }
+
+    location_policy_t policy;
+    location_policy_set_defaults(&policy);
+    uint16_t interval_s = 0;
+    if (nvs_get_u16(nvs, "interval_s", &interval_s) == ESP_OK)
+        policy.interval_s = interval_s;
+    char tier_buf[16] = {0};
+    size_t tier_len = sizeof(tier_buf);
+    if (nvs_get_str(nvs, "def_tier", tier_buf, &tier_len) == ESP_OK)
+        policy.default_tier = location_tier_from_string(tier_buf);
+    location_policy_normalize(&policy);
+
+    int count = (int)(len / sizeof(legacy_contact_t));
+    if (count > LOC_CONTACT_UI_MAX)
+        count = LOC_CONTACT_UI_MAX;
+    for (int i = 0; i < count; i++) {
+        char key[LOCATION_TARGET_KEY_SIZE];
+        if (!location_contact_key(key, sizeof(key), legacy[i].addr))
+            continue;
+        location_rule_t rule = {
+            .enabled = legacy[i].enabled != 0,
+            .tier = legacy[i].tier == 0xFF ? policy.default_tier : legacy[i].tier,
+            .interval_s = policy.interval_s,
+        };
+        char value[48];
+        location_rule_format(value, sizeof(value), &rule);
+        nvs_set_str(nvs, key, value);
+    }
+
+    nvs_erase_key(nvs, "ct_data");
     nvs_commit(nvs);
+    nvs_close(nvs);
+    ESP_LOGI(TAG, "carried %d peer target(s) over to canonical location rules", count);
+}
+
+static void location_contacts_load(void) {
+    location_contacts_migrate_legacy_blob();
+
+    s_loc_contact_count = 0;
+    s_loc_channel_target_count = 0;
+
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK)
+        return;
+
+    nvs_iterator_t it = NULL;
+    if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) == ESP_OK) {
+        while (it != NULL) {
+            nvs_entry_info_t info;
+            nvs_entry_info(it, &info);
+
+            char raw[64] = {0};
+            size_t raw_len = sizeof(raw);
+            if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
+                location_rule_t rule = {
+                    .enabled = true,
+                    .tier = LOCATION_TIER_COARSE,
+                    .interval_s = LOCATION_DEFAULT_INTERVAL_S,
+                };
+                if (strncmp(info.key, LOCATION_CONTACT_RULE_PREFIX,
+                            sizeof(LOCATION_CONTACT_RULE_PREFIX) - 1) == 0) {
+                    location_rule_parse(raw, &rule);
+                    if (s_loc_contact_count < LOC_CONTACT_UI_MAX) {
+                        s_loc_contacts[s_loc_contact_count].addr = (uint32_t)strtoul(
+                            info.key + sizeof(LOCATION_CONTACT_RULE_PREFIX) - 1, NULL, 16);
+                        s_loc_contacts[s_loc_contact_count].enabled = rule.enabled;
+                        s_loc_contact_count++;
+                    }
+                } else if (strncmp(info.key, LOCATION_CHANNEL_RULE_PREFIX,
+                                   sizeof(LOCATION_CHANNEL_RULE_PREFIX) - 1) == 0) {
+                    location_rule_parse(raw, &rule);
+                    if (rule.enabled)
+                        s_loc_channel_target_count++;
+                }
+            }
+
+            if (nvs_entry_next(&it) != ESP_OK) {
+                break;
+            }
+        }
+        nvs_release_iterator(it);
+    }
+
     nvs_close(nvs);
 }
 
-/* Toggle callback: user_data encodes peer addr as uintptr_t */
+static bool location_contact_is_enabled(uint32_t addr) {
+    int idx = location_contacts_find(addr);
+    return idx >= 0 && s_loc_contacts[idx].enabled;
+}
+
+static int location_enabled_target_count(void) {
+    int count = s_loc_channel_target_count;
+    for (int i = 0; i < s_loc_contact_count; i++) {
+        if (s_loc_contacts[i].enabled)
+            count++;
+    }
+    return count;
+}
+
+/* The share switch is a permission, not an activity: with it on and no target
+ * configured the node transmits nothing. Say so on the screen rather than
+ * leaving a switch that reads as "sharing". */
+static void location_share_hint_refresh(void) {
+    if (!s_loc_no_target_lbl)
+        return;
+    if (s_loc_state.sharing_enabled && location_enabled_target_count() == 0) {
+        lv_label_set_text(s_loc_no_target_lbl, "No targets yet, so nothing is sent.\n"
+                                               "Pick a peer below, or a channel in the app.");
+        lv_obj_clear_flag(s_loc_no_target_lbl, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_loc_no_target_lbl, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/* Toggle callback: user_data encodes peer addr as uintptr_t. Writing the rule
+ * key straight through is what makes the toggle mean something: the send path
+ * picks it up on its next policy tick. */
 static void location_contact_toggle_cb(lv_event_t* e) {
     lv_obj_t* sw = lv_event_get_target(e);
     bool want_enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
     uint32_t addr = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
 
+    char key[LOCATION_TARGET_KEY_SIZE];
+    if (!location_contact_key(key, sizeof(key), addr))
+        return;
+
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK)
+        return;
+
+    if (want_enabled) {
+        location_rule_t rule = {
+            .enabled = true,
+            .tier = (uint8_t)s_loc_state.tier,
+            .interval_s = s_loc_state.interval_s,
+        };
+        char value[48];
+        location_rule_format(value, sizeof(value), &rule);
+        nvs_set_str(nvs, key, value);
+    } else {
+        nvs_erase_key(nvs, key);
+    }
+    nvs_commit(nvs);
+    nvs_close(nvs);
+
     int idx = location_contacts_find(addr);
     if (want_enabled) {
-        if (idx < 0) {
-            /* Add new entry if space available */
-            if (s_loc_contact_count < LOC_CONTACT_UI_MAX) {
-                s_loc_contacts[s_loc_contact_count].addr = addr;
-                s_loc_contacts[s_loc_contact_count].tier = 0xFF; /* use global */
-                s_loc_contacts[s_loc_contact_count].enabled = 1;
-                s_loc_contact_count++;
-            }
-        } else {
-            s_loc_contacts[idx].enabled = 1;
-        }
-    } else {
         if (idx >= 0) {
-            /* Remove by shifting */
-            for (int i = idx; i < s_loc_contact_count - 1; i++) {
-                s_loc_contacts[i] = s_loc_contacts[i + 1];
-            }
-            s_loc_contact_count--;
+            s_loc_contacts[idx].enabled = true;
+        } else if (s_loc_contact_count < LOC_CONTACT_UI_MAX) {
+            s_loc_contacts[s_loc_contact_count].addr = addr;
+            s_loc_contacts[s_loc_contact_count].enabled = true;
+            s_loc_contact_count++;
         }
+    } else if (idx >= 0) {
+        for (int i = idx; i < s_loc_contact_count - 1; i++) {
+            s_loc_contacts[i] = s_loc_contacts[i + 1];
+        }
+        s_loc_contact_count--;
     }
-    location_contacts_save();
+
+    location_share_hint_refresh();
     ESP_LOGI(TAG, "Peer target %08lX %s", (unsigned long)addr, want_enabled ? "added" : "removed");
 }
 
@@ -251,6 +397,7 @@ static void location_share_changed_cb(lv_event_t* e) {
     bool enabled = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
     location_ui_apply_action(&s_loc_state, LOCATION_UI_ACTION_SET_SHARING, enabled ? 1 : 0);
     location_ui_save_state(&s_loc_state);
+    location_share_hint_refresh();
 }
 
 static void location_tier_changed_cb(lv_event_t* e) {
@@ -364,8 +511,8 @@ static void build_loc_peer_targets_section(lv_obj_t* cont, lv_group_t* g) {
         lv_obj_set_style_bg_color(sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
         lv_obj_set_style_bg_color(sw, BR_COLOR_TEXT, LV_PART_KNOB);
 
-        /* Pre-check if this peer is already a target */
-        if (location_contacts_find(nb->addr) >= 0) {
+        /* Pre-check if this peer is already an enabled target */
+        if (location_contact_is_enabled(nb->addr)) {
             lv_obj_add_state(sw, LV_STATE_CHECKED);
         }
 
@@ -378,7 +525,7 @@ static void build_loc_peer_targets_section(lv_obj_t* cont, lv_group_t* g) {
     /* Show persisted offline targets (not currently visible as neighbors) */
     bool shown_offline_hdr = false;
     for (int ci = 0; ci < s_loc_contact_count; ci++) {
-        const loc_contact_nvs_t* ct = &s_loc_contacts[ci];
+        const loc_contact_ui_t* ct = &s_loc_contacts[ci];
         /* Check if already shown as a neighbor */
         bool is_neighbor = false;
         for (int ni = 0; ni < MAX_NEIGHBORS; ni++) {
@@ -449,19 +596,16 @@ void settings_location_summary(char* buf, size_t n) {
         tier = "exact";
     else if (st.tier == LOCATION_UI_TIER_PRESENCE)
         tier = "presence";
-    /* Count only ENABLED targets: the NVS blob keeps a record for every peer
-     * that ever had a toggle, so counting raw records reported "16 peers" on a
-     * bench with two peers, both switched off. */
-    int enabled = 0;
+    /* Count only ENABLED targets: a rule the app switched off is a record,
+     * not an audience, and counting records reported "16 peers" on a bench
+     * with two peers, both switched off. */
+    int enabled_contacts = 0;
     for (int i = 0; i < s_loc_contact_count; i++) {
         if (s_loc_contacts[i].enabled)
-            enabled++;
+            enabled_contacts++;
     }
-    if (enabled > 0) {
-        snprintf(buf, n, "%d peer%s, %s", enabled, enabled == 1 ? "" : "s", tier);
-    } else {
-        snprintf(buf, n, "On, %s", tier);
-    }
+    location_ui_format_share_summary(buf, n, st.sharing_enabled, enabled_contacts,
+                                     s_loc_channel_target_count, tier);
 }
 
 void settings_location_builder(bramble_layout_t* layout, void* ctx) {
@@ -483,6 +627,11 @@ void settings_location_builder(bramble_layout_t* layout, void* ctx) {
     lv_obj_add_event_cb(s_loc_share_sw, location_share_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     if (g)
         lv_group_add_obj(g, s_loc_share_sw);
+
+    ui_zone_track(&s_loc_no_target_lbl, lv_label_create(cont));
+    lv_obj_set_style_text_font(s_loc_no_target_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_loc_no_target_lbl, BR_COLOR_WARNING, 0);
+    location_share_hint_refresh();
 
     lv_obj_t* loc_tier_row = settings_create_setting_row(cont, "Privacy Tier");
     ui_zone_track(&s_loc_tier_dd, lv_dropdown_create(loc_tier_row));

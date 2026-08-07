@@ -662,8 +662,10 @@ lat_e7(4) + lon_e7(4) + alt_m(2) + accuracy_m(1) + speed_kmh(1) + heading_deg2(1
 
 **Sharing rules:**
 
-- Periodic sharing is gated by the persisted policy (`location_policy_t`: enabled flag, default tier, interval): `location_policy_should_send(policy, has_source, has_targets, now_ms, last_sent_ms)` returns true once the configured interval has elapsed and both a position source and at least one target exist.
-- Per-contact rules (which peers receive updates and at which tier) are persisted in NVS under the `lcr_` key prefix and managed over RPC (`bramble.setLocationContact`).
+- A share round runs when the persisted policy (`location_policy_t`: enabled flag, default tier, interval) is enabled, a position source resolves, and at least one target is configured: `location_share_round_enabled(policy, has_source, target_count)`. Pacing is per target, not per round: each target carries its own `interval_s` and is scheduled independently (`location_schedule_is_due` / `location_schedule_record`), so a fast channel target and a slow contact rule each get the cadence they were configured with.
+- Targets come in two kinds, both resolved from one NVS pass by `location_target_from_entry`. Per-contact rules (`lcr_` key prefix, managed over RPC by `bramble.setLocationContact`) are unicast under that peer's DM session key and require an active session, and therefore a route. Per-channel targets (`lch_` key prefix, managed by `bramble.setLocationConfig`) are broadcast under the channel key and require no session, no route and no prior directed traffic; the tier on a channel target is the resolution every member of that channel receives.
+- A failed attempt retries differently by kind. A channel broadcast that the TX gate refused retries after `LOCATION_SEND_RETRY_S`, never longer than its own interval, because the refusal is a transient radio condition. A contact unicast consumes its interval, because its usual failure is a missing DM session that a fast retry cannot resolve.
+- LOCATION frames are not relayed, so a share is read by nodes that hear the sender directly.
 
 **Position cache:**
 
