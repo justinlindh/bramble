@@ -120,7 +120,7 @@ Defined in `bramble_theme.h`:
 
 ```text
 ┌──────────────────────────────────────┐  y=0
-│ 🔋 85%  📶 3   GPS  --:--  BRAMBLE  │  ← Status Bar (h=20)
+│ 🔋 85%  📶 3   🛰 12  --:--  BRAMBLE  │  ← Status Bar (h=20)
 ├──────────────────────────────────────┤  y=20
 │                                      │
 │          [Content Area]              │  ← 320×180 px
@@ -142,7 +142,7 @@ Horizontal flex row, space-between alignment, 2px padding all sides, Montserrat 
 |----------|----------------|----------------------------------------|-----------------|
 | Left     | Battery        | `{sym} {pct}%` (sym varies by level)  | TEXT (colored by level; thresholds below) |
 | -        | Signal         | `📶 {neighbor_count}`                 | TEXT            |
-| -        | GNSS           | `{sym} {count}` (2-char right-aligned count, hidden when the board has no receiver) | SUCCESS on fix, WARNING while acquiring, DANGER on no signal |
+| -        | GNSS           | `{sym} {count}` (2-char right-aligned count, hidden when the board has no receiver and when GPS is powered off in Settings) | SUCCESS on fix, WARNING while acquiring, DANGER on no signal |
 | -        | Time           | `HH:MM` UTC from GPS, else mesh network time, else `--:--` | TEXT            |
 | Right    | Node Name      | `mesh_get_node_name()`, trimmed to fit | PRIMARY (green)  |
 

@@ -44,9 +44,10 @@ typedef struct {
  * mutex; the nRF driver wraps a FreeRTOS mutex). The multi-word members
  * (first_line_ms, the slot until_ms deadlines) can therefore tear on an
  * unlocked reader such as gps.c: those values are only ever compared against
- * a deadline, never accumulated, so the worst outcome is one stale-versus-
- * fresh flip of a single constellation's liveness or of the NMEA age for one
- * UI tick. */
+ * a deadline, never accumulated. A tear that splits a low-word carry yields
+ * an arbitrary deadline rather than a merely stale one, so the reported
+ * liveness of one constellation, or the NMEA age, can be wrong for a UI tick
+ * until the next write lands. Nothing downstream persists or acts on it. */
 typedef struct {
     char line_buf[GPS_FEED_MAX_LINE];
     int line_pos;

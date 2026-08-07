@@ -52,8 +52,15 @@ function accessibleName(
         : `GNSS no signal: 0 tracked of ${inView} in view`;
     case 'acquiring': {
       const clauses: string[] = [];
-      if (tracked !== undefined && inView !== undefined) clauses.push(`${tracked} tracked of ${inView} in view`);
-      else if (tracked !== undefined) clauses.push(`${tracked} tracked`);
+      // A receiver with GSV switched off reports no tracked or in-view count,
+      // and the GGA used count is the only number there is. The visible label
+      // already falls back to it, so the announced name must too or the two
+      // disagree on exactly the receiver this fallback exists for.
+      if (tracked === undefined && inView === undefined && used !== undefined) {
+        clauses.push(`${used} satellites used`);
+      } else if (tracked !== undefined && inView !== undefined) {
+        clauses.push(`${tracked} tracked of ${inView} in view`);
+      } else if (tracked !== undefined) clauses.push(`${tracked} tracked`);
       else if (inView !== undefined) clauses.push(`${inView} in view`);
       if (snr !== undefined && snr > 0) clauses.push(`best ${snr} dBHz`);
       return clauses.length > 0 ? `GNSS acquiring: ${clauses.join(', ')}` : 'GNSS acquiring';

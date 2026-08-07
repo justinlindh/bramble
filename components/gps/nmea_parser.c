@@ -9,6 +9,19 @@
 /* Helper: check if field is empty */
 static bool field_empty(const char* field) { return !field || field[0] == '\0'; }
 
+/* Digits only. atoi maps anything else to 0, which is a meaningful value for
+ * several NMEA fields, so a caller that must tell "zero" from "garbage" checks
+ * this first. */
+static bool field_is_numeric(const char* field) {
+    if (field_empty(field))
+        return false;
+    for (const char* c = field; *c != '\0'; c++) {
+        if (*c < '0' || *c > '9')
+            return false;
+    }
+    return true;
+}
+
 /*
  * Split an NMEA sentence into comma-separated fields IN PLACE, preserving
  * empty fields. NMEA uses empty fields to mean "no data" (e.g. an RMC with
@@ -214,6 +227,12 @@ bool nmea_parse_gsv(char* sentence, nmea_gsv_t* out) {
         total_msgs = 0;
     out->total_msgs = (uint8_t)total_msgs;
 
+    /* A corrupt msg_num must not read as 0: the feed treats msg_num <= 1 as
+     * the start of a cycle and drops what the cycle accumulated so far, so a
+     * garbled field would silently discard satellites already counted. Reject
+     * the sentence instead, as the other malformed fields here do. */
+    if (!field_empty(fields[2]) && !field_is_numeric(fields[2]))
+        return false;
     int msg_num = field_empty(fields[2]) ? 0 : atoi(fields[2]);
     if (msg_num < 0 || msg_num > 9)
         msg_num = 0;
