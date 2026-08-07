@@ -53,20 +53,24 @@ void test_receipt_summary_truncates_with_plus_n(void) {
 
 void test_route_line_only_for_relayed_direct_messages(void) {
     /* A relayed DM is the only case worth a route line. */
-    TEST_ASSERT_TRUE(chat_message_route_is_informative(MSG_STORE_DM_CHANNEL, 3));
-    TEST_ASSERT_TRUE(chat_message_route_is_informative(MSG_STORE_DM_CHANNEL, 8));
+    TEST_ASSERT_TRUE(chat_message_route_is_informative(true, MSG_STORE_DM_CHANNEL, 3));
+    TEST_ASSERT_TRUE(chat_message_route_is_informative(true, MSG_STORE_DM_CHANNEL, 8));
 
     /* Direct DM: the "route" is just sender then recipient, which restates
      * the addressing already on screen. */
-    TEST_ASSERT_FALSE(chat_message_route_is_informative(MSG_STORE_DM_CHANNEL, 2));
-    TEST_ASSERT_FALSE(chat_message_route_is_informative(MSG_STORE_DM_CHANNEL, 0));
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(true, MSG_STORE_DM_CHANNEL, 2));
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(true, MSG_STORE_DM_CHANNEL, 0));
 
     /* Channel and broadcast: the store holds one route field that every
      * recipient's receipt overwrites, so any single line would present one
      * arbitrary recipient's path as the message's path. */
-    TEST_ASSERT_FALSE(chat_message_route_is_informative(0, 3));
-    TEST_ASSERT_FALSE(chat_message_route_is_informative(0, 8));
-    TEST_ASSERT_FALSE(chat_message_route_is_informative(2, 5));
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(true, 0, 3));
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(true, 0, 8));
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(true, 2, 5));
+
+    /* An incoming broadcast is stored channel-less exactly like a DM, so
+     * without the direction it would be misclassified as a relayed DM. */
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(false, MSG_STORE_DM_CHANNEL, 3));
 }
 
 void test_receipt_summary_empty_reads_no_receipts(void) {

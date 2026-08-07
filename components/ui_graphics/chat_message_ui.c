@@ -31,8 +31,9 @@ bool chat_message_has_details_toggle(bool is_outgoing, uint32_t packet_id) {
     return is_outgoing && packet_id != 0;
 }
 
-bool chat_message_route_is_informative(int16_t channel_index, uint8_t route_hop_count) {
-    return channel_index < 0 && route_hop_count > 2;
+bool chat_message_route_is_informative(bool is_outgoing, int16_t channel_index,
+                                       uint8_t route_hop_count) {
+    return is_outgoing && channel_index < 0 && route_hop_count > 2;
 }
 
 int chat_format_receipt_summary(char* out, size_t out_len, const uint32_t* addrs,

@@ -537,7 +537,8 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
              * does not already state: a single-recipient message that
              * actually traversed a relay. See
              * chat_message_route_is_informative. */
-            if (chat_message_route_is_informative(msg->channel_index, msg->route_hop_count)) {
+            if (chat_message_route_is_informative(is_mine, msg->channel_index,
+                                                  msg->route_hop_count)) {
                 char route_buf[200];
                 char route_line[220];
                 format_route_text(route_buf, sizeof(route_buf), msg->route_hop_count,
