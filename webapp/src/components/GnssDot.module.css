@@ -1,0 +1,63 @@
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+/* Matches the topbar's other separators. Owned here rather than by the header
+   so a hidden indicator cannot leave a dangling bullet behind. */
+.divider {
+  font-size: 0.8rem;
+  color: var(--border);
+  user-select: none;
+}
+
+.count {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Phone portrait: the topbar cannot hold the count next to the connection
+   label, the node name and the Disconnect button, and a partly clipped count
+   reads as a smaller number rather than as a truncated one. The dot carries
+   the state on its own and the full counts stay in its accessible name and on
+   the Stats tab. */
+@media (max-width: 400px) {
+  .count {
+    display: none;
+  }
+}
+
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.unknown {
+  background: var(--text-muted);
+}
+
+.noSignal {
+  background: var(--danger);
+}
+
+/* Acquiring blinks: a steady amber dot next to a steady red one reads as two
+   shades of "bad" at a glance, and the motion is what separates them. */
+.acquiring {
+  background: var(--warning);
+  animation: blink 1s ease-in-out infinite;
+}
+
+.fix {
+  background: var(--accent);
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}

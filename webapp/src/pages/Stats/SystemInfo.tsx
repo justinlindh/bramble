@@ -33,6 +33,55 @@ interface Props {
   config: BrambleConfig;
 }
 
+const GNSS_STATE_WORDS: Record<NonNullable<NodeStatus['gpsState']>, string> = {
+  absent: 'off',
+  no_signal: 'no signal',
+  acquiring: 'acquiring',
+  fix: 'fix',
+};
+
+/**
+ * GNSS detail rows, on the page an operator reaches for when a node is
+ * misbehaving. Spelling out used, tracked and in-view separately is the point:
+ * satellites listed in view with none tracked means the almanac predicts them
+ * and the receiver hears none, which is a different fault from a cold start.
+ * Boards without a receiver contribute no rows at all.
+ */
+function gnssRows(status: NodeStatus): Row[] {
+  if (!status.gpsAvailable) return [];
+
+  const state = status.gpsState;
+  const rows: Row[] = [
+    {
+      label: 'GNSS',
+      value: state ? GNSS_STATE_WORDS[state] : 'unknown',
+      color: state === undefined ? 'muted'
+        : state === 'no_signal' ? 'danger'
+        : state === 'acquiring' ? 'warning'
+        : state === 'absent' ? 'muted'
+        : undefined,
+    },
+  ];
+
+  // Undefined counts mean firmware that predates these fields, which reads as
+  // unknown; printing zeroes would invent a receiver hearing nothing.
+  const { gpsSatsUsed: used, gpsSatsTracked: tracked, gpsSatsInView: inView } = status;
+  const known = used !== undefined || tracked !== undefined || inView !== undefined;
+  rows.push({
+    label: 'Satellites',
+    value: known
+      ? `${used ?? 0} used / ${tracked ?? 0} tracked / ${inView ?? 0} in view`
+      : 'unknown',
+    color: known ? undefined : 'muted',
+  });
+
+  if (status.gpsSnrMaxDbHz) {
+    rows.push({ label: 'Best C/N0', value: `${status.gpsSnrMaxDbHz} dBHz` });
+  }
+
+  return rows;
+}
+
 function hasBattery(status: NodeStatus): boolean {
   // Boards without a battery commonly report 0mV / 0%.
   if (status.batteryMv === undefined && status.batteryPct === undefined) return false;
@@ -94,6 +143,7 @@ export function SystemInfo({ status, config }: Props) {
             : ('muted' as const),
         }]
       : []),
+    ...gnssRows(status),
     {
       label: 'Firmware',
       value: status.fwVersion,

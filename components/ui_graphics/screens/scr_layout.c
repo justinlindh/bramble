@@ -10,18 +10,19 @@
 #include "battery.h"
 #include "board_config.h"
 #include "gps.h"
+#include "gnss_status.h"
 #include <time.h>
 #include "routing.h"
 #include "airtime_budget.h"
 #include "esp_log.h"
 #include <stdio.h>
+#include <string.h>
 
 static const char* TAG = "layout";
 static bramble_layout_t s_layout;
 
 extern const char* mesh_get_node_name(void);
 extern bool mesh_get_network_time_ms(int64_t* out_ms);
-extern bool bramble_gps_enabled(void); /* persisted GPS power preference (main.c) */
 
 static const char* tab_labels[TAB_COUNT] = {LV_SYMBOL_ENVELOPE " Chat", LV_SYMBOL_WIFI " Nodes",
                                             LV_SYMBOL_GPS " Map", LV_SYMBOL_BARS " Stats",
@@ -120,10 +121,12 @@ bramble_layout_t* layout_create(void) {
     lv_obj_set_style_text_font(s_layout.lbl_signal, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_layout.lbl_signal, BR_COLOR_TEXT, 0);
 
-    /* GPS is an icon, not a text label: its color carries the state (see
-     * layout_update_status), matching the WiFi/battery icon grammar. */
+    /* GNSS is an icon plus a two-character count: the color carries the
+     * three-way state and the count carries how many satellites are behind it
+     * (see layout_update_status). Created at its full width so the
+     * SPACE_BETWEEN row does not reflow on the first update. */
     s_layout.lbl_gps = lv_label_create(s_layout.status_bar);
-    lv_label_set_text(s_layout.lbl_gps, LV_SYMBOL_GPS);
+    lv_label_set_text(s_layout.lbl_gps, LV_SYMBOL_GPS " --");
     lv_obj_set_style_text_font(s_layout.lbl_gps, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_layout.lbl_gps, BR_COLOR_TEXT_SEC, 0);
 
@@ -232,6 +235,52 @@ void layout_set_tab(bramble_layout_t* layout, bramble_tab_t tab) {
     layout_rebuild_content(layout, tab_builder, NULL);
 }
 
+/* Pixels the node name may occupy in the 320 px status bar. What is left after
+ * the battery (~49 px), signal (~30 px), GNSS badge (~27 px) and clock
+ * (~31 px) items and the gaps a SPACE_BETWEEN row needs between them. */
+#define BR_STATUS_NAME_MAX_W 150
+
+/* Copy the longest prefix of src that fits max_w pixels at montserrat_12,
+ * marking a cut with a trailing "..". Measuring beats counting characters: the
+ * font is proportional, so "WWWWWWWW" is more than twice the width of
+ * "iiiiiiii". Whole UTF-8 sequences only, so a cut never splits a codepoint. */
+static void fit_to_width(char* out, size_t out_len, const char* src, int32_t max_w) {
+    static const char kEllipsis[] = "..";
+    if (!out || out_len < sizeof(kEllipsis) + 1)
+        return;
+    out[0] = '\0';
+    if (!src)
+        return;
+
+    const lv_font_t* font = &lv_font_montserrat_12;
+    size_t len = strlen(src);
+    if (len < out_len && lv_text_get_width(src, (uint32_t)len, font, 0) <= max_w) {
+        memcpy(out, src, len + 1);
+        return;
+    }
+
+    /* Longest whole-codepoint prefix that leaves room for the marker, bounded
+     * by the output buffer as well as by the pixel budget. */
+    int32_t budget = max_w - lv_text_get_width(kEllipsis, sizeof(kEllipsis) - 1, font, 0);
+    size_t limit = out_len - sizeof(kEllipsis);
+    if (limit > len)
+        limit = len;
+    while (limit > 0 && ((unsigned char)src[limit] & 0xC0) == 0x80)
+        limit--; /* never let the buffer bound itself land mid-codepoint */
+    size_t keep = 0;
+    for (size_t i = 0; i < limit;) {
+        size_t next = i + 1;
+        while (next < limit && ((unsigned char)src[next] & 0xC0) == 0x80)
+            next++; /* skip UTF-8 continuation bytes */
+        if (lv_text_get_width(src, (uint32_t)next, font, 0) > budget)
+            break;
+        keep = next;
+        i = next;
+    }
+    memcpy(out, src, keep);
+    memcpy(out + keep, kEllipsis, sizeof(kEllipsis));
+}
+
 void layout_update_status(bramble_layout_t* layout) {
     /* Battery */
     int pct = battery_read_pct();
@@ -276,21 +325,45 @@ void layout_update_status(bramble_layout_t* layout) {
         lv_label_set_text(layout->lbl_time, "--:--");
     }
 
-    /* GPS icon color carries the state:
-     *   - absent (no board cap) or powered off in Settings -> hidden
-     *   - fix                                              -> success green
-     *   - searching (powered, no fix yet)                 -> muted */
-    if (board_has_cap(BOARD_CAP_GPS) && bramble_gps_enabled()) {
-        lv_obj_clear_flag(layout->lbl_gps, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_text_color(layout->lbl_gps,
-                                    gps_has_fix() ? BR_COLOR_SUCCESS : BR_COLOR_TEXT_SEC, 0);
-    } else {
+    /* GNSS: the icon color and the count together carry the three-way state,
+     * because "no fix" alone cannot tell a receiver hearing nothing from one
+     * hearing satellites and still converging.
+     *   absent or powered off -> hidden
+     *   no signal             -> danger red, "--"
+     *   acquiring             -> warning amber, satellites tracked
+     *   fix                   -> success green, satellites used
+     * The count is right-aligned to a fixed two characters so the
+     * SPACE_BETWEEN row does not shuffle every tick. */
+    gnss_ui_input_t gnss;
+    ui_shared_gnss_state(&gnss);
+    gnss_ui_state_t gstate = gnss_ui_classify(&gnss);
+    if (gstate == GNSS_UI_ABSENT) {
         lv_obj_add_flag(layout->lbl_gps, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        char count[4];
+        gnss_ui_badge_count(&gnss, count, sizeof(count));
+        snprintf(buf, sizeof(buf), LV_SYMBOL_GPS " %s", count);
+        lv_label_set_text(layout->lbl_gps, buf);
+        lv_obj_set_style_text_color(layout->lbl_gps,
+                                    gstate == GNSS_UI_FIX         ? BR_COLOR_SUCCESS
+                                    : gstate == GNSS_UI_ACQUIRING ? BR_COLOR_WARNING
+                                                                  : BR_COLOR_DANGER,
+                                    0);
+        lv_obj_clear_flag(layout->lbl_gps, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* Node name from the mesh (settable via Settings / bramble.setNodeName) */
+    /* Node name from the mesh (settable via Settings / bramble.setNodeName),
+     * trimmed to the pixel budget the other status-bar items leave it. Names
+     * run to BRAMBLE_NODE_NAME_MAX characters, which is wider than a 320 px
+     * row can hold, and this is the last item in a SPACE_BETWEEN flow: without
+     * the trim a long name walks the battery, signal and GNSS items off the
+     * left edge. */
     const char* name = mesh_get_node_name();
-    lv_label_set_text(layout->lbl_node_name, (name && name[0]) ? name : "BRAMBLE");
+    if (!name || !name[0])
+        name = "BRAMBLE";
+    char name_buf[40];
+    fit_to_width(name_buf, sizeof(name_buf), name, BR_STATUS_NAME_MAX_W);
+    lv_label_set_text(layout->lbl_node_name, name_buf);
 }
 
 void layout_set_unread(bramble_layout_t* layout, int count) {

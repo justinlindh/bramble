@@ -1207,6 +1207,7 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
@@ -1228,6 +1229,7 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
@@ -1249,6 +1251,7 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
@@ -1270,6 +1273,7 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
@@ -1309,6 +1313,7 @@ target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
@@ -1343,6 +1348,7 @@ target_include_directories(test_rpc_set_auth_token_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
@@ -1373,6 +1379,7 @@ add_executable(test_rpc_anchor_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
@@ -1401,6 +1408,7 @@ target_include_directories(test_rpc_anchor_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
@@ -1435,6 +1443,7 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
@@ -1469,6 +1478,7 @@ target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
@@ -1668,6 +1678,7 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
@@ -1697,6 +1708,7 @@ target_include_directories(test_rpc_methods_firmware PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
@@ -1728,6 +1740,7 @@ add_executable(test_rpc_scratch_isolation
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
@@ -1757,6 +1770,7 @@ target_include_directories(test_rpc_scratch_isolation PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
@@ -1780,6 +1794,16 @@ add_executable(test_chat_message_ui
 target_include_directories(test_chat_message_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
+
+# GNSS three-way state classifier and formatters (pure, no LVGL, no driver)
+add_executable(test_gnss_status
+    test_gnss_status.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+)
+target_include_directories(test_gnss_status PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
 )
 
 # GPS module behavior tests (ESP path with host stubs)
@@ -1964,6 +1988,7 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
@@ -1994,6 +2019,7 @@ target_include_directories(test_host_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include

@@ -700,16 +700,25 @@ There is no second copy of these workflows anywhere: the Gitea mirror that once
 carried a frozen `.gitea/workflows/` tree is retired, and that tree is gone.
 
 `webapp-build-publish.yml` is the one workflow that is not a check. It stages
-the web flasher, runs the webapp tests, builds the unified runtime image, pushes
-it to the registry, and then redeploys the `bramble-web-client` container on the
-`bramble-host` runner (the container-capable persistent host that carries the
-docker socket and registry reachability). It is `workflow_dispatch` only, so
-publishing the web client is always a deliberate act.
+the web flasher, builds the unified runtime image, pushes it to the registry
+with OCI media types, and reads both published tags back to prove the push
+landed. It runs on the `bramble-host` runner, the container-capable persistent
+host that carries the docker socket and registry reachability.
+
+It is a reusable workflow, not a push-triggered one. `release-components.yml`
+calls it from a `webapp-image` job once semantic-release has cut a `webapp-v*`
+tag, so an image is published per released version rather than per merge. A
+`workflow_dispatch` with a `webapp_tag` input republishes an existing release
+tag. A workflow triggered by `push: tags:` would not work here: semantic-release
+pushes the tag with the default `GITHUB_TOKEN`, and a tag pushed by
+`GITHUB_TOKEN` does not trigger workflows.
 
 Every step of it gates. The registry push needs the `REGISTRY_HOST` and
 `REGISTRY_IMAGE_REPO` repo variables plus the `REGISTRY_USERNAME` and
-`REGISTRY_PAT` secrets; without them the login step fails against the public
-placeholder default rather than pushing somewhere unintended. The redeploy fails
-the job if the new container does not come up and pass `/api/healthz` inside 60
-seconds. There is no fallback path and nothing is swallowed, so a green run means
-the image was pushed and the running container is serving it.
+`REGISTRY_PAT` secrets, and a preflight step fails the run when any of them is
+unset rather than falling back to a default target. Nothing is swallowed, so a
+green run means the image was pushed and verified in the registry.
+
+Publishing is not deploying. The hosted site rolls forward through GitOps, and
+this repo's CI holds no cluster or GitOps credential; see
+[deploy-bramble-web-client.md](deploy-bramble-web-client.md).
