@@ -11,9 +11,9 @@ persistence, P3 GNSS (below). Power management has since landed too: WFE
 idle-sleep in the idle task, a corrected account of HFXO ownership
 (NimBLE's rfmgmt always cycled the crystal; what landed here is the boot
 path stopping it after LFCLK bring-up, plus the anomaly-192 workaround in
-the RC fallback), and charge/VBUS detect on the T1000-E
-(`nrf/shim/battery_saadc.c`). The T1000-E's cell voltage reading in that
-same file does not work: see the Battery section below.
+the RC fallback), and the T1000-E battery backend
+(`nrf/shim/battery_t1000e.c`): charge/VBUS detect plus rail-gated cell
+voltage, with the safety layers the Battery section below describes.
 
 Status, stated per the repo's honesty conventions: builds, boots, and runs
 as a live peer on the bench mesh from the Wio-WM1110 dev kit, with the
@@ -264,49 +264,58 @@ consumption figures for the chip, so none are cited here.
 ## Battery (T1000-E)
 
 The T1000-E carries a LiPo cell plus charger-IC status pins (Seeed's stock
-Meshtastic-compatible wiring). `shim/battery_saadc.c` reads charge and
-VBUS detect (P1.03, P0.05) as plain GPIO inputs, and samples P0.02/AIN0
-through the board's 2x divider with the nRF52840's SAADC, satisfying the
-same `components/battery/include/battery.h` contract as the ESP32 fleet and
-the emulator's virtual battery: `battery_get_status()` returns averaged
-millivolts, a curve percentage, presence, and a hardware-informed charging
-state. The charging state is correct; the millivolts are not, for the
-reason below. Every field this backend produces flows through the shared code the
-ESP32 fleet already uses: the same LiPo discharge curve
-(`components/battery/battery_pct.c`), the same beacon-level 0xFF
+Meshtastic-compatible wiring). `shim/battery_t1000e.c` is the backend:
+charge and VBUS detect (P1.03, P0.05) as plain GPIO inputs, and cell
+voltage over P0.02/AIN0 through the board's 2x divider with the nRF52840's
+SAADC, satisfying the same `components/battery/include/battery.h` contract
+as the ESP32 fleet and the emulator's virtual battery:
+`battery_get_status()` returns averaged millivolts, a curve percentage,
+presence, and a hardware-informed charging state. Every field flows
+through the shared code the ESP32 fleet already uses: the same LiPo
+discharge curve (`components/battery/battery_pct.c`), the same
+valid-masked averaging (`battery_average_mv`), the same beacon-level 0xFF
 unknown/plugged-in sentinel (`battery_beacon_pct()`,
 `docs/bramble-protocol-spec.md` §beacon layout), the same RPC charging
 fields on `getStatus`/`getBattery`, and the same webapp charging display.
-The pin wiring and charge-detect polarity are source-verified against
-Meshtastic's `tracker-t1000-e` variant and `Power.cpp` (cited in
-`battery_saadc.c`'s header comment), not against this project's own bench
-measurement of the T1000-E's battery circuit.
 
-The voltage reading does not work, and it is the reason this part of the
-port is not finished. The divider on P0.02 hangs off a sensor rail nothing
-here powers, so the SAADC measures a dead divider. The conversions still
-succeed and return 1 to 4 mV, so the driver has no error to detect: the
-node reports `present` true with a near-zero voltage, which on USB is
-masked by the charging sentinel and off the charger beacons a real 0
-percent.
+The divider on P0.02 hangs off a sensor rail gated by P1.06
+(SENSE_POWER_EN in Seeed's vendor SDK, `smtc_hal_config.h`; the vendor's
+`sensor.c` drives it per read, and Meshtastic's `initVariant()` drives the
+same pin at boot fleet-wide as `PIN_3V3_EN`). Ungated, the SAADC measures
+the dead divider: conversions succeed and return single-digit millivolts
+with no error a driver could detect, a confident wrong answer that would
+beacon 0 percent off the charger. Every voltage read is therefore a gated
+window mirroring the vendor's sequence: rail high (push-pull, standard
+drive, active HIGH, the vendor's exact configuration), settle, 8-sample
+valid-masked average, rail low. Rail-gated reads are bench-verified on a
+retail unit (2026-08-06): rail off measured 2 mV at the pin, driven
+measured 3920 mV on a charging cell, released returned to 2 mV.
 
-Powering the rail is what makes the divider readable, and it is also how
-the board was lost once. The gate is P1.06 (SENSE_POWER_EN per Seeed's
-vendor SDK): driven high at runtime it measured 3920 mV at the pin on a
-charging cell, and released it returned to 2 mV. The same drive issued from
-the boot-time battery snapshot stopped the board within about a
-millisecond, leaving a boot trace that ends on the stamp written
-immediately after the pin write, with no failure tag from any instrumented
-fatal path and no rescue from the no-advertising sentinel. Why the two
-differ is not established, and neither is brownout versus core lockup;
-separating those needs a build that records a reset reason per boot. This
-backend therefore does not define or touch that pin.
+One question about this board remains open, and the backend is designed so
+its answer does not matter. A single instrumented build stopped dead
+(reset or core lockup, undetermined: no failure tag, no sentinel rescue)
+the one time BOOT-context code drove P1.06, while the identical drive is
+bench-proven at runtime. Two layers respond to that: the voltage path
+stays disarmed until `app_init` finishes boot (`battery_runtime_arm()`
+after `BT_BOOT_DONE`; disarmed reads return the mv 0 "no reading"
+sentinel, so beacons carry 0xFF, not a fake percentage), which keeps every
+rail drive in the bench-proven runtime context; and a persisted survival
+latch brackets the first-ever gated window (ATTEMPTING committed before
+the first drive, PROVEN after the window completes), so a drive that is
+somehow fatal even at runtime costs one reset per flash lifetime and
+disables the voltage path on the next boot instead of looping. The
+decoded boot trace shows the latch verdict (`BATTERY_INIT` aux) and each
+boot's first successful reading (`BATTERY_MV`).
 
-Charge detection is confirmed on hardware, tracking a charger being plugged
-and unplugged, and depends on neither the ADC nor that rail. The Wio-WM1110
-dev kit has no battery hardware and never claims otherwise:
+Charge detection is bench-confirmed on hardware, tracking a charger being
+plugged and unplugged, and depends on neither the ADC nor the rail. The
+Wio-WM1110 dev kit has no battery hardware and never claims otherwise:
 `shim/battery_null.c` reports `present=false` honestly rather than
-fabricating a reading.
+fabricating a reading. The battery shim is selected per board by filename
+in `nrf/CMakeLists.txt`; a board whose divider needs the rail gate
+declares `BOARD_BATTERY_NEEDS_RAIL_GATE`, which non-gating backends refuse
+at compile time, so a wrong selection fails the build instead of shipping
+a dead reading.
 
 ## Dev network key (bench only)
 

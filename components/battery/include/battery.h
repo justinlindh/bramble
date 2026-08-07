@@ -79,7 +79,7 @@ bool battery_reading_available(const battery_status_t* status);
  *
  * Each target provides its own implementation: components/battery/battery.c
  * (ESP ADC), components/battery/battery_virt.c (emulator, served over
- * emu-link), nrf/shim/battery_saadc.c (T1000-E, real SAADC + charge
+ * emu-link), nrf/shim/battery_t1000e.c (T1000-E, real SAADC + charge
  * detect), nrf/shim/battery_null.c (WM1110 dev kit, no battery hardware
  * wired: honestly reports present=false).
  */

@@ -332,10 +332,15 @@ else()
   set(BRAMBLE_NRF_GPS_SRCS shim/gps_null.c)
 endif()
 
-# Battery: the T1000-E gets the real SAADC + charge-detect backend; every
-# other board (no battery sense wired) gets the null backend.
+# Battery driver: the T1000-E gets the gated SAADC voltage read (drive the
+# P1.06 sensor rail per read) plus CHRG/VBUS charge detect, all in
+# shim/battery_t1000e.c; the dev kit (no battery sense wired) gets the null
+# backend. Exactly one backend is compiled per board, BY FILENAME, so a
+# wrong name here selects silently; the compile-time guard on
+# BOARD_BATTERY_NEEDS_RAIL_GATE (nrf/boards/t1000e.h, checked by
+# battery_null.c) is what turns a wrong selection into a build error.
 if(BRAMBLE_NRF_BOARD STREQUAL "t1000e")
-  set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_saadc.c)
+  set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_t1000e.c)
 else()
   set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_null.c)
 endif()

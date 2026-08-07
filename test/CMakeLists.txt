@@ -426,6 +426,16 @@ target_include_directories(test_battery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
 )
 
+# T1000-E battery conversion math (SAADC raw -> cell mV, divider, average)
+add_executable(test_battery_t1000e
+    test_battery_t1000e.c
+    unity/unity.c
+)
+target_include_directories(test_battery_t1000e PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+)
+
 # Radio airtime tests
 add_executable(test_radio_airtime
     test_radio_airtime.c

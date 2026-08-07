@@ -249,7 +249,7 @@ bool nimble_glue_start_lfclk(void) {
  *    measured which corner the devkit's part actually sits at. Bench
  *    verification of console integrity under real HFXO cycling is Task 8's
  *    job, not this comment's.
- *  - SAADC (battery voltage sampling, nrf/shim/battery_saadc.c, the
+ *  - SAADC (battery voltage sampling, nrf/shim/battery_t1000e.c, the
  *    T1000-E's real ADC + charge-detect backend): does not need HFXO for
  *    its own conversion timing, unaffected by HFXO cycling the same way
  *    UARTE and SPIM2 below are.
