@@ -60,8 +60,8 @@ static void lat_lon_to_km(double lat, double lon, double center_lat, double cent
 }
 
 static void km_to_pixel(double x_km, double y_km, double zoom_km, int* px, int* py) {
-    double pixels_per_km = 140.0 / zoom_km;
-    *px = (int)(140 + x_km * pixels_per_km);
+    double pixels_per_km = (double)MAP_ZOOM_HALF_WIDTH_PX / zoom_km;
+    *px = (int)(MAP_ZOOM_HALF_WIDTH_PX + x_km * pixels_per_km);
     *py = (int)(66 - y_km * pixels_per_km); /* Invert Y for screen coords */
 }
 
@@ -292,21 +292,12 @@ static bool create_marker(lv_obj_t* parent, int x, int y, lv_color_t color, cons
     return true;
 }
 
-/* Round scale-bar length: the largest nice value fitting in ~90 px. */
+/* Scale bar, bottom right of the canvas and stopping short of the zoom column.
+ * map_zoom picks the round distance and its pixel length; this only draws. */
 static void draw_scale_bar(lv_obj_t* map_cont, double zoom_km) {
-    static const double NICE_KM[] = {50.0, 20.0, 10.0, 5.0, 2.0, 1.0, 0.5, 0.2, 0.1, 0.05};
-    double pixels_per_km = 140.0 / zoom_km;
-    double bar_km = 0.0;
     int bar_px = 0;
-    for (size_t i = 0; i < sizeof(NICE_KM) / sizeof(NICE_KM[0]); i++) {
-        int px = (int)(NICE_KM[i] * pixels_per_km);
-        if (px <= 90 && px >= 20) {
-            bar_km = NICE_KM[i];
-            bar_px = px;
-            break;
-        }
-    }
-    if (bar_px == 0)
+    char txt[16];
+    if (!map_zoom_scale_bar(zoom_km, &bar_px, txt, sizeof(txt)))
         return;
 
     int x1 = SCALE_BAR_RIGHT_X - bar_px;
@@ -317,11 +308,6 @@ static void draw_scale_bar(lv_obj_t* map_cont, double zoom_km) {
     lv_obj_set_style_line_color(bar, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_line_width(bar, 2, 0);
 
-    char txt[16];
-    if (bar_km >= 1.0)
-        snprintf(txt, sizeof(txt), "%g km", bar_km);
-    else
-        snprintf(txt, sizeof(txt), "%d m", (int)(bar_km * 1000.0));
     lv_obj_t* lbl = lv_label_create(map_cont);
     lv_label_set_text(lbl, txt);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
