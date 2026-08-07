@@ -1,6 +1,6 @@
 {
   "name": "emu-location-channel",
-  "description": "Two provisioned firmware pagers on one ether, exercising a channel location share end to end. The sharer (0,0) has one channel target seeded into its location namespace by EMU_LOCATION_CHANNEL, which writes the same NVS keys bramble.setLocationConfig writes, so the mesh task's real policy tick collects the target, encrypts under the channel key and broadcasts it. The listener (30,0) holds the same network key and the same public channel, decrypts the frame and caches the position. Asserted by run_scenarios.sh: the sharer's 'TX location (channel)' console line and the listener's 'RX location from' line, which together prove target selection, channel encryption, origin authentication and the receive-and-store path. This is the regression net for a config surface that accepts a channel target and transmits nothing: a unit test on the config parser cannot tell those two states apart, but this scenario can. Neither node ever exchanges a DM, so no route and no DM session exists on either of them, which is exactly the mesh condition a channel share has to work under. Position comes from the automatic 1 Hz NMEA feed the virtual pager board's GPS gate starts (see emu-gps-fix). The share interval is the 30s floor and beacons run at 15s to keep the ether quiet, so the first share lands well inside the run.",
+  "description": "Two provisioned firmware pagers on one ether, exercising a channel location share end to end. Both nodes join the same keyed channel by deriving it from EMU_LOCATION_CHANNEL_PSK, which is how real nodes agree: the channel is created from the PSK and its index is whatever slot each node lands on, never assumed equal. The sharer (0,0) additionally sets EMU_LOCATION_SHARE, so a target is seeded into its location namespace using the same rule codec and key builder bramble.setLocationConfig writes, and the mesh task's real policy tick collects it, encrypts under the channel key and broadcasts. The listener (30,0) holds the same network key and the same channel but shares nothing, so a decode there cannot be the node hearing itself. Asserted by run_scenarios.sh: the sharer's 'TX location (channel)' console line and the listener's 'RX location from' line, which together prove target selection, channel encryption, origin authentication and the receive-and-store path. This is the regression net for a config surface that accepts a channel target and transmits nothing: a unit test on the config parser cannot tell those two states apart, but this scenario can. Neither node ever exchanges a DM, so no route and no DM session exists on either of them, which is exactly the mesh condition a channel share has to work under. The channel is a keyed one because the public channel cannot carry location: its PSK is well known, so a target on it would broadcast coordinates in the clear. Position comes from the automatic 1 Hz NMEA feed the virtual pager board's GPS gate starts (see emu-gps-fix). The share interval is the 30s floor and beacons run at 15s to keep the ether quiet, so the first share lands well inside the run.",
   "mode": "deterministic",
   "duration_ms": 120000,
   "nodes": [],
@@ -19,7 +19,8 @@
       "env": {
         "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
         "EMU_BEACON_INTERVAL_MS": "15000",
-        "EMU_LOCATION_CHANNEL": "0",
+        "EMU_LOCATION_CHANNEL_PSK": "emu-location-scenario-psk",
+        "EMU_LOCATION_SHARE": "1",
         "EMU_LOCATION_INTERVAL_S": "30",
         "EMU_LOCATION_TIER": "full"
       }
@@ -37,6 +38,7 @@
       "label": "listener",
       "env": {
         "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "EMU_LOCATION_CHANNEL_PSK": "emu-location-scenario-psk",
         "EMU_BEACON_INTERVAL_MS": "15000"
       }
     }

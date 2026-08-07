@@ -1979,20 +1979,23 @@ components:
         no route, DM session or prior traffic is required. The tier is the
         resolution the whole channel receives. A receiver additionally requires
         a valid network-key origin MAC before it believes the position, so a
-        node outside the network cannot originate one.
+        node outside the network cannot originate one. The channel must be a
+        keyed one: a keyed channel gives location both confidentiality and the
+        full per-sender replay window.
       required: [channel]
       properties:
         channel:
           type: integer
-          minimum: 0
+          minimum: 1
           maximum: 15
           description: >-
-            Channel index. Outside this range names no channel the node can
-            share to, and setLocationConfig rejects the whole request. Channel 0
-            is the public channel, whose PSK is well known: targeting it makes
-            the position readable by anyone in radio range, not only by the
-            network. Pick a private channel to keep a group's positions within
-            that group.
+            Channel index, 1 to 15. Outside that range names no channel the node
+            can share to, and setLocationConfig rejects the whole request
+            without applying any part of it. Channel 0 is the public channel and
+            is rejected: its PSK is well known, so a target on it would
+            broadcast exact coordinates readable by anyone in radio range, and
+            the shared replay window is deliberately skipped there. Create a
+            channel with a PSK and target the index addChannel returns.
         enabled:
           type: boolean
           description: Whether rule is enabled.

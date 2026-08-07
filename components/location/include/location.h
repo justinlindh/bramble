@@ -159,6 +159,74 @@ void location_cache_purge(location_manager_t* mgr, uint32_t now_ms);
 #define LOCATION_MAX_CHANNEL_TARGETS 16
 #define LOCATION_MAX_TARGETS (LOCATION_MAX_CONTACTS + LOCATION_MAX_CHANNEL_TARGETS)
 
+/* Mirrors BRAMBLE_PUBLIC_CHANNEL_INDEX, kept as a literal for the same reason
+ * as LOCATION_MAX_CHANNEL_TARGETS; main/mesh_location.c static-asserts the two
+ * agree. */
+#define LOCATION_PUBLIC_CHANNEL_INDEX 0
+
+/*
+ * Whether a channel index may carry this node's position.
+ *
+ * The public channel's PSK is documented as known to everyone, not just to
+ * channel members, so a target on it is a periodic broadcast of exact
+ * coordinates that any receiver in radio range decrypts. It is worse than it
+ * first looks: the shared replay window is deliberately skipped for
+ * public-channel decrypts (a forgeable src_addr there could otherwise be used
+ * to slam a victim's high-water mark into a DoS), so those position frames can
+ * also be replayed at will.
+ *
+ * Position is not a datum to emit under a well-known key, so this is a hard
+ * rejection rather than a warning or an off-by-default toggle. Both the RPC
+ * setter and the send path ask this, so a rule already in NVS from an older
+ * build cannot transmit either.
+ */
+bool location_channel_target_is_permitted(int channel_index);
+
+/*
+ * Handshake pacing for directed targets.
+ *
+ * A directed share needs an ACTIVE DM session, and a session only exists after
+ * a handshake. A contact target on a peer nobody has ever messaged therefore
+ * has no session, and dropping the share leaves that target dead forever. The
+ * send path asks for a session instead, but a peer that is powered off, out of
+ * range or simply not answering must not draw one handshake attempt per target
+ * per share round: with LOCATION_MAX_CONTACTS targets that is real airtime and
+ * battery on a LoRa mesh.
+ *
+ * First attempt fires as soon as a target comes due with no session, then the
+ * delay doubles from LOCATION_HS_BACKOFF_START_MS to LOCATION_HS_BACKOFF_MAX_MS.
+ * The start is deliberately above LOCATION_MIN_INTERVAL_S: the share interval
+ * floor is 30s, so a shorter gate would pass on every single tick and gate
+ * nothing. Clearing a peer on session establishment returns it to the fast
+ * first attempt, so a peer that drops out and returns recovers quickly.
+ *
+ * Pure state, no radio and no locks, so the pacing is host-testable on its own.
+ */
+#define LOCATION_HS_BACKOFF_START_MS 60000U
+#define LOCATION_HS_BACKOFF_MAX_MS (30U * 60U * 1000U)
+#define LOCATION_HS_TRACK 8
+
+typedef struct {
+    uint32_t addr;
+    uint32_t next_attempt_ms;
+    uint32_t backoff_ms;
+    bool used;
+} location_hs_slot_t;
+
+typedef struct {
+    location_hs_slot_t slots[LOCATION_HS_TRACK];
+} location_hs_table_t;
+
+void location_hs_reset(location_hs_table_t* table);
+
+/* True when a handshake to addr may be attempted now, recording the attempt and
+ * growing the backoff. Wrap-safe against the mesh clock. */
+bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, uint32_t now_ms);
+
+/* Forget a peer's backoff, so its next need for a session attempts at once.
+ * Called when a session to that peer reaches ACTIVE. */
+void location_hs_clear(location_hs_table_t* table, uint32_t addr);
+
 /* Longest channel-target NVS key plus terminator ("lch_" + two digits). */
 #define LOCATION_TARGET_KEY_SIZE 16
 

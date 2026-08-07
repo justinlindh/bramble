@@ -42,7 +42,7 @@ Accepted params (all optional for partial updates):
   - `tier` (string, optional)
   - `interval_s` (number, optional)
 - `channel_targets` (array of objects):
-  - `channel` (number, 0 to 15)
+  - `channel` (number, 1 to 15; 0 is the public channel and is rejected)
   - `enabled` (bool, optional)
   - `tier` (string, optional)
   - `interval_s` (number, optional)
@@ -58,20 +58,34 @@ Notes:
 - `enabled` is a permission, not an activity. A node transmits only to its
   targets, so `enabled: true` with no enabled contact rule or channel target
   sends nothing.
-- A contact target is unicast under that peer's DM session key and needs an
-  active session, which needs a route. A channel target is broadcast under the
-  channel key and needs no session, no route and no prior traffic, which is
-  what makes it work on a mesh whose members have only ever broadcast. Its
-  tier is the resolution every member of the channel receives.
-- Channel 0 is the public channel and its PSK is well known, so a target on it
-  publishes the position to anyone in radio range rather than to a group. A
-  private channel keeps a group's positions within that group. Either way a
-  receiver believes a position only after the network-key origin MAC verifies,
-  so a node outside the network cannot originate one.
+- A contact target is unicast under that peer's DM session key. It needs an
+  ACTIVE session, and when none exists the share round asks for one: the peer
+  gets a DM handshake, and the next due tick sends a fresh position once the
+  session is up. Sending a message first is not required. The position itself
+  is never queued across the handshake, because location is real-time presence
+  and a coordinate captured before the handshake would arrive stale.
+- Handshake requests are paced per peer, starting at 60 seconds and doubling to
+  a 30 minute ceiling, cleared once a session exists. Only peers that are
+  current neighbours are asked, and at most one handshake is started per share
+  round, so a fleet of unreachable targets cannot turn into an airtime or
+  battery drain.
+- A channel target is broadcast under the channel key and needs no session, no
+  route and no prior traffic. Its tier is the resolution every member of the
+  channel receives.
+- A `channel` target must name a keyed channel. Channel 0 is the public channel
+  and is rejected: its PSK is well known, so a target on it would broadcast
+  exact coordinates to anyone in radio range, and the shared replay window is
+  deliberately skipped for public-channel decrypts. A keyed channel gives
+  location both confidentiality and the full per-sender replay window. Add one
+  with `bramble.addChannel` and target the index it returns; that index is
+  per-device and nodes agree by deriving the same key from the same PSK, not by
+  occupying the same slot.
+- A receiver believes a position only after the network-key origin MAC
+  verifies, so a node outside the network cannot originate one.
 - Each target is paced off its own `interval_s`, floored at 30 seconds.
-- A `channel` outside 0 to 15 names no channel the node can share to, and the
+- A `channel` outside 1 to 15 names no channel the node can share to, and the
   whole request is rejected with an invalid-params error rather than stored as
-  a rule that never fires.
+  a rule that never fires. No part of a rejected request is applied.
 - Existing `default_tier` and `interval_s` fields remain supported.
 - Contact rules are stored and read only from canonical `lcr_XXXXXXXX` keys,
   and channel targets from `lch_NN` keys.

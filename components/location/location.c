@@ -308,6 +308,64 @@ bool location_contact_key(char* out, size_t out_len, uint32_t addr) {
     return true;
 }
 
+bool location_channel_target_is_permitted(int channel_index) {
+    return channel_index != LOCATION_PUBLIC_CHANNEL_INDEX;
+}
+
+void location_hs_reset(location_hs_table_t* table) {
+    if (table)
+        memset(table, 0, sizeof(*table));
+}
+
+void location_hs_clear(location_hs_table_t* table, uint32_t addr) {
+    if (!table)
+        return;
+    for (int i = 0; i < LOCATION_HS_TRACK; i++) {
+        if (table->slots[i].used && table->slots[i].addr == addr) {
+            memset(&table->slots[i], 0, sizeof(table->slots[i]));
+            return;
+        }
+    }
+}
+
+bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, uint32_t now_ms) {
+    if (!table || addr == 0)
+        return false;
+
+    int free_idx = -1;
+    int oldest = 0;
+    for (int i = 0; i < LOCATION_HS_TRACK; i++) {
+        location_hs_slot_t* slot = &table->slots[i];
+        if (slot->used && slot->addr == addr) {
+            /* Signed difference so the comparison survives the mesh clock
+             * wrapping between the scheduled attempt and now. */
+            if ((int32_t)(now_ms - slot->next_attempt_ms) < 0)
+                return false;
+            slot->backoff_ms = (slot->backoff_ms >= LOCATION_HS_BACKOFF_MAX_MS)
+                                   ? LOCATION_HS_BACKOFF_MAX_MS
+                                   : slot->backoff_ms * 2;
+            if (slot->backoff_ms > LOCATION_HS_BACKOFF_MAX_MS)
+                slot->backoff_ms = LOCATION_HS_BACKOFF_MAX_MS;
+            slot->next_attempt_ms = now_ms + slot->backoff_ms;
+            return true;
+        }
+        if (!slot->used && free_idx < 0)
+            free_idx = i;
+        if (table->slots[i].next_attempt_ms < table->slots[oldest].next_attempt_ms)
+            oldest = i;
+    }
+
+    /* First time this peer needed a session: attempt immediately, and start the
+     * backoff so a peer that never answers decays instead of retrying forever
+     * at the share interval. */
+    int idx = (free_idx >= 0) ? free_idx : oldest;
+    table->slots[idx].addr = addr;
+    table->slots[idx].used = true;
+    table->slots[idx].backoff_ms = LOCATION_HS_BACKOFF_START_MS;
+    table->slots[idx].next_attempt_ms = now_ms + LOCATION_HS_BACKOFF_START_MS;
+    return true;
+}
+
 bool location_channel_key(char* out, size_t out_len, int channel_index) {
     if (!out || out_len < LOCATION_TARGET_KEY_SIZE)
         return false;
@@ -358,6 +416,11 @@ bool location_target_from_entry(const char* key, const char* raw, location_targe
             return false;
         int index = atoi(suffix);
         if (index < 0 || index >= LOCATION_MAX_CHANNEL_TARGETS)
+            return false;
+        /* Defence in depth: a public-channel rule persisted by an older build,
+         * or written by any path that did not go through the RPC setter, must
+         * not resolve to a target here either. */
+        if (!location_channel_target_is_permitted(index))
             return false;
         kind = LOCATION_TARGET_CHANNEL;
         id = (uint32_t)index;

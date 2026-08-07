@@ -32,6 +32,11 @@
 
 static const char* TAG = "emu_provision";
 
+/* Declared here rather than by including mesh_task.h: this file builds as part
+ * of the null_drivers component, which does not carry main/ on its include
+ * path, and main.c declares this file's own entry points the same way. */
+int mesh_add_channel(const char* name, const uint8_t* psk, size_t psk_len);
+
 /* Parses one hex nibble, or -1 if c is not a hex digit. */
 static int hex_nibble(char c) {
     if (c >= '0' && c <= '9')
@@ -81,23 +86,51 @@ int emu_node_seed_network_key_from_env(void) {
  * same rule codec and key builder the send path reads back, so a scenario
  * exercises the real policy tick rather than a shortcut around it.
  *
- * EMU_LOCATION_CHANNEL is the channel index to share to; unset or blank is a
+ * EMU_LOCATION_CHANNEL_PSK is the pre-shared key of the location channel.
+ * Every node that sets it JOINS that channel, which a receiver needs in order
+ * to decrypt at all. EMU_LOCATION_SHARE additionally makes this node share to
+ * it; a receiver sets the PSK alone and stays silent, so a scenario can tell a
+ * real transmit apart from a node decoding its own broadcast. Both unset is a
  * no-op and the node shares nothing, which is the privacy-first default every
  * other scenario keeps. EMU_LOCATION_INTERVAL_S and EMU_LOCATION_TIER are
  * optional overrides.
  *
- * Returns 0 if a target was written, -1 otherwise.
+ * The channel is CREATED here from that PSK rather than named by index,
+ * because that is the real provisioning order: the index is an output of
+ * adding a channel, not an input a caller may assume, and two nodes need not
+ * land on the same slot. Nodes agree because they derive the same key from the
+ * same PSK. The public channel cannot carry location (its key is well known),
+ * so a scenario has to bring its own keyed channel.
+ *
+ * Returns 0 if a share target was written, -1 otherwise.
  */
 int emu_node_seed_location_share_from_env(void) {
-    const char* channel_str = getenv("EMU_LOCATION_CHANNEL");
-    if (!channel_str || !*channel_str)
+    const char* psk = getenv("EMU_LOCATION_CHANNEL_PSK");
+    if (!psk || !*psk)
         return -1;
 
-    int channel_index = atoi(channel_str);
+    int channel_index = mesh_add_channel("emu-loc", (const uint8_t*)psk, strlen(psk));
+    if (channel_index < 0) {
+        ESP_LOGW(TAG, "could not add the location channel");
+        return -1;
+    }
+    ESP_LOGI(TAG, "location channel joined at index %d (emulator provisioning)", channel_index);
+
+    const char* share = getenv("EMU_LOCATION_SHARE");
+    if (!share || !*share || share[0] == '0') {
+        /* Channel member, not a sharer. */
+        return -1;
+    }
+
     char key[LOCATION_TARGET_KEY_SIZE];
     if (!location_channel_key(key, sizeof(key), channel_index)) {
-        ESP_LOGW(TAG, "EMU_LOCATION_CHANNEL=%s is outside the channel-target key space; ignoring",
-                 channel_str);
+        ESP_LOGW(TAG, "channel index %d is outside the channel-target key space; ignoring",
+                 channel_index);
+        return -1;
+    }
+    if (!location_channel_target_is_permitted(channel_index)) {
+        ESP_LOGW(TAG, "channel index %d cannot carry location; not seeding a target",
+                 channel_index);
         return -1;
     }
 

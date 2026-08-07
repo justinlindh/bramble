@@ -1720,8 +1720,12 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
     /* Validate every channel target before writing any of this config. A
        channel index outside the key space resolves to no target at all, and
        accepting it would leave the caller with a policy that reads back as
-       configured while the send path has nothing to send to. Rejecting up
-       front also keeps the write below all-or-nothing. */
+       configured while the send path has nothing to send to. The public
+       channel is rejected outright: its PSK is well known, so a target on it
+       broadcasts exact coordinates in the clear to anyone in range, and the
+       shared replay window is deliberately skipped there. Rejecting up front
+       also keeps the write below all-or-nothing, so no part of a request
+       carrying a bad target is applied. */
     const cJSON* proposed_targets = cJSON_GetObjectItem(params, "channel_targets");
     if (proposed_targets && cJSON_IsArray(proposed_targets)) {
         const cJSON* proposed = NULL;
@@ -1730,6 +1734,14 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
             char probe[LOCATION_TARGET_KEY_SIZE];
             if (!cJSON_IsNumber(channel) ||
                 !location_channel_key(probe, sizeof(probe), channel->valueint)) {
+                return RPC_ERR_INVALID_PARAMS;
+            }
+            if (!location_channel_target_is_permitted(channel->valueint)) {
+                cJSON_AddStringToObject(
+                    result, "error",
+                    "channel 0 is the public channel and cannot carry location: its key is "
+                    "well known, so a target on it would broadcast coordinates in the clear. "
+                    "Create a channel with a PSK and target that instead.");
                 return RPC_ERR_INVALID_PARAMS;
             }
         }
