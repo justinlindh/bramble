@@ -224,6 +224,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.getDmSessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get DM session table
+         * @description Returns metadata for every used slot in the DM session table. A directed send (a chat DM, or a per-contact location share) requires an active session with the destination and is dropped without one, so this is what tells a diagnostic which configured peer a node cannot currently reach directly. Key material is never included.
+         */
+        post: operations["getDmSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.getMessages": {
         parameters: {
             query?: never;
@@ -1563,19 +1583,19 @@ export interface components {
             /** @description Override update interval in seconds. */
             interval_s?: number;
         };
-        /** @description Per-channel location sharing rule. */
+        /** @description Per-channel location sharing rule. The node broadcasts its position under this channel's key, so every holder of that key receives it and no route, DM session or prior traffic is required. The tier is the resolution the whole channel receives. A receiver additionally requires a valid network-key origin MAC before it believes the position, so a node outside the network cannot originate one. */
         LocationChannelTarget: {
-            /** @description Channel index. */
+            /** @description Channel index. Outside this range names no channel the node can share to, and setLocationConfig rejects the whole request. Channel 0 is the public channel, whose PSK is well known: targeting it makes the position readable by anyone in radio range, not only by the network. Pick a private channel to keep a group's positions within that group. */
             channel: number;
             /** @description Whether rule is enabled. */
             enabled?: boolean;
             tier?: components["schemas"]["LocationTier"];
-            /** @description Override update interval in seconds. */
+            /** @description Update interval in seconds for this target, paced independently of every other target. Floored at 30. */
             interval_s?: number;
         };
         /** @description Canonical location configuration. */
         LocationConfig: {
-            /** @description Whether location sharing is enabled. */
+            /** @description Whether location sharing is permitted. A node transmits only to the targets in contact_rules and channel_targets, so this being true with no enabled target means nothing is sent. */
             enabled: boolean;
             tier: components["schemas"]["LocationTier"];
             default_tier: components["schemas"]["LocationTier"];
@@ -1819,6 +1839,33 @@ export interface components {
         };
         RoutesResponse: {
             routes: components["schemas"]["Route"][];
+        };
+        /** @description One used slot of the DM session table. Metadata only: the session key, the peer's cached identity key and the ratchet chain keys are never returned. */
+        DmSession: {
+            /** @description Peer address, 8 hex digits. */
+            address: string;
+            /**
+             * @description active means directed traffic to this peer can be encrypted and sent; handshaking means the key exchange has not completed.
+             * @enum {string}
+             */
+            state: "handshaking" | "active";
+            /** @description Peer identity key is pinned and confirmed. */
+            verified: boolean;
+            /** @description Send chain is established, so a payload can be encrypted now. */
+            ratchet_valid: boolean;
+            /** @description Messages carried by this session since it was established. */
+            msg_count: number;
+            /** @description Key-exchange epoch this session is on. */
+            ke_epoch: number;
+            /** @description Milliseconds since the slot was established or re-established. */
+            established_ms_ago: number;
+            /** @description Milliseconds since the last send or receive on this session. */
+            last_active_ms_ago: number;
+        };
+        DmSessionsResponse: {
+            sessions: components["schemas"]["DmSession"][];
+            /** @description Total slots in the session table, used or not. */
+            capacity: number;
         };
         MessagesResponse: {
             messages: components["schemas"]["Message"][];
@@ -3023,6 +3070,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoutesResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getDmSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description DM session table */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DmSessionsResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */
