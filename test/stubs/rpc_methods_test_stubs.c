@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "esp_stubs.h"
+/* One definition of the DM session snapshot type, shared with the firmware so
+   this stub cannot drift from the struct rpc_methods.c actually reads. */
+#include "mesh_dm_session_info.h"
 #include "nvs.h"
 
 /* ── Types mirrored from firmware headers ─────────────────────────── */
@@ -222,6 +225,27 @@ void mesh_get_state(mesh_shared_state_t* o) {
     }
 }
 void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
+
+/* DM session table, controllable by the test: g_stub_dm_sessions holds what
+   mesh_get_dm_sessions hands back, g_stub_dm_session_count how many of them,
+   and g_stub_dm_session_capacity what the table claims to hold. */
+mesh_dm_session_info_t g_stub_dm_sessions[8];
+size_t g_stub_dm_session_count = 0;
+size_t g_stub_dm_session_capacity = 32;
+
+size_t mesh_dm_session_capacity(void) { return g_stub_dm_session_capacity; }
+
+size_t mesh_get_dm_sessions(mesh_dm_session_info_t* out, size_t max) {
+    if (!out || max == 0)
+        return 0;
+    size_t n = g_stub_dm_session_count;
+    if (n > max)
+        n = max;
+    if (n > (sizeof(g_stub_dm_sessions) / sizeof(g_stub_dm_sessions[0])))
+        n = sizeof(g_stub_dm_sessions) / sizeof(g_stub_dm_sessions[0]);
+    memcpy(out, g_stub_dm_sessions, n * sizeof(*out));
+    return n;
+}
 bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified, bool* key_changed) {
     (void)addr;
     if (sas_out)
