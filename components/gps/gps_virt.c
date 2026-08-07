@@ -278,6 +278,14 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
     return ok;
 }
 
+bool gps_get_utc_date(uint16_t* year, uint8_t* month, uint8_t* day) {
+    bool ok;
+    pthread_mutex_lock(&s_mu);
+    ok = gps_feed_get_utc_date(&s_feed, gvirt_now_ms(), year, month, day);
+    pthread_mutex_unlock(&s_mu);
+    return ok;
+}
+
 void gps_get_stats(gps_stats_t* out) {
     if (!out)
         return;

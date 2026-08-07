@@ -129,6 +129,17 @@ static void msg_store_add_full(uint32_t peer_addr, msg_direction_t dir, const ch
         text_len = MSG_TEXT_MAX - 1;
     }
 
+    /* Every row carries a uid, allocated here for the callers that have none
+     * of their own. What uid 0 means to a caller is untouched: nobody knows an
+     * id allocated in here, so nothing can target such a row with
+     * msg_store_update_by_uid. What it buys is that every persisted record
+     * holds an id unique within the ring, which is how the persistence backend
+     * tells one record from another when it confirms a status update is
+     * landing on the right one. Allocated before the lock is taken: the
+     * allocator takes the same non-recursive lock. */
+    if (uid == 0)
+        uid = msg_store_next_uid();
+
     /* Hold the lock across the whole slot write so a concurrent UI reader
      * copies either the old slot or the fully-written new one, never a torn
      * mix. SPIFFS persistence below runs after the unlock (writers are
@@ -211,31 +222,71 @@ void msg_store_add(uint32_t peer_addr, msg_direction_t dir, const char* text, si
     msg_store_add_ex(peer_addr, dir, text, text_len, rssi, snr, 0, MSG_STATUS_NONE);
 }
 
+/*
+ * Push a row whose delivery state just changed back to its persisted record,
+ * so a reboot restores "delivered" instead of the status the message was
+ * first stored with. Runs AFTER the ring lock is released (flash I/O must
+ * never happen inside a critical section), and takes the ring index rather
+ * than a copy for the same reason msg_store_add_full hands the backend a
+ * pointer into the ring: writers are single-task, so the row stays put.
+ *
+ * from_end is the row's distance from the newest, which is how the ring maps
+ * onto the file: both hold a suffix of the same append sequence. The backend
+ * re-checks that the record it lands on is really this message, so a mapping
+ * skewed by a failed append costs an unpersisted status, never a corrupted
+ * neighbour.
+ *
+ * Only a change is written. Repeat delivery receipts for one broadcast all
+ * report DELIVERED, and a message sees at most a couple of real transitions,
+ * so the flash cost is a handful of record rewrites per message rather than
+ * one per receipt.
+ */
+static void persist_row_update(int idx, int from_end) {
+#ifdef CONFIG_BRAMBLE_MSG_PERSIST_ENABLED
+    msg_store_spiffs_update(from_end, &s_msgs[idx]);
+#else
+    (void)idx;
+    (void)from_end;
+#endif
+}
+
 bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
                                         uint8_t route_hop_count, const uint32_t* route_hops) {
     if (packet_id == 0)
         return false;
     bool found = false;
+    bool changed = false;
+    int found_idx = 0;
+    int from_end = 0;
     MSG_LOCK();
     int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
     /* Search newest first for faster match */
     for (int i = s_count - 1; i >= 0; i--) {
         int idx = (start + i) % MSG_STORE_MAX;
         if (s_msgs && s_msgs[idx].packet_id == packet_id) {
+            changed = s_msgs[idx].status != status;
             s_msgs[idx].status = status;
             if (route_hops && route_hop_count > 0) {
                 uint8_t bounded =
                     (route_hop_count > MSG_ROUTE_MAX_HOPS) ? MSG_ROUTE_MAX_HOPS : route_hop_count;
+                /* A route arriving for a row that had none is worth persisting
+                 * too; a second receipt reporting a different path for the same
+                 * delivered message is not. */
+                changed = changed || s_msgs[idx].route_hop_count == 0;
                 s_msgs[idx].route_hop_count = bounded;
                 for (uint8_t h = 0; h < bounded; h++) {
                     s_msgs[idx].route_hops[h] = route_hops[h];
                 }
             }
             found = true;
+            found_idx = idx;
+            from_end = s_count - 1 - i;
             break;
         }
     }
     MSG_UNLOCK();
+    if (found && changed)
+        persist_row_update(found_idx, from_end);
     return found;
 }
 
@@ -250,6 +301,9 @@ bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t stat
     if (!s_msgs)
         return false;
     bool found = false;
+    bool changed = false;
+    int found_idx = 0;
+    int from_end = 0;
     MSG_LOCK();
     int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
     /* Search newest first: the row being reconciled is almost always recent */
@@ -258,12 +312,20 @@ bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t stat
         if (s_msgs[idx].uid == uid) {
             if (packet_id != 0)
                 s_msgs[idx].packet_id = packet_id;
+            /* The wire packet_id this stamps rides along on whatever write a
+             * status change earns; it is correlation state, not something a
+             * reboot has any use for on its own. */
+            changed = s_msgs[idx].status != status;
             s_msgs[idx].status = status;
             found = true;
+            found_idx = idx;
+            from_end = s_count - 1 - i;
             break;
         }
     }
     MSG_UNLOCK();
+    if (found && changed)
+        persist_row_update(found_idx, from_end);
     return found;
 }
 
@@ -336,9 +398,19 @@ void msg_store_init_with_persistence(void) {
         s_head = count % MSG_STORE_MAX;
 
         /* Restored timestamps are a PREVIOUS boot's uptime clock and would
-         * render as garbage ages; zero them so the UI hides the age. */
+         * render as garbage ages; zero them so the UI hides the age.
+         *
+         * The uid allocator resumes past the highest restored uid in the same
+         * pass. Restarting it at 1 would hand a fresh message a uid a restored
+         * row in the same ring already holds, and uid is what identifies a row
+         * to msg_store_update_by_uid and to the persistence drift check. */
         for (int i = 0; i < count; i++) {
             s_msgs[i].timestamp_s = 0;
+            if (s_msgs[i].uid >= s_next_uid) {
+                s_next_uid = s_msgs[i].uid + 1;
+                if (s_next_uid == 0)
+                    s_next_uid = 1;
+            }
         }
     }
 #endif

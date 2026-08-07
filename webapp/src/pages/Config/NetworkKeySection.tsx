@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useTimedFlag } from '../../hooks/useTimedFlag';
-import { copyWithFallback } from '../../utils/clipboard';
+import { useCopyFlash } from '../../hooks/useCopyFlash';
 import { encodeNetworkKeyShare, parseNetworkKeyShare } from '../../utils/networkKeyShare';
 import { setNetworkKey, generateNetworkKey, loadNetworkKeyStatus } from '../../store/actions';
 import { useStore } from '../../store/index';
@@ -31,7 +30,7 @@ export function NetworkKeySection() {
   const [confirmRekey, setConfirmRekey] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showGeneratedShare, setShowGeneratedShare] = useState(false);
-  const [hexCopied, flashHexCopied, resetHexCopied] = useTimedFlag(2000);
+  const [hexCopied, copyHex, resetHexCopied] = useCopyFlash(2000);
 
   const [pasteInput, setPasteInput] = useState('');
   const [showScan, setShowScan] = useState(false);
@@ -74,13 +73,8 @@ export function NetworkKeySection() {
     }
   };
 
-  const handleCopyHex = async () => {
-    if (!generated) return;
-    // copyWithFallback swallows its own failure and returns false; the field
-    // below is still selectable/copyable by hand, so a false result just skips the flash.
-    if (await copyWithFallback(generated.hex)) {
-      flashHexCopied();
-    }
+  const handleCopyHex = () => {
+    if (generated) void copyHex(generated.hex);
   };
 
   // ── Join (paste/scan an existing key) ──────────────────────────────────────

@@ -113,6 +113,34 @@ describe('LocationSection hybrid policy controls', () => {
     expect((screen.getByLabelText('Default tier') as HTMLSelectElement).value).toBe('coarse');
   });
 
+  it('does not present sharing as active when it has no targets', () => {
+    render(<LocationSection location={makeLocation({ enabled: true })} neighbors={[]} channels={channels} gpsAvailable />);
+
+    expect(screen.getByText('Location sharing enabled, no targets')).toBeInTheDocument();
+    expect(screen.getByLabelText('Location policy preview').textContent).toMatch(/no targets, so nothing is sent/i);
+  });
+
+  it('presents sharing as active once a channel target exists', () => {
+    const location = makeLocation({
+      enabled: true,
+      channel_targets: [{ channel: 0, enabled: true, tier: 'coarse', interval_s: 60 }],
+    });
+    render(<LocationSection location={location} neighbors={[]} channels={channels} gpsAvailable />);
+
+    expect(screen.getByText('Location sharing enabled')).toBeInTheDocument();
+    expect(screen.getByLabelText('Location policy preview').textContent).toMatch(/Active targets: 1/);
+  });
+
+  it('treats a disabled target as no target at all', () => {
+    const location = makeLocation({
+      enabled: true,
+      contact_rules: [{ address: 'AABBCCDD', enabled: false, tier: 'coarse', interval_s: 60 }],
+    });
+    render(<LocationSection location={location} neighbors={[]} channels={channels} gpsAvailable />);
+
+    expect(screen.getByText('Location sharing enabled, no targets')).toBeInTheDocument();
+  });
+
   it('shows tier description for the selected default tier', () => {
     render(<LocationSection location={makeLocation()} neighbors={[]} channels={channels} gpsAvailable />);
 

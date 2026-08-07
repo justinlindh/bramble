@@ -46,10 +46,13 @@ typedef enum {
 
 typedef struct {
     uint32_t peer_addr; /* Remote address (sender or recipient) */
-    uint32_t uid;       /* Stable local id for one user-submitted message (0 = untracked).
-                           Survives the whole send pipeline (route queue, session queue,
-                           transmit) so every stage UPDATES this row instead of adding
-                           a new one. Never leaves the node; not a wire field. */
+    uint32_t uid;       /* Stable local id for this row, unique within the ring and never 0.
+                           A user-submitted message carries its own through the whole send
+                           pipeline (route queue, session queue, transmit) so every stage
+                           UPDATES this row instead of adding a new one; a row stored
+                           without one is given a uid when it is stored, which is what
+                           identifies its persisted record. Never leaves the node; not a
+                           wire field. */
     msg_direction_t direction;
     msg_status_t status;     /* Delivery status (outgoing only) */
     uint32_t packet_id;      /* Packet ID for ACK correlation */

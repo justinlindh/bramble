@@ -63,6 +63,9 @@ typedef struct {
     uint64_t antenna_until_ms; /* 0 = no active warning */
     uint8_t utc_hour, utc_min;
     bool utc_valid;
+    uint16_t utc_year;
+    uint8_t utc_month, utc_day;
+    bool utc_date_valid;
     uint32_t rx_bytes_total;
     uint32_t rx_lines_total;
     char chip_banner[GPS_FEED_MAX_LINE]; /* first $PAIR021* line seen, else "" */
@@ -87,6 +90,13 @@ void gps_feed_line(gps_feed_t* f, const char* line, uint64_t now_ms);
 bool gps_feed_has_fix(const gps_feed_t* f, uint64_t now_ms);
 bool gps_feed_get_position(const gps_feed_t* f, uint64_t now_ms, bramble_position_t* out);
 bool gps_feed_get_utc_hm(const gps_feed_t* f, uint64_t now_ms, uint8_t* hour, uint8_t* min);
+/* UTC calendar date from the last RMC sentence. Reported separately from the
+ * time of day because the two come from different sentences: a receiver that
+ * has emitted GGA but not yet RMC has a time and no date. Expires on the same
+ * silence rule as the time of day, so a receiver that has gone quiet reports
+ * no date rather than the one it last sent. */
+bool gps_feed_get_utc_date(const gps_feed_t* f, uint64_t now_ms, uint16_t* year, uint8_t* month,
+                           uint8_t* day);
 /* Satellite counts expire on the same silence rule: the GSV slots against
  * GPS_FEED_GSV_TTL_MS, the GGA-derived sats-used and fix-quality against
  * GPS_FEED_SILENCE_TTL_MS. A silent receiver therefore reads as zero

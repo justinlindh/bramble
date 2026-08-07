@@ -122,9 +122,153 @@ int location_cache_update(location_manager_t* mgr, uint32_t peer_addr,
 const location_cache_entry_t* location_cache_get(const location_manager_t* mgr, uint32_t peer_addr);
 void location_cache_purge(location_manager_t* mgr, uint32_t now_ms);
 
-/* Policy engine send gating for periodic sharing */
-bool location_policy_should_send(const location_policy_t* policy, bool has_source, bool has_targets,
-                                 uint32_t now_ms, uint32_t last_sent_ms);
+/*
+ * Share targets.
+ *
+ * A location share always goes to an explicit target. Two kinds exist and
+ * they are not interchangeable:
+ *
+ *   CONTACT: one peer, unicast under that peer's DM session key, so only
+ *     that peer can read it. Needs an ACTIVE session, which in turn needs a
+ *     route, so it only works once directed traffic has flowed to that peer.
+ *
+ *   CHANNEL: everyone holding the channel key, broadcast to
+ *     0xFFFFFFFF under that channel key. Needs no session, no route and no
+ *     prior traffic, which is what makes group location sharing work on a
+ *     mesh whose members have only ever broadcast.
+ *
+ * A channel target's tier is the resolution EVERY member of that channel
+ * receives. Per-contact tiers express "how much I trust this one peer" and
+ * have no meaning against a channel audience, so a channel target carries
+ * exactly one tier and it is applied to the single broadcast frame.
+ *
+ * Targets are persisted in the location NVS namespace, one key per target:
+ * LOCATION_CONTACT_RULE_PREFIX plus the 8 hex digits of the peer address, or
+ * LOCATION_CHANNEL_RULE_PREFIX plus the two-digit channel index. The value is
+ * the rule string described at location_rule_parse.
+ */
+#define LOCATION_CONTACT_RULE_PREFIX "lcr_"
+#define LOCATION_CHANNEL_RULE_PREFIX "lch_"
+
+#define LOCATION_TARGET_CONTACT 0
+#define LOCATION_TARGET_CHANNEL 1
+
+/* Mirrors MAX_CHANNELS from the channel component. Kept as a literal so this
+ * header stays dependency-free; main/mesh_location.c static-asserts the two
+ * agree. */
+#define LOCATION_MAX_CHANNEL_TARGETS 16
+#define LOCATION_MAX_TARGETS (LOCATION_MAX_CONTACTS + LOCATION_MAX_CHANNEL_TARGETS)
+
+/* Longest channel-target NVS key plus terminator ("lch_" + two digits). */
+#define LOCATION_TARGET_KEY_SIZE 16
+
+/*
+ * Retry delay after a share attempt that never reached the radio.
+ *
+ * Applied to CHANNEL targets only, and never stretched past the target's own
+ * interval. A channel share fails when the TX gate rejects it (listen-before-
+ * talk found the channel busy, or the airtime budget is spent), which is a
+ * transient radio condition that clears on its own, costs one gate evaluation
+ * to retest, and needs no state from any peer. Waiting a full share interval
+ * to retry it throws away a position that is still fresh.
+ *
+ * CONTACT targets deliberately do not get this: their dominant failure is
+ * "no ACTIVE DM session", which cannot resolve on a ten-second timescale
+ * because it needs a handshake driven by other traffic. Retrying that fast
+ * is a warning-logging busy loop that changes nothing, so a failed contact
+ * share consumes its interval like a successful one.
+ */
+#define LOCATION_SEND_RETRY_S 10
+
+/* One persisted target rule: whether it is active, at what resolution, and
+ * how often. */
+typedef struct {
+    bool enabled;
+    uint8_t tier; /* LOCATION_TIER_* */
+    uint16_t interval_s;
+} location_rule_t;
+
+/* One resolved, enabled target for a share round. */
+typedef struct {
+    uint8_t kind; /* LOCATION_TARGET_* */
+    uint32_t id;  /* peer address (CONTACT) or channel index (CHANNEL) */
+    uint8_t tier; /* resolution to send at */
+    uint16_t interval_s;
+} location_target_t;
+
+/*
+ * Rule string codec, shared by the RPC config surface that writes these keys
+ * and the send path that reads them, so the two cannot drift.
+ *
+ * Canonical form is "<enabled>|<tier>|<interval_s>", for example
+ * "1|coarse|300". A bare tier name is also accepted and read as an enabled
+ * rule at the default interval. Parsing always fills the rule (it has no
+ * failure mode that leaves it unset) and returns false only for null
+ * arguments.
+ */
+bool location_rule_parse(const char* raw, location_rule_t* rule);
+void location_rule_format(char* out, size_t out_len, const location_rule_t* rule);
+
+/* Build the canonical NVS key for a target. Returns false if the identifier
+ * is out of range, which is how an out-of-range channel index is rejected
+ * before it can be written as a key nothing will ever match. */
+bool location_contact_key(char* out, size_t out_len, uint32_t addr);
+bool location_channel_key(char* out, size_t out_len, int channel_index);
+
+/*
+ * Resolve one persisted NVS key/value pair into a share target.
+ *
+ * This is the whole target-selection decision: which keys name a target,
+ * which kind each one is, and what tier and interval it carries. Returns
+ * true only for a key that names a target whose rule is enabled.
+ */
+bool location_target_from_entry(const char* key, const char* raw, location_target_t* out);
+
+/* Shortest interval among the given targets, in seconds, or 0 for none. This
+ * is the node's effective share cadence, which is what the GNSS duty cycler
+ * has to schedule against. */
+uint16_t location_targets_min_interval_s(const location_target_t* targets, size_t count);
+
+/* Should a share round run at all: sharing on, a position to send, and at
+ * least one target to send it to. Interval pacing is per target and belongs
+ * to the schedule below, not here. */
+bool location_share_round_enabled(const location_policy_t* policy, bool has_source,
+                                  size_t target_count);
+
+/*
+ * Per-target send schedule.
+ *
+ * Each target paces itself off its own interval, so a channel target set to
+ * 60s and a contact rule set to 900s both get what they asked for. Slots are
+ * keyed by kind and id, hold the time of the last ATTEMPT and how long that
+ * attempt bought, and are compared with wrap-safe unsigned subtraction
+ * because the mesh clock wraps. A target with no slot yet is due
+ * immediately, so a freshly configured target shares on the next round
+ * rather than after one silent interval.
+ */
+typedef struct {
+    uint8_t kind;
+    uint32_t id;
+    uint32_t last_attempt_ms;
+    uint32_t wait_ms;
+    bool used;
+} location_schedule_slot_t;
+
+typedef struct {
+    location_schedule_slot_t slots[LOCATION_MAX_TARGETS];
+} location_schedule_t;
+
+void location_schedule_init(location_schedule_t* sched);
+bool location_schedule_is_due(const location_schedule_t* sched, const location_target_t* target,
+                              uint32_t now_ms);
+/* Record an attempt. `sent` false means the frame never reached the radio;
+ * see LOCATION_SEND_RETRY_S for why that backs off differently per kind. */
+void location_schedule_record(location_schedule_t* sched, const location_target_t* target,
+                              uint32_t now_ms, bool sent);
+/* Drop slots for targets that are no longer configured, so removing a rule
+ * releases its slot instead of pinning it until the table wraps. */
+void location_schedule_retain(location_schedule_t* sched, const location_target_t* targets,
+                              size_t count);
 
 /* Persistent policy helpers */
 void location_policy_set_defaults(location_policy_t* policy);

@@ -264,6 +264,10 @@ void ui_zone_activate(ui_zone_t zone) {
         apply_focus_visual(g);
 }
 
+void ui_zone_sync_focus_visual(void) {
+    apply_focus_visual((s_zone == UI_ZONE_CHROME) ? s_chrome : s_content);
+}
+
 void ui_zone_reset_to_content(void) {
     /* A screen with no focusable content (map, traffic) starts in chrome so
      * focus lands somewhere visible instead of an empty group. */
@@ -402,6 +406,15 @@ uint32_t ui_zone_translate(ui_button_t btn) {
     case BTN_UP:
     case BTN_DOWN:
         ui_zone_activate(UI_ZONE_CONTENT);
+        /* A widget that owns the vertical axis (the map canvas: UP/DOWN step
+         * the zoom) also gets the key that carried the cursor home, so the
+         * press that arrives on the map zooms instead of being spent on the
+         * hop. Group-navigated content still swallows it: there the drop back
+         * IS the movement, and delivering PREV/NEXT on top of it would skip a
+         * row. The cursor can be parked in chrome without the user putting it
+         * there, since a touch tap focuses whatever it lands on. */
+        if (consumes_vertical(active_focused()))
+            return (btn == BTN_UP) ? LV_KEY_UP : LV_KEY_DOWN;
         return 0;
     case BTN_LEFT:
         return LV_KEY_PREV;

@@ -444,6 +444,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.getTimezone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the configured display timezone
+         * @description Returns the POSIX TZ specification the node renders wall-clock times in, together with the named zones the on-device picker offers. Clients read the preset list from here rather than carrying their own copy of the specs.
+         */
+        post: operations["getTimezone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rpc/bramble.setTimezone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the display timezone
+         * @description Persists a POSIX TZ specification, for example "PST8PDT,M3.2.0,M11.1.0". UTC remains the internal source of truth; the zone is applied only where a clock is rendered. A specification naming a daylight-saving zone must also carry explicit transition rules, since the ruleless form is ambiguous and guessing would produce a silently wrong clock.
+         */
+        post: operations["setTimezone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.addChannel": {
         parameters: {
             query?: never;
@@ -1974,6 +2014,37 @@ export interface components {
             /** @description The applied node name. */
             name: string;
         };
+        /** @description A named zone offered by the on-device picker. */
+        TimezonePreset: {
+            /** @description Human-facing zone name, for example "US Pacific". */
+            label: string;
+            /** @description POSIX TZ specification the label maps to. */
+            spec: string;
+        };
+        /** @description Response from bramble.getTimezone. */
+        GetTimezoneResponse: {
+            ok: boolean;
+            /** @description Effective POSIX TZ specification used to render clocks. */
+            timezone: string;
+            /** @description Compiled-in default, used when nothing valid is stored. */
+            default_timezone: string;
+            /** @description True when a zone is stored, as opposed to the default. */
+            configured: boolean;
+            /** @description Named zones the on-device picker offers. */
+            presets: components["schemas"]["TimezonePreset"][];
+        };
+        SetTimezoneParams: {
+            /** @description POSIX TZ specification, for example "PST8PDT,M3.2.0,M11.1.0" or "UTC0". */
+            timezone: string;
+        };
+        /** @description Response from bramble.setTimezone. */
+        SetTimezoneResponse: {
+            ok: boolean;
+            /** @description Effective timezone after the change. */
+            timezone?: string;
+            /** @description Error message when ok=false. */
+            error?: string;
+        };
         AddChannelParams: {
             /** @description Channel display name. */
             name: string;
@@ -3340,6 +3411,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SetNodeNameResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getTimezone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description Current timezone configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GetTimezoneResponse"];
+                };
+            };
+        };
+    };
+    setTimezone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SetTimezoneParams"];
+            };
+        };
+        responses: {
+            /** @description Effective timezone after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetTimezoneResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */

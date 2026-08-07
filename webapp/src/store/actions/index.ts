@@ -39,6 +39,8 @@ export {
   setDefaultChannel,
   setLocationConfig,
   setGpsEnabled,
+  loadTimezone,
+  setTimezone,
   shareLocationOnce,
 } from './config';
 export {

@@ -516,8 +516,9 @@ Generates and persists the node's identity on first boot (stored in NVS): an Ed2
 Stratum-based mesh time synchronization inspired by NTP:
 
 - Sync rides the beacon: each beacon carries `network_time` and a stratum/confidence field, consumed by `timesync_handle_sync` on beacon receipt (`main/mesh_beacon.c`). The dedicated TIME_SYNC packet type was removed unshipped; the beacon is the only sync transport.
-- GPS-equipped nodes are stratum 0; other nodes adopt the best (lowest stratum) time source they hear and become stratum+1.
-- Convergence to ±1–2s across the mesh.
+- Nodes adopt the best (lowest stratum) time source they hear and become stratum+1, after `CORROBORATION_REQUIRED` distinct established sources agree.
+- No stratum-0 source is wired: nothing seeds the clock from GPS, an RTC, or an operator, and a node emits `network_time` only when it is already synchronized. Between honest nodes that closes the loop, since with nothing seeding a time no node emits one, no node collects the distinct established sources a first commit needs, and `synchronized` never leaves false. `network_time` is therefore a mesh-relative millisecond counter rather than an epoch and carries no wall-clock meaning. The status-bar clock reads UTC from a GPS fix instead (`components/ui_graphics/screens/scr_layout.c`).
+- `timesync_is_confident` measures agreement between peers, never agreement with real time: it returns true once a commit has happened and the last sync is within `CONFIDENCE_MAX_AGE_MS`, so it says a quorum corroborated an offset and says nothing about that offset being a valid epoch. The commit path is what a fabricated time source has to get through, which is why it demands `CORROBORATION_REQUIRED` distinct sources that `identity_store_quorum_eligible` accepts rather than a single peer's word.
 
 ---
 
@@ -662,8 +663,10 @@ lat_e7(4) + lon_e7(4) + alt_m(2) + accuracy_m(1) + speed_kmh(1) + heading_deg2(1
 
 **Sharing rules:**
 
-- Periodic sharing is gated by the persisted policy (`location_policy_t`: enabled flag, default tier, interval): `location_policy_should_send(policy, has_source, has_targets, now_ms, last_sent_ms)` returns true once the configured interval has elapsed and both a position source and at least one target exist.
-- Per-contact rules (which peers receive updates and at which tier) are persisted in NVS under the `lcr_` key prefix and managed over RPC (`bramble.setLocationContact`).
+- A share round runs when the persisted policy (`location_policy_t`: enabled flag, default tier, interval) is enabled, a position source resolves, and at least one target is configured: `location_share_round_enabled(policy, has_source, target_count)`. Pacing is per target, not per round: each target carries its own `interval_s` and is scheduled independently (`location_schedule_is_due` / `location_schedule_record`), so a fast channel target and a slow contact rule each get the cadence they were configured with.
+- Targets come in two kinds, both resolved from one NVS pass by `location_target_from_entry`. Per-contact rules (`lcr_` key prefix, managed over RPC by `bramble.setLocationContact`) are unicast under that peer's DM session key and require an active session, and therefore a route. Per-channel targets (`lch_` key prefix, managed by `bramble.setLocationConfig`) are broadcast under the channel key and require no session, no route and no prior directed traffic; the tier on a channel target is the resolution every member of that channel receives.
+- A failed attempt retries differently by kind. A channel broadcast that the TX gate refused retries after `LOCATION_SEND_RETRY_S`, never longer than its own interval, because the refusal is a transient radio condition. A contact unicast consumes its interval, because its usual failure is a missing DM session that a fast retry cannot resolve.
+- LOCATION frames are not relayed, so a share is read by nodes that hear the sender directly.
 
 **Position cache:**
 

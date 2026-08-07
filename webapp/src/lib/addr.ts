@@ -31,14 +31,15 @@ export function parseAddr(x: string | number | undefined): number {
  * than fall back to 0: a form field the user types into, or an imported record
  * whose keys may be malformed. Returns the numeric address from a hex string
  * (with or without a `0x` prefix, surrounding whitespace tolerated), or null
- * when the input is empty or does not land in the 32-bit address range.
- * parseAddr's return-0 fallback cannot distinguish "absent/invalid" from the
- * legitimate address 0, which is why these callers need their own parser.
+ * unless the input is exactly 1 to 8 hex digits. The 8-digit cap is the 32-bit
+ * address range, and rejecting any non-hex character stops trailing garbage
+ * ("abcz") from silently parsing to a truncated address, which the looser
+ * parseInt path would accept. parseAddr's return-0 fallback cannot distinguish
+ * "absent/invalid" from the legitimate address 0, which is why these callers
+ * need their own parser.
  */
 export function tryParseAddr(x: string): number | null {
   const raw = x.trim().replace(/^0x/i, '');
-  if (!raw) return null;
-  const n = parseInt(raw, 16);
-  if (!Number.isFinite(n) || n < 0 || n > 0xffffffff) return null;
-  return n;
+  if (!/^[0-9a-fA-F]{1,8}$/.test(raw)) return null;
+  return parseInt(raw, 16);
 }

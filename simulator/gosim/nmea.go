@@ -65,7 +65,8 @@ func nmeaTimeUTC(simUs uint64) string {
 }
 
 // nmeaRMC builds a valid-fix RMC sentence for a slot position at a sim time.
-// The date field is the canonical fixture date; nothing downstream reads it.
+// The date field is the canonical fixture date, which the firmware reads as
+// the UTC calendar date behind its status-bar clock.
 func nmeaRMC(x, y float32, simUs uint64) string {
 	lat, ns, lon, ew := nmeaDegrees(x, y)
 	body := fmt.Sprintf("GPRMC,%s,A,%s,%s,%s,%s,0.0,0.0,230394,,", nmeaTimeUTC(simUs), lat, ns, lon, ew)

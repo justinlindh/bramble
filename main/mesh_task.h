@@ -135,8 +135,8 @@ bool mesh_resolve_self_position(bramble_position_t* out);
  * decision (gps_duty_should_power).
  */
 typedef struct {
-    bool sharing_active;   /* policy.enabled && location_policy_has_targets() */
-    uint16_t interval_s;   /* policy share interval */
+    bool sharing_active;   /* policy enabled AND at least one target configured */
+    uint16_t interval_s;   /* shortest configured target interval */
     uint32_t last_send_ms; /* 0 = never */
 } mesh_location_share_state_t;
 
@@ -223,10 +223,6 @@ uint8_t mesh_get_flood_hop_limit(void);
  * Get the current node name (returns NULL if not set).
  */
 const char* mesh_get_node_name(void);
-
-/* Network wall clock for display. Returns true and writes epoch ms only
- * when mesh timesync is synchronized. */
-bool mesh_get_network_time_ms(int64_t* out_ms);
 
 /**
  * Get the local identity address and public key.

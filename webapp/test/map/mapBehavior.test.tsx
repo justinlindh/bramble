@@ -83,6 +83,24 @@ describe('Map behavior', () => {
     expect(fitBoundsMock).toHaveBeenCalledTimes(1);
   });
 
+  it('does not claim the legend is sharing when the policy has no targets', () => {
+    const { getByText } = render(<MapPage />);
+    expect(getByText(/no targets, so nothing is published/i)).toBeTruthy();
+  });
+
+  it('reports the sharing cadence once a channel target exists', () => {
+    state = {
+      ...state,
+      config: {
+        ...state.config,
+        location: { ...state.config.location, channel_targets: [{ channel: 0, enabled: true, tier: 'coarse', interval_s: 60 }] },
+      },
+    };
+
+    const { getByText } = render(<MapPage />);
+    expect(getByText(/Sharing coarse updates every 300s via gps/i)).toBeTruthy();
+  });
+
   it('renders a fallback marker for presence-tier peers with grid square', () => {
     state = {
       ...state,

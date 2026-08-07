@@ -27,6 +27,12 @@ void test_spiffs_save_returns_error_when_not_initialized(void) {
     TEST_ASSERT_EQUAL(-1, ret);
 }
 
+void test_spiffs_update_returns_error_when_not_initialized(void) {
+    stored_msg_t msg = {0};
+    int ret = msg_store_spiffs_update(0, &msg);
+    TEST_ASSERT_EQUAL(-1, ret);
+}
+
 void test_spiffs_get_count_returns_zero_on_host(void) {
     int count = msg_store_spiffs_get_count();
     TEST_ASSERT_EQUAL(0, count);
@@ -76,6 +82,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_spiffs_init_returns_error_on_host);
     RUN_TEST(test_spiffs_save_returns_error_when_not_initialized);
+    RUN_TEST(test_spiffs_update_returns_error_when_not_initialized);
     RUN_TEST(test_spiffs_get_count_returns_zero_on_host);
     RUN_TEST(test_spiffs_load_recent_returns_zero_on_host);
     RUN_TEST(test_spiffs_clear_does_not_crash);
