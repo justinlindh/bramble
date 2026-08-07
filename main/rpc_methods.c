@@ -627,6 +627,54 @@ static int handle_get_routes(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* bramble.getDmSessions
+ *
+ * Whether a peer has an established DM session is observable state that
+ * nothing else reports, and its absence is a silent failure mode: a directed
+ * send (a chat DM, or a per-contact location share) needs an ACTIVE session
+ * and is dropped without one, logging only to the serial console. A node can
+ * therefore be configured to share location with a peer, report that config
+ * back through bramble.getConfig, and transmit nothing, with no way to tell
+ * from the outside. This returns the session table's metadata so a diagnostic
+ * can name the peer that has no session.
+ *
+ * Key material is not exposed: mesh_get_dm_sessions copies only the fields
+ * below out of dm_session_t, never session_key, peer_id_pub or the ratchet
+ * chain keys. */
+static int handle_get_dm_sessions(const cJSON* params, cJSON* result) {
+    (void)params;
+
+    size_t cap = mesh_dm_session_capacity();
+    mesh_dm_session_info_t* sessions = calloc(cap, sizeof(*sessions));
+    if (!sessions) {
+        ESP_LOGE(TAG, "getDmSessions: out of memory for session snapshot");
+        return RPC_ERR_INTERNAL;
+    }
+    size_t count = mesh_get_dm_sessions(sessions, cap);
+
+    cJSON* arr = cJSON_AddArrayToObject(result, "sessions");
+    char buf[12];
+    for (size_t i = 0; i < count; i++) {
+        const mesh_dm_session_info_t* s = &sessions[i];
+        cJSON* obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(obj, "address", addr_hex(s->peer_addr, buf, sizeof(buf)));
+        cJSON_AddStringToObject(obj, "state",
+                                s->state == MESH_DM_SESSION_ACTIVE        ? "active"
+                                : s->state == MESH_DM_SESSION_HANDSHAKING ? "handshaking"
+                                                                          : "none");
+        cJSON_AddBoolToObject(obj, "verified", s->verified);
+        cJSON_AddBoolToObject(obj, "ratchet_valid", s->ratchet_valid);
+        cJSON_AddNumberToObject(obj, "msg_count", s->msg_count);
+        cJSON_AddNumberToObject(obj, "ke_epoch", s->ke_epoch);
+        cJSON_AddNumberToObject(obj, "established_ms_ago", s->established_ms_ago);
+        cJSON_AddNumberToObject(obj, "last_active_ms_ago", s->last_active_ms_ago);
+        cJSON_AddItemToArray(arr, obj);
+    }
+    cJSON_AddNumberToObject(result, "capacity", (double)cap);
+    free(sessions);
+    return 0;
+}
+
 /* bramble.getAirtime */
 static int handle_get_airtime(const cJSON* params, cJSON* result) {
     (void)params;
@@ -3436,6 +3484,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.getDeliveryEvents", handle_get_delivery_events);
     rpc_register("bramble.getNeighbors", handle_get_neighbors);
     rpc_register("bramble.getRoutes", handle_get_routes);
+    rpc_register("bramble.getDmSessions", handle_get_dm_sessions);
     rpc_register("bramble.getAirtime", handle_get_airtime);
     rpc_register("bramble.ping", handle_ping);
     rpc_register("bramble.getConfig", handle_get_config);

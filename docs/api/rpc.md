@@ -312,6 +312,23 @@ fixed to a place where it hears nothing therefore reports the second place.
 {"jsonrpc":"2.0","id":21,"method":"bramble.getRoutes","params":{}}
 ```
 
+#### `bramble.getDmSessions`
+
+- Description: Returns metadata for every used DM session slot. A directed send
+  (a chat DM, or a per-contact location share) requires an `active` session with
+  the destination and is dropped without one, so this is what identifies a
+  configured peer the node cannot currently send to. Key material is never
+  returned.
+- Params: none.
+- Response fields: `sessions` (array; `address`, `state` (`handshaking` or
+  `active`), `verified`, `ratchet_valid`, `msg_count`, `ke_epoch`,
+  `established_ms_ago`, `last_active_ms_ago`), `capacity`.
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":24,"method":"bramble.getDmSessions","params":{}}
+```
+
 #### `bramble.getAirtime`
 
 - Description: Returns airtime budget status.

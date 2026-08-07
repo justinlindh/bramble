@@ -224,6 +224,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.getDmSessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get DM session table
+         * @description Returns metadata for every used slot in the DM session table. A directed send (a chat DM, or a per-contact location share) requires an active session with the destination and is dropped without one, so this is what tells a diagnostic which configured peer a node cannot currently reach directly. Key material is never included.
+         */
+        post: operations["getDmSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.getMessages": {
         parameters: {
             query?: never;
@@ -1780,6 +1800,33 @@ export interface components {
         RoutesResponse: {
             routes: components["schemas"]["Route"][];
         };
+        /** @description One used slot of the DM session table. Metadata only: the session key, the peer's cached identity key and the ratchet chain keys are never returned. */
+        DmSession: {
+            /** @description Peer address, 8 hex digits. */
+            address: string;
+            /**
+             * @description active means directed traffic to this peer can be encrypted and sent; handshaking means the key exchange has not completed.
+             * @enum {string}
+             */
+            state: "handshaking" | "active";
+            /** @description Peer identity key is pinned and confirmed. */
+            verified: boolean;
+            /** @description Send chain is established, so a payload can be encrypted now. */
+            ratchet_valid: boolean;
+            /** @description Messages carried by this session since it was established. */
+            msg_count?: number;
+            /** @description Key-exchange epoch this session is on. */
+            ke_epoch?: number;
+            /** @description Milliseconds since the slot was established or re-established. */
+            established_ms_ago?: number;
+            /** @description Milliseconds since the last send or receive on this session. */
+            last_active_ms_ago?: number;
+        };
+        DmSessionsResponse: {
+            sessions: components["schemas"]["DmSession"][];
+            /** @description Total slots in the session table, used or not. */
+            capacity: number;
+        };
         MessagesResponse: {
             messages: components["schemas"]["Message"][];
         };
@@ -2952,6 +2999,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoutesResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getDmSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description DM session table */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DmSessionsResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */
