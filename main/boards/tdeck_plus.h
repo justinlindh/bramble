@@ -35,7 +35,10 @@ static const bramble_board_config_t board_tdeck_plus = {
 
     .keyboard_int = 46,
 
-    .trackball = {.up = 3, .down = 2, .left = 15, .right = 1, .center = 0},
+    /* Direction-to-GPIO map per the LilyGo T-Deck UnitTest example and the
+     * Meshtastic t-deck variant, which agree: G01=3 up, G03=15 down, G04=1
+     * left, G02=2 right. */
+    .trackball = {.up = 3, .down = 15, .left = 1, .right = 2, .center = 0},
 
     .touch = {.int_pin = 16, .rst_pin = -1, .i2c_addr = 0x14},
 

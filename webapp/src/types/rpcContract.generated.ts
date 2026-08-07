@@ -1603,6 +1603,21 @@ export interface components {
             gps_available: boolean;
             /** @description The persisted GPS power preference (independent of gps_available). */
             gps_enabled: boolean;
+            /**
+             * @description Three-way GNSS state. absent when the board has no receiver or it is powered off by preference; no_signal when the receiver is powered and hearing nothing (interference, dead antenna, or an unpowered module); acquiring when satellites are being tracked but no fix has converged; fix when a position has been computed.
+             * @enum {string}
+             */
+            gps_state: "absent" | "no_signal" | "acquiring" | "fix";
+            /** @description Satellites the receiver lists across all constellations, tracked or predicted from the almanac. 0 on a board without GNSS. */
+            gps_sats_in_view: number;
+            /** @description Satellites reporting a nonzero carrier-to-noise ratio, meaning the receiver is actually hearing them. A nonzero in-view count with a zero tracked count means nothing is reaching the antenna. */
+            gps_sats_tracked: number;
+            /** @description Satellites used in the most recent fix computation. Reported with or without a fix. */
+            gps_sats_used: number;
+            /** @description Best carrier-to-noise ratio across the tracked satellites, in dB-Hz. 0 when nothing is tracked. */
+            gps_snr_max_dbhz: number;
+            /** @description GGA fix-quality digit as the receiver reports it: 0 invalid, 1 GPS, 2 DGPS, 4 RTK fixed, 5 RTK float, 6 dead reckoning. */
+            gps_fix_quality: number;
             /** @description True when bramble.getDeliveryEvents incremental replay is supported. */
             supports_delivery_event_sync: boolean;
             /** @description Verified per-node identity pins currently held (TOFU pin store, RAM-only; resets on reboot). */
@@ -2364,7 +2379,7 @@ export interface components {
         };
         /** @description Response from bramble.getGpsPosition. */
         GetGpsPositionResponse: {
-            /** @description True when a GPS fix is available and all position fields are populated. False when GPS is not available or no fix has been acquired. */
+            /** @description True when a GPS fix is available and all position fields are populated. False when no fix has been acquired. The satellite fields below are populated on both branches, so a valid:false response still tells a caller whether anything is reaching the receiver. A board without a GNSS receiver returns the method-not-supported error instead of this schema, so a caller must read that error as "no receiver" rather than as zero satellites. */
             valid: boolean;
             /** @description Latitude in decimal degrees. */
             lat?: number;
@@ -2380,6 +2395,21 @@ export interface components {
             accuracy_m?: number;
             /** @description Unix timestamp of the GPS fix (seconds). */
             timestamp?: number;
+            /**
+             * @description Reported whether or not valid is true. Three-way GNSS state: absent when the receiver is powered off by preference; no_signal when the receiver is powered and hearing nothing (interference, dead antenna, or an unpowered module); acquiring when satellites are being tracked but no fix has converged; fix when a position has been computed.
+             * @enum {string}
+             */
+            state: "absent" | "no_signal" | "acquiring" | "fix";
+            /** @description Reported whether or not valid is true. Satellites the receiver lists across all constellations, tracked or predicted from the almanac. */
+            sats_in_view: number;
+            /** @description Reported whether or not valid is true. Satellites reporting a nonzero carrier-to-noise ratio, meaning the receiver is actually hearing them. A nonzero in-view count with a zero tracked count means nothing is reaching the antenna. */
+            sats_tracked: number;
+            /** @description Reported whether or not valid is true. Satellites used in the most recent fix computation. */
+            sats_used: number;
+            /** @description Reported whether or not valid is true. Best carrier-to-noise ratio across the tracked satellites, in dB-Hz. 0 when nothing is tracked. */
+            snr_max_dbhz: number;
+            /** @description Reported whether or not valid is true. GGA fix-quality digit as the receiver reports it: 0 invalid, 1 GPS, 2 DGPS, 4 RTK fixed, 5 RTK float, 6 dead reckoning. */
+            fix_quality: number;
         };
         /** @description Parameters for bramble.setGpsEnabled. */
         SetGpsEnabledParams: {

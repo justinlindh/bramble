@@ -91,12 +91,7 @@ int send_beacon(void) {
         ESP_LOGE(TAG, "Seq counter unavailable, dropping beacon this interval");
         return -1;
     }
-    beacon.seq[0] = (uint8_t)(beacon_seq >> 40);
-    beacon.seq[1] = (uint8_t)(beacon_seq >> 32);
-    beacon.seq[2] = (uint8_t)(beacon_seq >> 24);
-    beacon.seq[3] = (uint8_t)(beacon_seq >> 16);
-    beacon.seq[4] = (uint8_t)(beacon_seq >> 8);
-    beacon.seq[5] = (uint8_t)beacon_seq;
+    bramble_seq48_pack(beacon.seq, beacon_seq);
 
     /* HMAC auth: use shared beacon key (derived from public channel PSK) */
     beacon_compute_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key));
@@ -226,12 +221,7 @@ static int send_identity_attestation(void) {
 
     /* Relay gate (Phase 3): write seq, then MAC. Both after the Ed25519
      * sign above, since the MAC covers sig and seq. */
-    att.seq[0] = (uint8_t)(att_seq >> 40);
-    att.seq[1] = (uint8_t)(att_seq >> 32);
-    att.seq[2] = (uint8_t)(att_seq >> 24);
-    att.seq[3] = (uint8_t)(att_seq >> 16);
-    att.seq[4] = (uint8_t)(att_seq >> 8);
-    att.seq[5] = (uint8_t)att_seq;
+    bramble_seq48_pack(att.seq, att_seq);
     ident_relay_sign(&att);
 
     uint8_t buf[IDENTITY_ATTESTATION_SIZE];
@@ -331,9 +321,7 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
      * NEW-SEC-4 where a replayed beacon re-feeds stale network_time; the
      * bootstrap-quorum race (1.3c) is closed separately by the bounded
      * per-boot grace in identity_store_quorum_eligible. */
-    uint64_t beacon_seq = ((uint64_t)beacon.seq[0] << 40) | ((uint64_t)beacon.seq[1] << 32) |
-                          ((uint64_t)beacon.seq[2] << 24) | ((uint64_t)beacon.seq[3] << 16) |
-                          ((uint64_t)beacon.seq[4] << 8) | (uint64_t)beacon.seq[5];
+    uint64_t beacon_seq = bramble_seq48_unpack(beacon.seq);
     if (!control_replay_ok(beacon.src_addr, beacon_seq)) {
         ESP_LOGW(TAG, "Beacon replay src=%08" PRIX32, beacon.src_addr);
         return;
@@ -495,9 +483,7 @@ void handle_identity_attestation(const uint8_t* data, uint8_t len) {
         return;
     }
 
-    uint64_t att_seq = ((uint64_t)att.seq[0] << 40) | ((uint64_t)att.seq[1] << 32) |
-                       ((uint64_t)att.seq[2] << 24) | ((uint64_t)att.seq[3] << 16) |
-                       ((uint64_t)att.seq[4] << 8) | (uint64_t)att.seq[5];
+    uint64_t att_seq = bramble_seq48_unpack(att.seq);
     if (!control_replay_ok(att.src_addr, att_seq)) {
         ESP_LOGW(TAG, "Identity attestation replay src=%08" PRIX32, att.src_addr);
         return;

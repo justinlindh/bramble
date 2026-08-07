@@ -30,6 +30,7 @@
 #include "freertos/task.h"
 #include "board_config.h"
 #include "display.h"
+#include "gnss_status.h"
 #include "gps.h"
 #include "gps_pref.h"
 #include "location.h"
@@ -80,6 +81,16 @@ static const char* bramble_hardware(void) {
         return board->short_name;
     }
     return "unknown";
+}
+
+/* Lowercase-hex encode n bytes into out, which must hold 2*n + 1 bytes (the
+ * trailing NUL included). Used by the RPC handlers that surface a pubkey,
+ * network key, or 4-byte fingerprint as a hex string. */
+static void bytes_to_hex(const uint8_t* in, size_t n, char* out) {
+    for (size_t i = 0; i < n; i++) {
+        snprintf(out + i * 2, 3, "%02x", in[i]);
+    }
+    out[2 * n] = '\0';
 }
 
 typedef struct __attribute__((packed)) {
@@ -135,6 +146,27 @@ static const char* battery_charging_str(battery_charging_t charging) {
     }
 }
 
+/* One GNSS snapshot shared by getStatus and getGpsPosition. gps_get_stats
+ * takes the driver lock, so callers take exactly one snapshot per response. */
+static void gnss_snapshot(gnss_ui_input_t* in) {
+    memset(in, 0, sizeof(*in));
+    in->board_has_gnss = board_has_cap(BOARD_CAP_GPS);
+    if (!in->board_has_gnss) {
+        in->nmea_age_s = GNSS_UI_NMEA_NEVER;
+        return;
+    }
+    in->powered = gps_pref_get();
+    in->has_fix = gps_has_fix();
+    gps_stats_t st;
+    gps_get_stats(&st);
+    in->sats_in_view = st.sats_in_view;
+    in->sats_tracked = st.sats_tracked;
+    in->sats_used = st.sats_used;
+    in->snr_max_dbhz = st.snr_max_dbhz;
+    in->fix_quality = st.fix_quality;
+    in->nmea_age_s = st.nmea_age_s;
+}
+
 /* bramble.getStatus */
 static int handle_get_status(const cJSON* params, cJSON* result) {
     (void)params;
@@ -167,6 +199,21 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
     cJSON_AddBoolToObject(result, "present", bstat.present);
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
     cJSON_AddBoolToObject(result, "gps_enabled", gps_pref_get());
+
+    /* GNSS observability: the three-way state plus the counts behind it, so a
+     * field operator can tell "nothing reaching the receiver" from "signal
+     * present, fix not converging" from "fix". Always emitted, zeroed on a
+     * board without GNSS (gps_available already says which); mirrored in
+     * api/openapi.yaml's StatusResponse. */
+    gnss_ui_input_t gnss;
+    gnss_snapshot(&gnss);
+    cJSON_AddStringToObject(result, "gps_state", gnss_ui_state_wire(gnss_ui_classify(&gnss)));
+    cJSON_AddNumberToObject(result, "gps_sats_in_view", gnss.sats_in_view);
+    cJSON_AddNumberToObject(result, "gps_sats_tracked", gnss.sats_tracked);
+    cJSON_AddNumberToObject(result, "gps_sats_used", gnss.sats_used);
+    cJSON_AddNumberToObject(result, "gps_snr_max_dbhz", gnss.snr_max_dbhz);
+    cJSON_AddNumberToObject(result, "gps_fix_quality", gnss.fix_quality);
+
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync",
                           mesh_supports_delivery_event_sync());
 
@@ -385,10 +432,7 @@ static int handle_get_identity(const cJSON* params, cJSON* result) {
      * the whole key to request an anchor endorsement; address/pubkey_hash are
      * only truncated hashes. */
     char ed_hex[2 * BRAMBLE_ED25519_PUBKEY_SIZE + 1];
-    for (int i = 0; i < BRAMBLE_ED25519_PUBKEY_SIZE; i++) {
-        snprintf(ed_hex + i * 2, 3, "%02x", s_identity->ed25519_public_key[i]);
-    }
-    ed_hex[2 * BRAMBLE_ED25519_PUBKEY_SIZE] = '\0';
+    bytes_to_hex(s_identity->ed25519_public_key, BRAMBLE_ED25519_PUBKEY_SIZE, ed_hex);
     cJSON_AddStringToObject(result, "ed25519_pub", ed_hex);
     return 0;
 }
@@ -1100,10 +1144,7 @@ static int handle_get_network_key_status(const cJSON* params, cJSON* result) {
     uint8_t fp[4];
     network_key_fingerprint(fp);
     char hex[9];
-    for (int i = 0; i < 4; i++) {
-        snprintf(hex + i * 2, 3, "%02x", fp[i]);
-    }
-    hex[8] = '\0';
+    bytes_to_hex(fp, 4, hex);
     cJSON_AddStringToObject(result, "fingerprint", hex);
     return 0;
 }
@@ -1134,10 +1175,7 @@ static int handle_generate_network_key(const cJSON* params, cJSON* result) {
     }
 
     char key_hex[65];
-    for (int i = 0; i < 32; i++) {
-        snprintf(key_hex + i * 2, 3, "%02x", key[i]);
-    }
-    key_hex[64] = '\0';
+    bytes_to_hex(key, 32, key_hex);
     memset(key, 0, sizeof(key)); /* wipe local copy; never log the key */
     cJSON_AddStringToObject(result, "key", key_hex);
 
@@ -1146,10 +1184,7 @@ static int handle_generate_network_key(const cJSON* params, cJSON* result) {
     uint8_t fp[4];
     network_key_fingerprint(fp);
     char fp_hex[9];
-    for (int i = 0; i < 4; i++) {
-        snprintf(fp_hex + i * 2, 3, "%02x", fp[i]);
-    }
-    fp_hex[8] = '\0';
+    bytes_to_hex(fp, 4, fp_hex);
     cJSON_AddStringToObject(result, "fingerprint", fp_hex);
     return 0;
 }
@@ -1206,10 +1241,7 @@ static int handle_get_anchor_status(const cJSON* params, cJSON* result) {
         uint8_t fp[4];
         identity_anchor_fingerprint(fp);
         char hex[9];
-        for (int i = 0; i < 4; i++) {
-            snprintf(hex + i * 2, 3, "%02x", fp[i]);
-        }
-        hex[8] = '\0';
+        bytes_to_hex(fp, 4, hex);
         cJSON_AddStringToObject(result, "anchor_fingerprint", hex);
     }
     /* endorsed = we hold a cert that ACTUALLY verifies against the CURRENT
@@ -2718,6 +2750,18 @@ static int handle_get_gps_position(const cJSON* params, cJSON* result) {
     } else {
         cJSON_AddBoolToObject(result, "valid", false);
     }
+
+    /* Emitted on both branches: the no-fix branch is the one that matters in
+     * the field, where "valid: false" alone is indistinguishable from a dead
+     * antenna. */
+    gnss_ui_input_t gnss;
+    gnss_snapshot(&gnss);
+    cJSON_AddStringToObject(result, "state", gnss_ui_state_wire(gnss_ui_classify(&gnss)));
+    cJSON_AddNumberToObject(result, "sats_in_view", gnss.sats_in_view);
+    cJSON_AddNumberToObject(result, "sats_tracked", gnss.sats_tracked);
+    cJSON_AddNumberToObject(result, "sats_used", gnss.sats_used);
+    cJSON_AddNumberToObject(result, "snr_max_dbhz", gnss.snr_max_dbhz);
+    cJSON_AddNumberToObject(result, "fix_quality", gnss.fix_quality);
     return 0;
 }
 

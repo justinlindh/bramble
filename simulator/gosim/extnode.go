@@ -637,6 +637,11 @@ func (s *Sim) scheduleNMEAFeed(ec *extConn, gen uint64) {
 		}
 		ec.sendJSON(nmeaMsg{T: "nmea", Sentence: nmeaRMC(x, y, s.simTime)})
 		ec.sendJSON(nmeaMsg{T: "nmea", Sentence: nmeaGGA(x, y, s.simTime)})
+		// Without GSV a virtual node reports satellites used and none in
+		// view, which is a state no receiver produces.
+		for _, sentence := range nmeaGSV() {
+			ec.sendJSON(nmeaMsg{T: "nmea", Sentence: sentence})
+		}
 		s.scheduleNMEAFeed(ec, gen)
 	})
 }

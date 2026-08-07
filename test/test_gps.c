@@ -194,7 +194,41 @@ void test_gps_stats_default_zero(void) {
     gps_get_stats(&stats);
     TEST_ASSERT_EQUAL_UINT8(0, stats.sats_used);
     TEST_ASSERT_EQUAL_UINT8(0, stats.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(0, stats.sats_tracked);
+    TEST_ASSERT_EQUAL_UINT8(0, stats.snr_max_dbhz);
+    TEST_ASSERT_EQUAL_UINT8(0, stats.fix_quality);
     TEST_ASSERT_FALSE(stats.antenna_warning);
+    /* An unparseable line is still a line: the module is talking. */
+    TEST_ASSERT_NOT_EQUAL_UINT32(GPS_STATS_NMEA_NEVER, stats.nmea_age_s);
+}
+
+/* A module that has sent nothing at all is the class-A case the sentinel
+ * exists to name, and it must not read as a zero-second-old feed. */
+void test_gps_stats_nmea_never_when_module_silent(void) {
+    g_uart_stream = NULL;
+    if (setjmp(g_jmp) == 0) {
+        g_allow_jump = 1;
+        (void)gps_init(NULL, NULL);
+        TEST_FAIL_MESSAGE("expected jump out of gps task loop");
+    }
+    gps_stats_t stats;
+    gps_get_stats(&stats);
+    TEST_ASSERT_EQUAL_UINT32(GPS_STATS_NMEA_NEVER, stats.nmea_age_s);
+}
+
+void test_gps_stats_report_tracked_and_snr_after_gsv(void) {
+    g_uart_stream = "$GLGSV,1,1,06,65,45,120,33,66,20,300,28*70\x0d\x0a"
+                    "$GPGSV,1,1,08,10,63,137,17,07,61,308,21*70\x0d\x0a";
+    if (setjmp(g_jmp) == 0) {
+        g_allow_jump = 1;
+        (void)gps_init(NULL, NULL);
+        TEST_FAIL_MESSAGE("expected jump out of gps task loop");
+    }
+    gps_stats_t stats;
+    gps_get_stats(&stats);
+    TEST_ASSERT_EQUAL_UINT8(14, stats.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(4, stats.sats_tracked);
+    TEST_ASSERT_EQUAL_UINT8(33, stats.snr_max_dbhz);
 }
 
 void test_gps_stats_tracks_gga_sats_used_without_fix(void) {
@@ -242,6 +276,8 @@ int main(void) {
     RUN_TEST(test_gps_stats_default_zero);
     RUN_TEST(test_gps_stats_tracks_gga_sats_used_without_fix);
     RUN_TEST(test_gps_stats_tracks_gsv_sats_in_view);
+    RUN_TEST(test_gps_stats_nmea_never_when_module_silent);
+    RUN_TEST(test_gps_stats_report_tracked_and_snr_after_gsv);
     RUN_TEST(test_gps_stats_tracks_antenna_warning);
     return UNITY_END();
 }

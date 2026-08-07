@@ -166,7 +166,94 @@ void test_get_battery_returns_charging_and_present_fields(void) {
     cJSON_Delete(resp);
 }
 
-/* ── 1b. getDiagnostics GPS fields ────────────────────────────────── */
+/* ── 1b. getStatus GNSS observability fields ──────────────────────── */
+
+/* The six fields are always emitted so their absence means exactly one thing:
+ * firmware that predates them. A client can then render "unknown" instead of
+ * reporting zero satellites, which would name the wrong failure class. */
+static void assert_gnss_status_fields_present(cJSON* r) {
+    cJSON* state = cJSON_GetObjectItem(r, "gps_state");
+    TEST_ASSERT_NOT_NULL(state);
+    TEST_ASSERT_TRUE(cJSON_IsString(state));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_sats_in_view"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_sats_tracked"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_sats_used"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_snr_max_dbhz"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "gps_fix_quality"));
+}
+
+void test_get_status_includes_gnss_fields(void) {
+    g_stub_board_has_gps = true;
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":102,\"method\":\"bramble.getStatus\",\"params\":{}}");
+    cJSON* r = get_result(resp);
+
+    assert_gnss_status_fields_present(r);
+    /* A capable, powered receiver that has sent nothing at all is the severe
+     * case and must be named as such: not "absent" (which claims the board has
+     * no receiver) and not "acquiring" (which claims something is being
+     * heard). The harness GPS backend reports a feed that has never produced
+     * an NMEA line. */
+    TEST_ASSERT_EQUAL_STRING("no_signal", cJSON_GetObjectItem(r, "gps_state")->valuestring);
+
+    cJSON_Delete(resp);
+}
+
+/* The mirror image of test_get_diagnostics_omits_gps_fields_without_gps_cap:
+ * getStatus keeps the fields so a client disambiguates on gps_available, never
+ * on a satellite count. */
+void test_get_status_gnss_fields_present_without_gps_cap(void) {
+    g_stub_board_has_gps = false;
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":103,\"method\":\"bramble.getStatus\",\"params\":{}}");
+    cJSON* r = get_result(resp);
+
+    assert_gnss_status_fields_present(r);
+    TEST_ASSERT_EQUAL_STRING("absent", cJSON_GetObjectItem(r, "gps_state")->valuestring);
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItem(r, "gps_sats_in_view")->valueint);
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItem(r, "gps_sats_tracked")->valueint);
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItem(r, "gps_sats_used")->valueint);
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItem(r, "gps_snr_max_dbhz")->valueint);
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItem(r, "gps_fix_quality")->valueint);
+    TEST_ASSERT_FALSE(cJSON_IsTrue(cJSON_GetObjectItem(r, "gps_available")));
+
+    cJSON_Delete(resp);
+}
+
+/* ── 1c. getGpsPosition ───────────────────────────────────────────── */
+
+/* The direct regression guard for the field failure: a node that never
+ * acquires a fix answered with nothing but valid:false, which cannot tell a
+ * dead antenna from a cold start. */
+void test_get_gps_position_includes_gnss_fields_without_fix(void) {
+    g_stub_board_has_gps = true;
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":104,\"method\":\"bramble.getGpsPosition\",\"params\":{}}");
+    cJSON* r = get_result(resp);
+
+    TEST_ASSERT_FALSE(cJSON_IsTrue(cJSON_GetObjectItem(r, "valid")));
+    cJSON* state = cJSON_GetObjectItem(r, "state");
+    TEST_ASSERT_NOT_NULL(state);
+    TEST_ASSERT_TRUE(cJSON_IsString(state));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "sats_in_view"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "sats_tracked"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "sats_used"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "snr_max_dbhz"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "fix_quality"));
+
+    cJSON_Delete(resp);
+}
+
+void test_get_gps_position_not_supported_without_gps_cap(void) {
+    g_stub_board_has_gps = false;
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":105,\"method\":\"bramble.getGpsPosition\",\"params\":{}}");
+    cJSON* err = get_error(resp);
+    TEST_ASSERT_EQUAL_INT(-1004, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(resp);
+}
+
+/* ── 1d. getDiagnostics GPS fields ────────────────────────────────── */
 
 void test_get_diagnostics_includes_gps_fields_when_gps_capable(void) {
     g_stub_board_has_gps = true;
@@ -741,6 +828,14 @@ int main(void) {
     /* getStatus */
     RUN_TEST(test_get_status_returns_expected_fields);
     RUN_TEST(test_get_battery_returns_charging_and_present_fields);
+
+    /* getStatus GNSS observability fields */
+    RUN_TEST(test_get_status_includes_gnss_fields);
+    RUN_TEST(test_get_status_gnss_fields_present_without_gps_cap);
+
+    /* getGpsPosition */
+    RUN_TEST(test_get_gps_position_includes_gnss_fields_without_fix);
+    RUN_TEST(test_get_gps_position_not_supported_without_gps_cap);
 
     /* getDiagnostics GPS fields */
     RUN_TEST(test_get_diagnostics_includes_gps_fields_when_gps_capable);

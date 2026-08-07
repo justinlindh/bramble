@@ -36,6 +36,10 @@
 #include "mdns.h"
 #endif
 #include "ble_server.h"
+#if CONFIG_BT_ENABLED
+/* esp_bt_mem_release: reclaim the unused BT controller RAM on WiFi boots. */
+#include "esp_bt.h"
+#endif
 #include "esp_system.h"
 #include "battery.h"
 #include "alerts.h"
@@ -47,6 +51,7 @@
 #include "sas_format.h"
 
 #include "gps.h"
+#include "gnss_status.h"
 #include "gps_pref.h"
 #include "cJSON.h"
 
@@ -65,6 +70,10 @@ int emu_node_start_autosend(void);
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "sdcard.h"
 #include "audio.h"
+#endif
+
+#ifdef CONFIG_PM_ENABLE
+#include "esp_pm.h"
 #endif
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
@@ -214,14 +223,13 @@ conn_mode_t conn_mode_get(void) {
         nvs_get_u8(nvs, NVS_KEY_CONN_MODE, &mode);
         nvs_close(nvs);
     }
-    if (mode == CONN_MODE_BOTH || mode >= CONN_MODE_COUNT)
+    /* Explicit allowlist: the enum is sparse (2 is the retired BOTH slot,
+     * still normalized to WiFi so stale devices do not silently go dark)
+     * and Off sits above it at 3, so a range check cannot work. */
+    if (mode != CONN_MODE_WIFI && mode != CONN_MODE_BLE && mode != CONN_MODE_OFF)
         mode = CONN_MODE_WIFI;
 
-#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
-    return conn_mode_resolve_boot((conn_mode_t)mode, true);
-#else
-    return conn_mode_resolve_boot((conn_mode_t)mode, false);
-#endif
+    return conn_mode_resolve_boot((conn_mode_t)mode, ble_server_supported());
 }
 
 void conn_mode_set(conn_mode_t mode) {
@@ -765,13 +773,13 @@ static void render_screen(ui_state_t* ui) {
             if (ui->settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) {
                 display_draw_text(2, y, "Connectivity Mode:");
                 y += LINE_H + 4;
-                static const char* mode_names[] = {"WiFi", "BLE"};
                 conn_mode_t current = conn_mode_get();
-                for (int i = 0; i < CONN_MODE_COUNT; i++) {
+                for (int i = 0; i < CONN_MODE_UI_COUNT; i++) {
                     char ml[32];
+                    conn_mode_t m = conn_mode_from_ui_index(i);
                     const char* arrow = (i == ui->settings_cursor) ? ">" : " ";
-                    const char* mark = (i == (int)current) ? " *" : "";
-                    snprintf(ml, sizeof(ml), "%s %s%s", arrow, mode_names[i], mark);
+                    const char* mark = (m == current) ? " *" : "";
+                    snprintf(ml, sizeof(ml), "%s %s%s", arrow, conn_mode_name(m), mark);
                     display_draw_text(2, y, ml);
                     y += LINE_H;
                 }
@@ -827,7 +835,6 @@ static void render_screen(ui_state_t* ui) {
             int y = CONTENT_Y;
 
             conn_mode_t cur_mode = conn_mode_get();
-            static const char* mnames[] = {"WiFi", "BLE"};
             loc_share_mode_t cur_loc = location_share_mode_get();
             static const char* loc_names[] = {"Off", "Coarse", "Exact"};
 
@@ -835,7 +842,7 @@ static void render_screen(ui_state_t* ui) {
             {
                 const char* sel =
                     (ui->settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) ? ">" : " ";
-                snprintf(line, sizeof(line), "%sConn: %s", sel, mnames[cur_mode]);
+                snprintf(line, sizeof(line), "%sConn: %s", sel, conn_mode_name(cur_mode));
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
@@ -984,8 +991,9 @@ static void render_screen(ui_state_t* ui) {
     }
     case SCREEN_GPS: {
         /* Only reachable when board_has_cap(BOARD_CAP_GPS) - see ui_set_gps_available() call
-         * in app_main and the gating in ui_handle_button(). Currently the only board with
-         * BOARD_CAP_GPS is Heltec V4 (non-graphical), so no T-Deck layout is needed here. */
+         * in app_main and the gating in ui_handle_button(). This layout serves the
+         * non-graphical boards; the graphical stack renders GNSS through scr_layout's
+         * status bar and scr_stats, from the same gnss_ui_classify() verdict. */
         display_clear();
         display_draw_text(2, HEADER_Y, "GPS");
         render_unread_badge(ui, DISPLAY_WIDTH - 2);
@@ -998,13 +1006,28 @@ static void render_screen(ui_state_t* ui) {
         gps_get_stats(&stats);
         bool has_fix = gps_has_fix();
 
-        /* Line 1: fix status */
-        display_draw_text(2, y, has_fix ? "GPS: fix" : "GPS: no fix");
+        /* Line 1: the three-way state, so "no fix" is separated into a receiver
+         * hearing nothing and a receiver hearing satellites and converging. */
+        gnss_ui_input_t gnss = {
+            .board_has_gnss = true,
+            .powered = bramble_gps_enabled(),
+            .has_fix = has_fix,
+            .sats_in_view = stats.sats_in_view,
+            .sats_tracked = stats.sats_tracked,
+            .sats_used = stats.sats_used,
+            .snr_max_dbhz = stats.snr_max_dbhz,
+            .fix_quality = stats.fix_quality,
+            .nmea_age_s = stats.nmea_age_s,
+        };
+        snprintf(line, sizeof(line), "GPS: %s", gnss_ui_state_label(gnss_ui_classify(&gnss)));
+        display_draw_text(2, y, line);
         y += LINE_H;
 
-        /* Line 2: satellites used / in view */
-        snprintf(line, sizeof(line), "Sats: %u/%u", (unsigned)stats.sats_used,
-                 (unsigned)stats.sats_in_view);
+        /* Line 2: satellites used / tracked / in view. Tracked is the middle
+         * number because a nonzero in-view with zero tracked is the almanac
+         * predicting satellites the receiver cannot hear. */
+        snprintf(line, sizeof(line), "Sats: %u/%u/%u", (unsigned)stats.sats_used,
+                 (unsigned)stats.sats_tracked, (unsigned)stats.sats_in_view);
         display_draw_text(2, y, line);
         y += LINE_H;
 
@@ -1026,10 +1049,6 @@ static void render_screen(ui_state_t* ui) {
             display_draw_text(2, y, line);
         } else if (stats.antenna_warning) {
             display_draw_text(2, y, "ANTENNA OPEN!");
-            y += LINE_H;
-            display_draw_text(2, y, "Searching...");
-        } else {
-            display_draw_text(2, y, "Searching...");
         }
 
         display_draw_text(2, FOOTER_Y, "[press] next screen");
@@ -1075,6 +1094,32 @@ void app_main(void) {
         ESP_LOGE(TAG, "Board init failed, halting");
         return;
     }
+
+#ifdef CONFIG_PM_ENABLE
+    /* Power: dynamic frequency scaling. esp_pm holds a per-core CPU_FREQ_MAX
+     * lock whenever that core has a ready task and releases it only in the
+     * idle hook (pm_impl.c), so busy work always runs at max_freq_mhz; only
+     * genuinely idle time drops to min_freq_mhz. min 80 MHz keeps the PLL on
+     * and the APB clock pinned at 80 MHz, so UART baud (GPS), LEDC PWM
+     * (backlight), SPI (display + SX1262) and I2C (keyboard/touch) clocks
+     * never shift; the IDF v5.4.1 drivers additionally take transaction-scoped
+     * pm locks (verified in esp_driver_spi/esp_driver_i2c/esp_driver_uart).
+     * Light sleep stays OFF deliberately: it would drop the USB-Serial-JTAG
+     * console (the T-Deck's CLI/RPC transport), fight the 1 ms LVGL tick, and
+     * add wake latency to the SX1262 DIO1 interrupt path. */
+    esp_pm_config_t pm_cfg = {
+        .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+        .min_freq_mhz = 80,
+        .light_sleep_enable = false,
+    };
+    esp_err_t pm_err = esp_pm_configure(&pm_cfg);
+    if (pm_err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_pm_configure failed: %s", esp_err_to_name(pm_err));
+    } else {
+        ESP_LOGI(TAG, "DFS enabled: %d/%d MHz, light sleep off", pm_cfg.max_freq_mhz,
+                 pm_cfg.min_freq_mhz);
+    }
+#endif
 
 #ifdef CONFIG_IDF_TARGET_LINUX
     /* Emulator: bind NVS-backed flash to a per-node file ($NODE_DIR/flash.bin)
@@ -1272,8 +1317,13 @@ void app_main(void) {
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     /* Init keyboard and trackball (T-Deck Plus only) */
     ESP_LOGI(TAG, "=== BOOT STAGE: keyboard_init ===");
+    /* Power: keyboard_init() already loads the persisted backlight percent
+     * from NVS (default 80%) and applies it. Do NOT force the LEDs here: a
+     * raw keyboard_set_backlight(255) after init used to override the saved
+     * preference on every boot, burning the keyboard LEDs at full brightness
+     * regardless of the Settings slider (which then disagreed with the
+     * hardware, since the raw setter bypasses the percent bookkeeping). */
     keyboard_init();
-    keyboard_set_backlight(255); /* Keyboard LEDs at full brightness */
     ESP_LOGI(TAG, "=== BOOT STAGE: trackball_init ===");
     trackball_init();
 #endif
@@ -1358,10 +1408,14 @@ void app_main(void) {
     }
 #endif
 
-    /* Read connectivity mode */
+    /* Read connectivity mode. conn_mode_get already falls back to WiFi when
+     * the build carries no BLE stack; say so instead of silently booting a
+     * different mode than the one persisted. */
     conn_mode_t boot_mode = conn_mode_get();
-    static const char* mode_str[] = {"WiFi", "BLE"};
-    ESP_LOGI(TAG, "Connectivity mode: %s", mode_str[boot_mode]);
+    ESP_LOGI(TAG, "Connectivity mode: %s", conn_mode_name(boot_mode));
+    if (!ble_server_supported()) {
+        ESP_LOGI(TAG, "BLE: unsupported in this build (stub transport); WiFi only");
+    }
 
     /* Init RPC dispatcher and register methods BEFORE transports
      * so ws_server/ble notify registrations aren't wiped by rpc_init() */
@@ -1395,6 +1449,20 @@ void app_main(void) {
 #else
     /* Init message store (RAM-only) */
     msg_store_init();
+#endif
+
+#if CONFIG_BT_ENABLED
+    if (boot_mode != CONN_MODE_BLE) {
+        /* Connectivity modes are exclusive and a mode switch always reboots,
+         * so a WiFi or Off boot never starts the BT controller. Hand its
+         * static RAM (BT .bss/.data, internal DRAM) back to the heap instead
+         * of letting it sit unused; the release is one-way per boot, which
+         * the reboot-to-switch model makes safe. */
+        esp_err_t bt_rel = esp_bt_mem_release(ESP_BT_MODE_BLE);
+        if (bt_rel != ESP_OK) {
+            ESP_LOGW(TAG, "esp_bt_mem_release failed: %s", esp_err_to_name(bt_rel));
+        }
+    }
 #endif
 
     /* Init WiFi if selected */
@@ -1695,25 +1763,35 @@ void app_main(void) {
             ui.settings_confirmed = false;
             ui.settings_editing = false;
             if (ui.settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) {
-                conn_mode_t new_mode = (conn_mode_t)ui.settings_cursor;
+                conn_mode_t new_mode = conn_mode_from_ui_index(ui.settings_cursor);
                 conn_mode_t old_mode = conn_mode_get();
-                if (new_mode != old_mode) {
+                if (new_mode == CONN_MODE_BLE && !ble_server_supported()) {
+                    /* Honest refusal: this build has no BLE stack, so a
+                     * switch would reboot into a node with no transport. */
+                    ESP_LOGW(TAG, "BLE not included in this build; mode unchanged");
+                    display_clear();
+                    const char* msg = "BLE: not in build";
+                    int msg_x = (DISPLAY_WIDTH - (int)strlen(msg) * FONT_W) / 2;
+                    display_draw_text(msg_x, DISPLAY_HEIGHT / 2 - FONT_H / 2, msg);
+                    display_flush();
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    ui.screen_dirty = true;
+                } else if (new_mode != old_mode) {
                     conn_mode_set(new_mode);
                     ESP_LOGI(TAG, "Connectivity mode changed to %d, rebooting...", new_mode);
 
                     /* Show confirmation before reboot */
                     display_clear();
-                    static const char* mnames[] = {"WiFi", "BLE"};
 
                     const char* msg1 = "Mode changed:";
                     int msg1_x = (DISPLAY_WIDTH - strlen(msg1) * FONT_W) / 2;
                     int msg1_y = DISPLAY_HEIGHT / 4;
                     display_draw_text(msg1_x, msg1_y, msg1);
 
-                    int mode_w = strlen(mnames[new_mode]) * FONT_W * 2;
+                    int mode_w = strlen(conn_mode_name(new_mode)) * FONT_W * 2;
                     int mode_x = (DISPLAY_WIDTH - mode_w) / 2;
                     int mode_y = msg1_y + FONT_H + 8;
-                    display_draw_text_large(mode_x, mode_y, mnames[new_mode]);
+                    display_draw_text_large(mode_x, mode_y, conn_mode_name(new_mode));
 
                     const char* msg2 = "Rebooting...";
                     int msg2_x = (DISPLAY_WIDTH - strlen(msg2) * FONT_W) / 2;

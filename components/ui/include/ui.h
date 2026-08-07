@@ -20,8 +20,16 @@ typedef enum {
     CONN_MODE_WIFI = 0,
     CONN_MODE_BLE = 1,
     CONN_MODE_BOTH = 2, /* legacy persisted value; normalized to WiFi */
-    CONN_MODE_COUNT = 2 /* exposed modes are exclusive: WiFi or BLE */
+    CONN_MODE_OFF = 3,  /* no WiFi, no BLE; LoRa mesh and USB serial unaffected */
 } conn_mode_t;
+
+/* Exposed modes in UI order (WiFi, BLE, Off). Enum values are persisted and
+ * sparse (2 is the retired BOTH slot), so UI indexes and enum values need
+ * explicit mapping; indexing arrays by conn_mode_t is a bug. */
+#define CONN_MODE_UI_COUNT 3
+conn_mode_t conn_mode_from_ui_index(int index);
+int conn_mode_to_ui_index(conn_mode_t mode);
+const char* conn_mode_name(conn_mode_t mode);
 
 typedef enum {
     BTN_NONE = 0,
@@ -170,8 +178,10 @@ int ui_format_msg_line(const ui_msg_line_t* m, char* buf, size_t buf_len);
 int ui_format_uptime(uint32_t uptime_sec, char* buf, size_t buf_len);
 
 /* Normalize persisted connectivity mode at boot.
- * Legacy WiFi+BLE values are coerced to WiFi (exclusive mode policy).
+ * Legacy WiFi+BLE values are coerced to WiFi (exclusive mode policy), and a
+ * persisted BLE mode falls back to WiFi when the build has no BLE stack
+ * (ble_supported = ble_server_supported()).
  */
-conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool low_sram_board);
+conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool ble_supported);
 
 #endif

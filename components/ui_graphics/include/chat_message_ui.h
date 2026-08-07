@@ -25,8 +25,36 @@ typedef struct {
 } chat_delivery_badge_t;
 
 chat_delivery_badge_t chat_message_delivery_badge(msg_status_t status);
-bool chat_message_has_inline_route_toggle(bool is_outgoing, msg_status_t status,
-                                          uint8_t route_hop_count, uint32_t packet_id);
+/* An outgoing message with a packet id can always expand its details panel:
+ * status, route when it says something, delivery receipts. */
+bool chat_message_has_details_toggle(bool is_outgoing, uint32_t packet_id);
+
+/* Whether the expanded panel should draw a route line.
+ *
+ * A route is only worth showing for a single-recipient message that actually
+ * traversed a relay. Two cases must stay silent. A message that reached its
+ * recipient directly has a "route" of sender then recipient, which restates
+ * the addressing the panel already shows. And a channel or broadcast message
+ * has one route per recipient, while the store keeps a single route field
+ * that each arriving receipt overwrites, so any line drawn from it presents
+ * one arbitrary recipient's path as the whole message's path.
+ *
+ * hop_count counts endpoints, so a relayed path is 3 or more.
+ *
+ * is_outgoing is load-bearing, not a convenience: a received broadcast is
+ * stored channel-less exactly like a DM, so channel_index alone cannot tell
+ * them apart. Only an outgoing message can be classified from it. */
+bool chat_message_route_is_informative(bool is_outgoing, int16_t channel_index,
+                                       uint8_t route_hop_count);
+
+/* Formats a receipt summary like "Delivered to 3: Alic, Bob, Carl" or
+ * "Delivered to 5: Alic, Bob, Carl, Dave, +1". addrs holds the first
+ * shown_count unique recipients; total is the full unique-recipient count
+ * (>= shown_count). name_of writes a short display name for an address.
+ * Returns characters written. */
+typedef void (*chat_receipt_name_fn)(char* out, size_t out_len, uint32_t addr);
+int chat_format_receipt_summary(char* out, size_t out_len, const uint32_t* addrs,
+                                size_t shown_count, size_t total, chat_receipt_name_fn name_of);
 
 /* Compact age for message bubbles: "now", "5m", "3h", "2d". */
 int chat_format_age(uint32_t age_s, char* buf, size_t buf_len);

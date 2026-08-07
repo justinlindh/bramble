@@ -6,6 +6,13 @@
 #include <stddef.h>
 
 /**
+ * Whether this build carries a real BLE stack. False on stub builds
+ * (CONFIG_BT_NIMBLE_ENABLED unset, POSIX/Linux simulator), where init and
+ * start fail: callers gate mode selection and boot fallback on this.
+ */
+bool ble_server_supported(void);
+
+/**
  * Initialize BLE GATT server with NUS (Nordic UART Service).
  * Registers with rpc_dispatcher for notifications.
  * Returns 0 on success.

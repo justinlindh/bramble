@@ -240,33 +240,213 @@ void test_nmea_parse_gga_sats_used_with_fix(void) {
 /* Test valid GSV sentence parsing */
 void test_nmea_parse_gsv_valid(void) {
     char sentence[] = "$GPGSV,3,1,11,10,63,137,17,07,61,308,17,05,59,169,18,30,54,042,*7D";
-    uint8_t sats_in_view = 0;
+    nmea_gsv_t gsv;
 
-    bool result = nmea_parse_gsv(sentence, &sats_in_view);
+    bool result = nmea_parse_gsv(sentence, &gsv);
 
     TEST_ASSERT_TRUE(result);
-    TEST_ASSERT_EQUAL_UINT8(11, sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(11, gsv.sats_in_view);
+    TEST_ASSERT_EQUAL_STRING("GP", gsv.talker);
 }
 
 /* Test GNGSV (multi-constellation) sentence */
 void test_nmea_parse_gngsv_valid(void) {
     char sentence[] = "$GNGSV,1,1,04,10,63,137,17,07,61,308,17*70";
-    uint8_t sats_in_view = 0;
+    nmea_gsv_t gsv;
 
-    bool result = nmea_parse_gsv(sentence, &sats_in_view);
+    bool result = nmea_parse_gsv(sentence, &gsv);
 
     TEST_ASSERT_TRUE(result);
-    TEST_ASSERT_EQUAL_UINT8(4, sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(4, gsv.sats_in_view);
+    TEST_ASSERT_EQUAL_STRING("GN", gsv.talker);
 }
 
 /* Test truncated GSV sentence is rejected */
 void test_nmea_parse_gsv_truncated(void) {
     char sentence[] = "$GPGSV,3,1";
-    uint8_t sats_in_view = 0;
+    nmea_gsv_t gsv;
 
-    bool result = nmea_parse_gsv(sentence, &sats_in_view);
+    bool result = nmea_parse_gsv(sentence, &gsv);
 
     TEST_ASSERT_FALSE(result);
+}
+
+/* GLONASS is a talker the old whitelist dropped outright, which undercounted
+ * every multi-constellation receiver. */
+void test_nmea_parse_gsv_glonass_talker_accepted(void) {
+    char sentence[] = "$GLGSV,2,1,07,65,45,120,33,66,20,300,28,72,10,050,,73,05,200,*60";
+    nmea_gsv_t gsv;
+
+    TEST_ASSERT_TRUE(nmea_parse_gsv(sentence, &gsv));
+    TEST_ASSERT_EQUAL_STRING("GL", gsv.talker);
+    TEST_ASSERT_EQUAL_UINT8(7, gsv.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(2, gsv.tracked);
+    TEST_ASSERT_EQUAL_UINT8(33, gsv.snr_max);
+}
+
+void test_nmea_parse_gsv_galileo_and_beidou_talkers_accepted(void) {
+    char galileo[] = "$GAGSV,1,1,03,01,40,100,30,02,30,200,25,03,20,300,*70";
+    char beidou[] = "$GBGSV,1,1,05,11,50,110,44,12,35,210,,13,25,310,*70";
+    nmea_gsv_t gsv;
+
+    TEST_ASSERT_TRUE(nmea_parse_gsv(galileo, &gsv));
+    TEST_ASSERT_EQUAL_STRING("GA", gsv.talker);
+    TEST_ASSERT_EQUAL_UINT8(3, gsv.sats_in_view);
+
+    TEST_ASSERT_TRUE(nmea_parse_gsv(beidou, &gsv));
+    TEST_ASSERT_EQUAL_STRING("GB", gsv.talker);
+    TEST_ASSERT_EQUAL_UINT8(5, gsv.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(44, gsv.snr_max);
+}
+
+/* A talker-agnostic gate must still reject sentences that are not GSV. */
+void test_nmea_parse_gsv_unknown_sentence_rejected(void) {
+    char gga[] = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47";
+    char gsa[] = "$GPGSA,A,3,04,05,,09,12,,,24,,,,,2.5,1.3,2.1*39";
+    nmea_gsv_t gsv;
+
+    TEST_ASSERT_FALSE(nmea_parse_gsv(gga, &gsv));
+    TEST_ASSERT_FALSE(nmea_parse_gsv(gsa, &gsv));
+}
+
+/* A blank or zero C/N0 is a satellite the almanac predicts and the receiver
+ * is not hearing, which is the distinction the tracked count exists for. */
+void test_nmea_parse_gsv_counts_tracked_and_max_snr(void) {
+    char sentence[] = "$GPGSV,1,1,04,10,63,137,17,07,61,308,00,05,59,169,,30,54,042,42*70";
+    nmea_gsv_t gsv;
+
+    TEST_ASSERT_TRUE(nmea_parse_gsv(sentence, &gsv));
+    TEST_ASSERT_EQUAL_UINT8(2, gsv.tracked);
+    TEST_ASSERT_EQUAL_UINT8(42, gsv.snr_max);
+    TEST_ASSERT_EQUAL_UINT8(4, gsv.sats_in_view);
+}
+
+void test_nmea_parse_gsv_blank_snr_is_not_tracked(void) {
+    char sentence[] = "$GPGSV,1,1,04,10,63,137,,07,61,308,,05,59,169,,30,54,042,*70";
+    nmea_gsv_t gsv;
+
+    TEST_ASSERT_TRUE(nmea_parse_gsv(sentence, &gsv));
+    TEST_ASSERT_EQUAL_UINT8(0, gsv.tracked);
+    TEST_ASSERT_EQUAL_UINT8(0, gsv.snr_max);
+    TEST_ASSERT_EQUAL_UINT8(4, gsv.sats_in_view);
+}
+
+void test_nmea_parse_gsv_msg_num_and_total_parsed(void) {
+    char sentence[] = "$GPGSV,3,2,11,10,63,137,17,07,61,308,17,05,59,169,18,30,54,042,*7D";
+    nmea_gsv_t gsv;
+
+    TEST_ASSERT_TRUE(nmea_parse_gsv(sentence, &gsv));
+    TEST_ASSERT_EQUAL_UINT8(3, gsv.total_msgs);
+    TEST_ASSERT_EQUAL_UINT8(2, gsv.msg_num);
+}
+
+/* NMEA 4.11 appends a signal-id field after the last satellite group; it must
+ * not be read as a fifth satellite's carrier-to-noise ratio. */
+void test_nmea_parse_gsv_tolerates_trailing_signal_id(void) {
+    char sentence[] = "$GPGSV,1,1,03,10,63,137,17,07,61,308,18,05,59,169,19,1*70";
+    nmea_gsv_t gsv;
+
+    TEST_ASSERT_TRUE(nmea_parse_gsv(sentence, &gsv));
+    TEST_ASSERT_EQUAL_UINT8(3, gsv.tracked);
+    TEST_ASSERT_EQUAL_UINT8(19, gsv.snr_max);
+    /* The caller keys its per-cycle state on talker plus signal id, because a
+     * multi-band receiver restarts message numbering for every band. */
+    TEST_ASSERT_EQUAL_UINT8(1, gsv.signal_id);
+}
+
+/* A receiver that sends no signal-id field reports one band, which is signal
+ * id 0 as far as the caller's slot key is concerned. */
+void test_nmea_parse_gsv_without_signal_id_reports_zero(void) {
+    char sentence[] = "$GPGSV,1,1,03,10,63,137,17,07,61,308,18,05,59,169,19*70";
+    nmea_gsv_t gsv;
+
+    TEST_ASSERT_TRUE(nmea_parse_gsv(sentence, &gsv));
+    TEST_ASSERT_EQUAL_UINT8(3, gsv.tracked);
+    TEST_ASSERT_EQUAL_UINT8(0, gsv.signal_id);
+}
+
+/* A full four-group message plus the trailing signal id, the shape an L5 or
+ * E5b band arrives in. */
+void test_nmea_parse_gsv_signal_id_after_four_groups(void) {
+    char sentence[] = "$GPGSV,2,1,08,10,63,137,42,07,61,308,40,05,59,169,38,30,54,042,45,6*70";
+    nmea_gsv_t gsv;
+
+    TEST_ASSERT_TRUE(nmea_parse_gsv(sentence, &gsv));
+    TEST_ASSERT_EQUAL_UINT8(4, gsv.tracked);
+    TEST_ASSERT_EQUAL_UINT8(45, gsv.snr_max);
+    TEST_ASSERT_EQUAL_UINT8(6, gsv.signal_id);
+}
+
+void test_nmea_parse_gsv_snr_clamped_to_99(void) {
+    char sentence[] = "$GPGSV,1,1,01,10,63,137,255*70";
+    nmea_gsv_t gsv;
+
+    TEST_ASSERT_TRUE(nmea_parse_gsv(sentence, &gsv));
+    TEST_ASSERT_EQUAL_UINT8(99, gsv.snr_max);
+    TEST_ASSERT_EQUAL_UINT8(1, gsv.tracked);
+}
+
+/* Fix quality is the receiver's own verdict and is captured whether or not
+ * the sentence survives the fix gate. */
+void test_nmea_parse_gga_fix_quality_captured_without_fix(void) {
+    char nofix[] = "$GPGGA,123519,,,,,0,05,,,M,,M,,*5C";
+    nmea_position_t pos = {0};
+    pos.fix_quality = 7;
+
+    TEST_ASSERT_FALSE(nmea_parse_gga(nofix, &pos));
+    TEST_ASSERT_EQUAL_UINT8(0, pos.fix_quality);
+
+    char dgps[] = "$GPGGA,123519,4807.038,N,01131.000,E,2,08,0.9,545.4,M,46.9,M,,*47";
+    TEST_ASSERT_TRUE(nmea_parse_gga(dgps, &pos));
+    TEST_ASSERT_EQUAL_UINT8(2, pos.fix_quality);
+}
+
+/* NMEA 0183 defines fix quality 0-8. A digit outside that range says nothing
+ * the field can express, so it reads as 0 (invalid) rather than as 8, which
+ * would claim the receiver is running in simulation mode. api/openapi.yaml
+ * documents the same 0-8 range for the field on the wire. */
+void test_nmea_parse_gga_fix_quality_out_of_range_reads_invalid(void) {
+    char sentence[] = "$GPGGA,123519,4807.038,N,01131.000,E,9,08,0.9,545.4,M,46.9,M,,*47";
+    nmea_position_t pos = {0};
+    pos.fix_quality = 4;
+
+    TEST_ASSERT_FALSE(nmea_parse_gga(sentence, &pos));
+    TEST_ASSERT_EQUAL_UINT8(0, pos.fix_quality);
+}
+
+void test_nmea_parse_gga_fix_quality_empty_field(void) {
+    char sentence[] = "$GPGGA,123519,4807.038,N,01131.000,E,,08,0.9,545.4,M,46.9,M,,*47";
+    nmea_position_t pos = {0};
+    pos.fix_quality = 5;
+
+    TEST_ASSERT_FALSE(nmea_parse_gga(sentence, &pos));
+    TEST_ASSERT_EQUAL_UINT8(0, pos.fix_quality);
+}
+
+/* A receiver's own no-fix verdict is distinct from a sentence that failed to
+ * parse: the first invalidates a fix the caller holds, the second says
+ * nothing at all. */
+void test_nmea_reports_no_fix_recognizes_the_receivers_verdict(void) {
+    TEST_ASSERT_TRUE(nmea_reports_no_fix("$GPRMC,123519,V,,,,,,,230394,,*00"));
+    TEST_ASSERT_TRUE(nmea_reports_no_fix("$GNRMC,123519,V,,,,,,,230394,,*00"));
+    TEST_ASSERT_TRUE(nmea_reports_no_fix("$GPGGA,123519,,,,,0,05,,,M,,M,,*5C"));
+    TEST_ASSERT_TRUE(nmea_reports_no_fix("$GPGGA,123519,,,,,,05,,,M,,M,,*5C"));
+}
+
+void test_nmea_reports_no_fix_ignores_everything_else(void) {
+    /* Sentences reporting a fix. */
+    TEST_ASSERT_FALSE(nmea_reports_no_fix(
+        "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A"));
+    TEST_ASSERT_FALSE(
+        nmea_reports_no_fix("$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47"));
+    /* Truncated before the field that carries the verdict. */
+    TEST_ASSERT_FALSE(nmea_reports_no_fix("$GPRMC,123519"));
+    TEST_ASSERT_FALSE(nmea_reports_no_fix("$GPGGA,,,,"));
+    /* Other sentence types, and degenerate input. */
+    TEST_ASSERT_FALSE(nmea_reports_no_fix("$GPGSV,1,1,01,10,63,137,17*70"));
+    TEST_ASSERT_FALSE(nmea_reports_no_fix("$GP"));
+    TEST_ASSERT_FALSE(nmea_reports_no_fix(""));
+    TEST_ASSERT_FALSE(nmea_reports_no_fix(NULL));
 }
 
 /* Test antenna-open detection */
@@ -377,13 +557,28 @@ int main(void) {
     RUN_TEST(test_nmea_parse_gga_sats_used_no_fix);
     RUN_TEST(test_nmea_parse_gga_sats_used_with_fix);
     RUN_TEST(test_nmea_parse_gga_empty_sats_no_shift);
+    RUN_TEST(test_nmea_parse_gga_fix_quality_captured_without_fix);
+    RUN_TEST(test_nmea_parse_gga_fix_quality_out_of_range_reads_invalid);
+    RUN_TEST(test_nmea_parse_gga_fix_quality_empty_field);
 
     /* GSV parsing tests */
     RUN_TEST(test_nmea_parse_gsv_valid);
     RUN_TEST(test_nmea_parse_gngsv_valid);
     RUN_TEST(test_nmea_parse_gsv_truncated);
+    RUN_TEST(test_nmea_parse_gsv_glonass_talker_accepted);
+    RUN_TEST(test_nmea_parse_gsv_galileo_and_beidou_talkers_accepted);
+    RUN_TEST(test_nmea_parse_gsv_unknown_sentence_rejected);
+    RUN_TEST(test_nmea_parse_gsv_counts_tracked_and_max_snr);
+    RUN_TEST(test_nmea_parse_gsv_blank_snr_is_not_tracked);
+    RUN_TEST(test_nmea_parse_gsv_msg_num_and_total_parsed);
+    RUN_TEST(test_nmea_parse_gsv_tolerates_trailing_signal_id);
+    RUN_TEST(test_nmea_parse_gsv_without_signal_id_reports_zero);
+    RUN_TEST(test_nmea_parse_gsv_signal_id_after_four_groups);
+    RUN_TEST(test_nmea_parse_gsv_snr_clamped_to_99);
 
     /* TXT / antenna warning tests */
+    RUN_TEST(test_nmea_reports_no_fix_recognizes_the_receivers_verdict);
+    RUN_TEST(test_nmea_reports_no_fix_ignores_everything_else);
     RUN_TEST(test_nmea_is_antenna_open_detects_warning);
     RUN_TEST(test_nmea_is_antenna_open_ignores_other_text);
 

@@ -298,7 +298,7 @@ void test_trackball_settings_edit_navigation_connectivity_row(void) {
 
     // Wrap-around test
     ui_handle_button(&state, BTN_UP, 3000);
-    TEST_ASSERT_EQUAL(CONN_MODE_COUNT - 1, state.settings_cursor);
+    TEST_ASSERT_EQUAL(CONN_MODE_UI_COUNT - 1, state.settings_cursor);
 }
 
 void test_trackball_settings_edit_navigation_oled_row(void) {
@@ -335,8 +335,33 @@ void test_trackball_settings_edit_cancel_with_left(void) {
 }
 
 void test_conn_mode_resolve_boot_keeps_supported_modes(void) {
+    TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_WIFI, true));
     TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_WIFI, false));
-    TEST_ASSERT_EQUAL(CONN_MODE_BLE, conn_mode_resolve_boot(CONN_MODE_BLE, false));
+    TEST_ASSERT_EQUAL(CONN_MODE_BLE, conn_mode_resolve_boot(CONN_MODE_BLE, true));
+}
+
+void test_conn_mode_resolve_boot_ble_unsupported_falls_back_to_wifi(void) {
+    /* Persisted BLE mode on a stub-BLE build must boot WiFi, not a node
+     * with no transport at all. */
+    TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_BLE, false));
+}
+
+void test_conn_mode_resolve_boot_off_valid_on_every_build(void) {
+    /* Off needs no transport, so it must survive resolve on stub and
+     * BLE-capable builds alike. */
+    TEST_ASSERT_EQUAL(CONN_MODE_OFF, conn_mode_resolve_boot(CONN_MODE_OFF, true));
+    TEST_ASSERT_EQUAL(CONN_MODE_OFF, conn_mode_resolve_boot(CONN_MODE_OFF, false));
+}
+
+void test_conn_mode_ui_index_round_trip(void) {
+    /* The enum is sparse (legacy BOTH occupies 2, Off sits at 3), so the
+     * UI index mapping is load-bearing; a direct cast regressed once. */
+    conn_mode_t modes[] = {CONN_MODE_WIFI, CONN_MODE_BLE, CONN_MODE_OFF};
+    for (int i = 0; i < 3; i++) {
+        TEST_ASSERT_EQUAL(modes[i], conn_mode_from_ui_index(conn_mode_to_ui_index(modes[i])));
+        TEST_ASSERT_EQUAL(i, conn_mode_to_ui_index(conn_mode_from_ui_index(i)));
+    }
+    TEST_ASSERT_EQUAL(0, conn_mode_to_ui_index(CONN_MODE_BOTH));
 }
 
 void test_conn_mode_resolve_boot_normalizes_legacy_both(void) {
@@ -882,7 +907,10 @@ int main(void) {
     RUN_TEST(test_gps_screen_reachable_going_backward_when_available);
     RUN_TEST(test_trackball_select_on_messages_opens_compose);
     RUN_TEST(test_conn_mode_resolve_boot_keeps_supported_modes);
+    RUN_TEST(test_conn_mode_resolve_boot_ble_unsupported_falls_back_to_wifi);
     RUN_TEST(test_conn_mode_resolve_boot_normalizes_legacy_both);
+    RUN_TEST(test_conn_mode_resolve_boot_off_valid_on_every_build);
+    RUN_TEST(test_conn_mode_ui_index_round_trip);
     RUN_TEST(test_trackball_settings_row_navigation_when_not_editing);
     RUN_TEST(test_settings_gps_row_skipped_when_unavailable);
     RUN_TEST(test_settings_gps_row_reachable_when_available);

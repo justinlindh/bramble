@@ -45,17 +45,48 @@ on:
 ```
 
 `pull_request` fires once per PR (and on every update to the PR head). `push`
-fires only on `main`, i.e. post-merge. Every gating job now also runs on
-`pull_request`; there are no post-merge-only jobs left. There is no per-branch `push` trigger, so a
-PR gets exactly one wave of checks instead of two overlapping waves (a
-`pull_request` wave and a `push`-to-`fix/**` wave) that previously each ran to
-completion in separate concurrency groups and doubled the queue. `webapp-quality.yml`
-gained the `pull_request` trigger it previously lacked, so it now gates PRs the
-same way as the other two.
+fires only on `main`, i.e. post-merge. Every gating job also runs on
+`pull_request`; there are no post-merge-only jobs. There is no per-branch
+`push` trigger: with one, a PR would get two overlapping waves (a
+`pull_request` wave and a `push`-to-`fix/**` wave) running to completion in
+separate concurrency groups, doubling the queue.
 
 Each workflow sets `concurrency` keyed on the ref with
 `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, so a new push
 to a PR cancels the superseded PR run but never cancels a `main` run.
+
+### Fork pull requests never touch the self-hosted pool
+
+The repo is public, so fork-origin work is fenced twice.
+
+First, the repository Actions setting "Require approval for all external
+contributors" (REST:
+`repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval`,
+policy `all_external_contributors`) holds every workflow run on a fork-head PR
+until a maintainer approves it, on every push, regardless of the author's
+contribution history. The weaker default (`first_time_contributors`) would
+grant permanent unapproved runs to anyone with a single merged commit, which
+is the wrong trade for self-hosted runners. This setting lives in
+repository configuration, not in this tree; treat this paragraph as the
+contract and restore the policy if it ever drifts.
+
+Second, every job that targets the pool selects its runner with
+
+```yaml
+runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
+```
+
+so an approved fork-head run executes on GitHub-hosted runners and fork code
+never reaches the pool; for same-repo PRs, `main` pushes, and dispatches the
+fork test is false or absent, so they follow `RUNNER_LABEL`.
+The expression is defense-in-depth, not the boundary: a `pull_request` run
+takes its workflow definitions from the PR's merge ref, so a fork PR can edit
+the expression out. The approval gate above is what stands between an
+untrusted author and any run at all, and reviewing the diff (including
+workflow edits) before approving is what keeps a tampered `runs-on` off the
+pool. The workflows that hold write tokens (`claude.yml`, `cache-cleanup.yml`)
+are author-association-gated or run no repository code, and both are pinned to
+GitHub-hosted runners; their in-file comments carry the details.
 
 ## The always-report contract (do not break this)
 
@@ -669,16 +700,25 @@ There is no second copy of these workflows anywhere: the Gitea mirror that once
 carried a frozen `.gitea/workflows/` tree is retired, and that tree is gone.
 
 `webapp-build-publish.yml` is the one workflow that is not a check. It stages
-the web flasher, runs the webapp tests, builds the unified runtime image, pushes
-it to the registry, and then redeploys the `bramble-web-client` container on the
-`bramble-host` runner (the container-capable persistent host that carries the
-docker socket and registry reachability). It is `workflow_dispatch` only, so
-publishing the web client is always a deliberate act.
+the web flasher, builds the unified runtime image, pushes it to the registry
+with OCI media types, and reads both published tags back to prove the push
+landed. It runs on the `bramble-host` runner, the container-capable persistent
+host that carries the docker socket and registry reachability.
+
+It is a reusable workflow, not a push-triggered one. `release-components.yml`
+calls it from a `webapp-image` job once semantic-release has cut a `webapp-v*`
+tag, so an image is published per released version rather than per merge. A
+`workflow_dispatch` with a `webapp_tag` input republishes an existing release
+tag. A workflow triggered by `push: tags:` would not work here: semantic-release
+pushes the tag with the default `GITHUB_TOKEN`, and a tag pushed by
+`GITHUB_TOKEN` does not trigger workflows.
 
 Every step of it gates. The registry push needs the `REGISTRY_HOST` and
 `REGISTRY_IMAGE_REPO` repo variables plus the `REGISTRY_USERNAME` and
-`REGISTRY_PAT` secrets; without them the login step fails against the public
-placeholder default rather than pushing somewhere unintended. The redeploy fails
-the job if the new container does not come up and pass `/api/healthz` inside 60
-seconds. There is no fallback path and nothing is swallowed, so a green run means
-the image was pushed and the running container is serving it.
+`REGISTRY_PAT` secrets, and a preflight step fails the run when any of them is
+unset rather than falling back to a default target. Nothing is swallowed, so a
+green run means the image was pushed and verified in the registry.
+
+Publishing is not deploying. The hosted site rolls forward through GitOps, and
+this repo's CI holds no cluster or GitOps credential; see
+[deploy-bramble-web-client.md](deploy-bramble-web-client.md).

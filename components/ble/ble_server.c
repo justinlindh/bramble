@@ -27,6 +27,7 @@
  * symbol from this header is used anywhere in the file). */
 #ifdef ESP_PLATFORM
 #include "esp_nimble_hci.h"
+#include "esp_bt.h"
 #endif
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -624,6 +625,8 @@ static void on_reset(int reason) { ESP_LOGW(TAG, "BLE host reset: reason=%d", re
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
+bool ble_server_supported(void) { return true; }
+
 /* Default BLE name when the operator has not named the node: "Bramble-XXXX"
  * carrying the low 16 bits of the node address, the same short form the mDNS
  * hostname (bramble-%04x) and the webapp's formatAddrShort already use. A
@@ -754,6 +757,16 @@ int ble_server_init(void) {
 }
 
 int ble_server_start(void) {
+#ifdef ESP_PLATFORM
+    /* Default BLE TX is ~3 dBm, far below the 20 dBm the SoftAP runs at; a
+     * pager-class device wants the link budget. +9 dBm is the S3 ceiling for
+     * advertising and connections. Failure is non-fatal: worst case the link
+     * runs at default power. */
+    esp_err_t pw = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
+    esp_err_t pw_adv = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
+    if (pw != ESP_OK || pw_adv != ESP_OK)
+        ESP_LOGW(TAG, "BLE TX power set failed (default=%d adv=%d)", (int)pw, (int)pw_adv);
+#endif
     nimble_port_freertos_init(ble_host_task);
     ESP_LOGI(TAG, "BLE server started");
     return 0;

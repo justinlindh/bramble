@@ -7,6 +7,7 @@ import type { Neighbor, Route } from '../../types/bramble';
 import { useStore } from '../../store/index';
 import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
+import { tryParseAddr } from '../../lib/addr';
 import { formatAge } from '../../hooks/useAgeTick';
 import styles from './PeerManager.module.css';
 
@@ -85,9 +86,8 @@ function parseImportedContacts(raw: unknown): Map<number, ContactRecord> {
   const out = new Map<number, ContactRecord>();
 
   for (const [key, value] of Object.entries(contactsObj)) {
-    const normalized = key.trim().replace(/^0x/i, '');
-    const addr = parseInt(normalized, 16);
-    if (Number.isNaN(addr) || addr < 0 || addr > 0xffffffff) continue;
+    const addr = tryParseAddr(key);
+    if (addr === null) continue;
 
     if (typeof value === 'string') {
       const name = value.trim();
@@ -263,9 +263,8 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
     e.preventDefault();
     setAddError('');
     setAddSuccess('');
-    const raw = addAddr.trim().replace(/^0x/i, '');
-    const addr = parseInt(raw, 16);
-    if (isNaN(addr) || addr < 0 || addr > 0xffffffff) {
+    const addr = tryParseAddr(addAddr);
+    if (addr === null) {
       setAddError('Invalid address (use hex, e.g. 0xDEADBEEF)');
       return;
     }

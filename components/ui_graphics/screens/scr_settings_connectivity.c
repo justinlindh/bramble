@@ -4,6 +4,7 @@
 #include "ui_toast.h"
 #include "ui_zone.h"
 #include "ui.h"
+#include "ble_server.h"
 #include "wifi_manager.h"
 #include "esp_system.h"
 #include "esp_log.h"
@@ -19,7 +20,7 @@ static void do_apply_conn_mode(void* user_data) {
     (void)user_data;
     if (!s_conn_dropdown)
         return;
-    conn_mode_t new_mode = (conn_mode_t)lv_dropdown_get_selected(s_conn_dropdown);
+    conn_mode_t new_mode = conn_mode_from_ui_index((int)lv_dropdown_get_selected(s_conn_dropdown));
     conn_mode_set(new_mode);
     ESP_LOGW(TAG, "Connectivity mode set to %d, rebooting...", (int)new_mode);
     esp_restart();
@@ -30,7 +31,13 @@ static void conn_apply_cb(lv_event_t* e) {
     if (!s_conn_dropdown)
         return;
 
-    conn_mode_t new_mode = (conn_mode_t)lv_dropdown_get_selected(s_conn_dropdown);
+    conn_mode_t new_mode = conn_mode_from_ui_index((int)lv_dropdown_get_selected(s_conn_dropdown));
+    if (new_mode == CONN_MODE_BLE && !ble_server_supported()) {
+        /* Honest refusal: this build has no BLE stack, so applying would
+         * reboot into a node with no transport at all. */
+        ui_toast_show("BLE not included in this build");
+        return;
+    }
     if (new_mode == conn_mode_get()) {
         ui_toast_show("Mode unchanged");
         return;
@@ -41,7 +48,7 @@ static void conn_apply_cb(lv_event_t* e) {
 /* ── Subpage ─────────────────────────────────────────────────────────────── */
 
 void settings_connectivity_summary(char* buf, size_t n) {
-    snprintf(buf, n, "%s", conn_mode_get() == CONN_MODE_WIFI ? "WiFi" : "BLE");
+    snprintf(buf, n, "%s", conn_mode_name(conn_mode_get()));
 }
 
 void settings_connectivity_builder(bramble_layout_t* layout, void* ctx) {
@@ -55,7 +62,8 @@ void settings_connectivity_builder(bramble_layout_t* layout, void* ctx) {
 
     ui_zone_track(&s_conn_dropdown, lv_dropdown_create(conn_row));
     lv_dropdown_set_options(s_conn_dropdown, "WiFi only\n"
-                                             "BLE only");
+                                             "BLE only\n"
+                                             "Off");
     lv_obj_set_size(s_conn_dropdown, 150, 34);
     lv_obj_align(s_conn_dropdown, LV_ALIGN_RIGHT_MID, 0, 0);
 
@@ -74,7 +82,7 @@ void settings_connectivity_builder(bramble_layout_t* layout, void* ctx) {
 
     /* Pre-select the currently persisted mode */
     conn_mode_t cur_conn = conn_mode_get();
-    lv_dropdown_set_selected(s_conn_dropdown, (uint16_t)cur_conn);
+    lv_dropdown_set_selected(s_conn_dropdown, (uint16_t)conn_mode_to_ui_index(cur_conn));
 
     if (g)
         lv_group_add_obj(g, s_conn_dropdown);
@@ -83,7 +91,8 @@ void settings_connectivity_builder(bramble_layout_t* layout, void* ctx) {
     lv_obj_t* conn_hint = lv_label_create(cont);
     lv_label_set_text(conn_hint, "WiFi: WebSocket RPC + OTA updates\n"
                                  "BLE: Bluetooth GATT RPC\n"
-                                 "Modes are exclusive");
+                                 "Off: mesh only, no phone link\n"
+                                 "Switch back here or over USB");
     lv_obj_set_style_text_font(conn_hint, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(conn_hint, BR_COLOR_TEXT_SEC, 0);
 

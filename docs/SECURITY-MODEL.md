@@ -32,14 +32,14 @@ are encrypted end to end (section 3), and routing control traffic
 (RREP, RERR, beacon, ACK, delivery receipt) carries a network-key HMAC
 plus a per-message freshness sequence (section 3): against a
 provisioned fleet, this attacker cannot forge any of the five
-control-plane message types, and cannot replay one against a node that has
-been running continuously since it saw the original. Replay across a
-reboot is NOT closed: the replay windows are RAM-only
-(`replay_table_init` at `main/mesh_task.c`, no NVS save or
-restore anywhere in the tree) while sender-side counters persist, so a
-captured batch replayed in ascending counter order after the target
-reboots is accepted as fresh. Tracked as issue #72; see the residuals note
-in section 3. Against an unprovisioned fleet there is
+control-plane message types, and cannot replay one the target has already
+accepted: the replay windows persist their high-water marks to NVS and are
+force-flushed before every deliberate reboot (`mesh_replay_store_save` /
+`_load` in `main/mesh_persist.c`), so the rejection survives reboots. What
+remains is a bounded crash residual: an unclean crash can forfeit at most
+one flush interval of high-water advance, so frames captured inside that
+final window could replay once against the crashed-and-rebooted target
+(section 3). Against an unprovisioned fleet there is
 no HMAC key at all: an unprovisioned node is inert (fail-closed, section
 3), so it emits no authenticated control traffic and rejects every control
 frame before comparing, and there is no public fallback key an outsider
@@ -61,11 +61,11 @@ by omission. Replay is different: the per-signer control freshness window
 verified message, not on who is currently transmitting it, so it also
 rejects an insider re-transmitting a captured, genuinely-valid message
 signed by someone else, exactly like it rejects an outsider doing the
-same, for as long as that window survives. It does not survive a reboot:
-the window is RAM-only, so an insider holding captured frames can replay
-them at a rebooted target exactly as an outsider can (issue #72). Forgery
-remains open to this adversary by design, and replay remains open across a
-target reboot until the replay state is persisted.
+same. The window's high-water marks persist across reboots (section 3),
+so an insider holding captured frames is bounded by the same
+unclean-crash residual as an outsider: at most one flush interval of
+history can be lost, and only to a crash, never to a deliberate reboot.
+Forgery remains open to this adversary by design.
 
 **Mailbox or relay operator.** Any node forwards packets, and a node with
 mailbox mode enabled stores ciphertext for offline peers. The design intends
@@ -108,17 +108,19 @@ it is not enabled.
   as WS, with a first-write handshake and throttled retries
   (`components/ble/ble_server.c`); pre-handshake JSON-RPC is limited to the
   same identification allowlist, and dispatcher notifications are withheld
-  until the handshake succeeds. The link itself is unencrypted and
-  unbonded: the NimBLE host is configured with only `reset_cb` and
-  `sync_cb` (`components/ble/ble_server.c:473-474`, no `sm_bonding`,
-  `sm_sc`, `sm_mitm`, or `sm_io_cap`), and the characteristics are plain
-  `BLE_GATT_CHR_F_WRITE` and `BLE_GATT_CHR_F_NOTIFY` with no `_ENC` or
-  `_AUTHEN` variant. So, exactly as with the plaintext-HTTP case above, a
-  passive sniffer in range during any legitimate app connection reads
-  everything, token included, and can then reconnect and drive the full
-  authenticated RPC surface. Tracked as issue #73; the fix is a NimBLE
-  security manager with bonding plus encryption-requiring characteristic
-  flags.
+  until the handshake succeeds. The link itself is encrypted and bonded:
+  pairing is LE Secure Connections (`sm_sc=1`, an ECDH P-256 key agreement,
+  with legacy pairing compiled out via `CONFIG_BT_NIMBLE_SM_LEGACY=n`),
+  bonds persist in NVS so pairing happens once per device, the RPC write
+  characteristic is `BLE_GATT_CHR_F_WRITE_ENC`, and the access callback
+  independently re-checks link encryption and fails closed
+  (`ble_link_payload_permitted` in `components/ble/include/ble_link_sec.h`),
+  so neither the token nor RPC traffic crosses the air in the clear and a
+  passive sniffer who records the entire pairing exchange still cannot
+  derive the link key. The residual is the pairing model: `sm_io_cap` is
+  no-input-no-output, so pairing is Just Works with no MITM protection,
+  and an active attacker present at first-pairing time can interpose
+  (section 5).
 
 **Compromised OTA source.** An attacker who controls the firmware download
 server, the URL given to the device, or the TLS path. Three controls stack
@@ -256,8 +258,8 @@ probabilistic: uniqueness holds as long as the persisted ceiling invariant
 holds, rather than as a birthday-bound argument over 96 random bits the
 way an RNG-per-message scheme would. The simulator bridge still
 builds its nonces with a sim-local helper (`sim_build_nonce` in
-`simulator/gosim/bridge.c`: src_addr, counter, 4 random bytes) that predates
-and is independent of this counter, so simulated nodes and real nodes
+`simulator/gosim/bridge.c`: src_addr, counter, 4 random bytes) that is
+independent of this counter, so simulated nodes and real nodes
 generate nonces differently.
 
 Residual: the counter is visible in the cleartext nonce field on every
@@ -339,9 +341,9 @@ there is *no* public-PSK fallback to derive one from
 `BRAMBLE_PUBLIC_CHANNEL_PSK`). Provisioned, the HMAC proves the sender
 holds the network key, which is real authentication against outsiders, but
 not against another key holder forging a fresh beacon (section 5). Freshness (below)
-closes replay of a captured, genuinely valid beacon within a boot (the
-window is RAM-only, so replay reopens against a rebooted receiver: issue
-\#72), and does not close forgery by another key holder at all. Do not
+closes replay of a captured, genuinely valid beacon (the per-signer window
+persists across reboots, with the bounded unclean-crash residual in
+section 3), and does not close forgery by another key holder at all. Do not
 treat a provisioned beacon HMAC as more than that.
 
 ### RREQ origination rate limiting
@@ -364,7 +366,7 @@ per-neighbor buckets, or set it to a victim's address to fill that victim's
 bucket and frame them. Keying the cap on `prev_hop` would be evadable and
 would introduce a targeted framing DoS that does not otherwise exist, so it is
 deliberately not done. Robust per-neighbor fairness needs RREQ
-authentication (future work). Under a sustained flood
+authentication, which does not exist (section 4). Under a sustained flood
 the global cap also drops some legitimate forwarded RREQs; this is an
 accepted airtime-vs-reach tradeoff, and discovery already retries.
 
@@ -378,17 +380,17 @@ provisioning gate on the receive path would delete that use case, so
 The consequence, stated plainly, is that anyone in radio range can cause
 nodes to transmit. What is bounded is *how much*.
 
-Before this bound existed, `handle_probe` did one length check and nothing
-else. Each accepted probe queued a three-transmission `PROBE_ACK` reply burst
-and also rebroadcast the probe, and duplicate suppression keys on a
-`packet_id` an attacker varies freely. One injected 16-byte frame therefore
-bought four transmissions from every node in earshot, with no ceiling: an
-unbounded amplification factor available to an unauthenticated attacker. The
+The amplification at stake: each accepted probe queues a three-transmission
+`PROBE_ACK` reply burst and also rebroadcasts the probe, and duplicate
+suppression keys on a `packet_id` an attacker varies freely, so without an
+ingress bound one injected 16-byte frame would buy four transmissions from
+every node in earshot, with no ceiling: an unbounded amplification factor
+available to an unauthenticated attacker. The
 `probe_rate_limit_t` in `components/bramble_probe/bramble_probe.c` is a
-`send_limiter` covering locally originated probes only and never gated
+`send_limiter` covering locally originated probes only; it does not gate
 ingress.
 
-Received probes now pass two global token buckets, `probe_ingress_allow` in
+Received probes pass two global token buckets, `probe_ingress_allow` in
 `components/security/security.c`, called from `handle_probe`. The reply
 bucket (`PROBE_REPLY_BURST` 8, one token per `PROBE_REPLY_REFILL_MS` 5000ms)
 caps answering; the forward bucket (`PROBE_FWD_BURST` 4, one token per
@@ -450,9 +452,9 @@ generation call sites run only after Wi-Fi or BT RF init, when
 `Authorization: Bearer <token>`; browser WebSocket clients, which cannot
 set headers, instead carry the token in the `Sec-WebSocket-Protocol`
 subprotocol offer (`bramble.v1.auth.<token>`, `ws_auth_extract_token` in
-`main/ws_auth_credential.c`). There is no `?token=` query parameter:
-that path was removed (NEW-SEC-6) because URLs leak into logs, proxies,
-and history. The Wi-Fi config POST endpoint is gated by the same token,
+`main/ws_auth_credential.c`). There is no `?token=` query parameter
+(NEW-SEC-6): URLs leak into logs, proxies, and history, so credentials
+travel only in headers. The Wi-Fi config POST endpoint is gated by the same token,
 accepted as a form field so the AP-mode setup portal can submit it, and
 posts that do not prove the token must additionally pass a CSRF check:
 an Origin header gets the full origin policy below, a Referer without an
@@ -481,8 +483,8 @@ full access is unreachable rather than open.
 
 The serial CLI dispatches RPC without authentication *by design*: physical
 USB access is the pairing bootstrap. `bramble pair` reads the token over
-serial, and the token is printed to the serial boot log for the same
-reason. This is the device-as-secret posture (section 5): whoever holds
+serial, and the token is printed to the serial log when it is generated,
+for the same reason. This is the device-as-secret posture (section 5): whoever holds
 the hardware owns it, and plaintext flash (section 4) makes any
 stronger serial story moot.
 
@@ -739,7 +741,7 @@ is surfaced for re-verification (a genuine key change, not a routine
 re-handshake, is the only trigger). The verification UX ships in the web
 client (`webapp`, the richest DM surface, reached over BLE or the local
 transport), in the T-Deck graphical build, and on the e-paper pager itself:
-the pager's text UI grows a per-peer view under the Nodes screen that shows
+the pager's text UI has a per-peer view under the Nodes screen that shows
 the grouped safety number and the verified / key-changed state, and marks a
 contact verified with a two-step fail-safe confirm (arm, then commit) on the
 single button, calling the same setter path as the other surfaces. That the
@@ -747,8 +749,7 @@ two peers compute an identical safety number is gated by a host test
 (`test_identity_sas_order_independent`); the pager-side selection and verify
 logic is a host-tested state machine (`test_ui.c`), with the e-paper
 rendering covered by the board build. A live two-node emulator verification
-E2E that drives the Nodes SAS flow over CDP does not exist; it is tracked
-as follow-up work.
+E2E that drives the Nodes SAS flow does not exist.
 
 Residuals to keep in view: post-compromise recovery is epoch-coarse, not
 per-message; the network-key insider is unchanged (the ratchet protects DM
@@ -781,9 +782,9 @@ channel-shared and direct-session paths (`mesh_send_location_packet`,
 the authenticated plaintext (byte 0) rather than the cleartext header, and
 every LOCATION ciphertext pads to one canonical size regardless of tier, so
 ciphertext length does not leak which tier was chosen. A per-sender replay
-window (shared with DATA, below) rejects replayed location updates within a
-boot (the window is RAM-only, so replay reopens against a rebooted
-receiver: issue #72, detailed in that section); a
+window (shared with DATA, below) rejects replayed location updates
+(persisted across reboots, with the bounded unclean-crash residual
+detailed in that section); a
 below-window location update is dropped, never deferred, since location is
 real-time and a stale position accepted late is worse than one dropped.
 Residual: an observer still
@@ -791,7 +792,7 @@ learns that a node is running location sharing and roughly how often it
 updates, from packet type and timing alone, even with coordinates hidden
 (section 5).
 
-### Per-sender replay windows for DATA and LOCATION (SEC-M1, closed within a boot; reboot residual open as issue #72)
+### Per-sender replay windows for DATA and LOCATION (SEC-M1, closed; NVS-persisted with a bounded unclean-crash residual)
 
 Received DATA and LOCATION packets are checked against a per-sender sliding
 replay window keyed on `(src_addr, nonce_counter_extract(nonce))`, enforced
@@ -831,28 +832,39 @@ reading `BELOW_WINDOW`, and a tier-2 cache that never heard of the
 original acceptance treating the replay as a fresh, legitimate deferred
 delivery).
 
-Residuals: a 64-entry sender table and a 128-entry tier-2 LRU evict the
-oldest tracked sender under load, which loses replay history for an
-evicted-then-later-returning sender (needs 64, respectively 128,
-concurrent distinct senders to matter).
+Residuals: the 64-sender tier-1 table refuses to evict a slot whose sender
+has been active within `REPLAY_EVICT_MIN_IDLE_MS` (15 minutes) and fails
+closed by rejecting the new sender's packet instead (`slot_for` returning
+NULL maps to `REPLAY_REJECT_NO_SLOT`, `components/replay_window`), so an
+attacker spoofing many source addresses cannot flush a live sender's
+high-water mark on demand; the cost is that a genuinely new sender is
+refused while 64 senders stay concurrently active. The 128-entry tier-2
+LRU evicts the least-recently-seen entry under load (needs 128 concurrent
+distinct senders to matter).
 
-The larger residual is reboot. All of this state is RAM-only: both tables
-are initialized empty at boot (`replay_table_init(&s_replay)` and
-`replay_table_init(&s_control_replay)`, `main/mesh_task.c`) and
-nothing in the tree saves or restores them to NVS. A fresh slot accepts
-any counter (`components/replay_window/replay_window.c:49-53`), and the
-tier-1 accept path applies no `sent_at` freshness gate (that check runs
-only on the below-window path, `main/mesh_task.c`), while the
-sender-side counter is persistent (`nonce_counter_next`,
-`main/mesh_task.c`). So an attacker who captured a batch of
-authenticated frames can replay them in ascending counter order after the
-target reboots and have them accepted as fresh. A replayed RERR tears down
-routes; replayed LOCATION and CHAT are privacy and integrity problems; and
-an OTA update is itself a reboot, so the trigger is available to an
-attacker rather than merely incidental. This is an open gap, tracked as
-issue #72, not a closed control.
+Reboot is closed by persistence, bounded by flash endurance. Both tables
+(`s_replay` and `s_control_replay`) serialize their high-water marks to a
+CRC-checked NVS blob (`replay_table_serialize` in
+`components/replay_window`), flushed by the mesh task at most once per 15
+minutes and only when dirty (`mesh_replay_store_save` in
+`main/mesh_persist.c`, never on the receive path: NOR flash has finite
+erase endurance and the table is touched on every received packet), and
+force-flushed before every deliberate reboot, OTA, RPC reboot, or
+settings-screen restart (`mesh_reboot_delayed` in `main/mesh_task.c`).
+Restore fails closed: the per-slot bitmap is not persisted, so the entire
+64-wide band below a restored high-water mark is treated as already seen
+(`replay_table_deserialize`), and a corrupt blob is rejected loudly rather
+than loaded. The tier-1 CHAT accept path also applies the authenticated
+`sent_at` freshness bound when timesync is confident (`main/mesh_task.c`),
+the same bound the below-window path enforces. The residual is an unclean
+crash: a crash or bare `esp_restart` skips the forced flush, so up to one
+flush interval of high-water advance can be lost, and authenticated frames
+captured inside that final window could replay once against the
+crashed-and-rebooted target. The sender-side counter is persistent with a
+reserve-ahead ceiling (`nonce_counter_next`, `main/mesh_task.c`), so a
+sender never reuses a counter across its own reboot.
 
-### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; outsider forge closed under a provisioned key, outsider replay closed within a boot with the reboot residual open as issue #72, insider forgery and NEW-SEC-4's Sybil-minting residual remain, its bootstrap race closed by the per-boot grace)
+### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; outsider forge closed under a provisioned key, outsider replay closed with the bounded unclean-crash residual, insider forgery and NEW-SEC-4's Sybil-minting residual remain, its bootstrap race closed by the per-boot grace)
 
 Every routing and reliability control message carries a network-key
 HMAC, verified before the message
@@ -940,11 +952,11 @@ narrower beacon/ACK/receipt cases. The freshness field is what the
 `BRAMBLE_VERSION` 2-to-3 wire bump exists for (a flag day: see
 `docs/bramble-protocol-spec.md`).
 
-Provisioning plus this freshness work together close outsider forgery for
-all five message types, and close outsider replay for as long as the
-receiver stays up: the freshness state is RAM-only and does not survive a
-reboot, so replay against a freshly-booted target remains open (issue #72,
-detailed under the per-sender replay windows above). They do **not** close
+Provisioning plus this freshness work together close outsider forgery and
+outsider replay for all five message types: the per-signer window persists
+across reboots alongside the DATA/LOCATION windows, with the same bounded
+unclean-crash residual (detailed under the per-sender replay windows
+above). They do **not** close
 SEC-H1, SEC-H2, NEW-SEC-4, or NEW-SEC-8 outright: a network-key insider
 can still forge a message on behalf of any other holder (inherent to a
 shared symmetric key, accepted, see section 5), and NEW-SEC-4's
@@ -1078,9 +1090,9 @@ cannot manufacture a route-poisoning target out of thin air. What the MAC
 does *not* do is add freshness or authenticate `prev_hop`, so "the `prev_hop`
 next-hop-hint is unauthenticated" is an open, accepted residual (see
 section 5, mirroring the same residual accepted for RREP's
-`next_hop`). Tracked as
-follow-up hardening: anti-replay/freshness on the DATA breadcrumb path,
-matching the freshness treatment given to RREP/RERR/ACK/receipt/beacon.
+`next_hop`), and the absence of anti-replay/freshness on the DATA
+breadcrumb path, unlike the freshness given to
+RREP/RERR/ACK/receipt/beacon, is an open gap (section 4).
 
 **Re-ACK-on-duplicate, auth_hmac-gated.** The lost-ACK recovery path
 re-sends an ACK when a duplicate unicast
@@ -1135,8 +1147,8 @@ holder's traffic propagates. The flooded ACK is verified twice before relay:
 `ack_verify` (network-key MAC) and the per-message freshness check
 against the control-replay window (the control-plane section above), so a
 forged ACK is neither relayed nor allowed to confirm anything, and neither
-is a replayed one for as long as the receiver has been up since it saw the
-original (the freshness window is RAM-only: issue #72).
+is a replayed one (the freshness window persists across reboots, with the
+bounded unclean-crash residual in section 3).
 
 **Confirmed delivery without routes.** The flooded ACK gives the original
 sender sender-confirmation with no route table consulted anywhere on the path:
@@ -1185,11 +1197,11 @@ same PR that fixes it.
   spoofable. A per-neighbor cap keyed on it would be evadable (rotate
   `prev_hop`) and would let an attacker frame a victim by spoofing
   `prev_hop = victim` to drain their bucket, so it is deliberately not
-  built that way. Robust per-neighbor fairness needs RREQ authentication
-  (future). Under sustained flood the global cap also drops some
+  built that way. Robust per-neighbor fairness needs RREQ authentication,
+  which does not exist (the RREQ bullet below). Under sustained flood the global cap also drops some
   legitimate forwarded RREQs (accepted airtime-vs-reach tradeoff;
   discovery retries).
-- **An unauthenticated RREQ is a route hint, not a route fact (issue #74).**
+- **An unauthenticated RREQ is a route hint, not a route fact.**
   There is no `rreq_verify`: RREQ carries no HMAC field on the wire, so a
   keyless attacker can flood an RREQ with an arbitrary `prev_hop`,
   `hop_count`, and `metric`. `handle_rreq` still learns a route back toward
@@ -1200,10 +1212,10 @@ same PR that fixes it.
   DISCOVERED route or locking one out, and the signed RREP this RREQ triggers
   installs the genuine DISCOVERED route that always wins. `hop_count`
   arithmetic in `components/routing/discovery.c` also saturates at 255 instead
-  of wrapping, so a forged maximal hop count can no longer be laundered into a
+  of wrapping, so a forged maximal hop count cannot be laundered into a
   zero-hop (maximally attractive) advertisement. This is a mitigation, not a
-  fix of the root cause: full RREQ authentication (a wire-format change gated
-  on a protocol-version bump) remains future work, and until then an RREQ
+  fix of the root cause: RREQ carries no authentication on the wire (adding
+  it is a wire-format change gated on a protocol-version bump), so an RREQ
   source route is treated as exactly what it is, an unauthenticated hint.
 - **The identity private key, all channel keys, the RPC auth token, and,
   once provisioned, the network key are stored as plaintext NVS entries,
@@ -1218,25 +1230,15 @@ same PR that fixes it.
   credentials travel only in headers (an `Authorization` header, or for
   browser clients a `Sec-WebSocket-Protocol` subprotocol offer), never in
   the URL (`main/ws_server.c`).
-- **The BLE link is unencrypted and unbonded** (issue #73). The NimBLE host
-  sets only `reset_cb` and `sync_cb` (`components/ble/ble_server.c:473-474`);
-  there is no security-manager configuration (`sm_bonding`, `sm_sc`,
-  `sm_mitm`, `sm_io_cap`) anywhere in `components/ble/`, and the NUS
-  characteristics are plain `BLE_GATT_CHR_F_WRITE` /
-  `BLE_GATT_CHR_F_NOTIFY` with no `_ENC` or `_AUTHEN` variant. The RPC auth
-  token is compared against a raw first-line GATT write, so a passive
-  sniffer in range during a legitimate app connection captures the token
-  and gains the full authenticated RPC surface. Same exposure class as the
-  plaintext-HTTP bullet above.
-- **Replay windows are RAM-only and reset on reboot** (issue #72). Both
-  tables are initialized empty at boot (`main/mesh_task.c`) with
-  no NVS save or restore anywhere in the tree, a fresh slot accepts any
-  counter (`components/replay_window/replay_window.c:49-53`), and the
-  tier-1 accept path has no `sent_at` freshness gate, while the sender-side
-  counter is durable across reboots (`nonce_counter_next`). A captured
-  batch replayed in ascending counter order after the target reboots is
-  therefore accepted as fresh. An OTA update is itself a reboot, so the
-  trigger is attacker-reachable.
+- **Replay-window persistence is interval-flushed, not per-packet.** Both
+  replay tables flush their high-water marks to NVS at most once per 15
+  minutes and only when dirty (NOR erase endurance;
+  `main/mesh_persist.c`), force-flush before deliberate reboots, and
+  restore fail-closed (section 3), but an unclean crash skips the forced
+  flush, so up to one flush interval of high-water advance can be lost and
+  authenticated frames captured inside that final window can replay once
+  against the crashed-and-rebooted target. The sender side is unaffected:
+  `nonce_counter`'s reserve-ahead ceiling never reissues a counter.
 - **OTA signatures are enforced at update time, not at boot.** Images are
   signed and verified on every OTA write, the update origin is allowlisted,
   and a soft anti-rollback floor rejects downgrades, but without burned
@@ -1257,9 +1259,10 @@ same PR that fixes it.
   fresh, correctly-signed beacon for the victim address (section 5,
   inherent and accepted). Unprovisioned, the node is inert and neither
   sends nor accepts beacons, so no flush can be triggered at all.
-- **Beacons broadcast node name, battery percentage, uptime, neighbor count,
-  and mailbox capability in cleartext** (`send_beacon` in
-  `main/mesh_task.c`).
+- **Beacons broadcast node name, battery percentage, uptime, TX queue
+  depth, neighbor count, mailbox capability, and network time in
+  cleartext** (`send_beacon` in `main/mesh_beacon.c`; field list in
+  `bramble_beacon_t`, `components/packet/include/packet.h`).
 - **DATA's `auth_hmac` (wire v4, section 3) has no freshness or replay
   window**, unlike RREP/RERR/ACK/delivery-receipt/beacon's `seq`. A
   captured, genuinely valid DATA frame's MAC never expires, so a keyless
@@ -1297,6 +1300,16 @@ These do not go away when section 4 empties out.
   deliberate device-as-secret design, not an oversight: a stolen device
   already yields its plaintext flash (section 4), and a forgotten token
   must not brick the owner out of their own hardware.
+- **BLE pairing is Just Works, so first-pairing MITM is not defended.**
+  The BLE link is encrypted and bonded (LE Secure Connections, section 1),
+  which defeats passive capture of the RPC token, but `sm_io_cap` is
+  no-input-no-output because not every supported board has the display
+  plus confirm input a passkey or numeric-comparison flow needs, and a
+  flow that works on one board profile and disables BLE on another is
+  worse than a uniform one (`components/ble/ble_server.c`). An active
+  attacker present at first-pairing time can therefore interpose as the
+  peer; once a bond exists the stored LTK is required, so the exposure is
+  the first pairing, not every session.
 - **Cleartext routing headers.** Destination addresses must be readable by
   relays for multi-hop forwarding to work at this power and duty-cycle
   budget. Onion routing over LoRa airtime budgets is not a trade Bramble
@@ -1318,9 +1331,9 @@ These do not go away when section 4 empties out.
   message types.
 - **Control-plane freshness authenticates the sequence, not the signer's
   honesty.** The per-message freshness on RREP, RERR, beacon, ACK, and
-  delivery receipt (section 3) rejects replay of a captured message within
-  a boot (the window is RAM-only, so replay reopens against a rebooted
-  receiver: issue #72, section 4), but
+  delivery receipt (section 3) rejects replay of a captured message (the
+  window persists across reboots, with the bounded unclean-crash residual
+  in sections 3 and 4), but
   it does not stop a network-key insider from forging a message with a
   fresh, self-issued sequence (the insider-forgery residual above), and
   freshness does not address NEW-SEC-4 (below): the bootstrap-quorum race
@@ -1456,8 +1469,9 @@ These do not go away when section 4 empties out.
      (`not_after == UINT64_MAX`); there is no revocation list, so un-trusting
      one specific endorsed node also means a re-anchor. The wire format and
      firmware already carry `not_after` and an implemented-but-inert expiry
-     check, so moving to expiring certs is a webapp-only change (issue
-     shorter-lived certs); this is deliberately DEFERRED, not missing.
+     check, so moving to expiring certs is a webapp-only change (the anchor
+     tool issuing shorter-lived certificates); v1 deliberately issues
+     permanent certs.
   e. **Bounded-grace unpinned residual.** During the per-boot
      timesync-quorum grace an established but UNPINNED peer still corroborates
      the clock (both a silent Sybil and a self-revealing one), bounded by
@@ -1549,8 +1563,8 @@ These do not go away when section 4 empties out.
   overhearing and replaying (or racing) a valid frame, and the excluded
   `hop_limit` can let that forged breadcrumb win arbitration too. Strictly
   narrower than the pre-v4 gap (the outsider is confined to victims whose
-  valid frame it actually overheard, not an arbitrary silent address), and
-  tracked as follow-up hardening (section 3, section 4), not closed here.
+  valid frame it actually overheard, not an arbitrary silent address), an
+  open gap (sections 3 and 4), not closed here.
 - **DM SAS verification has a UX; it only helps if used.** An identity-bound 7-digit safety
   number is surfaced for out-of-band comparison in the web client and the
   T-Deck graphical build, with the verified bit persisted per contact and
@@ -1585,22 +1599,25 @@ These do not go away when section 4 empties out.
   under table pressure. This is the deliberate trade: a narrow,
   activity-gated outage instead of a permanent, total one; an idle
   session that is evicted must simply re-handshake.
-- **A 64-sender or 128-entry LRU table can be evicted under enough
-  concurrent senders.** The DATA/LOCATION tier-1 replay table (64 senders)
-  and tier-2 deferred table (128 entries) evict the least-recently-seen
-  entry under load. The control-plane replay table
-  (`s_control_replay`) shares the same `REPLAY_MAX_SENDERS` = 64 bound as
-  the data-plane table, since it is a second instance of the same
-  `replay_window` component: a signer evicted after the mesh has seen more
-  than 64 other distinct signers resets, and a very old, previously-valid
-  control-plane message replayed after that signer's eviction could be
-  accepted again. Not outsider-drivable: `s_control_replay` is only ever
-  fed a `(signer, seq)` pair after that message's MAC has already
-  verified, so an attacker without the network key cannot manufacture the
-  flood of distinct authenticated signers a targeted eviction would need.
-  An evicted sender who later returns (data-plane) or re-transmits
-  (control-plane) starts with no replay history, which only matters once a
-  mesh sustains that many concurrent distinct senders.
+- **A 64-sender or 128-entry LRU table degrades under enough concurrent
+  senders.** The DATA/LOCATION tier-1 replay table (64 senders) and the
+  control-plane replay table (`s_control_replay`, a second instance of the
+  same `replay_window` component with the same `REPLAY_MAX_SENDERS` = 64
+  bound) refuse to evict a slot whose sender was active within
+  `REPLAY_EVICT_MIN_IDLE_MS` (15 minutes) and fail closed by rejecting the
+  new sender's packet instead, so spoofed source addresses cannot flush a
+  live sender's replay history on demand; the costs are that a sender idle
+  past that bound can still be evicted and returns with no history, and
+  that a genuinely new sender is refused while 64 senders stay
+  concurrently active (an availability cost, never a false accept). A very
+  old, previously-valid control-plane message replayed after its signer's
+  eviction could be accepted again. Not outsider-drivable:
+  `s_control_replay` is only ever fed a `(signer, seq)` pair after that
+  message's MAC has already verified, so an attacker without the network
+  key cannot manufacture the flood of distinct authenticated signers a
+  targeted eviction would need. The tier-2 deferred table (128 entries)
+  evicts the least-recently-seen entry under load, which only matters once
+  a mesh sustains that many concurrent distinct senders.
 - **Minor, non-exploitable robustness notes:** `network_key_mac`'s
   `label || data` concatenation is not length-prefixed, which would be
   ambiguous for attacker-chosen labels, but every label is a fixed,
@@ -1613,8 +1630,8 @@ These do not go away when section 4 empties out.
   them in transit, producing a cosmetic hop-trail change in the UI even
   where the core `src_addr`/packet-id/seq binding holds. This is in-flight
   tampering during a single legitimate transit, not replay: the
-  freshness work (section 3) closes replay of the message as a whole for as
-  long as the receiver stays up (issue #72 for the reboot residual). The
+  freshness work (section 3) closes replay of the message as a whole, with
+  the bounded unclean-crash residual (sections 3 and 4). The
   LOCATION channel-message decode path does not assert `app_type ==
   APP_TYPE_LOCATION` before parsing (defense-in-depth only; it is inside the
   AEAD trust boundary and memory-safe either way).
@@ -1642,8 +1659,8 @@ These do not go away when section 4 empties out.
     deployment (the SF-to-density deployment guidance).
   - **Retry re-floods the same `packet_id`,** which is suppressed at every relay
     still holding the 60-second dedup key for that frame, so retry mainly helps
-    the single-hop / lost-ACK case, not multi-hop propagation failures. A
-    tracked tuning item.
+    the single-hop / lost-ACK case, not multi-hop propagation failures: an
+    accepted efficiency limit.
   - **A full flood relay queue (capacity 8) falls back to immediate,
     uncancellable transmission,** so under burst load suppression silently stops
     and the flood reverts to unsuppressed rebroadcast.
@@ -1651,10 +1668,11 @@ These do not go away when section 4 empties out.
     broadcast/channel flood suppression applies regardless of the toggle;
     `s_flood_transport` gates only the unicast DATA + flooded-ACK extension, and
     the reactive routing path is entirely unchanged when it is off.
-  - **Keyed-insider residual unchanged.** A network-key holder can still forge a
+  - **Keyed-insider residual.** A network-key holder can still forge a
     flood frame or ACK (every MAC here proves "signed by a holder", not "by a
     specific node"); replay of a captured valid frame is caught by the
-    control-replay window within a boot (RAM-only, issue #72), but
+    control-replay window (persisted across reboots, with the bounded
+    unclean-crash residual in sections 3 and 4), but
     insider forgery is inherent to a shared symmetric
     key (the insider-forgery residual above).
 

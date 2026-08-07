@@ -161,6 +161,7 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/ui/ui_manager.c
   ${BRAMBLE_COMPONENTS}/ui/ui_format.c
   ${BRAMBLE_COMPONENTS}/ui/sas_format.c
+  ${BRAMBLE_COMPONENTS}/ui/gnss_status.c
   ${BRAMBLE_COMPONENTS}/radio/radio_airtime.c
   ${BRAMBLE_COMPONENTS}/radio/radio_profiles.c
   ${BRAMBLE_COMPONENTS}/radio/tx_gate.c

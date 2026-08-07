@@ -132,6 +132,15 @@ export interface NodeStatus {
   position?: Position;      // current GPS position if available
   gpsAvailable?: boolean;   // hardware has GPS module
   gpsEnabled?: boolean;     // persisted GPS power preference (independent of gpsAvailable)
+  // GNSS observability. All optional and never defaulted: an absent field means
+  // the firmware predates them, which must render as unknown rather than as a
+  // receiver hearing nothing.
+  gpsState?: 'absent' | 'no_signal' | 'acquiring' | 'fix'; // three-way GNSS state
+  gpsSatsInView?: number;   // satellites the receiver lists, tracked or predicted
+  gpsSatsTracked?: number;  // satellites reporting a nonzero C/N0
+  gpsSatsUsed?: number;     // satellites in the fix computation
+  gpsSnrMaxDbHz?: number;   // best C/N0 in dB-Hz
+  gpsFixQuality?: number;   // GGA fix quality digit
   batteryMv?: number;       // battery voltage in millivolts
   batteryPct?: number;      // battery percentage 0-100
   charging?: 'unknown' | 'no' | 'yes'; // hardware-informed charging state; "yes" includes plugged-in-and-full

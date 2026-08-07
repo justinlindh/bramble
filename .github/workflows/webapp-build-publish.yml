@@ -1,7 +1,38 @@
 name: Web Client Build Publish
 
+# Builds and publishes the unified runtime web client image for a webapp
+# release. This does not run on every push to main: it runs when
+# release-components.yml cuts a `webapp-v*` tag, so a published image always
+# corresponds to a released version. `workflow_dispatch` is the recovery
+# path for republishing an existing tag.
+#
+# This workflow only publishes an image. It does not deploy. The cluster
+# rolls forward when argocd-image-updater sees the new `v<version>` tag and
+# writes the bump into the GitOps repo; see docs/deploy-bramble-web-client.md.
+
 on:
+  workflow_call:
+    inputs:
+      webapp_tag:
+        description: "webapp-vX.Y.Z tag to build the image from."
+        required: true
+        type: string
+    # Declared explicitly rather than taking `secrets: inherit` from the
+    # caller. This job runs `docker build` over the webapp's npm dependency
+    # tree, so it should never be holding the OTA signing keys or any other
+    # repo secret it has no use for. The names match the repo secrets, so the
+    # workflow_dispatch path resolves the same two from the repo.
+    secrets:
+      REGISTRY_USERNAME:
+        required: true
+      REGISTRY_PAT:
+        required: true
   workflow_dispatch:
+    inputs:
+      webapp_tag:
+        description: "webapp-vX.Y.Z tag to build and publish the web client image for."
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,185 +42,188 @@ defaults:
     shell: bash
 
 jobs:
-  build-test-publish:
+  build-publish:
     # Pinned to the persistent self-hosted host (never RUNNER_LABEL, never
     # ubuntu-latest): this is a job-level container: job, so the burst pool is
     # out (it does not mount node externals into job containers, failing every
     # step at Checkout), and a GitHub-hosted runner cannot reach the private
-    # LAN registry or bind the host docker socket this job pushes through. The
+    # registry or bind the host docker socket this job pushes through. The
     # bramble-host runner is the container-capable host that carries the docker
     # socket (group 959) and registry reachability this publish path needs.
     runs-on: bramble-host
     container:
       image: ghcr.io/catthehacker/ubuntu:full-22.04
       options: --user 0:0 --group-add 959
+    timeout-minutes: 60
     env:
-      REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'registry.example.com' }}
-      REGISTRY_IMAGE_REPO: ${{ vars.REGISTRY_IMAGE_REPO || 'registry.example.com/bramble/bramble-web-client' }}
+      WEBAPP_TAG: ${{ inputs.webapp_tag }}
+      REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
+      REGISTRY_IMAGE_REPO: ${{ vars.REGISTRY_IMAGE_REPO }}
+      BUILDER: bramble-webapp-${{ github.run_id }}-${{ github.run_attempt }}
     defaults:
       run:
         shell: bash
     steps:
-      - name: Checkout
+      # Fail before doing any work if the publish target is not configured.
+      # There is no placeholder fallback: a default registry host would either
+      # fail late at docker login or, worse, push somewhere unintended. The
+      # values are repo variables rather than literals in this tracked file
+      # because scripts/lint/check-no-internal-refs.sh forbids the private
+      # registry hostname in a public tree.
+      - name: Check publish configuration
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PAT: ${{ secrets.REGISTRY_PAT }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${REGISTRY_HOST}" ] || missing+=("vars.REGISTRY_HOST")
+          [ -n "${REGISTRY_IMAGE_REPO}" ] || missing+=("vars.REGISTRY_IMAGE_REPO")
+          [ -n "${REGISTRY_USERNAME}" ] || missing+=("secrets.REGISTRY_USERNAME")
+          [ -n "${REGISTRY_PAT}" ] || missing+=("secrets.REGISTRY_PAT")
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf 'Web client publish is not configured. Missing: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+          case "${REGISTRY_IMAGE_REPO}" in
+            "${REGISTRY_HOST}"/*) ;;
+            *)
+              echo "REGISTRY_IMAGE_REPO must live under REGISTRY_HOST." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout release tag
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.webapp_tag }}
+          persist-credentials: false
 
       - name: Verify docker daemon access
-        shell: bash
         run: |
           set -euo pipefail
           id
           ls -ln /var/run/docker.sock
           docker version
 
-      - name: Stage web-flasher and test webapp
-        # Deliberately no `npm run build` here. webapp/.dockerignore excludes
-        # both `dist` and `node_modules`, so nothing a host build produces ever
-        # reaches the image: the image's own `npm run build` is the build that
-        # ships. That script is `npm run typecheck && vite build`, so the
-        # typecheck still gates this path (a type error fails the buildx step
-        # below, which runs before anything is pushed). The tests are the part
-        # that cannot move into the image, so they stay here.
+      # Two tags, both immutable, and no floating ones. `v<version>` is what
+      # argocd-image-updater tracks with its semver strategy, and
+      # `sha-<full git sha>` is the provenance tag a human pins or rolls back
+      # to. The retired `main`, `vX.Y` and `vX` tags were mutable and now have
+      # no consumer: nothing deploys from a moving tag, and a moving tag would
+      # defeat the image-updater semver ordering.
+      - name: Resolve version and image tags
+        id: tags
         run: |
+          set -euo pipefail
+          case "$WEBAPP_TAG" in
+            webapp-v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Unexpected webapp tag: '$WEBAPP_TAG'" >&2; exit 1 ;;
+          esac
+          version="${WEBAPP_TAG#webapp-}"
+          sha="$(git rev-parse HEAD)"
+          {
+            echo "version_tag=${version}"
+            echo "sha_tag=sha-${sha}"
+            echo "app_version=${version#v}+$(printf '%s' "$sha" | cut -c1-7)"
+          } >> "$GITHUB_OUTPUT"
+
+      # The image build context is `webapp`, so the flasher has to be staged
+      # inside it. Deliberately no `npm ci` and no `npm test` here: the webapp
+      # suites already gate this commit in webapp-quality.yml, and re-running
+      # them would be duplicated CI work. The image's own `npm run build` is
+      # `npm run typecheck && vite build`, so a type error still fails the
+      # build step below, before anything is pushed.
+      - name: Stage web-flasher into the build context
+        run: |
+          set -euo pipefail
           rm -rf webapp/public/web-flasher
           mkdir -p webapp/public/web-flasher
           cp -a web-flasher/. webapp/public/web-flasher/
-          cd webapp
-          npm ci
-          npm test
 
-      - name: Resolve image tags
-        id: tags
-        shell: bash
-        run: |
-          set -euo pipefail
-          tags=()
-
-          immutable_sha_tag="sha-${GITHUB_SHA}"
-
-          if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ "${GITHUB_REF_NAME}" = "main" ]; then
-            tags+=("main")
-            tags+=("${immutable_sha_tag}")
-          fi
-
-          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            version="${GITHUB_REF_NAME}"
-            tags+=("${version}")
-            tags+=("$(printf '%s' "${version}" | sed -E 's/^(v[0-9]+\.[0-9]+)\.[0-9]+$/\1/')")
-            tags+=("$(printf '%s' "${version}" | sed -E 's/^(v[0-9]+)\.[0-9]+\.[0-9]+$/\1/')")
-            tags+=("${immutable_sha_tag}")
-          fi
-
-          if [ "${#tags[@]}" -eq 0 ]; then
-            echo "No publishable tags for ref ${GITHUB_REF}; exiting."
-            exit 1
-          fi
-
-          printf 'tags=%s\n' "$(IFS=,; echo "${tags[*]}")" >> "$GITHUB_OUTPUT"
-
-      - name: Login to registry
+      # The registry allows anonymous read, so a successful `docker login` is
+      # not by itself proof that the credentials can push. The push step and
+      # the post-push verification are what actually prove it.
+      - name: Log in to the registry
         env:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PAT: ${{ secrets.REGISTRY_PAT }}
-        shell: bash
         run: |
           set -euo pipefail
-          echo "$REGISTRY_PAT" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin
+          printf '%s' "$REGISTRY_PAT" \
+            | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin
 
-      - name: Resolve app version
-        id: appver
-        shell: bash
-        run: |
-          pkg_ver="$(node -p "require('./webapp/package.json').version")"
-          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-7)"
-          echo "version=${pkg_ver}+${short_sha}" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push web-client image
+      - name: Build and push web client image
         env:
           IMAGE_REPO: ${{ env.REGISTRY_IMAGE_REPO }}
-          IMAGE_TAGS: ${{ steps.tags.outputs.tags }}
-          DOCKERFILE_PATH: webapp/Dockerfile
-          BUILD_CONTEXT: webapp
-          APP_VERSION: ${{ steps.appver.outputs.version }}
-        shell: bash
+          VERSION_TAG: ${{ steps.tags.outputs.version_tag }}
+          SHA_TAG: ${{ steps.tags.outputs.sha_tag }}
+          APP_VERSION: ${{ steps.tags.outputs.app_version }}
         run: |
           set -euo pipefail
 
-          # Registry-backed build cache persists npm/build layers across CI runs.
+          # Registry-backed build cache persists npm/build layers across runs.
           CACHE_REF="${IMAGE_REPO}:buildcache"
 
-          # Create a clean docker-container buildx builder each run.
-          # Required for multi-platform buildx builds.
-          docker buildx rm bramble-webapp-builder >/dev/null 2>&1 || true
-          docker buildx create --name bramble-webapp-builder --driver docker-container --use
-          docker buildx inspect --bootstrap
+          # A docker-container builder is required for the multi-platform
+          # build. The name is scoped to the run because this runner is a
+          # persistent host: a fixed name means a manual republish overlapping
+          # a release publish would tear down the other run's builder
+          # mid-build. The cleanup step below always removes it.
+          docker buildx create --name "$BUILDER" --driver docker-container --use
+          docker buildx inspect --bootstrap "$BUILDER"
 
-          tag_args=()
-          IFS=',' read -r -a tags <<< "$IMAGE_TAGS"
-          for tag in "${tags[@]}"; do
-            tag_args+=("-t" "${IMAGE_REPO}:${tag}")
-          done
-
+          # oci-mediatypes=true on both the image and the cache export, and
+          # image-manifest=true on the cache export, are load bearing: the
+          # registry implements the OCI dist spec without Docker
+          # schema2 compatibility and rejects a Docker manifest with
+          # "manifest invalid". A plain `--push` emits schema2 and always
+          # fails there, and the registry cache exporter defaults to a Docker
+          # manifest list unless it is told to write an OCI image manifest.
           docker buildx build \
-            --builder bramble-webapp-builder \
+            --builder "$BUILDER" \
             --platform linux/amd64,linux/arm64 \
             --cache-from "type=registry,ref=${CACHE_REF}" \
-            --cache-to "type=registry,ref=${CACHE_REF},mode=max" \
+            --cache-to "type=registry,ref=${CACHE_REF},mode=max,oci-mediatypes=true,image-manifest=true" \
             --build-arg APP_VERSION="${APP_VERSION}" \
-            -f "${DOCKERFILE_PATH}" \
-            "${BUILD_CONTEXT}" \
-            "${tag_args[@]}" \
-            --push
+            --output "type=image,push=true,oci-mediatypes=true" \
+            -f webapp/Dockerfile \
+            -t "${IMAGE_REPO}:${VERSION_TAG}" \
+            -t "${IMAGE_REPO}:${SHA_TAG}" \
+            webapp
 
-      - name: Redeploy web client on the runner host
-        # This is the deploy, not a fallback. It replaces a dispatch to a
-        # deploy workflow on the retired Gitea instance that was wrapped in
-        # `curl ... || true`, so every non-204 (unset token, unreachable host,
-        # wrong repo vars) silently degraded to exactly the docker redeploy
-        # below and still reported green. The redeploy is now the single,
-        # gating path: any failure in it fails the job.
-        #
-        # MODE and ALLOWED_SUBNETS are carried over from the running container
-        # so a redeploy preserves the host's configuration; a first deploy on a
-        # host with no container yet gets the hosted-mode defaults.
+      # Proof the push landed, rather than trusting the build step's exit
+      # code alone: read both tags back from the registry and assert the
+      # published manifest really is an OCI index carrying both platforms.
+      - name: Verify the published image
         env:
-          IMAGE_REF: ${{ env.REGISTRY_IMAGE_REPO }}:sha-${{ github.sha }}
-        shell: bash
+          IMAGE_REPO: ${{ env.REGISTRY_IMAGE_REPO }}
+          VERSION_TAG: ${{ steps.tags.outputs.version_tag }}
+          SHA_TAG: ${{ steps.tags.outputs.sha_tag }}
         run: |
           set -euo pipefail
-          mode="$(docker inspect bramble-web-client --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '/^MODE=/{print $2; exit}')"
-          allowed_subnets="$(docker inspect bramble-web-client --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '/^ALLOWED_SUBNETS=/{sub(/^ALLOWED_SUBNETS=/,""); print; exit}')"
-          mode="${mode:-hosted}"
-          allowed_subnets="${allowed_subnets:-}"
-
-          docker pull "${IMAGE_REF}"
-          docker rm -f bramble-web-client >/dev/null 2>&1 || true
-          docker run -d \
-            --name bramble-web-client \
-            --restart unless-stopped \
-            -p 8085:8085 \
-            -e MODE="${mode}" \
-            -e ALLOWED_SUBNETS="${allowed_subnets}" \
-            "${IMAGE_REF}"
-
-          ok=0
-          for _ in $(seq 1 30); do
-            if [ "$(docker inspect -f '{{.State.Running}}' bramble-web-client 2>/dev/null || true)" != "true" ]; then
-              sleep 2
-              continue
-            fi
-
-            if docker run --rm --network host curlimages/curl:8.12.1 \
-              -fsS http://127.0.0.1:8085/api/healthz >/dev/null; then
-              ok=1
-              break
-            fi
-            sleep 2
+          for tag in "${VERSION_TAG}" "${SHA_TAG}"; do
+            echo "Verifying ${IMAGE_REPO}:${tag}"
+            raw="$(docker buildx imagetools inspect --raw "${IMAGE_REPO}:${tag}")"
+            printf '%s\n' "$raw" | grep -q 'application/vnd.oci.image.index.v1+json' || {
+              echo "Published manifest for ${tag} is not an OCI image index." >&2
+              printf '%s\n' "$raw" >&2
+              exit 1
+            }
+            for arch in amd64 arm64; do
+              printf '%s\n' "$raw" | grep -q "\"architecture\": *\"${arch}\"" || {
+                echo "Published manifest for ${tag} has no ${arch} platform." >&2
+                printf '%s\n' "$raw" >&2
+                exit 1
+              }
+            done
           done
+          echo "Published ${IMAGE_REPO}:${VERSION_TAG} and ${IMAGE_REPO}:${SHA_TAG}."
 
-          if [ "${ok}" -ne 1 ]; then
-            echo "bramble-web-client did not pass /api/healthz within 60s." >&2
-            docker logs --tail 50 bramble-web-client 2>&1 || true
-            exit 1
-          fi
-
-          echo "Web client redeploy completed and health check passed."
+      # always(): the runner host is persistent, so a builder left behind by a
+      # failed run would leak a container and its build state onto it. This
+      # only removes this run's own builder, so it is safe while another
+      # publish is in flight.
+      - name: Remove the buildx builder
+        if: always()
+        run: docker buildx rm "$BUILDER" >/dev/null 2>&1 || true

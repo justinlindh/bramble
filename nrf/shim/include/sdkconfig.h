@@ -6,7 +6,7 @@
 #define CONFIG_BRAMBLE_BOARD_CUSTOM 1
 
 // Kconfig defaults (matching components/*/Kconfig and main/Kconfig.projbuild)
-#define CONFIG_BRAMBLE_RPC_MAX_METHODS 64
+#define CONFIG_BRAMBLE_RPC_MAX_METHODS 96
 #define CONFIG_BRAMBLE_MSG_STORE_CAP 20
 // P2: message persistence on LittleFS (values match the Kconfig defaults).
 #define CONFIG_BRAMBLE_MSG_PERSIST_ENABLED 1
