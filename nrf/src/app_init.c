@@ -9,6 +9,7 @@
 
 #include <FreeRTOS.h>
 
+#include "battery.h"
 #include "esp_log.h"
 #include "identity.h"
 #include "ble_host.h"
@@ -55,6 +56,21 @@ void app_init_stack(void) {
      * boot order (main.c calls this before mesh_task_start). */
     msg_store_init_with_persistence();
     boot_trace_mark(BT_MSG_STORE, 0);
+
+    /* Battery before the mesh starts, matching the ESP boot order (main.c
+     * calls battery_init() before mesh_task_start), and the first gated
+     * read runs here, BEFORE BT_BOOT_DONE, on purpose: on the T1000-E a
+     * read energizes the P1.06 sensor rail (shim/battery_t1000e.c), the one
+     * boot-context action that once stopped an instrumented build dead, so
+     * if that ever recurs this placement turns it into a pre-BOOT_DONE boot
+     * failure the boot-loop rescue escapes to DFU from, with the two stamps
+     * below bracketing the killing window in the decoded trace. A surviving
+     * first window stamps the measured cell voltage. */
+    battery_init();
+    boot_trace_mark(BT_BATTERY_INIT, 0);
+    uint32_t boot_mv = battery_read_mv();
+    boot_trace_mark(BT_BATTERY_MV, boot_mv);
+    ESP_LOGI(TAG, "Battery: %lu mV (%u%%)", (unsigned long)boot_mv, battery_mv_to_pct(boot_mv));
 
     /* The dispatcher and its method table must exist before any transport
      * registers, because rpc_init() clears both tables. */

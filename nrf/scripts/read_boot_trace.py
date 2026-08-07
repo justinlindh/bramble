@@ -20,7 +20,8 @@ TAGS = {
     0x07: "MSG_STORE", 0x08: "RPC_READY", 0x09: "TOKEN_SEED(rc)",
     0x0A: "TOKEN_LOADED", 0x0C: "HFXO_OK", 0x0D: "LFCLK(xtal)",
     0x0E: "BLE_INIT(rc)", 0x0F: "BLE_START(rc)", 0x10: "ADV(rc)",
-    0x11: "MESH_STARTED", 0xDD: "BOOT_DONE(heap)",
+    0x11: "MESH_STARTED", 0x12: "BATTERY_INIT", 0x13: "BATTERY_MV(mv)",
+    0xDD: "BOOT_DONE(heap)",
     0xE1: "FAIL_ASSERT(line)", 0xE2: "FAIL_STACK_OVERFLOW",
     0xE3: "FAIL_MALLOC", 0xE4: "FAIL_SENTINEL(last)", 0xEF: "FAIL_HARDFAULT(pc)",
 }

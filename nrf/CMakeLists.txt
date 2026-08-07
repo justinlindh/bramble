@@ -88,6 +88,7 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_nvmc.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_saadc.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
 )
 target_include_directories(nrfx_lib PUBLIC
@@ -327,6 +328,15 @@ else()
   set(BRAMBLE_NRF_GPS_SRCS shim/gps_null.c)
 endif()
 
+# Battery driver: the T1000-E reads its cell over SAADC through the gated
+# sensor-rail divider (nrf/boards/t1000e.h); the dev kit has no battery
+# sense wired and keeps the steady-value stub.
+if(BRAMBLE_NRF_BOARD STREQUAL "t1000e")
+  set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_t1000e.c)
+else()
+  set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_null.c)
+endif()
+
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
@@ -350,7 +360,7 @@ add_executable(bramble-nrf
   shim/esp_random_nrf.c
   shim/esp_system_nrf.c
   ${BRAMBLE_NRF_GPS_SRCS}
-  shim/battery_null.c
+  ${BRAMBLE_NRF_BATTERY_SRCS}
   shim/esp_app_desc_nrf.c
   shim/rpc_platform_stubs.c
   shim/nvs_lfs.c

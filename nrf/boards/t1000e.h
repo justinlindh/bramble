@@ -50,6 +50,26 @@
 #define BOARD_PIN_LORA_IRQ (32 + 1)    // P1.01, DIO9 IRQ line
 #define BOARD_PIN_LORA_BUSY 7          // P0.07
 
+// Battery voltage. The cell reaches P0.02/AIN0 through a 2x divider, and
+// the divider hangs off a sensor rail gated by P1.06: with the gate low the
+// SAADC converts successfully but reads the dead divider (single-digit mV),
+// a confident wrong answer, so every read must energize the gate first and
+// release it after. Sources, in evidence order:
+//   - Vendor SDK (Seeed-Tracker-T1000-E-for-LoRaWAN-dev-board,
+//     smtc_hal_config.h): SENSE_POWER_EN = 38 (P1.06), SENSE_ADC_BAT = 2
+//     (P0.02, AIN0); sensor.c's sensor_bat_sample() drives SENSE_POWER_EN
+//     high (push-pull, standard drive, hal_gpio_init_out ->
+//     nrf_gpio_cfg_output), samples, multiplies by 2, drives it low again.
+//   - Meshtastic variant.h for this board: BATTERY_PIN 2, ADC_MULTIPLIER
+//     2.0F, PIN_3V3_EN (32+6) "Power to Sensors", driven high at boot in
+//     initVariant() fleet-wide. Its T1000X_SENSOR_EN_PIN (P0.04) is NOT a
+//     gate: the vendor SDK names P0.04 SENSE_ADC_VCC, the rail's own ADC
+//     sense input (driving it changes nothing, bench-verified 2026-08-06).
+//   - Bench probe on this exact unit (2026-08-06): rail off = 2 mV at the
+//     pin, P1.06 driven high = 3920 mV on a charging cell, released = 2 mV.
+#define BOARD_PIN_VBAT_ADC 2            // P0.02 = AIN0, SENSE_ADC_BAT
+#define BOARD_PIN_VBAT_RAIL_EN (32 + 6) // P1.06, SENSE_POWER_EN, HIGH = divider live
+
 // RF switch truth table (Meshtastic rfswitch.h for this board):
 //   mode    DIO5 DIO6 DIO7 DIO8
 //   STBY     0    0    0    0
