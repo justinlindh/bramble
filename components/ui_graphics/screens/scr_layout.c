@@ -27,11 +27,29 @@ static const char* tab_labels[TAB_COUNT] = {LV_SYMBOL_ENVELOPE " Chat", LV_SYMBO
                                             LV_SYMBOL_GPS " Map", LV_SYMBOL_BARS " Stats",
                                             LV_SYMBOL_SETTINGS " Set"};
 
+/* Carries the requested tab from the click dispatch to the deferred switch.
+ * A single slot is correct: taps that arrive before the deferred call runs
+ * are the same user resolving on one destination, and the last one wins. */
+static bramble_tab_t s_pending_tab;
+
+static void tab_switch_async(void* arg) {
+    (void)arg;
+    layout_set_tab(&s_layout, s_pending_tab);
+}
+
 static void tab_click_cb(lv_event_t* e) {
     bramble_tab_t tab = (bramble_tab_t)(intptr_t)lv_event_get_user_data(e);
     if (tab == TAB_MAP)
         scr_map_clear_focus_peer(); /* direct visits start unfocused */
-    layout_set_tab(&s_layout, tab);
+
+    /* Defer the switch out of this CLICKED dispatch. layout_set_tab runs
+     * lv_refr_now and then lv_obj_clean on the content area, so performing it
+     * here re-enters the renderer and frees widgets while lv_event_send is
+     * still iterating the event array it captured before invoking this
+     * callback, and while event_send_core is walking the parent bubble chain.
+     * The chat bubble handler defers for the same reason. */
+    s_pending_tab = tab;
+    ui_defer(tab_switch_async, NULL);
 }
 
 void layout_rebuild_content(bramble_layout_t* layout, void (*builder)(bramble_layout_t*, void*),
