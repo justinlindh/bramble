@@ -2,6 +2,9 @@
 #include "nvs.h"
 #include "nvs_keys.h"
 #include "location.h"
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 loc_share_mode_t location_share_mode_get(void) {
@@ -259,17 +262,219 @@ void location_policy_normalize(location_policy_t* policy) {
     policy->interval_s = location_policy_clamp_interval_s(policy->interval_s);
 }
 
-bool location_policy_should_send(const location_policy_t* policy, bool has_source, bool has_targets,
-                                 uint32_t now_ms, uint32_t last_sent_ms) {
+bool location_share_round_enabled(const location_policy_t* policy, bool has_source,
+                                  size_t target_count) {
     if (!policy || !policy->enabled)
         return false;
-    if (!has_source || !has_targets)
+    return has_source && target_count > 0;
+}
+
+bool location_rule_parse(const char* raw, location_rule_t* rule) {
+    if (!raw || !rule)
         return false;
 
-    uint32_t interval_ms = (uint32_t)location_policy_clamp_interval_s(policy->interval_s) * 1000U;
-    if (last_sent_ms != 0 && (now_ms - last_sent_ms) < interval_ms) {
+    int enabled = 1;
+    char tier[16] = {0};
+    int interval_s = LOCATION_DEFAULT_INTERVAL_S;
+    int scanned = sscanf(raw, "%d|%15[^|]|%d", &enabled, tier, &interval_s);
+    if (scanned >= 2) {
+        rule->enabled = (enabled != 0);
+        rule->tier = location_tier_from_string(tier);
+        if (scanned >= 3 && interval_s > 0) {
+            rule->interval_s = location_policy_clamp_interval_s((uint16_t)interval_s);
+        } else {
+            rule->interval_s = LOCATION_DEFAULT_INTERVAL_S;
+        }
+        return true;
+    }
+
+    rule->enabled = true;
+    rule->tier = location_tier_from_string(raw);
+    rule->interval_s = LOCATION_DEFAULT_INTERVAL_S;
+    return true;
+}
+
+void location_rule_format(char* out, size_t out_len, const location_rule_t* rule) {
+    if (!out || out_len == 0 || !rule)
+        return;
+    snprintf(out, out_len, "%d|%s|%u", rule->enabled ? 1 : 0, location_tier_to_string(rule->tier),
+             (unsigned)rule->interval_s);
+}
+
+bool location_contact_key(char* out, size_t out_len, uint32_t addr) {
+    if (!out || out_len < LOCATION_TARGET_KEY_SIZE)
+        return false;
+    snprintf(out, out_len, LOCATION_CONTACT_RULE_PREFIX "%08" PRIX32, addr);
+    return true;
+}
+
+bool location_channel_key(char* out, size_t out_len, int channel_index) {
+    if (!out || out_len < LOCATION_TARGET_KEY_SIZE)
+        return false;
+    /* Two digits is the whole key space this prefix has, so an index outside
+     * it cannot be represented. Rejecting here is what stops a key nothing
+     * will ever match from being written. */
+    if (channel_index < 0 || channel_index >= LOCATION_MAX_CHANNEL_TARGETS)
+        return false;
+    snprintf(out, out_len, LOCATION_CHANNEL_RULE_PREFIX "%02d", channel_index);
+    return true;
+}
+
+/* Exactly `digits` characters of the named base and then end of string. The key
+ * builders above emit fixed-width suffixes (8 hex for a contact, 2 decimal for
+ * a channel), so anything else is not a key this module wrote. strtoul/atoi
+ * alone would not do: both accept a partial parse and report 0 for a suffix
+ * with no digits at all, which would silently turn a foreign key into target 0
+ * rather than rejecting it. */
+static bool location_suffix_is_exact(const char* suffix, size_t digits, bool hex) {
+    for (size_t i = 0; i < digits; i++) {
+        char c = suffix[i];
+        bool ok =
+            (c >= '0' && c <= '9') || (hex && ((c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')));
+        if (!ok)
+            return false;
+    }
+    return suffix[digits] == '\0';
+}
+
+bool location_target_from_entry(const char* key, const char* raw, location_target_t* out) {
+    if (!key || !raw || !out)
+        return false;
+
+    const size_t contact_prefix_len = sizeof(LOCATION_CONTACT_RULE_PREFIX) - 1;
+    const size_t channel_prefix_len = sizeof(LOCATION_CHANNEL_RULE_PREFIX) - 1;
+
+    uint8_t kind;
+    uint32_t id;
+    if (strncmp(key, LOCATION_CONTACT_RULE_PREFIX, contact_prefix_len) == 0) {
+        const char* suffix = key + contact_prefix_len;
+        if (!location_suffix_is_exact(suffix, 8, true))
+            return false;
+        kind = LOCATION_TARGET_CONTACT;
+        id = (uint32_t)strtoul(suffix, NULL, 16);
+    } else if (strncmp(key, LOCATION_CHANNEL_RULE_PREFIX, channel_prefix_len) == 0) {
+        const char* suffix = key + channel_prefix_len;
+        if (!location_suffix_is_exact(suffix, 2, false))
+            return false;
+        int index = atoi(suffix);
+        if (index < 0 || index >= LOCATION_MAX_CHANNEL_TARGETS)
+            return false;
+        kind = LOCATION_TARGET_CHANNEL;
+        id = (uint32_t)index;
+    } else {
         return false;
     }
 
+    location_rule_t rule = {
+        .enabled = true,
+        .tier = LOCATION_TIER_COARSE,
+        .interval_s = LOCATION_DEFAULT_INTERVAL_S,
+    };
+    location_rule_parse(raw, &rule);
+    if (!rule.enabled)
+        return false;
+
+    out->kind = kind;
+    out->id = id;
+    out->tier = rule.tier;
+    out->interval_s = location_policy_clamp_interval_s(rule.interval_s);
     return true;
+}
+
+uint16_t location_targets_min_interval_s(const location_target_t* targets, size_t count) {
+    if (!targets || count == 0)
+        return 0;
+    uint16_t min_s = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (min_s == 0 || targets[i].interval_s < min_s)
+            min_s = targets[i].interval_s;
+    }
+    return min_s;
+}
+
+void location_schedule_init(location_schedule_t* sched) {
+    if (!sched)
+        return;
+    memset(sched, 0, sizeof(*sched));
+}
+
+static location_schedule_slot_t* location_schedule_find(location_schedule_t* sched, uint8_t kind,
+                                                        uint32_t id) {
+    for (size_t i = 0; i < LOCATION_MAX_TARGETS; i++) {
+        if (sched->slots[i].used && sched->slots[i].kind == kind && sched->slots[i].id == id)
+            return &sched->slots[i];
+    }
+    return NULL;
+}
+
+bool location_schedule_is_due(const location_schedule_t* sched, const location_target_t* target,
+                              uint32_t now_ms) {
+    if (!sched || !target)
+        return false;
+    const location_schedule_slot_t* slot =
+        location_schedule_find((location_schedule_t*)sched, target->kind, target->id);
+    if (!slot)
+        return true; /* never attempted: share on this round */
+    return (uint32_t)(now_ms - slot->last_attempt_ms) >= slot->wait_ms;
+}
+
+void location_schedule_record(location_schedule_t* sched, const location_target_t* target,
+                              uint32_t now_ms, bool sent) {
+    if (!sched || !target)
+        return;
+
+    uint32_t interval_ms = (uint32_t)location_policy_clamp_interval_s(target->interval_s) * 1000U;
+    uint32_t wait_ms = interval_ms;
+    if (!sent && target->kind == LOCATION_TARGET_CHANNEL) {
+        uint32_t retry_ms = (uint32_t)LOCATION_SEND_RETRY_S * 1000U;
+        wait_ms = retry_ms < interval_ms ? retry_ms : interval_ms;
+    }
+
+    location_schedule_slot_t* slot = location_schedule_find(sched, target->kind, target->id);
+    if (!slot) {
+        for (size_t i = 0; i < LOCATION_MAX_TARGETS; i++) {
+            if (!sched->slots[i].used) {
+                slot = &sched->slots[i];
+                break;
+            }
+        }
+    }
+    if (!slot) {
+        /* Unreachable while the collector caps targets at LOCATION_MAX_TARGETS
+         * and retain() releases departed slots, but a full table must never
+         * silently un-pace a target: take the slot that has waited longest. */
+        slot = &sched->slots[0];
+        for (size_t i = 1; i < LOCATION_MAX_TARGETS; i++) {
+            if ((uint32_t)(now_ms - sched->slots[i].last_attempt_ms) >
+                (uint32_t)(now_ms - slot->last_attempt_ms)) {
+                slot = &sched->slots[i];
+            }
+        }
+    }
+
+    slot->used = true;
+    slot->kind = target->kind;
+    slot->id = target->id;
+    slot->last_attempt_ms = now_ms;
+    slot->wait_ms = wait_ms;
+}
+
+void location_schedule_retain(location_schedule_t* sched, const location_target_t* targets,
+                              size_t count) {
+    if (!sched)
+        return;
+    for (size_t i = 0; i < LOCATION_MAX_TARGETS; i++) {
+        if (!sched->slots[i].used)
+            continue;
+        bool still_configured = false;
+        for (size_t j = 0; targets && j < count; j++) {
+            if (targets[j].kind == sched->slots[i].kind && targets[j].id == sched->slots[i].id) {
+                still_configured = true;
+                break;
+            }
+        }
+        if (!still_configured) {
+            sched->slots[i].used = false;
+        }
+    }
 }

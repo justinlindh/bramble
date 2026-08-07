@@ -66,14 +66,10 @@ static const char* TAG = "rpc_methods";
 static bramble_identity_t* s_identity;
 
 #define LOCATION_SOURCE_KEY "source"
-#define LOCATION_CONTACT_RULE_PREFIX "lcr_"
-#define LOCATION_CHANNEL_RULE_PREFIX "lch_"
-
-typedef struct {
-    bool enabled;
-    uint8_t tier;
-    uint16_t interval_s;
-} rpc_location_rule_t;
+/* LOCATION_CONTACT_RULE_PREFIX, LOCATION_CHANNEL_RULE_PREFIX and the rule
+   string codec come from location.h: the send path reads exactly the keys
+   this file writes, so they share one definition rather than two that agree
+   by inspection. */
 
 static const char* bramble_hardware(void) {
     const bramble_board_config_t* board = board_get_config();
@@ -1671,47 +1667,14 @@ static const char* rpc_location_source_normalize(const char* source) {
     return "hybrid";
 }
 
-static bool rpc_location_parse_rule_string(const char* raw, rpc_location_rule_t* rule) {
-    if (!raw || !rule)
-        return false;
-
-    int enabled = 1;
-    char tier[16] = {0};
-    int interval_s = LOCATION_DEFAULT_INTERVAL_S;
-    int scanned = sscanf(raw, "%d|%15[^|]|%d", &enabled, tier, &interval_s);
-    if (scanned >= 2) {
-        rule->enabled = (enabled != 0);
-        rule->tier = location_tier_from_string(tier);
-        if (scanned >= 3 && interval_s > 0) {
-            rule->interval_s = location_policy_clamp_interval_s((uint16_t)interval_s);
-        } else {
-            rule->interval_s = LOCATION_DEFAULT_INTERVAL_S;
-        }
-        return true;
-    }
-
-    rule->enabled = true;
-    rule->tier = location_tier_from_string(raw);
-    rule->interval_s = LOCATION_DEFAULT_INTERVAL_S;
-    return true;
-}
-
-static void rpc_location_write_rule_string(char* out, size_t out_len,
-                                           const rpc_location_rule_t* rule) {
-    if (!out || out_len == 0 || !rule)
-        return;
-    snprintf(out, out_len, "%d|%s|%u", rule->enabled ? 1 : 0, location_tier_to_string(rule->tier),
-             (unsigned)rule->interval_s);
-}
-
 /* Build a per-target location rule from a request JSON entry, starting from the
    node policy's default tier and interval and letting the entry override any of
    enabled/tier/interval_s. Shared by the contact_rules and channel_targets
    write loops in set_location_config, which differ only in how the rule is
    keyed into NVS. */
-static rpc_location_rule_t rpc_location_rule_from_json(const cJSON* entry,
-                                                       const location_policy_t* policy) {
-    rpc_location_rule_t rule = {
+static location_rule_t rpc_location_rule_from_json(const cJSON* entry,
+                                                   const location_policy_t* policy) {
+    location_rule_t rule = {
         .enabled = true,
         .tier = policy->default_tier,
         .interval_s = policy->interval_s,
@@ -1736,15 +1699,15 @@ static rpc_location_rule_t rpc_location_rule_from_json(const cJSON* entry,
 
 /* Parse a stored rule string and append its enabled/tier/interval_s fields to a
    response entry. The caller adds the identifying field (address or channel)
-   first. Shared by the contact_rules and channel_targets read loops in
-   get_location_config. */
+   first. Shared by the contact_rules and channel_targets read loops that
+   handle_get_config runs to emit the location block. */
 static void rpc_location_rule_emit_fields(cJSON* entry, const char* raw) {
-    rpc_location_rule_t rule = {
+    location_rule_t rule = {
         .enabled = true,
         .tier = LOCATION_TIER_COARSE,
         .interval_s = LOCATION_DEFAULT_INTERVAL_S,
     };
-    rpc_location_parse_rule_string(raw, &rule);
+    location_rule_parse(raw, &rule);
     cJSON_AddBoolToObject(entry, "enabled", rule.enabled);
     cJSON_AddStringToObject(entry, "tier", location_tier_to_string(rule.tier));
     cJSON_AddNumberToObject(entry, "interval_s", rule.interval_s);
@@ -1753,6 +1716,24 @@ static void rpc_location_rule_emit_fields(cJSON* entry, const char* raw) {
 static int handle_set_location_config(const cJSON* params, cJSON* result) {
     if (!params)
         return RPC_ERR_INVALID_PARAMS;
+
+    /* Validate every channel target before writing any of this config. A
+       channel index outside the key space resolves to no target at all, and
+       accepting it would leave the caller with a policy that reads back as
+       configured while the send path has nothing to send to. Rejecting up
+       front also keeps the write below all-or-nothing. */
+    const cJSON* proposed_targets = cJSON_GetObjectItem(params, "channel_targets");
+    if (proposed_targets && cJSON_IsArray(proposed_targets)) {
+        const cJSON* proposed = NULL;
+        cJSON_ArrayForEach(proposed, proposed_targets) {
+            const cJSON* channel = cJSON_GetObjectItem(proposed, "channel");
+            char probe[LOCATION_TARGET_KEY_SIZE];
+            if (!cJSON_IsNumber(channel) ||
+                !location_channel_key(probe, sizeof(probe), channel->valueint)) {
+                return RPC_ERR_INVALID_PARAMS;
+            }
+        }
+    }
 
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
@@ -1810,12 +1791,12 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
             if (!cJSON_IsString(address) || !address->valuestring)
                 continue;
 
-            rpc_location_rule_t rule = rpc_location_rule_from_json(entry, &policy);
+            location_rule_t rule = rpc_location_rule_from_json(entry, &policy);
 
             char key[20];
             char val[48];
             snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", address->valuestring);
-            rpc_location_write_rule_string(val, sizeof(val), &rule);
+            location_rule_format(val, sizeof(val), &rule);
             if (err == ESP_OK)
                 err = nvs_set_str(nvs, key, val);
         }
@@ -1826,15 +1807,15 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
         const cJSON* entry = NULL;
         cJSON_ArrayForEach(entry, channel_targets) {
             const cJSON* channel = cJSON_GetObjectItem(entry, "channel");
-            if (!cJSON_IsNumber(channel))
+            char key[LOCATION_TARGET_KEY_SIZE];
+            /* Range-checked above, before anything was written. */
+            if (!location_channel_key(key, sizeof(key), channel->valueint))
                 continue;
 
-            rpc_location_rule_t rule = rpc_location_rule_from_json(entry, &policy);
+            location_rule_t rule = rpc_location_rule_from_json(entry, &policy);
 
-            char key[20];
             char val[48];
-            snprintf(key, sizeof(key), LOCATION_CHANNEL_RULE_PREFIX "%02d", channel->valueint);
-            rpc_location_write_rule_string(val, sizeof(val), &rule);
+            location_rule_format(val, sizeof(val), &rule);
             if (err == ESP_OK)
                 err = nvs_set_str(nvs, key, val);
         }
@@ -1875,7 +1856,7 @@ static int handle_set_location_contact(const cJSON* params, cJSON* result) {
         return 0;
     }
 
-    rpc_location_rule_t rule = {
+    location_rule_t rule = {
         .enabled = true,
         .tier = tier ? location_tier_from_string(tier) : LOCATION_TIER_COARSE,
         .interval_s = LOCATION_DEFAULT_INTERVAL_S,
@@ -1890,7 +1871,7 @@ static int handle_set_location_contact(const cJSON* params, cJSON* result) {
 
     char key[20];
     char rule_buf[48];
-    rpc_location_write_rule_string(rule_buf, sizeof(rule_buf), &rule);
+    location_rule_format(rule_buf, sizeof(rule_buf), &rule);
     snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", addr_str);
     err = nvs_set_str(nvs, key, rule_buf);
     err = rpc_nvs_commit_close(nvs, err);

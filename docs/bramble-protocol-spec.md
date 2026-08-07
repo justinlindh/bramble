@@ -782,8 +782,10 @@ Total: 1 byte
 
 **Sharing policy:**
 
-- Periodic sharing is gated by the persisted policy (`location_policy_t`: enabled flag, default tier, interval). `location_policy_should_send()` returns true once the configured interval has elapsed (`LOCATION_DEFAULT_INTERVAL_S`, 5 minutes by default, floored at `LOCATION_MIN_INTERVAL_S`, 30 seconds) and both a position source and at least one target exist.
-- Per-contact rules (which peers receive updates and at which tier) are persisted in NVS under the `lcr_` key prefix and managed over RPC (`bramble.setLocationContact`).
+- A share round runs when the persisted policy (`location_policy_t`: enabled flag, default tier, interval) is enabled, a position source resolves, and at least one target is configured (`location_share_round_enabled()`). Each target is then paced off its own `interval_s` (`LOCATION_DEFAULT_INTERVAL_S`, 5 minutes by default, floored at `LOCATION_MIN_INTERVAL_S`, 30 seconds) rather than off a single node-wide timer.
+- Per-contact rules (`lcr_` key prefix, `bramble.setLocationContact`) address one peer, encrypted under that peer's DM session key, and so require an active session and a route to it.
+- Per-channel targets (`lch_` key prefix, `bramble.setLocationConfig`) address everyone holding a channel key: the frame is a broadcast to `0xFFFFFFFF` with `FLAG_CHANNEL`, encrypted by `channel_msg_encrypt` under that channel. No session, route or prior directed traffic is needed. The tier on a channel target is the resolution the whole channel receives, so per-contact tier grading does not apply.
+- A received LOCATION frame is origin-authenticated against the network key (`data_auth_verify`) before its position is believed, the same check `handle_data` applies. On a public channel the AEAD tag proves only that the sender holds a public key, so without this the `src_addr` in the frame would be a free-to-forge claim.
 
 **Cache:**
 

@@ -1973,12 +1973,26 @@ components:
 
     LocationChannelTarget:
       type: object
-      description: Per-channel location sharing rule.
+      description: >-
+        Per-channel location sharing rule. The node broadcasts its position
+        under this channel's key, so every holder of that key receives it and
+        no route, DM session or prior traffic is required. The tier is the
+        resolution the whole channel receives. A receiver additionally requires
+        a valid network-key origin MAC before it believes the position, so a
+        node outside the network cannot originate one.
       required: [channel]
       properties:
         channel:
           type: integer
-          description: Channel index.
+          minimum: 0
+          maximum: 15
+          description: >-
+            Channel index. Outside this range names no channel the node can
+            share to, and setLocationConfig rejects the whole request. Channel 0
+            is the public channel, whose PSK is well known: targeting it makes
+            the position readable by anyone in radio range, not only by the
+            network. Pick a private channel to keep a group's positions within
+            that group.
         enabled:
           type: boolean
           description: Whether rule is enabled.
@@ -1986,7 +2000,9 @@ components:
           $ref: '#/components/schemas/LocationTier'
         interval_s:
           type: integer
-          description: Override update interval in seconds.
+          description: >-
+            Update interval in seconds for this target, paced independently of
+            every other target. Floored at 30.
 
     LocationConfig:
       type: object
@@ -1995,7 +2011,10 @@ components:
       properties:
         enabled:
           type: boolean
-          description: Whether location sharing is enabled.
+          description: >-
+            Whether location sharing is permitted. A node transmits only to
+            the targets in contact_rules and channel_targets, so this being
+            true with no enabled target means nothing is sent.
         tier:
           $ref: '#/components/schemas/LocationTier'
         default_tier:
