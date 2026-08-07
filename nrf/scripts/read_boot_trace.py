@@ -40,6 +40,18 @@ BT_BOOT_DONE = 0xDD
 # starts a group of its own here; otherwise it prints under the previous failed
 # boot and reads as part of it.
 BT_FAIL_BOOTLOOP = 0xE6
+BT_TOKEN_SEED = 0x09
+
+# nrf_seed_auth_token_from_build's return codes (nrf/src/nrf_provision.h).
+# 1 is not a failure: it is what every build without a dev token returns.
+TOKEN_SEED_RC = {
+    0: "token in place (seeded or already stored)",
+    1: "no dev token in this build (normal, minted by ws_server_load_token next)",
+    # An image built before the skipped code existed returned -1 for both
+    # "no dev token in this build" and a genuine failure, so a -1 off such
+    # an image cannot be read as a failure on its own.
+    -1: "seeding failed, OR an image predating the skipped code (ambiguous)",
+}
 
 # nRF52840 POWER->RESETREAS bit positions.
 RESETREAS_BITS = {
@@ -117,7 +129,12 @@ def main(path):
         completed = any(tag == BT_BOOT_DONE for tag, _ in boot)
         print(f"boot {n} of {len(boots)}{'' if completed else '  (never reached BOOT_DONE)'}:")
         for tag, aux in boot:
-            note = f"  [{decode_resetreas(aux)}]" if tag == BT_BOOT_BEGIN else ""
+            note = ""
+            if tag == BT_BOOT_BEGIN:
+                note = f"  [{decode_resetreas(aux)}]"
+            elif tag == BT_TOKEN_SEED:
+                rc = aux - (1 << 32) if aux >> 31 else aux
+                note = f"  [{TOKEN_SEED_RC.get(rc, f'unknown rc {rc}')}]"
             print(f"  {TAGS.get(tag, f'tag 0x{tag:02x}')} aux=0x{aux:08x} ({aux}){note}")
     return 0
 
