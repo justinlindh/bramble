@@ -88,7 +88,6 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_nvmc.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
-  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_saadc.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
 )
 target_include_directories(nrfx_lib PUBLIC
@@ -330,10 +329,10 @@ else()
   set(BRAMBLE_NRF_GPS_SRCS shim/gps_null.c)
 endif()
 
-# Battery: the T1000-E gets the real SAADC + charge-detect backend; every
-# other board (no battery sense wired) gets the null backend.
+# Battery: the T1000-E gets the charge-detect backend; every other board
+# (no battery sense wired) gets the null backend.
 if(BRAMBLE_NRF_BOARD STREQUAL "t1000e")
-  set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_saadc.c)
+  set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_t1000e.c)
 else()
   set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_null.c)
 endif()

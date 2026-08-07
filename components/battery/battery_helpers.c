@@ -1,6 +1,6 @@
 /*
  * battery_helpers: pure functions shared by every battery_get_status()
- * implementation (ESP ADC, SAADC, emulator virtual battery, nRF null
+ * implementation (ESP ADC, emulator virtual battery, nRF charge-detect and null
  * stub). No hardware access, no ESP-IDF dependency: host-testable in
  * isolation (see test/test_battery.c).
  */

@@ -2,11 +2,11 @@
 // dev kit, BOARD_HAS_BATTERY 0): it is USB-powered. Reports an honest "no
 // battery hardware here" status (present=false, mv=0, pct=0,
 // charging=UNKNOWN) rather than a fabricated healthy reading.
-// getStatus/getBattery RPC consumers on these boards see 0 mV / not-present;
-// the T1000-E gets the real reading instead, from shim/battery_saadc.c
-// (selected in nrf/CMakeLists.txt by BRAMBLE_NRF_BOARD). A fabricated
-// healthy number is worse than an honest zero (see honesty conventions in
-// CLAUDE.md).
+// getStatus/getBattery RPC consumers on these boards see 0 mV / not-present.
+// The T1000-E reports the same absent voltage from shim/battery_t1000e.c
+// (selected in nrf/CMakeLists.txt by BRAMBLE_NRF_BOARD) for a different
+// reason, and adds charge detection. A fabricated healthy number is worse
+// than an honest zero (see honesty conventions in CLAUDE.md).
 #include "battery.h"
 #include <string.h>
 

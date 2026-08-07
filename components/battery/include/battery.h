@@ -79,14 +79,15 @@ bool battery_reading_available(const battery_status_t* status);
  *
  * Each target provides its own implementation: components/battery/battery.c
  * (ESP ADC), components/battery/battery_virt.c (emulator, served over
- * emu-link), nrf/shim/battery_saadc.c (T1000-E, real SAADC + charge
- * detect), nrf/shim/battery_null.c (WM1110 dev kit, no battery hardware
+ * emu-link), nrf/shim/battery_t1000e.c (T1000-E, charge detect only:
+ * reports present=false because the cell voltage is not readable on that
+ * board), nrf/shim/battery_null.c (WM1110 dev kit, no battery hardware
  * wired: honestly reports present=false).
  */
 void battery_get_status(battery_status_t* out);
 
-/* Number of raw samples averaged into battery_status_t.mv on the ESP and
- * SAADC ADC paths. A plain mean, not a median: bench Task 1's 30-minute
+/* Number of raw samples averaged into battery_status_t.mv on the ESP ADC
+ * path. A plain mean, not a median: bench Task 1's 30-minute
  * trace showed a steady-state reading within +/-4 mV with no outlier
  * spikes, so there is nothing for a median to reject. Named so a future
  * board whose ADC noise profile actually needs one touches this constant
@@ -94,8 +95,8 @@ void battery_get_status(battery_status_t* out);
 #define BATTERY_AVG_SAMPLE_COUNT 8
 
 /**
- * Pure averaging helper shared by every target that samples multiple raw
- * readings (the ESP and SAADC ADC paths). Averages only the entries whose
+ * Pure averaging helper for targets that sample multiple raw readings
+ * (the ESP ADC path). Averages only the entries whose
  * matching valid[i] is true, so one failed conversion cannot drag a
  * healthy reading toward a false low-battery value the way including it
  * as a fabricated 0 mV sample would: with BATTERY_AVG_SAMPLE_COUNT == 8, a

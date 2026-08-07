@@ -11,10 +11,10 @@ persistence, P3 GNSS (below). Power management has since landed too: WFE
 idle-sleep in the idle task, a corrected account of HFXO ownership
 (NimBLE's rfmgmt always cycled the crystal; what landed here is the boot
 path stopping it after LFCLK bring-up, plus the anomaly-192 workaround in
-the RC fallback), and real battery telemetry on the T1000-E (SAADC +
-charge/VBUS detect, `nrf/shim/battery_saadc.c`). What remains is bench
-verification against real hardware (overnight drain bound, current-draw
-measurement), not implementation.
+the RC fallback), and charge detection on the T1000-E (CHRG/VBUS detect,
+`nrf/shim/battery_t1000e.c`). What remains is bench verification against
+real hardware (overnight drain bound, current-draw measurement), not
+implementation.
 
 Status, stated per the repo's honesty conventions: builds, boots, and runs
 as a live peer on the bench mesh from the Wio-WM1110 dev kit, with the
@@ -265,32 +265,35 @@ consumption figures for the chip, so none are cited here.
 ## Battery (T1000-E)
 
 The T1000-E carries a LiPo cell plus charger-IC status pins (Seeed's stock
-Meshtastic-compatible wiring). `shim/battery_saadc.c` reads the cell voltage
-over P0.02/AIN0 through the board's 2x divider using the nRF52840's SAADC,
-and reads charge/VBUS-detect (P1.03, P0.05) as plain GPIO inputs, satisfying
-the same `components/battery/include/battery.h` contract as the ESP32 fleet
-and the emulator's virtual battery: `battery_get_status()` returns averaged
-millivolts, a curve percentage, presence, and a hardware-informed charging
-state. Every field this backend produces flows through the shared code the
-ESP32 fleet already uses: the same LiPo discharge curve
-(`components/battery/battery_pct.c`), the same beacon-level 0xFF
-unknown/plugged-in sentinel (`battery_beacon_pct()`,
-`docs/bramble-protocol-spec.md` §beacon layout), the same RPC charging
-fields on `getStatus`/`getBattery`, and the same webapp charging display.
-The pin wiring and charge-detect polarity are source-verified against
-Meshtastic's `tracker-t1000-e` variant and `Power.cpp` (cited in
-`battery_saadc.c`'s header comment), not against this project's own bench
-measurement of the T1000-E's battery circuit.
+Meshtastic-compatible wiring). `shim/battery_t1000e.c` reads charge and
+VBUS detect (P1.03, P0.05) as plain GPIO inputs and satisfies the same
+`components/battery/include/battery.h` contract as the ESP32 fleet and the
+emulator's virtual battery. It reports a hardware-informed charging state
+and no voltage: `mv` 0, `pct` 0, `present` false, which routes through the
+shared beacon-level 0xFF unknown/plugged sentinel
+(`battery_beacon_pct()`, `docs/bramble-protocol-spec.md` §beacon layout)
+and the shared "no reading" states in the RPC fields and the webapp, the
+same paths the ESP32 fleet uses. Charge-detect polarity is source-verified
+against Meshtastic's `tracker-t1000-e` variant and `Power.cpp`, cited in
+`battery_t1000e.c`'s header comment.
 
-Verification status: source-level only. The SAADC driver builds and its
-pure logic (averaging, curve mapping, charging classification) is
-host-tested the same way the ESP32 path is, but the actual voltage and
-charge-detect readings have not yet been checked against real hardware
-(a multimeter, a live charge/discharge cycle, or a charger being plugged
-and unplugged on the physical card): that bench pass is still pending. The
-Wio-WM1110 dev kit has no battery hardware and never claims otherwise:
-`shim/battery_null.c` reports `present=false` honestly rather than
-fabricating a reading.
+Cell voltage is not readable on this board. P0.02/AIN0 reaches the cell
+through a 2x divider, but the divider hangs off a sensor rail gated by
+P1.06 (SENSE_POWER_EN per Seeed's vendor SDK). With the rail off the SAADC
+conversions succeed and return 1 to 4 mV, which a driver cannot detect as a
+bad read, so a voltage backend would beacon a near-dead cell whenever the
+device is unplugged. Driving the gate high is worse: on hardware the board
+stopped within about a millisecond of the pin write, leaving a boot trace
+that ends on the following stamp with no failure tag and no sentinel
+rescue, so it reset or locked up rather than blocking. Whether that is a
+brownout or a lockup is not established, so this port defines neither the
+ADC pin nor the gate pin and no build can reach them.
+
+Verification status: charge detection is confirmed on a T1000-E, tracking a
+charger being plugged and unplugged. The absent voltage reading is a
+property of the port, not a pending measurement. The Wio-WM1110 dev kit has
+no battery hardware and never claims otherwise: `shim/battery_null.c`
+reports `present=false` honestly rather than fabricating a reading.
 
 ## Dev network key (bench only)
 
