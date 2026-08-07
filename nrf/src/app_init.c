@@ -6,6 +6,7 @@
 #include "app_init.h"
 
 #include "boot_trace.h"
+#include "nrf_provision.h"
 
 #include <FreeRTOS.h>
 
@@ -84,7 +85,9 @@ void app_init_stack(void) {
      * once, over a UART the T1000-E does not have), so a build-time token is
      * seeded first when one was provided. Seeds only if none is stored, and
      * must precede ws_server_load_token, which mints when it finds none. */
-    extern int nrf_seed_auth_token_from_build(void);
+    /* rc is BRAMBLE_TOKEN_SEED_SKIPPED (1) on any build without a dev token,
+     * which is the normal production result and not a failure; see
+     * nrf_provision.h for the full contract this stamp records. */
     boot_trace_mark(BT_TOKEN_SEED, (uint32_t)nrf_seed_auth_token_from_build());
 
     /* Mints or loads the per-device RPC auth token. The entropy gate is
