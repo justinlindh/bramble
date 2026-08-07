@@ -12,7 +12,6 @@ import styles from './MessageBubble.module.css';
 
 interface MessageBubbleProps {
   message: Message;
-  myAddr: number;
 }
 
 const TIER_CLASS: Record<string, string> = {
@@ -21,7 +20,7 @@ const TIER_CLASS: Record<string, string> = {
   critical:  'tierCritical',
 };
 
-export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
+export function MessageBubble({ message }: MessageBubbleProps) {
   const isOut = message.direction === 'outgoing';
   const tierCls = TIER_CLASS[message.tier] ?? '';
   const showRoutesGlobal = useStore(s => s.showRoutes);
@@ -74,10 +73,7 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
 
       {/* Relay path (shown when global toggle on OR individually expanded) */}
       {showPath && (
-        <RelayPathDisplay
-          path={message.relayPath!}
-          myAddr={myAddr}
-        />
+        <RelayPathDisplay path={message.relayPath!} />
       )}
 
       {/* Timestamp + delivery status */}
