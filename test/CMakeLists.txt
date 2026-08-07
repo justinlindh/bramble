@@ -417,6 +417,17 @@ target_include_directories(test_dedup PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
 )
 
+# Boot-trace page walking (nRF consoleless boards); the NVMC half stays on
+# the device, this is the decision logic it drives.
+add_executable(test_boot_trace
+    test_boot_trace.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src/boot_trace_scan.c
+    unity/unity.c
+)
+target_include_directories(test_boot_trace PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src
+)
+
 # Battery percentage curve (shared by the device and virtual drivers)
 add_executable(test_battery
     test_battery.c
