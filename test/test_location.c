@@ -201,6 +201,31 @@ void test_location_target_from_entry_rejects_non_targets(void) {
     TEST_ASSERT_FALSE(location_target_from_entry("lch_", "1|coarse|60", &target));
 }
 
+/* Only the exact suffix shape the key builders emit names a target: 8 hex
+ * digits for a contact, 2 decimal digits for a channel. A partially numeric or
+ * wrong-width suffix is a key this module did not write, and accepting one
+ * would resolve a foreign key to some arbitrary target rather than skipping
+ * it. */
+void test_location_target_from_entry_rejects_malformed_suffixes(void) {
+    location_target_t target;
+
+    /* Channel: partial parses and wrong widths, not channel 1 or channel 0. */
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_1x", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_0", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_000", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_ab", "1|coarse|60", &target));
+
+    /* Contact: a non-hex or wrong-width suffix must not resolve to address 0. */
+    TEST_ASSERT_FALSE(location_target_from_entry("lcr_ZZZZZZZZ", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lcr_AABBCCD", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lcr_AABBCCDDE", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lcr_", "1|coarse|60", &target));
+
+    /* Lowercase hex is still a well-formed contact suffix. */
+    TEST_ASSERT_TRUE(location_target_from_entry("lcr_aabbccdd", "1|coarse|60", &target));
+    TEST_ASSERT_EQUAL_UINT32(0xAABBCCDDu, target.id);
+}
+
 void test_location_target_interval_floor(void) {
     location_target_t target;
 
@@ -411,6 +436,7 @@ int main(void) {
     RUN_TEST(test_location_target_from_entry_channel);
     RUN_TEST(test_location_target_from_entry_contact);
     RUN_TEST(test_location_target_from_entry_rejects_non_targets);
+    RUN_TEST(test_location_target_from_entry_rejects_malformed_suffixes);
     RUN_TEST(test_location_target_interval_floor);
     RUN_TEST(test_location_rule_codec_roundtrip);
     RUN_TEST(test_location_target_keys);

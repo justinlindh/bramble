@@ -320,6 +320,23 @@ bool location_channel_key(char* out, size_t out_len, int channel_index) {
     return true;
 }
 
+/* Exactly `digits` characters of the named base and then end of string. The key
+ * builders above emit fixed-width suffixes (8 hex for a contact, 2 decimal for
+ * a channel), so anything else is not a key this module wrote. strtoul/atoi
+ * alone would not do: both accept a partial parse and report 0 for a suffix
+ * with no digits at all, which would silently turn a foreign key into target 0
+ * rather than rejecting it. */
+static bool location_suffix_is_exact(const char* suffix, size_t digits, bool hex) {
+    for (size_t i = 0; i < digits; i++) {
+        char c = suffix[i];
+        bool ok =
+            (c >= '0' && c <= '9') || (hex && ((c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')));
+        if (!ok)
+            return false;
+    }
+    return suffix[digits] == '\0';
+}
+
 bool location_target_from_entry(const char* key, const char* raw, location_target_t* out) {
     if (!key || !raw || !out)
         return false;
@@ -331,13 +348,13 @@ bool location_target_from_entry(const char* key, const char* raw, location_targe
     uint32_t id;
     if (strncmp(key, LOCATION_CONTACT_RULE_PREFIX, contact_prefix_len) == 0) {
         const char* suffix = key + contact_prefix_len;
-        if (suffix[0] == '\0')
+        if (!location_suffix_is_exact(suffix, 8, true))
             return false;
         kind = LOCATION_TARGET_CONTACT;
         id = (uint32_t)strtoul(suffix, NULL, 16);
     } else if (strncmp(key, LOCATION_CHANNEL_RULE_PREFIX, channel_prefix_len) == 0) {
         const char* suffix = key + channel_prefix_len;
-        if (suffix[0] < '0' || suffix[0] > '9')
+        if (!location_suffix_is_exact(suffix, 2, false))
             return false;
         int index = atoi(suffix);
         if (index < 0 || index >= LOCATION_MAX_CHANNEL_TARGETS)
