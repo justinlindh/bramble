@@ -18,9 +18,9 @@ CONFIG_PM_ENABLE=y
 
 # BLE: NimBLE compiled in for this profile (overrides the WiFi-first global
 # default). Runtime connectivity modes are exclusive (Settings > Connectivity,
-# WiFi or BLE, reboot to apply), so the BT controller is initialized only when
-# the persisted mode is BLE; a WiFi-mode boot never starts it. The AP WPA
-# handshake instability that motivated disabling BLE here (commit 7eefcf33)
+# WiFi, BLE, or Off, reboot to apply), so the BT controller is initialized only
+# when the persisted mode is BLE; a WiFi- or Off-mode boot never starts it. The
+# AP WPA handshake instability that motivated disabling BLE here (commit 7eefcf33)
 # was observed with WiFi and BLE running concurrently, a configuration
 # conn_mode_resolve_boot coerces to WiFi-only. NimBLE tuning (MTU, roles,
 # SM/link security, bond persistence) comes from the global defaults.
