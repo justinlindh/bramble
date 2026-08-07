@@ -322,6 +322,36 @@ jobs:
             dist/factory/SHA256SUMS
 
   # ---------------------------------------------------------------------------
+  # Web client container image for the webapp release. It lives here, called
+  # from the job that just cut the tag, rather than in a workflow triggered by
+  # `push: tags: webapp-v*`: semantic-release pushes the tag with the default
+  # GITHUB_TOKEN, and a tag pushed by GITHUB_TOKEN does not trigger workflows,
+  # so a tag-triggered publish would silently never run. Calling the reusable
+  # workflow also reuses the release job's own tag-diff detection instead of
+  # recomputing which version was published.
+  #
+  # Gated on the webapp_published output rather than needs.release.result, for
+  # the same reason the installer jobs are: the webapp release step runs before
+  # the sim step, so a later failure in that job must not skip a publish for a
+  # release that already exists. !cancelled() lifts the implicit success()
+  # gate that would otherwise do exactly that.
+  webapp-image:
+    needs: release
+    if: >-
+      !cancelled() &&
+      needs.release.outputs.webapp_published == 'true'
+    uses: ./.github/workflows/webapp-build-publish.yml
+    permissions:
+      contents: read
+    with:
+      webapp_tag: ${{ needs.release.outputs.webapp_tag }}
+    # Named rather than `inherit`: the image build runs docker build over the
+    # webapp's npm tree and has no business holding the OTA signing keys.
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      REGISTRY_PAT: ${{ secrets.REGISTRY_PAT }}
+
+  # ---------------------------------------------------------------------------
   # Desktop installers for the webapp release. Linux (AppImage, deb, pacman)
   # and Windows (NSIS) cross-build in electronuserland/builder:24-wine on the
   # Linux runner; macOS dmgs need real Apple hardware, so they build on a
