@@ -660,7 +660,10 @@ void settings_location_builder(bramble_layout_t* layout, void* ctx) {
     if (g)
         lv_group_add_obj(g, s_loc_interval_dd);
 
-    lv_obj_t* loc_source_row = settings_create_setting_row(cont, "Active Source");
+    /* "Source", not "Active Source": the value is the configured preference
+     * read from NVS, and calling it active would assert that the receiver is
+     * working when it may be hearing nothing. */
+    lv_obj_t* loc_source_row = settings_create_setting_row(cont, "Source");
     ui_zone_track(&s_loc_source_lbl, lv_label_create(loc_source_row));
     lv_obj_set_style_text_color(s_loc_source_lbl, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_font(s_loc_source_lbl, &lv_font_montserrat_12, 0);

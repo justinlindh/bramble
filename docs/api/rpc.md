@@ -141,7 +141,8 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 - Description: Returns high-level node runtime status.
 - Params: none (`{}`).
-- Response fields: `uptime_s` (number), `neighbors` (number), `routes` (number), `radio_ok` (bool), `battery_pct` (number, when available), `gps` (object, when available).
+- Response fields: `address` (string), `firmware_version` (string), `protocol_version` (string), `hardware` (string), `radio_ok` (bool), `peers` (number), `beacon_tx` (number), `beacon_rx` (number), `packets_tx` (number), `packets_rx` (number), `uptime_s` (number), `free_heap` (number), `battery_mv` (number), `battery_pct` (number), `gps_available` (bool), `gps_enabled` (bool), `gps_state` (string), `gps_sats_in_view` (number), `gps_sats_tracked` (number), `gps_sats_used` (number), `gps_snr_max_dbhz` (number), `gps_fix_quality` (number), `supports_delivery_event_sync` (bool), `identity_pins` (number), `identity_conflicts` (number), `identity_sig_failures` (number), `identity_addr_mismatches` (number), `identity_unendorsed` (number), `identity_expired` (number).
+- `gps_state` is one of `absent`, `no_signal`, `acquiring`, `fix`. The satellite counts and `gps_fix_quality` are always present and are 0 on a board without a receiver, so a client distinguishes "no receiver" from "zero satellites" on `gps_available`, never on a count. See [Diagnosing a node with no fix](#diagnosing-a-node-with-no-fix).
 - Example:
 
 ```json
@@ -150,13 +151,13 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 #### `bramble.getDiagnostics`
 
-- Description: Returns heap/task diagnostics.
-- Params: optional `include_tasks` (bool).
-- Response fields: `heap_free` (number), `heap_min` (number), `tasks` (array, optional).
+- Description: Returns heap, task-stack and backpressure diagnostics, plus raw GPS feed counters on a board with a receiver.
+- Params: optional `include_heap_dump` (bool); when true the node also writes a heap dump to its own console, which the response does not carry.
+- Response fields: `uptime_s` (number), `free_heap` (number), `heap` (object: `internal_free`, `internal_largest_free_block`, `internal_min_ever_free`, `dma_free`, `dma_largest_free_block`, `psram_free`, `psram_min_ever_free`), `task_stack_hwm` (array of `{task, hwm_words, hwm_bytes}`), `backpressure` (object: `flood_relay_drops`, `probe_ingress`), and on a GPS-capable board `gps_rx_bytes`, `gps_rx_lines`, `gps_chip`, `gps_rx_overruns`, `gps_rx_errors`, `gps_rx_disabled`, `gps_rx_rearm_fail`.
 - Example:
 
 ```json
-{"jsonrpc":"2.0","id":2,"method":"bramble.getDiagnostics","params":{"include_tasks":true}}
+{"jsonrpc":"2.0","id":2,"method":"bramble.getDiagnostics","params":{"include_heap_dump":true}}
 ```
 
 #### `bramble.getWifiStatus`
@@ -216,14 +217,43 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 #### `bramble.getGpsPosition`
 
-- Description: Returns latest GPS fix.
+- Description: Returns the latest GPS fix plus the satellite state behind it.
 - Params: none.
-- Response fields: `valid` (bool), `lat` (number), `lon` (number), `alt_m` (number), `accuracy_m` (number).
+- Response fields, on a fix: `valid` (bool), `lat` (number), `lon` (number), `alt` (number), `speed_kmh` (number), `heading_deg` (number), `accuracy_m` (number), `timestamp` (number).
+- Response fields, on both branches: `state` (string), `sats_in_view` (number), `sats_tracked` (number), `sats_used` (number), `snr_max_dbhz` (number), `fix_quality` (number). A `valid: false` response therefore still says whether anything is reaching the receiver.
+- A board without a GNSS receiver returns error `-1004` (method not supported), which a client reads as "no receiver" rather than as zero satellites.
 - Example:
 
 ```json
 {"jsonrpc":"2.0","id":8,"method":"bramble.getGpsPosition","params":{}}
 ```
+
+#### Diagnosing a node with no fix
+
+`state` and the counts split "no fix" into the three cases that need different
+responses in the field:
+
+- `no_signal` with `sats_in_view` 0: nothing is reaching the receiver. Suspect
+  a disconnected or damaged antenna, an unpowered or miswired module, or
+  jamming. Cross-check `gps_rx_lines` in `bramble.getDiagnostics`: zero lines
+  means the module is not talking at all, nonzero means it is talking and
+  hearing nothing.
+- `no_signal` with `sats_in_view` above 0: the almanac predicts satellites and
+  none are being heard. The receiver is alive and its sky view or antenna path
+  is not. Moving to open sky is the first test.
+- `acquiring` with a low `snr_max_dbhz` (below roughly 25): marginal signal.
+  Obstruction, indoor use, or a poorly placed antenna.
+- `acquiring` with a healthy `snr_max_dbhz` (roughly 35 and above): a cold
+  start in progress. A receiver with no almanac takes minutes rather than
+  seconds; leave it under open sky and watch `sats_used` climb.
+- `absent`: the board has no receiver, or GPS is switched off by preference.
+  Check `gps_available` and `gps_enabled` in `bramble.getStatus`.
+
+Every value in this group describes what the receiver is reporting, not what it
+reported at some earlier point. A receiver that says its fix is invalid leaves
+`fix` on that sentence, and a receiver that stops sending NMEA at all drops to
+`no_signal` with zero counts within 30 seconds. A node carried from a place it
+fixed to a place where it hears nothing therefore reports the second place.
 
 ### Messaging
 

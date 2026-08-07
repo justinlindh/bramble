@@ -51,6 +51,7 @@
 #include "sas_format.h"
 
 #include "gps.h"
+#include "gnss_status.h"
 #include "gps_pref.h"
 #include "cJSON.h"
 
@@ -978,8 +979,9 @@ static void render_screen(ui_state_t* ui) {
     }
     case SCREEN_GPS: {
         /* Only reachable when board_has_cap(BOARD_CAP_GPS) - see ui_set_gps_available() call
-         * in app_main and the gating in ui_handle_button(). Currently the only board with
-         * BOARD_CAP_GPS is Heltec V4 (non-graphical), so no T-Deck layout is needed here. */
+         * in app_main and the gating in ui_handle_button(). This layout serves the
+         * non-graphical boards; the graphical stack renders GNSS through scr_layout's
+         * status bar and scr_stats, from the same gnss_ui_classify() verdict. */
         display_clear();
         display_draw_text(2, HEADER_Y, "GPS");
         render_unread_badge(ui, DISPLAY_WIDTH - 2);
@@ -992,13 +994,28 @@ static void render_screen(ui_state_t* ui) {
         gps_get_stats(&stats);
         bool has_fix = gps_has_fix();
 
-        /* Line 1: fix status */
-        display_draw_text(2, y, has_fix ? "GPS: fix" : "GPS: no fix");
+        /* Line 1: the three-way state, so "no fix" is separated into a receiver
+         * hearing nothing and a receiver hearing satellites and converging. */
+        gnss_ui_input_t gnss = {
+            .board_has_gnss = true,
+            .powered = bramble_gps_enabled(),
+            .has_fix = has_fix,
+            .sats_in_view = stats.sats_in_view,
+            .sats_tracked = stats.sats_tracked,
+            .sats_used = stats.sats_used,
+            .snr_max_dbhz = stats.snr_max_dbhz,
+            .fix_quality = stats.fix_quality,
+            .nmea_age_s = stats.nmea_age_s,
+        };
+        snprintf(line, sizeof(line), "GPS: %s", gnss_ui_state_label(gnss_ui_classify(&gnss)));
+        display_draw_text(2, y, line);
         y += LINE_H;
 
-        /* Line 2: satellites used / in view */
-        snprintf(line, sizeof(line), "Sats: %u/%u", (unsigned)stats.sats_used,
-                 (unsigned)stats.sats_in_view);
+        /* Line 2: satellites used / tracked / in view. Tracked is the middle
+         * number because a nonzero in-view with zero tracked is the almanac
+         * predicting satellites the receiver cannot hear. */
+        snprintf(line, sizeof(line), "Sats: %u/%u/%u", (unsigned)stats.sats_used,
+                 (unsigned)stats.sats_tracked, (unsigned)stats.sats_in_view);
         display_draw_text(2, y, line);
         y += LINE_H;
 
@@ -1020,10 +1037,6 @@ static void render_screen(ui_state_t* ui) {
             display_draw_text(2, y, line);
         } else if (stats.antenna_warning) {
             display_draw_text(2, y, "ANTENNA OPEN!");
-            y += LINE_H;
-            display_draw_text(2, y, "Searching...");
-        } else {
-            display_draw_text(2, y, "Searching...");
         }
 
         display_draw_text(2, FOOTER_Y, "[press] next screen");

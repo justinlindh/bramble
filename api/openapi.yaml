@@ -2077,6 +2077,12 @@ components:
         - battery_pct
         - gps_available
         - gps_enabled
+        - gps_state
+        - gps_sats_in_view
+        - gps_sats_tracked
+        - gps_sats_used
+        - gps_snr_max_dbhz
+        - gps_fix_quality
         - supports_delivery_event_sync
         - identity_pins
         - identity_conflicts
@@ -2133,6 +2139,51 @@ components:
         gps_enabled:
           type: boolean
           description: The persisted GPS power preference (independent of gps_available).
+        gps_state:
+          type: string
+          enum: [absent, no_signal, acquiring, fix]
+          description: >-
+            Three-way GNSS state. absent when the board has no receiver or it
+            is powered off by preference; no_signal when the receiver is
+            powered and hearing nothing (interference, dead antenna, or an
+            unpowered module); acquiring when satellites are being tracked but
+            no fix has converged; fix when a position has been computed.
+        gps_sats_in_view:
+          type: integer
+          minimum: 0
+          maximum: 99
+          description: >-
+            Satellites the receiver lists across all constellations, tracked or
+            predicted from the almanac. 0 on a board without GNSS.
+        gps_sats_tracked:
+          type: integer
+          minimum: 0
+          maximum: 99
+          description: >-
+            Satellites reporting a nonzero carrier-to-noise ratio, meaning the
+            receiver is actually hearing them. A nonzero in-view count with a
+            zero tracked count means nothing is reaching the antenna.
+        gps_sats_used:
+          type: integer
+          minimum: 0
+          maximum: 99
+          description: >-
+            Satellites used in the most recent fix computation. Reported with
+            or without a fix.
+        gps_snr_max_dbhz:
+          type: integer
+          minimum: 0
+          maximum: 99
+          description: >-
+            Best carrier-to-noise ratio across the tracked satellites, in
+            dB-Hz. 0 when nothing is tracked.
+        gps_fix_quality:
+          type: integer
+          minimum: 0
+          maximum: 8
+          description: >-
+            GGA fix-quality digit as the receiver reports it: 0 invalid,
+            1 GPS, 2 DGPS, 4 RTK fixed, 5 RTK float, 6 dead reckoning.
         supports_delivery_event_sync:
           type: boolean
           description: True when bramble.getDeliveryEvents incremental replay is supported.
@@ -3606,13 +3657,18 @@ components:
     GetGpsPositionResponse:
       type: object
       description: Response from bramble.getGpsPosition.
-      required: [valid]
+      required: [valid, state, sats_in_view, sats_tracked, sats_used, snr_max_dbhz, fix_quality]
       properties:
         valid:
           type: boolean
           description: >
             True when a GPS fix is available and all position fields are populated.
-            False when GPS is not available or no fix has been acquired.
+            False when no fix has been acquired. The satellite fields below are
+            populated on both branches, so a valid:false response still tells a
+            caller whether anything is reaching the receiver. A board without a
+            GNSS receiver returns the method-not-supported error instead of this
+            schema, so a caller must read that error as "no receiver" rather
+            than as zero satellites.
         lat:
           type: number
           description: Latitude in decimal degrees.
@@ -3634,6 +3690,55 @@ components:
         timestamp:
           type: integer
           description: Unix timestamp of the GPS fix (seconds).
+        state:
+          type: string
+          enum: [absent, no_signal, acquiring, fix]
+          description: >-
+            Reported whether or not valid is true. Three-way GNSS state: absent
+            when the receiver is powered off by preference; no_signal when the
+            receiver is powered and hearing nothing (interference, dead
+            antenna, or an unpowered module); acquiring when satellites are
+            being tracked but no fix has converged; fix when a position has
+            been computed.
+        sats_in_view:
+          type: integer
+          minimum: 0
+          maximum: 99
+          description: >-
+            Reported whether or not valid is true. Satellites the receiver
+            lists across all constellations, tracked or predicted from the
+            almanac.
+        sats_tracked:
+          type: integer
+          minimum: 0
+          maximum: 99
+          description: >-
+            Reported whether or not valid is true. Satellites reporting a
+            nonzero carrier-to-noise ratio, meaning the receiver is actually
+            hearing them. A nonzero in-view count with a zero tracked count
+            means nothing is reaching the antenna.
+        sats_used:
+          type: integer
+          minimum: 0
+          maximum: 99
+          description: >-
+            Reported whether or not valid is true. Satellites used in the most
+            recent fix computation.
+        snr_max_dbhz:
+          type: integer
+          minimum: 0
+          maximum: 99
+          description: >-
+            Reported whether or not valid is true. Best carrier-to-noise ratio
+            across the tracked satellites, in dB-Hz. 0 when nothing is tracked.
+        fix_quality:
+          type: integer
+          minimum: 0
+          maximum: 8
+          description: >-
+            Reported whether or not valid is true. GGA fix-quality digit as the
+            receiver reports it: 0 invalid, 1 GPS, 2 DGPS, 4 RTK fixed,
+            5 RTK float, 6 dead reckoning.
 
     SetGpsEnabledParams:
       type: object

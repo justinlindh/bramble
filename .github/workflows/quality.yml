@@ -683,8 +683,9 @@ jobs:
         # webapp/Dockerfile's `COPY . .` expects webapp/public/web-flasher/ to
         # be populated, but that path is gitignored (.gitignore) and only ever
         # filled by copying the top-level web-flasher/ tree in first, exactly
-        # as webapp-build-publish.yml's "Build and test webapp" step does
-        # before it builds the shipped image. Without this, the webapp leg
+        # as webapp-build-publish.yml's "Stage web-flasher into the build
+        # context" step does before it builds the shipped image. Without this,
+        # the webapp leg
         # would still build (Vite does not require the dir to exist) but would
         # silently produce an image missing web-flasher, so it would not be
         # verifying the same image that actually ships. Only the webapp leg
