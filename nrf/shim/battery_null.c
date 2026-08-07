@@ -1,8 +1,18 @@
-// Battery voltage stub for the WM1110 dev kit: it is USB-powered with no
-// battery sense wired in P1, so report a steady healthy voltage;
-// battery_pct.c (already linked) turns this into the pct beacons carry.
+// Battery voltage stub for boards with no battery sense wired (the WM1110
+// dev kit, BOARD_HAS_BATTERY 0): it is USB-powered. Reports an honest "no
+// battery hardware here" status (present=false, mv=0, pct=0,
+// charging=UNKNOWN) rather than a fabricated healthy reading.
+// getStatus/getBattery RPC consumers on these boards see 0 mV / not-present;
+// the T1000-E gets the real reading instead, from shim/battery_saadc.c
+// (selected in nrf/CMakeLists.txt by BRAMBLE_NRF_BOARD). A fabricated
+// healthy number is worse than an honest zero (see honesty conventions in
+// CLAUDE.md).
 #include "battery.h"
+#include <string.h>
 
-uint32_t battery_read_mv(void) { return 4000; }
+/* Nothing to configure: no battery ADC or charge-detect pins on this board.
+ * Exists so app_init.c can call battery_init() unconditionally, the same
+ * way it does on every ESP board (main/main.c). */
+void battery_init(void) {}
 
-uint8_t battery_read_pct(void) { return battery_mv_to_pct(battery_read_mv()); }
+void battery_get_status(battery_status_t* out) { memset(out, 0, sizeof(*out)); }

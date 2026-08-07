@@ -28,6 +28,7 @@ static const bramble_board_config_t board_tdeck_plus = {
     .button_gpio = -1, /* Trackball center handles this */
 
     .battery = {.gpio = 4, .adc_channel = 3, .divider_factor = 2},
+    .charge = {.chrg_gpio = -1, .chrg_active_level = 0, .vbus_gpio = -1},
 
     .i2c_sda = 18,
     .i2c_scl = 8,

@@ -125,6 +125,14 @@ void test_get_status_returns_expected_fields(void) {
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "battery_pct"));
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "peers"));
 
+    /* Charging-aware additive fields (stub reports UNKNOWN/present). */
+    cJSON* charging = cJSON_GetObjectItem(r, "charging");
+    TEST_ASSERT_NOT_NULL(charging);
+    TEST_ASSERT_EQUAL_STRING("unknown", charging->valuestring);
+    cJSON* present = cJSON_GetObjectItem(r, "present");
+    TEST_ASSERT_NOT_NULL(present);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(present));
+
     /* Per-node identity Phase 4 diagnostics (additive fields). */
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "identity_pins"));
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "identity_conflicts"));
@@ -138,7 +146,27 @@ void test_get_status_returns_expected_fields(void) {
     cJSON_Delete(resp);
 }
 
-/* ── 1a. getStatus GNSS observability fields ──────────────────────── */
+/* ── 1a. getBattery ───────────────────────────────────────────────── */
+
+void test_get_battery_returns_charging_and_present_fields(void) {
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"bramble.getBattery\",\"params\":{}}");
+    cJSON* r = get_result(resp);
+
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "voltage_mv"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "percentage"));
+
+    cJSON* charging = cJSON_GetObjectItem(r, "charging");
+    TEST_ASSERT_NOT_NULL(charging);
+    TEST_ASSERT_EQUAL_STRING("unknown", charging->valuestring);
+    cJSON* present = cJSON_GetObjectItem(r, "present");
+    TEST_ASSERT_NOT_NULL(present);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(present));
+
+    cJSON_Delete(resp);
+}
+
+/* ── 1b. getStatus GNSS observability fields ──────────────────────── */
 
 /* The six fields are always emitted so their absence means exactly one thing:
  * firmware that predates them. A client can then render "unknown" instead of
@@ -192,7 +220,7 @@ void test_get_status_gnss_fields_present_without_gps_cap(void) {
     cJSON_Delete(resp);
 }
 
-/* ── 1b. getGpsPosition ───────────────────────────────────────────── */
+/* ── 1c. getGpsPosition ───────────────────────────────────────────── */
 
 /* The direct regression guard for the field failure: a node that never
  * acquires a fix answered with nothing but valid:false, which cannot tell a
@@ -225,7 +253,7 @@ void test_get_gps_position_not_supported_without_gps_cap(void) {
     cJSON_Delete(resp);
 }
 
-/* ── 1c. getDiagnostics GPS fields ────────────────────────────────── */
+/* ── 1d. getDiagnostics GPS fields ────────────────────────────────── */
 
 void test_get_diagnostics_includes_gps_fields_when_gps_capable(void) {
     g_stub_board_has_gps = true;
@@ -799,6 +827,7 @@ int main(void) {
 
     /* getStatus */
     RUN_TEST(test_get_status_returns_expected_fields);
+    RUN_TEST(test_get_battery_returns_charging_and_present_fields);
 
     /* getStatus GNSS observability fields */
     RUN_TEST(test_get_status_includes_gnss_fields);

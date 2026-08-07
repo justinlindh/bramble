@@ -42,6 +42,7 @@ static const bramble_board_config_t board_virtual_pager = {
     .button_gpio = 0,
 
     .battery = {.gpio = 1, .adc_channel = 0, .divider_factor = 2},
+    .charge = {.chrg_gpio = -1, .chrg_active_level = 0, .vbus_gpio = -1},
 
     /* Debug header I2C; 10k pullups always fitted on board. */
     .i2c_sda = 17,

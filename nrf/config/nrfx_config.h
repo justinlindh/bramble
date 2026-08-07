@@ -18,6 +18,9 @@
 #define NRFX_GPIOTE0_ENABLED 1
 // Internal flash for the settings/message filesystem.
 #define NRFX_NVMC_ENABLED 1
+// Battery voltage sense on the T1000-E (blocking oneshot, no IRQ activity
+// beyond what nrfx_saadc_init() itself registers).
+#define NRFX_SAADC_ENABLED 1
 
 #include "nrfx_config_nrf52840.h"
 

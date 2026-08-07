@@ -11,6 +11,7 @@
 #include <string.h>
 #include "esp_stubs.h"
 #include "nvs.h"
+#include "battery.h"
 
 /* ── Types mirrored from firmware headers ─────────────────────────── */
 
@@ -344,8 +345,18 @@ uint32_t airtime_budget_next_refill_ms(const airtime_budget_t* ab, uint32_t now_
     (void)now_ms;
     return 0;
 }
-int battery_read_mv(void) { return 3700; }
-int battery_read_pct(void) { return 85; }
+/* Correct signatures (uint32_t/uint8_t, matching battery.h): the previous
+ * `int` return types were a latent UB mismatch against the real
+ * declarations rpc_methods.c compiles against (undetected because these
+ * two translation units never saw each other's prototype). */
+uint32_t battery_read_mv(void) { return 3700; }
+uint8_t battery_read_pct(void) { return 85; }
+void battery_get_status(battery_status_t* out) {
+    out->mv = 3700;
+    out->pct = 85;
+    out->charging = BATTERY_CHG_UNKNOWN;
+    out->present = true;
+}
 /* Return a zeroed-out block large enough for the real bramble_board_config_t.
  * The real struct is ~256 bytes; we allocate 512 to be safe.
  * The short_name pointer is at offset 0 in the real struct. */

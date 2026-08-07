@@ -36,6 +36,7 @@
 #define BT_BLE_START 0x0Fu     /* (rc) ble_server_start */
 #define BT_ADV 0x10u           /* (rc) ble_gap_adv_start result */
 #define BT_MESH_STARTED 0x11u  /* (0) */
+#define BT_BATTERY_INIT 0x12u  /* (0) battery_init complete */
 #define BT_BOOT_DONE 0xDDu     /* (free heap) app_init complete */
 
 /* Failure tags: boot_trace_fail stamps these and reboots into DFU. */

@@ -50,6 +50,26 @@
 #define BOARD_PIN_LORA_IRQ (32 + 1)    // P1.01, DIO9 IRQ line
 #define BOARD_PIN_LORA_BUSY 7          // P0.07
 
+// Battery ADC and charge detect. Verified 2026-08-01 against
+// github.com/meshtastic/firmware variants/nrf52840/tracker-t1000-e/variant.h
+// (BATTERY_PIN, ADC_MULTIPLIER, VBAT_AR_INTERNAL/AREF_VOLTAGE, ADC_RESOLUTION,
+// EXT_CHRG_DETECT, EXT_PWR_DETECT) and src/Power.cpp (the pin modes and the
+// isCharging()/isVbusIn() polarity, since variant.h alone does not say how
+// the detect pins are configured).
+//
+// BOARD_PIN_VBAT_ADC reads a DEAD divider here: the divider hangs off a
+// sensor rail this port does not power, so conversions succeed and return 1
+// to 4 mV. The rail gate is P1.06 (SENSE_POWER_EN per Seeed's vendor SDK),
+// and driving it is what makes the divider readable, but do NOT add that
+// drive to this board's boot path: the same drive from the boot-time battery
+// snapshot stopped the board within about a millisecond, while a runtime
+// drive measured correctly. See nrf/shim/battery_saadc.c.
+#define BOARD_HAS_BATTERY 1
+#define BOARD_PIN_VBAT_ADC 2           // P0.02 = AIN0, BAT_ADC (reads a dead divider)
+#define BOARD_BATTERY_DIVIDER 2        // ADC_MULTIPLIER 2.0F
+#define BOARD_PIN_CHRG_DETECT (32 + 3) // P1.03, EXT_CHRG_DETECT, active LOW = charging
+#define BOARD_PIN_VBUS_DETECT 5        // P0.05, EXT_PWR_DETECT, HIGH = external power present
+
 // RF switch truth table (Meshtastic rfswitch.h for this board):
 //   mode    DIO5 DIO6 DIO7 DIO8
 //   STBY     0    0    0    0

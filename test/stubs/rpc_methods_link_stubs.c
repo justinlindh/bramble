@@ -7,6 +7,7 @@
 #include "esp_stubs.h"
 #include "nvs.h"
 #include "esp_wifi.h"
+#include "battery.h"
 
 typedef struct {
     uint32_t event_seq;
@@ -266,8 +267,18 @@ broadcast_telemetry_mode_t mesh_get_broadcast_telemetry_mode(void) {
 uint32_t airtime_budget_remaining(void) { return 0; }
 void airtime_budget_refill(uint32_t n) { (void)n; }
 uint32_t airtime_budget_next_refill_ms(void) { return 0; }
-int battery_read_mv(void) { return 0; }
-int battery_read_pct(void) { return 0; }
+/* Correct signatures (uint32_t/uint8_t, matching battery.h): the previous
+ * `int` return types were a latent UB mismatch against the real
+ * declarations rpc_methods.c compiles against (undetected because these
+ * two translation units never saw each other's prototype). */
+uint32_t battery_read_mv(void) { return 0; }
+uint8_t battery_read_pct(void) { return 0; }
+void battery_get_status(battery_status_t* out) {
+    out->mv = 0;
+    out->pct = 0;
+    out->charging = BATTERY_CHG_UNKNOWN;
+    out->present = false;
+}
 const bramble_board_config_t* board_get_config(void) { return 0; }
 int display_set_backlight(uint8_t level) {
     (void)level;

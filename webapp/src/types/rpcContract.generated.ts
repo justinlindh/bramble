@@ -1628,10 +1628,17 @@ export interface components {
             uptime_s: number;
             /** @description Free heap memory in bytes. */
             free_heap: number;
-            /** @description Battery voltage in millivolts. */
+            /** @description Battery voltage in millivolts, averaged over several ADC samples. While charging is "yes" this reflects the charge rail, not the cell's state of charge. */
             battery_mv: number;
-            /** @description Estimated battery charge percentage. */
+            /** @description Estimated battery charge percentage. While charging is "yes" this is not meaningful; see charging. */
             battery_pct: number;
+            /**
+             * @description Hardware-informed or voltage-inferred charging state. "unknown" covers every case the backend cannot determine a real charging state for: no charge-detect pin AND a voltage below the inference threshold, the battery backend failed to initialize, or (emulator only) the emu-link batt message omitted its optional charging field. "yes" means a charger is currently driving the battery rail, which includes a charger left connected after the cell reads full, not strictly "current is flowing into the cell right now"; boards with a charge-detect pin (currently only the T1000-E) report this from hardware, every other board infers it once voltage_mv is high enough that a real cell could not have produced it on its own (see BATTERY_MV_CHARGER_RAIL_MIN in components/battery/include/battery.h).
+             * @enum {string}
+             */
+            charging?: "unknown" | "no" | "yes";
+            /** @description Whether this board has battery-sensing hardware and it initialized successfully. false means battery_mv and battery_pct are not meaningful (0). present describes hardware init, not this particular read: a read where every ADC sample failed still reports present true with a 0 voltage, so treat a 0 voltage as "no reading" regardless of present. */
+            present?: boolean;
             /** @description Whether this board has GPS hardware. */
             gps_available: boolean;
             /** @description The persisted GPS power preference (independent of gps_available). */
@@ -2405,10 +2412,17 @@ export interface components {
         };
         /** @description Response from bramble.getBattery. */
         GetBatteryResponse: {
-            /** @description Battery voltage in millivolts. */
+            /** @description Battery voltage in millivolts, averaged over several ADC samples. While charging is "yes" this reflects the charge rail, not the cell's state of charge. */
             voltage_mv: number;
-            /** @description Estimated battery charge percentage (0–100). */
+            /** @description Estimated battery charge percentage (0-100), derived from voltage_mv. While charging is "yes" this is not meaningful (the charge rail's voltage does not reflect the cell); treat it as unknown rather than a real level in that case. */
             percentage: number;
+            /**
+             * @description Hardware-informed or voltage-inferred charging state. "unknown" covers every case the backend cannot determine a real charging state for: no charge-detect pin AND a voltage below the inference threshold, the battery backend failed to initialize, or (emulator only) the emu-link batt message omitted its optional charging field. "yes" means a charger is currently driving the battery rail, which includes a charger left connected after the cell reads full, not strictly "current is flowing into the cell right now"; boards with a charge-detect pin (currently only the T1000-E) report this from hardware, every other board infers it once voltage_mv is high enough that a real cell could not have produced it on its own (see BATTERY_MV_CHARGER_RAIL_MIN in components/battery/include/battery.h).
+             * @enum {string}
+             */
+            charging?: "unknown" | "no" | "yes";
+            /** @description Whether this board has battery-sensing hardware and it initialized successfully. false means voltage_mv and percentage are not meaningful (0). present describes hardware init, not this particular read: a read where every ADC sample failed still reports present true with a 0 voltage, so treat a 0 voltage as "no reading" regardless of present. */
+            present?: boolean;
         };
         /** @description Parameters for bramble.setBacklight. */
         SetBacklightParams: {

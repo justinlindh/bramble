@@ -22,6 +22,10 @@
 
 #define BOARD_HAS_GNSS 0
 
+// No battery sense wired: the dev kit is USB-powered only. See
+// nrf/shim/battery_null.c.
+#define BOARD_HAS_BATTERY 0
+
 // LR1110 radio bus (P1 phase; unused in P0)
 #define BOARD_PIN_LORA_SCK (32 + 13)   // P1.13
 #define BOARD_PIN_LORA_MOSI (32 + 14)  // P1.14

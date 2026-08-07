@@ -146,7 +146,8 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 - Description: Returns high-level node runtime status.
 - Params: none (`{}`).
-- Response fields: `address` (string), `firmware_version` (string), `protocol_version` (string), `hardware` (string), `radio_ok` (bool), `peers` (number), `beacon_tx` (number), `beacon_rx` (number), `packets_tx` (number), `packets_rx` (number), `uptime_s` (number), `free_heap` (number), `battery_mv` (number), `battery_pct` (number), `gps_available` (bool), `gps_enabled` (bool), `gps_state` (string), `gps_sats_in_view` (number), `gps_sats_tracked` (number), `gps_sats_used` (number), `gps_snr_max_dbhz` (number), `gps_fix_quality` (number), `supports_delivery_event_sync` (bool), `identity_pins` (number), `identity_conflicts` (number), `identity_sig_failures` (number), `identity_addr_mismatches` (number), `identity_unendorsed` (number), `identity_expired` (number).
+- Response fields: `address` (string), `firmware_version` (string), `protocol_version` (string), `hardware` (string), `radio_ok` (bool), `peers` (number), `beacon_tx` (number), `beacon_rx` (number), `packets_tx` (number), `packets_rx` (number), `uptime_s` (number), `free_heap` (number), `battery_mv` (number), `battery_pct` (number), `charging` (string: `"unknown"`/`"no"`/`"yes"`), `present` (bool), `gps_available` (bool), `gps_enabled` (bool), `gps_state` (string), `gps_sats_in_view` (number), `gps_sats_tracked` (number), `gps_sats_used` (number), `gps_snr_max_dbhz` (number), `gps_fix_quality` (number), `supports_delivery_event_sync` (bool), `identity_pins` (number), `identity_conflicts` (number), `identity_sig_failures` (number), `identity_addr_mismatches` (number), `identity_unendorsed` (number), `identity_expired` (number).
+- `present` reports whether the battery backend initialized, not whether this particular read succeeded, so treat a 0 `battery_mv` as no reading even when `present` is true.
 - `gps_state` is one of `absent`, `no_signal`, `acquiring`, `fix`. The satellite counts and `gps_fix_quality` are always present and are 0 on a board without a receiver, so a client distinguishes "no receiver" from "zero satellites" on `gps_available`, never on a count. See [Diagnosing a node with no fix](#diagnosing-a-node-with-no-fix).
 - Example:
 
@@ -202,7 +203,7 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 - Description: Returns battery telemetry.
 - Params: none.
-- Response fields: `pct` (number), `mv` (number, optional), `charging` (bool, optional).
+- Response fields: `percentage` (number), `voltage_mv` (number), `charging` (string: `"unknown"`/`"no"`/`"yes"`, optional), `present` (bool, optional; init status, not per-read: treat a 0 voltage as no reading even when true).
 - Example:
 
 ```json
