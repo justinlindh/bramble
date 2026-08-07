@@ -49,6 +49,12 @@ static lfs_file_t s_file;
 static uint8_t s_file_buffer[LFS_NVMC_CACHE_SIZE];
 static const struct lfs_file_config s_file_cfg = {.buffer = s_file_buffer};
 
+/* One record (712 bytes) of scratch, static rather than stack because this
+ * target has 256KB in total and no PSRAM. Shared by the streaming rollover
+ * and the in-place update: every public entry point holds nvs_lfs_lock() for
+ * its whole body, so the two can never be in flight at once. */
+static stored_msg_t s_record_scratch;
+
 static lfs_t* fs(void) { return nvs_lfs_handle(); }
 
 static int write_header(void) {
@@ -145,6 +151,46 @@ static int save_unlocked(const stored_msg_t* msg) {
     return write_header();
 }
 
+static int update_unlocked(int from_end, const stored_msg_t* msg) {
+    if (!s_initialized || msg == NULL) {
+        return -1;
+    }
+    if (from_end < 0 || (uint32_t)from_end >= s_header.record_count) {
+        return -1;
+    }
+
+    lfs_soff_t index = (lfs_soff_t)s_header.record_count - 1 - (lfs_soff_t)from_end;
+    lfs_soff_t offset =
+        (lfs_soff_t)sizeof(msg_file_header_t) + index * (lfs_soff_t)sizeof(stored_msg_t);
+
+    /* Read the record back and confirm it is the message the caller means
+     * before overwriting it: see msg_store_spiffs_update's contract. */
+    if (lfs_file_seek(fs(), &s_file, offset, LFS_SEEK_SET) < 0 ||
+        lfs_file_read(fs(), &s_file, &s_record_scratch, sizeof(s_record_scratch)) !=
+            (lfs_ssize_t)sizeof(s_record_scratch)) {
+        ESP_LOGW(TAG, "update: record %ld unreadable", (long)index);
+        return -1;
+    }
+    if (!msg_store_record_matches(&s_record_scratch, msg)) {
+        ESP_LOGW(TAG, "update: record %ld is a different message, skipping", (long)index);
+        return -1;
+    }
+
+    uint32_t persisted_ts = s_record_scratch.timestamp_s;
+    s_record_scratch = *msg;
+    s_record_scratch.timestamp_s = persisted_ts;
+
+    if (lfs_file_seek(fs(), &s_file, offset, LFS_SEEK_SET) < 0 ||
+        lfs_file_write(fs(), &s_file, &s_record_scratch, sizeof(s_record_scratch)) !=
+            (lfs_ssize_t)sizeof(s_record_scratch)) {
+        ESP_LOGE(TAG, "update: failed to rewrite record %ld", (long)index);
+        return -1;
+    }
+    /* The record count does not change, so the header stays as it is; only
+     * this record has to become durable (invariant 2). */
+    return lfs_file_sync(fs(), &s_file) == LFS_ERR_OK ? 0 : -1;
+}
+
 int msg_store_spiffs_get_count(void) { return s_initialized ? (int)s_header.record_count : 0; }
 
 static int load_recent_unlocked(stored_msg_t* msgs, int max_count) {
@@ -184,8 +230,8 @@ static void rollover_unlocked(int max_messages, int keep_pct) {
              (unsigned long)s_header.record_count, keep_count);
 
     /* Stream record by record into a fresh file: the SPIFFS backend mallocs
-     * the whole keep-set, which would be ~32KB here. One record of stack
-     * (712 bytes) is the price of not needing a heap at all. */
+     * the whole keep-set, which would be ~32KB here. One record of scratch
+     * (s_record_scratch) is the price of not needing a heap at all. */
     lfs_file_t out;
     static uint8_t out_buffer[LFS_NVMC_CACHE_SIZE];
     static const struct lfs_file_config out_cfg = {.buffer = out_buffer};
@@ -199,16 +245,17 @@ static void rollover_unlocked(int max_messages, int keep_pct) {
     bool ok = lfs_file_write(fs(), &out, &new_header, sizeof(new_header)) ==
               (lfs_ssize_t)sizeof(new_header);
 
-    static stored_msg_t record; /* 712 bytes: static, not stack */
     for (int i = 0; ok && i < keep_count; i++) {
         lfs_soff_t offset = (lfs_soff_t)sizeof(msg_file_header_t) +
                             (lfs_soff_t)(skip_count + i) * sizeof(stored_msg_t);
         if (lfs_file_seek(fs(), &s_file, offset, LFS_SEEK_SET) < 0 ||
-            lfs_file_read(fs(), &s_file, &record, sizeof(record)) != (lfs_ssize_t)sizeof(record)) {
+            lfs_file_read(fs(), &s_file, &s_record_scratch, sizeof(s_record_scratch)) !=
+                (lfs_ssize_t)sizeof(s_record_scratch)) {
             ok = false;
             break;
         }
-        ok = lfs_file_write(fs(), &out, &record, sizeof(record)) == (lfs_ssize_t)sizeof(record);
+        ok = lfs_file_write(fs(), &out, &s_record_scratch, sizeof(s_record_scratch)) ==
+             (lfs_ssize_t)sizeof(s_record_scratch);
         new_header.record_count++;
     }
     if (ok) {
@@ -271,6 +318,13 @@ int msg_store_spiffs_init(void) {
 int msg_store_spiffs_save(const stored_msg_t* msg) {
     nvs_lfs_lock();
     int rc = save_unlocked(msg);
+    nvs_lfs_unlock();
+    return rc;
+}
+
+int msg_store_spiffs_update(int from_end, const stored_msg_t* msg) {
+    nvs_lfs_lock();
+    int rc = update_unlocked(from_end, msg);
     nvs_lfs_unlock();
     return rc;
 }

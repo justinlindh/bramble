@@ -37,11 +37,15 @@ typedef struct {
 void setUp(void) {}
 void tearDown(void) {}
 
+/* Shaped like a record the store actually writes: a nonzero uid and a real
+ * text_len, both of which the backend's identity check reads. */
 static stored_msg_t make_msg(uint32_t id, const char* text) {
     stored_msg_t m;
     memset(&m, 0, sizeof(m));
+    m.uid = id + 1;
     m.packet_id = id;
     strncpy(m.text, text, sizeof(m.text) - 1);
+    m.text_len = (uint16_t)strlen(m.text);
     return m;
 }
 
@@ -176,6 +180,108 @@ void test_rollover_keeps_most_recent_records(void) {
     TEST_ASSERT_EQUAL(8, msg_store_spiffs_get_count());
 }
 
+/* A delivery status arrives after the record was appended, so the backend has
+ * to rewrite that record where it lies. from_end counts back from the newest,
+ * and the record on the filesystem must carry the new status afterwards. */
+void test_update_rewrites_a_record_in_place(void) {
+    msg_store_spiffs_clear();
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_init());
+    for (uint32_t i = 0; i < 3; i++) {
+        char text[32];
+        snprintf(text, sizeof(text), "sent %lu", (unsigned long)i);
+        stored_msg_t m = make_msg(i, text);
+        m.status = MSG_STATUS_SENT;
+        TEST_ASSERT_EQUAL(0, msg_store_spiffs_save(&m));
+    }
+
+    /* The middle record: from_end 1 of 3. */
+    stored_msg_t updated = make_msg(1, "sent 1");
+    updated.status = MSG_STATUS_DELIVERED;
+    updated.route_hop_count = 2;
+    updated.route_hops[0] = 0xAAAA;
+    updated.route_hops[1] = 0xBBBB;
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_update(1, &updated));
+
+    stored_msg_t out[3];
+    TEST_ASSERT_EQUAL(3, msg_store_spiffs_load_recent(out, 3));
+    TEST_ASSERT_EQUAL(MSG_STATUS_SENT, out[0].status);
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, out[1].status);
+    TEST_ASSERT_EQUAL(2, out[1].route_hop_count);
+    TEST_ASSERT_EQUAL_UINT32(0xBBBB, out[1].route_hops[1]);
+    TEST_ASSERT_EQUAL_STRING("sent 1", out[1].text);
+    TEST_ASSERT_EQUAL(MSG_STATUS_SENT, out[2].status);
+}
+
+/* The record count never moves, so a reopened store still sees exactly the
+ * records it had, with the updated status among them. */
+void test_updated_status_survives_a_reopen(void) {
+    msg_store_spiffs_clear();
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_init());
+    stored_msg_t m = make_msg(42, "awaiting ack");
+    m.status = MSG_STATUS_SENT;
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_save(&m));
+
+    m.status = MSG_STATUS_DELIVERED;
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_update(0, &m));
+
+    stored_msg_t out[1];
+    TEST_ASSERT_EQUAL(1, msg_store_spiffs_get_count());
+    TEST_ASSERT_EQUAL(1, msg_store_spiffs_load_recent(out, 1));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, out[0].status);
+}
+
+/* If the caller's idea of which record it means has drifted, the update must
+ * be dropped: stamping a status onto another message would be worse than
+ * losing it. */
+void test_update_rejects_a_different_message(void) {
+    msg_store_spiffs_clear();
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_init());
+    stored_msg_t a = make_msg(1, "mine");
+    a.status = MSG_STATUS_SENT;
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_save(&a));
+
+    stored_msg_t other = make_msg(2, "someone else's");
+    other.status = MSG_STATUS_DELIVERED;
+    TEST_ASSERT_EQUAL(-1, msg_store_spiffs_update(0, &other));
+
+    stored_msg_t out[1];
+    TEST_ASSERT_EQUAL(1, msg_store_spiffs_load_recent(out, 1));
+    TEST_ASSERT_EQUAL(MSG_STATUS_SENT, out[0].status);
+    TEST_ASSERT_EQUAL_STRING("mine", out[0].text);
+}
+
+void test_update_rejects_positions_outside_the_file(void) {
+    msg_store_spiffs_clear();
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_init());
+    stored_msg_t m = make_msg(1, "only one");
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_save(&m));
+
+    TEST_ASSERT_EQUAL(-1, msg_store_spiffs_update(-1, &m));
+    TEST_ASSERT_EQUAL(-1, msg_store_spiffs_update(1, &m));
+    TEST_ASSERT_EQUAL(-1, msg_store_spiffs_update(0, NULL));
+}
+
+/* A restored row's timestamp is zeroed in RAM (it is a previous boot's uptime
+ * clock), so writing that row back must not erase the one on the filesystem. */
+void test_update_keeps_the_persisted_timestamp(void) {
+    msg_store_spiffs_clear();
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_init());
+    stored_msg_t m = make_msg(5, "timed");
+    m.status = MSG_STATUS_SENT;
+    m.timestamp_s = 4242;
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_save(&m));
+
+    stored_msg_t restored = m;
+    restored.timestamp_s = 0;
+    restored.status = MSG_STATUS_DELIVERED;
+    TEST_ASSERT_EQUAL(0, msg_store_spiffs_update(0, &restored));
+
+    stored_msg_t out[1];
+    TEST_ASSERT_EQUAL(1, msg_store_spiffs_load_recent(out, 1));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, out[0].status);
+    TEST_ASSERT_EQUAL_UINT32(4242, out[0].timestamp_s);
+}
+
 void test_rollover_below_threshold_is_a_no_op(void) {
     msg_store_spiffs_clear();
     TEST_ASSERT_EQUAL(0, msg_store_spiffs_init());
@@ -210,6 +316,11 @@ int main(void) {
     RUN_TEST(test_corrupt_header_recreates_store);
     RUN_TEST(test_rollover_keeps_most_recent_records);
     RUN_TEST(test_rollover_below_threshold_is_a_no_op);
+    RUN_TEST(test_update_rewrites_a_record_in_place);
+    RUN_TEST(test_updated_status_survives_a_reopen);
+    RUN_TEST(test_update_rejects_a_different_message);
+    RUN_TEST(test_update_rejects_positions_outside_the_file);
+    RUN_TEST(test_update_keeps_the_persisted_timestamp);
     RUN_TEST(test_clear_empties_the_store);
     return UNITY_END();
 }
