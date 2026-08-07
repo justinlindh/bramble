@@ -210,10 +210,13 @@ jobs:
               printf '%s\n' "$raw" >&2
               exit 1
             }
-            printf '%s\n' "$raw" | grep -q '"architecture": *"amd64"' || {
-              echo "Published manifest for ${tag} has no amd64 platform." >&2
-              exit 1
-            }
+            for arch in amd64 arm64; do
+              printf '%s\n' "$raw" | grep -q "\"architecture\": *\"${arch}\"" || {
+                echo "Published manifest for ${tag} has no ${arch} platform." >&2
+                printf '%s\n' "$raw" >&2
+                exit 1
+              }
+            done
           done
           echo "Published ${IMAGE_REPO}:${VERSION_TAG} and ${IMAGE_REPO}:${SHA_TAG}."
 
