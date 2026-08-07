@@ -59,6 +59,7 @@ jobs:
       WEBAPP_TAG: ${{ inputs.webapp_tag }}
       REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
       REGISTRY_IMAGE_REPO: ${{ vars.REGISTRY_IMAGE_REPO }}
+      BUILDER: bramble-webapp-${{ github.run_id }}-${{ github.run_attempt }}
     defaults:
       run:
         shell: bash
@@ -164,11 +165,13 @@ jobs:
           # Registry-backed build cache persists npm/build layers across runs.
           CACHE_REF="${IMAGE_REPO}:buildcache"
 
-          # Create a clean docker-container buildx builder each run. Required
-          # for the multi-platform build.
-          docker buildx rm bramble-webapp-builder >/dev/null 2>&1 || true
-          docker buildx create --name bramble-webapp-builder --driver docker-container --use
-          docker buildx inspect --bootstrap
+          # A docker-container builder is required for the multi-platform
+          # build. The name is scoped to the run because this runner is a
+          # persistent host: a fixed name means a manual republish overlapping
+          # a release publish would tear down the other run's builder
+          # mid-build. The cleanup step below always removes it.
+          docker buildx create --name "$BUILDER" --driver docker-container --use
+          docker buildx inspect --bootstrap "$BUILDER"
 
           # oci-mediatypes=true on both the image and the cache export, and
           # image-manifest=true on the cache export, are load bearing: the
@@ -178,7 +181,7 @@ jobs:
           # fails there, and the registry cache exporter defaults to a Docker
           # manifest list unless it is told to write an OCI image manifest.
           docker buildx build \
-            --builder bramble-webapp-builder \
+            --builder "$BUILDER" \
             --platform linux/amd64,linux/arm64 \
             --cache-from "type=registry,ref=${CACHE_REF}" \
             --cache-to "type=registry,ref=${CACHE_REF},mode=max,oci-mediatypes=true,image-manifest=true" \
@@ -213,3 +216,11 @@ jobs:
             }
           done
           echo "Published ${IMAGE_REPO}:${VERSION_TAG} and ${IMAGE_REPO}:${SHA_TAG}."
+
+      # always(): the runner host is persistent, so a builder left behind by a
+      # failed run would leak a container and its build state onto it. This
+      # only removes this run's own builder, so it is safe while another
+      # publish is in flight.
+      - name: Remove the buildx builder
+        if: always()
+        run: docker buildx rm "$BUILDER" >/dev/null 2>&1 || true
