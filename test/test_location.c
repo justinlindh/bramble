@@ -234,24 +234,24 @@ void test_location_handshake_backoff_grows_and_gates(void) {
     location_hs_reset(&table);
 
     uint32_t now = 1000;
-    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xAABBCCDD, now));
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xAABBCCDD, true, now));
     /* Same round, and any time inside the first backoff, is refused. */
-    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xAABBCCDD, now));
-    TEST_ASSERT_FALSE(
-        location_hs_should_attempt(&table, 0xAABBCCDD, now + LOCATION_HS_BACKOFF_START_MS - 1));
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xAABBCCDD, true, now));
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xAABBCCDD, true,
+                                                 now + LOCATION_HS_BACKOFF_START_MS - 1));
 
     /* Due again once the first backoff elapses. */
     now += LOCATION_HS_BACKOFF_START_MS;
-    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xAABBCCDD, now));
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xAABBCCDD, true, now));
 
     /* Doubled: the previous interval is no longer enough. */
     TEST_ASSERT_FALSE(
-        location_hs_should_attempt(&table, 0xAABBCCDD, now + LOCATION_HS_BACKOFF_START_MS));
+        location_hs_should_attempt(&table, 0xAABBCCDD, true, now + LOCATION_HS_BACKOFF_START_MS));
     now += LOCATION_HS_BACKOFF_START_MS * 2;
-    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xAABBCCDD, now));
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xAABBCCDD, true, now));
 
     /* A different peer is paced independently. */
-    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0x11223344, now));
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0x11223344, true, now));
 }
 
 /* The backoff is bounded: an absent peer settles at the cap rather than growing
@@ -261,15 +261,15 @@ void test_location_handshake_backoff_caps(void) {
     location_hs_reset(&table);
 
     uint32_t now = 1;
-    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xFEEDFACE, now));
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xFEEDFACE, true, now));
     for (int i = 0; i < 20; i++) {
         now += LOCATION_HS_BACKOFF_MAX_MS;
-        TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xFEEDFACE, now));
+        TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xFEEDFACE, true, now));
     }
     /* Never longer than the cap: one cap-length wait is always sufficient. */
-    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xFEEDFACE, now + 1));
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xFEEDFACE, true, now + 1));
     now += LOCATION_HS_BACKOFF_MAX_MS;
-    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xFEEDFACE, now));
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xFEEDFACE, true, now));
 }
 
 /* Once a session exists the peer is cleared, so a later outage attempts
@@ -279,11 +279,53 @@ void test_location_handshake_backoff_clears_on_session(void) {
     location_hs_reset(&table);
 
     uint32_t now = 500;
-    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xC0FFEE00, now));
-    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xC0FFEE00, now));
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xC0FFEE00, true, now));
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xC0FFEE00, true, now));
 
     location_hs_clear(&table, 0xC0FFEE00);
-    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xC0FFEE00, now));
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xC0FFEE00, true, now));
+}
+
+/* An unreachable peer must cost nothing at all: no slot, no recorded attempt,
+ * no backoff growth. A share round grants ONE handshake, so if an unreachable
+ * target consumed it, a reachable target later in the same round would be
+ * starved every round they come due together, which is exactly the
+ * permanently-dead-target failure this pacing exists to end. */
+void test_location_unreachable_peer_does_not_consume_the_round(void) {
+    location_hs_table_t table;
+    location_hs_reset(&table);
+
+    uint32_t now = 1000;
+
+    /* The unreachable target is refused and records nothing. */
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xDEAD0001, false, now));
+
+    /* The reachable target in the same round still gets its handshake. */
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xBEEF0002, true, now));
+
+    /* And because nothing was recorded for the unreachable one, it attempts
+     * immediately on the round it first becomes reachable rather than serving
+     * out a backoff it never earned. */
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xDEAD0001, true, now));
+}
+
+/* Repeated rounds against an unreachable peer must not fill the table and evict
+ * live entries, since nothing is ever recorded for it. */
+void test_location_unreachable_peer_never_occupies_a_slot(void) {
+    location_hs_table_t table;
+    location_hs_reset(&table);
+
+    uint32_t now = 1;
+    for (int i = 0; i < LOCATION_HS_TRACK * 4; i++) {
+        TEST_ASSERT_FALSE(
+            location_hs_should_attempt(&table, 0xF0000000u + (uint32_t)i, false, now));
+        now += 1000;
+    }
+
+    /* Every slot is still free, so a reachable peer takes a fresh one and gets
+     * the fast first attempt. */
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0x0000AAAA, true, now));
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0x0000AAAA, true, now));
 }
 
 /* Wrap-safe against the mesh clock: a scheduled attempt that straddles the
@@ -293,12 +335,12 @@ void test_location_handshake_backoff_wraps_with_the_mesh_clock(void) {
     location_hs_reset(&table);
 
     uint32_t now = 0xFFFFFFFFu - (LOCATION_HS_BACKOFF_START_MS / 2);
-    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xDEADBEEF, now));
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xDEADBEEF, true, now));
     /* Still inside the backoff, on the far side of the wrap. */
-    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xDEADBEEF, now + 1));
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xDEADBEEF, true, now + 1));
     /* Past it, also on the far side. */
     TEST_ASSERT_TRUE(
-        location_hs_should_attempt(&table, 0xDEADBEEF, now + LOCATION_HS_BACKOFF_START_MS));
+        location_hs_should_attempt(&table, 0xDEADBEEF, true, now + LOCATION_HS_BACKOFF_START_MS));
 }
 
 /* Only the exact suffix shape the key builders emit names a target: 8 hex
@@ -542,6 +584,8 @@ int main(void) {
     RUN_TEST(test_location_handshake_backoff_grows_and_gates);
     RUN_TEST(test_location_handshake_backoff_caps);
     RUN_TEST(test_location_handshake_backoff_clears_on_session);
+    RUN_TEST(test_location_unreachable_peer_does_not_consume_the_round);
+    RUN_TEST(test_location_unreachable_peer_never_occupies_a_slot);
     RUN_TEST(test_location_handshake_backoff_wraps_with_the_mesh_clock);
     RUN_TEST(test_location_target_interval_floor);
     RUN_TEST(test_location_rule_codec_roundtrip);

@@ -219,9 +219,21 @@ typedef struct {
 
 void location_hs_reset(location_hs_table_t* table);
 
-/* True when a handshake to addr may be attempted now, recording the attempt and
- * growing the backoff. Wrap-safe against the mesh clock. */
-bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, uint32_t now_ms);
+/*
+ * True when a handshake to addr may be attempted now, recording the attempt and
+ * growing the backoff. Wrap-safe against the mesh clock.
+ *
+ * reachable is the caller's answer to "is this peer a current neighbour", which
+ * a first-contact INIT needs because it is a unicast envelope. It is a
+ * parameter rather than a separate check at the call site so that an
+ * unreachable peer CANNOT consume anything: the table is left untouched and no
+ * attempt is recorded. A share round grants one handshake per pass, so a caller
+ * that consumed that pass on a peer it could never reach would starve a
+ * reachable target sitting later in the same round, which is the very
+ * permanently-dead-target failure this pacing exists to end.
+ */
+bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, bool reachable,
+                                uint32_t now_ms);
 
 /* Forget a peer's backoff, so its next need for a session attempts at once.
  * Called when a session to that peer reaches ACTIVE. */

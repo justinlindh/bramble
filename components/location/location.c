@@ -328,8 +328,13 @@ void location_hs_clear(location_hs_table_t* table, uint32_t addr) {
     }
 }
 
-bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, uint32_t now_ms) {
+bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, bool reachable,
+                                uint32_t now_ms) {
     if (!table || addr == 0)
+        return false;
+    /* Before any table mutation: an unreachable peer records nothing and grows
+     * no backoff, so it cannot consume the round's single handshake. */
+    if (!reachable)
         return false;
 
     int free_idx = -1;

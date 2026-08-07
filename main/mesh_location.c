@@ -456,15 +456,21 @@ static void mesh_emit_location_event(const char* event, uint32_t peer_addr, uint
  *
  * Gated on being a current neighbor, like the self-heal path: a first-contact
  * INIT is a unicast DATA envelope, so a peer that is not a direct neighbor has
- * no route for it and spraying at one buys nothing.
+ * no route for it and spraying at one buys nothing. That gate is passed INTO
+ * location_hs_should_attempt rather than checked here, so an unreachable peer
+ * records no attempt and grows no backoff.
+ *
+ * Returns true only when a handshake was actually queued. The caller latches
+ * its one-per-round budget on that, never on having called this: a peer that
+ * was skipped costs the round nothing, so a reachable target later in the same
+ * round still gets its turn.
  */
-static void location_request_dm_session(uint32_t peer, uint32_t t) {
+static bool location_request_dm_session(uint32_t peer, uint32_t t) {
     if (peer == 0 || peer == s_identity->address)
-        return;
-    if (!neighbor_lookup(&s_neighbors, peer))
-        return;
-    if (!location_hs_should_attempt(&s_location_hs, peer, t))
-        return;
+        return false;
+    bool reachable = neighbor_lookup(&s_neighbors, peer) != NULL;
+    if (!location_hs_should_attempt(&s_location_hs, peer, reachable, t))
+        return false;
 
     dm_handshake_work_item_t item;
     memset(&item, 0, sizeof(item));
@@ -474,9 +480,10 @@ static void location_request_dm_session(uint32_t peer, uint32_t t) {
     if (xQueueSend(s_handshake_work_q, &item, 0) != pdTRUE) {
         ESP_LOGW(TAG, "Handshake queue full, location session request dropped for %08" PRIX32,
                  peer);
-        return;
+        return false;
     }
     ESP_LOGI(TAG, "Location target %08" PRIX32 " has no session; initiating handshake", peer);
+    return true;
 }
 
 /*
@@ -536,8 +543,10 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
 
         if (target->kind == LOCATION_TARGET_CONTACT) {
             if (needs_session) {
-                if (!handshake_started) {
-                    location_request_dm_session(target->id, t);
+                /* Latch on a handshake actually being queued, not on the
+                 * attempt: a peer skipped as unreachable or still inside its
+                 * backoff must not spend the round's one slot. */
+                if (!handshake_started && location_request_dm_session(target->id, t)) {
                     handshake_started = true;
                 }
             } else {
