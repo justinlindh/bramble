@@ -10,8 +10,9 @@
 #include "battery.h"
 #include "board_config.h"
 #include "gps.h"
+#include "bramble_tz.h"
+#include "tz_store.h"
 #include "gnss_status.h"
-#include <time.h>
 #include "routing.h"
 #include "airtime_budget.h"
 #include "esp_log.h"
@@ -22,7 +23,7 @@ static const char* TAG = "layout";
 static bramble_layout_t s_layout;
 
 extern const char* mesh_get_node_name(void);
-extern bool mesh_get_network_time_ms(int64_t* out_ms);
+extern bool bramble_gps_enabled(void); /* persisted GPS power preference (main.c) */
 
 static const char* tab_labels[TAB_COUNT] = {LV_SYMBOL_ENVELOPE " Chat", LV_SYMBOL_WIFI " Nodes",
                                             LV_SYMBOL_GPS " Map", LV_SYMBOL_BARS " Stats",
@@ -306,22 +307,41 @@ void layout_update_status(bramble_layout_t* layout) {
     snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %d", state->neighbors.count);
     lv_label_set_text(layout->lbl_signal, buf);
 
-    /* Clock (UTC). GPS UTC is ground truth and shows the moment a lone node
-     * gets a fix (no mesh needed); network time via timesync is the fallback
-     * for GPS-less nodes once the mesh clock converges. --:-- only when both
-     * are unknown. */
-    uint8_t gps_h, gps_m;
-    int64_t net_ms;
-    if (board_has_cap(BOARD_CAP_GPS) && gps_get_utc_hm(&gps_h, &gps_m)) {
-        snprintf(buf, sizeof(buf), "%02u:%02u", gps_h, gps_m);
-        lv_label_set_text(layout->lbl_time, buf);
-    } else if (mesh_get_network_time_ms(&net_ms)) {
-        time_t tt = (time_t)(net_ms / 1000);
-        struct tm tm_utc;
-        gmtime_r(&tt, &tm_utc);
-        snprintf(buf, sizeof(buf), "%02d:%02d", tm_utc.tm_hour, tm_utc.tm_min);
-        lv_label_set_text(layout->lbl_time, buf);
-    } else {
+    /* Clock, rendered in the zone configured in Settings (default UTC).
+     *
+     * A GPS fix is the only wall clock a node has: it supplies both the UTC
+     * date (RMC) and the time of day (GGA), and the date is what makes a
+     * daylight-saving rule evaluable. UTC stays the internal source of truth
+     * and the zone is applied here, at render time.
+     *
+     * Mesh network time is deliberately not a fallback. timesync's "network
+     * time" is local uptime plus a corroborated offset that no node ever
+     * seeds from a real epoch, so it carries no wall-clock meaning (see the
+     * firmware-reality note in docs/bramble-protocol-spec.md). Rendering it
+     * as HH:MM would show a plausible but fabricated clock, which is worse
+     * than showing no clock, so --:-- stands whenever GPS UTC is unavailable
+     * or does not convert. */
+    uint8_t gps_h, gps_m, gps_mo, gps_d;
+    uint16_t gps_y;
+    bool clock_shown = false;
+
+    if (board_has_cap(BOARD_CAP_GPS) && gps_get_utc_hm(&gps_h, &gps_m) &&
+        gps_get_utc_date(&gps_y, &gps_mo, &gps_d)) {
+        char tz_spec[BRAMBLE_TZ_SPEC_MAX];
+        tz_store_get(tz_spec, sizeof(tz_spec));
+
+        const bramble_tz_time_t utc = {
+            .year = gps_y, .month = gps_mo, .day = gps_d, .hour = gps_h, .minute = gps_m};
+        bramble_tz_time_t local;
+        bramble_tz_status_t st = bramble_tz_localtime(tz_spec, &utc, &local, NULL, 0);
+        if (st == BRAMBLE_TZ_STD || st == BRAMBLE_TZ_DST) {
+            snprintf(buf, sizeof(buf), "%02u:%02u", local.hour, local.minute);
+            lv_label_set_text(layout->lbl_time, buf);
+            clock_shown = true;
+        }
+    }
+
+    if (!clock_shown) {
         lv_label_set_text(layout->lbl_time, "--:--");
     }
 

@@ -25,7 +25,7 @@ if(${target} STREQUAL "linux")
                  wifi esp_http_server esp_netif msg_store spiffs
                  ble reliability battery ota board_config
                  keyboard trackball location gps sdcard audio
-                 ui_graphics traffic_debug fragment timesync mailbox
+                 ui_graphics traffic_debug fragment timesync mailbox timezone
                  nonce_counter replay_window dm_session network_key routing_auth
                  null_drivers
     )
@@ -40,7 +40,7 @@ else()
                  wifi esp_http_server mdns esp_netif msg_store spiffs
                  ble reliability battery ota board_config
                  keyboard trackball location gps sdcard audio
-                 ui_graphics traffic_debug fragment timesync mailbox
+                 ui_graphics traffic_debug fragment timesync mailbox timezone
                  bootloader_support nonce_counter replay_window dm_session network_key routing_auth
 
         PRIV_REQUIRES lvgl__lvgl

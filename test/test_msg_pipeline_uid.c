@@ -200,7 +200,11 @@ void test_update_by_uid_stamps_packet_id_and_status(void) {
 void test_update_by_uid_zero_never_matches(void) {
     msg_store_init();
     msg_store_add_ex2(PEER, MSG_DIR_OUTGOING, "hi", 2, 0, 0, 7, MSG_STATUS_SENT, 0);
-    TEST_ASSERT_EQUAL_UINT32(0, msg_store_get(0)->uid); /* legacy adds stay untracked */
+    /* The row gets a uid of its own even though the caller passed none: every
+     * stored row is identifiable, which is what its persisted record is
+     * matched on. No caller can name that uid, so the row stays unreachable
+     * through update-by-uid, which is what "untracked" was ever about. */
+    TEST_ASSERT_TRUE(msg_store_get(0)->uid != 0);
     TEST_ASSERT_FALSE(msg_store_update_by_uid(0, 9, MSG_STATUS_FAILED));
     TEST_ASSERT_EQUAL_INT(MSG_STATUS_SENT, msg_store_get(0)->status);
     TEST_ASSERT_FALSE(msg_store_update_by_uid(12345, 9, MSG_STATUS_FAILED)); /* unknown uid */

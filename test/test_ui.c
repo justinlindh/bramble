@@ -418,6 +418,36 @@ void test_location_ui_status_indicators(void) {
     TEST_ASSERT_EQUAL_STRING("Hybrid", location_ui_source_label(LOCATION_UI_SOURCE_HYBRID));
 }
 
+/* Sharing switched on with nothing to send to must not read as sharing: that
+   state is the one a node sits in while its own settings screen claims it is
+   publishing. */
+void test_location_ui_share_summary(void) {
+    char buf[48];
+
+    location_ui_format_share_summary(buf, sizeof(buf), false, 3, 1, "coarse");
+    TEST_ASSERT_EQUAL_STRING("Off", buf);
+
+    location_ui_format_share_summary(buf, sizeof(buf), true, 0, 0, "coarse");
+    TEST_ASSERT_EQUAL_STRING("On, no targets", buf);
+
+    location_ui_format_share_summary(buf, sizeof(buf), true, 1, 0, "coarse");
+    TEST_ASSERT_EQUAL_STRING("1 peer, coarse", buf);
+
+    location_ui_format_share_summary(buf, sizeof(buf), true, 2, 0, "exact");
+    TEST_ASSERT_EQUAL_STRING("2 peers, exact", buf);
+
+    /* A channel-only node is sharing, and saying "no targets" there would be
+       the same lie in the other direction. */
+    location_ui_format_share_summary(buf, sizeof(buf), true, 0, 1, "coarse");
+    TEST_ASSERT_EQUAL_STRING("1 channel, coarse", buf);
+
+    location_ui_format_share_summary(buf, sizeof(buf), true, 0, 2, "coarse");
+    TEST_ASSERT_EQUAL_STRING("2 channels, coarse", buf);
+
+    location_ui_format_share_summary(buf, sizeof(buf), true, 2, 1, "presence");
+    TEST_ASSERT_EQUAL_STRING("3 targets, presence", buf);
+}
+
 void test_incoming_message_idle_auto_switches_to_messages(void) {
     state.current_screen = SCREEN_NODES;
     state.last_activity = 1000;
@@ -923,6 +953,7 @@ int main(void) {
     RUN_TEST(test_location_ui_actions_toggle_tier_interval);
     RUN_TEST(test_location_ui_panic_off_disables_sharing);
     RUN_TEST(test_location_ui_status_indicators);
+    RUN_TEST(test_location_ui_share_summary);
     RUN_TEST(test_incoming_message_idle_auto_switches_to_messages);
     RUN_TEST(test_incoming_message_while_active_increments_unread_without_switch);
     RUN_TEST(test_short_press_with_unread_jumps_to_messages_and_clears);

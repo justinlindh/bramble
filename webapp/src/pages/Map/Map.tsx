@@ -120,11 +120,18 @@ export function Map() {
     : peerLocations.find(p => p.addr === selfAddr && p.tier === 'full' && !!p.position);
   const selfPos = status?.position ?? selfPeerLocation?.position ?? null;
   const gpsEnabled = config?.location?.enabled ?? false;
+  // Sharing publishes only to configured targets, so the affirmative wording
+  // is earned by having one, not by the policy switch being on.
+  const shareTargetCount =
+    (config?.location?.contact_rules ?? []).filter(r => r.enabled !== false).length +
+    (config?.location?.channel_targets ?? []).filter(c => c.enabled !== false).length;
   const locationPolicyPreview = !config?.location
     ? 'Location policy unavailable'
     : !config.location.enabled
       ? 'Location sharing is OFF'
-      : `Sharing ${config.location.default_tier} updates every ${config.location.interval_s}s via ${config.location.source}`;
+      : shareTargetCount === 0
+        ? 'Location sharing is ON with no targets, so nothing is published'
+        : `Sharing ${config.location.default_tier} updates every ${config.location.interval_s}s via ${config.location.source}`;
 
   // Initialize map
   useEffect(() => {

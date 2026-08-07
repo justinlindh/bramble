@@ -695,6 +695,17 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
     return ok;
 }
 
+bool gps_get_utc_date(uint16_t* year, uint8_t* month, uint8_t* day) {
+    SemaphoreHandle_t mu = s_mu;
+    if (!mu) {
+        return false;
+    }
+    xSemaphoreTake(mu, portMAX_DELAY);
+    bool ok = gps_feed_get_utc_date(&s_feed, now_ms(), year, month, day);
+    xSemaphoreGive(mu);
+    return ok;
+}
+
 void gps_get_stats(gps_stats_t* out) {
     if (out == NULL) {
         return;

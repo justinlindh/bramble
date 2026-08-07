@@ -42,7 +42,7 @@ Accepted params (all optional for partial updates):
   - `tier` (string, optional)
   - `interval_s` (number, optional)
 - `channel_targets` (array of objects):
-  - `channel` (number)
+  - `channel` (number, 0 to 15)
   - `enabled` (bool, optional)
   - `tier` (string, optional)
   - `interval_s` (number, optional)
@@ -53,15 +53,33 @@ Response:
 { "ok": true }
 ```
 
-Compatibility notes:
+Notes:
 
+- `enabled` is a permission, not an activity. A node transmits only to its
+  targets, so `enabled: true` with no enabled contact rule or channel target
+  sends nothing.
+- A contact target is unicast under that peer's DM session key and needs an
+  active session, which needs a route. A channel target is broadcast under the
+  channel key and needs no session, no route and no prior traffic, which is
+  what makes it work on a mesh whose members have only ever broadcast. Its
+  tier is the resolution every member of the channel receives.
+- Channel 0 is the public channel and its PSK is well known, so a target on it
+  publishes the position to anyone in radio range rather than to a group. A
+  private channel keeps a group's positions within that group. Either way a
+  receiver believes a position only after the network-key origin MAC verifies,
+  so a node outside the network cannot originate one.
+- Each target is paced off its own `interval_s`, floored at 30 seconds.
+- A `channel` outside 0 to 15 names no channel the node can share to, and the
+  whole request is rejected with an invalid-params error rather than stored as
+  a rule that never fires.
 - Existing `default_tier` and `interval_s` fields remain supported.
-- Contact rules are stored and read only from canonical `lcr_XXXXXXXX` keys.
-- Legacy `lc_XXXXXXXX` contact keys are no longer read or maintained.
+- Contact rules are stored and read only from canonical `lcr_XXXXXXXX` keys,
+  and channel targets from `lch_NN` keys.
+- Legacy `lc_XXXXXXXX` contact keys are neither read nor maintained.
 
 ### `bramble.getConfig` (location section)
 
-`bramble.getConfig.result.location` now includes:
+`bramble.getConfig.result.location` includes:
 
 - `enabled` (bool)
 - `tier` (string)
@@ -400,6 +418,28 @@ fixed to a place where it hears nothing therefore reports the second place.
 
 ```json
 {"jsonrpc":"2.0","id":32,"method":"bramble.setNodeName","params":{"name":"ridge-01"}}
+```
+
+#### `bramble.getTimezone`
+
+- Description: Reports the POSIX TZ specification the node renders wall-clock times in, plus the named zones the on-device picker offers.
+- Params: none.
+- Response fields: `ok` (bool), `timezone` (string), `default_timezone` (string), `configured` (bool), `presets` (array of `{label, spec}`).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":37,"method":"bramble.getTimezone","params":{}}
+```
+
+#### `bramble.setTimezone`
+
+- Description: Persists a POSIX TZ specification. UTC stays the internal source of truth; the zone is applied only where a clock is rendered. A daylight-saving zone name must carry explicit transition rules, because the ruleless form is ambiguous.
+- Params: `timezone` (string).
+- Response fields: `ok` (bool), `timezone` (string), `error` (string, when `ok` is false).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":38,"method":"bramble.setTimezone","params":{"timezone":"PST8PDT,M3.2.0,M11.1.0"}}
 ```
 
 #### `bramble.setBacklight`

@@ -42,6 +42,52 @@ typedef struct {
     uint32_t last_share_epoch_s;
 } location_ui_state_t;
 
+/*
+ * Summarises what location sharing is actually doing, for the settings hub
+ * row.
+ *
+ * The sharing switch is a permission, not an activity: the node transmits
+ * only to configured targets, so "on" with no target sends nothing. Saying
+ * "On" there reads as "sharing is happening" and is how a node can sit
+ * silent while its own settings screen claims otherwise, so the no-target
+ * case is called out by name.
+ *
+ * Peers and channels are counted separately because they are different
+ * audiences: a peer target is readable by that one peer, a channel target by
+ * everyone holding the channel key.
+ */
+static inline void location_ui_format_share_summary(char* buf, size_t n, bool sharing_enabled,
+                                                    int contact_targets, int channel_targets,
+                                                    const char* tier_label) {
+    if (!buf || n == 0)
+        return;
+    if (!sharing_enabled) {
+        snprintf(buf, n, "Off");
+        return;
+    }
+    if (contact_targets < 0)
+        contact_targets = 0;
+    if (channel_targets < 0)
+        channel_targets = 0;
+
+    if (contact_targets == 0 && channel_targets == 0) {
+        snprintf(buf, n, "On, no targets");
+        return;
+    }
+    if (channel_targets == 0) {
+        snprintf(buf, n, "%d peer%s, %s", contact_targets, contact_targets == 1 ? "" : "s",
+                 tier_label);
+        return;
+    }
+    if (contact_targets == 0) {
+        snprintf(buf, n, "%d channel%s, %s", channel_targets, channel_targets == 1 ? "" : "s",
+                 tier_label);
+        return;
+    }
+    int total = contact_targets + channel_targets;
+    snprintf(buf, n, "%d target%s, %s", total, total == 1 ? "" : "s", tier_label);
+}
+
 static inline const char* location_ui_source_label(location_ui_source_t source) {
     switch (source) {
     case LOCATION_UI_SOURCE_GPS:

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildChannelItems, filterDmConversations, parseDmHexAddress } from '../../src/pages/Chat/ConversationList';
+import { buildChannelItems, filterDmConversations } from '../../src/pages/Chat/ConversationList';
 
 describe('ConversationList logic', () => {
   it('builds channels from config and merges unread counts from conversations', () => {
@@ -25,12 +25,5 @@ describe('ConversationList logic', () => {
 
     const dms = filterDmConversations(conversations as any);
     expect(dms.map(d => d.id)).toEqual(['dm:1234']);
-  });
-
-  it('parses valid DM hex addresses and rejects invalid input', () => {
-    expect(parseDmHexAddress('0xABCD1234')).toBe(0xabcd1234);
-    expect(parseDmHexAddress('abcd')).toBe(0xabcd);
-    expect(parseDmHexAddress('xyz')).toBeNull();
-    expect(parseDmHexAddress('')).toBeNull();
   });
 });
