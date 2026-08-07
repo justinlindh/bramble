@@ -159,6 +159,29 @@ void location_cache_purge(location_manager_t* mgr, uint32_t now_ms);
 #define LOCATION_MAX_CHANNEL_TARGETS 16
 #define LOCATION_MAX_TARGETS (LOCATION_MAX_CONTACTS + LOCATION_MAX_CHANNEL_TARGETS)
 
+/* Mirrors BRAMBLE_PUBLIC_CHANNEL_INDEX, kept as a literal for the same reason
+ * as LOCATION_MAX_CHANNEL_TARGETS; main/mesh_location.c static-asserts the two
+ * agree. */
+#define LOCATION_PUBLIC_CHANNEL_INDEX 0
+
+/*
+ * Whether a channel index may carry this node's position.
+ *
+ * The public channel's PSK is documented as known to everyone, not just to
+ * channel members, so a target on it is a periodic broadcast of exact
+ * coordinates that any receiver in radio range decrypts. It is worse than it
+ * first looks: the shared replay window is deliberately skipped for
+ * public-channel decrypts (a forgeable src_addr there could otherwise be used
+ * to slam a victim's high-water mark into a DoS), so those position frames can
+ * also be replayed at will.
+ *
+ * Position is not a datum to emit under a well-known key, so this is a hard
+ * rejection rather than a warning or an off-by-default toggle. The RPC setter,
+ * target resolution and the send path all ask this, so a rule already
+ * persisted in NVS by an earlier build cannot transmit after an upgrade.
+ */
+bool location_channel_target_is_permitted(int channel_index);
+
 /* Longest channel-target NVS key plus terminator ("lch_" + two digits). */
 #define LOCATION_TARGET_KEY_SIZE 16
 
