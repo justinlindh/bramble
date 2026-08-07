@@ -231,9 +231,20 @@ void location_hs_reset(location_hs_table_t* table);
  * that consumed that pass on a peer it could never reach would starve a
  * reachable target sitting later in the same round, which is the very
  * permanently-dead-target failure this pacing exists to end.
+ *
+ * defer_first suppresses only the immediate first attempt, scheduling it one
+ * backoff step out instead. Callers set it for the higher-addressed side of a
+ * pair. Location targets are mutual in the normal case, every node targeting
+ * every other, so without this both ends fire an INIT in the same round, each
+ * installs a ratchet from the other's ephemeral, and the pair lands in the
+ * one-sided session state that silently drops messages. The proactive rekey
+ * avoids the same collision the same way, with the lower address going first.
+ * Deferring rather than refusing keeps an asymmetric config working: if only
+ * the higher-addressed node holds the target, nobody else will ever initiate,
+ * and it still does so one step later.
  */
 bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, bool reachable,
-                                uint32_t now_ms);
+                                bool defer_first, uint32_t now_ms);
 
 /* Forget a peer's backoff, so its next need for a session attempts at once.
  * Called when a session to that peer reaches ACTIVE. */

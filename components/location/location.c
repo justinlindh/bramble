@@ -329,7 +329,7 @@ void location_hs_clear(location_hs_table_t* table, uint32_t addr) {
 }
 
 bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, bool reachable,
-                                uint32_t now_ms) {
+                                bool defer_first, uint32_t now_ms) {
     if (!table || addr == 0)
         return false;
     /* Before any table mutation: an unreachable peer records nothing and grows
@@ -362,13 +362,15 @@ bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, bool 
 
     /* First time this peer needed a session: attempt immediately, and start the
      * backoff so a peer that never answers decays instead of retrying forever
-     * at the share interval. */
+     * at the share interval. The higher-addressed side of a pair defers this
+     * first attempt by one step instead, leaving the window to the lower
+     * address so mutual targets do not both initiate and cross. */
     int idx = (free_idx >= 0) ? free_idx : oldest;
     table->slots[idx].addr = addr;
     table->slots[idx].used = true;
     table->slots[idx].backoff_ms = LOCATION_HS_BACKOFF_START_MS;
     table->slots[idx].next_attempt_ms = now_ms + LOCATION_HS_BACKOFF_START_MS;
-    return true;
+    return !defer_first;
 }
 
 bool location_channel_key(char* out, size_t out_len, int channel_index) {

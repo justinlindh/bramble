@@ -469,7 +469,17 @@ static bool location_request_dm_session(uint32_t peer, uint32_t t) {
     if (peer == 0 || peer == s_identity->address)
         return false;
     bool reachable = neighbor_lookup(&s_neighbors, peer) != NULL;
-    if (!location_hs_should_attempt(&s_location_hs, peer, reachable, t))
+    /* Only the lower-addressed side opens immediately. Both ends normally hold
+     * each other as targets, so after a fleet reboot every pair would otherwise
+     * initiate in the same round; the two INITs cross, each side installs a
+     * ratchet from the other's ephemeral, and the pair is left one-sided, which
+     * is the silent-loss shape this codebase has already been bitten by. The
+     * proactive rekey resolves the identical collision with the identical rule.
+     * The higher address is deferred rather than barred so an asymmetric
+     * configuration, where only it holds the target, still converges a step
+     * later. */
+    bool defer_first = s_identity->address > peer;
+    if (!location_hs_should_attempt(&s_location_hs, peer, reachable, defer_first, t))
         return false;
 
     dm_handshake_work_item_t item;
