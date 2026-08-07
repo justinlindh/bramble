@@ -1,6 +1,6 @@
 import { type ReactNode, Suspense, lazy, useEffect, useRef } from 'react';
 import { useStore } from './store/index';
-import { disconnect, loadConnectionCapabilities, loadNeighbors, loadNetworkKeyStatus } from './store/actions';
+import { disconnect, loadConnectionCapabilities, loadNeighbors, loadNetworkKeyStatus, loadStatus } from './store/actions';
 import { usePoll } from './hooks/usePoll';
 import { isAndroidShell } from './utils/platform';
 import { formatAddr0x } from './utils/address';
@@ -8,6 +8,7 @@ import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { DevicePickerModal } from './components/DevicePickerModal';
 import { UnprovisionedBanner } from './components/UnprovisionedBanner';
 import { StatusDot } from './components/StatusDot';
+import { GnssDot } from './components/GnssDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer, showToast, dismissToast } from './components/Toast';
 import { IconChat, IconNodes, IconConfig, IconStats, IconMap } from './components/Icons';
@@ -80,6 +81,13 @@ export default function App() {
   // Global provisioning poll: keeps the UNPROVISIONED (inert) banner live on
   // every tab and makes it vanish the moment a key is set on this node.
   usePoll(loadNetworkKeyStatus, 10_000, { enabled: isConnected });
+
+  // Global status poll: keeps the GNSS indicator live on every tab. The
+  // firmware's onGpsEvent fires only on fix transitions, so a node that never
+  // acquires one emits nothing and the indicator has to poll. 15 s rather than
+  // the Stats tab's 5 s: this is a glanceable health signal, and getStatus
+  // allocates a full mesh state snapshot on the device.
+  usePoll(loadStatus, 15_000, { enabled: isConnected });
 
   useEffect(() => {
     loadConnectionCapabilities();
@@ -199,6 +207,7 @@ export default function App() {
               </span>
             </>
           )}
+          {isConnected && <GnssDot />}
         </span>
 
         {(isConnected || connectionState === 'error') && (
