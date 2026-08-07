@@ -45,6 +45,6 @@ idf_component_register(
     INCLUDE_DIRS "include" "."
     REQUIRES nvs_keys nvs_flash display keyboard trackball board_config bramble_touch
              channel msg_store identity radio battery audio
-             location gps rpc airtime wifi ble ui
+             location gps rpc airtime wifi ble ui timezone
     PRIV_REQUIRES lvgl esp_app_format traffic_debug packet
 )

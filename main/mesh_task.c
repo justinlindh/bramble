@@ -2754,13 +2754,6 @@ const char* mesh_get_node_name(void) {
     return s_node_name;
 }
 
-bool mesh_get_network_time_ms(int64_t* out_ms) {
-    if (!out_ms || !s_timesync.synchronized)
-        return false;
-    *out_ms = timesync_get_network_time(&s_timesync, now_ms());
-    return true;
-}
-
 int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]) {
     if (!s_identity || !addr_out || !pubkey_out)
         return -1;

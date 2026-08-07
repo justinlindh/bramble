@@ -19,6 +19,13 @@ typedef struct {
     uint8_t utc_hour;    /* GGA/RMC UTC hour 0-23, valid only when utc_valid */
     uint8_t utc_min;     /* GGA/RMC UTC minute 0-59, valid only when utc_valid */
     bool utc_valid;      /* true when the UTC time-of-day field was parsed */
+    /* RMC carries the UTC date, which GGA does not. The date is what makes a
+     * daylight-saving rule evaluable, so local-time rendering needs it in
+     * addition to the time of day. */
+    uint16_t utc_year;   /* full year, e.g. 2026, valid only when utc_date_valid */
+    uint8_t utc_month;   /* 1-12, valid only when utc_date_valid */
+    uint8_t utc_day;     /* 1-31, valid only when utc_date_valid */
+    bool utc_date_valid; /* true when the RMC date field was parsed */
 } nmea_position_t;
 
 /**

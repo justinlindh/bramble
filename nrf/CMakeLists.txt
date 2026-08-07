@@ -166,6 +166,8 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/radio/tx_gate.c
   ${BRAMBLE_COMPONENTS}/radio/tx_gate_esp.c
   ${BRAMBLE_COMPONENTS}/radio/phy_passthrough.c
+  ${BRAMBLE_COMPONENTS}/timezone/bramble_tz.c
+  ${BRAMBLE_COMPONENTS}/timezone/tz_store.c
   ${BRAMBLE_COMPONENTS}/gps/nmea_parser.c
   ${BRAMBLE_COMPONENTS}/gps/gps_pref.c
   ${BRAMBLE_COMPONENTS}/gps/gps_feed.c
@@ -203,7 +205,7 @@ foreach(comp packet routing routing_auth dedup dm_session fragment replay_window
         security timesync airtime freq_plan mailbox nonce_counter bramble_probe
         channel identity location network_key msg_store reliability rpc
         traffic_debug ui radio gps battery indicators crypto nvs_keys ota
-        board_config)
+        board_config timezone)
   target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/${comp}/include)
 endforeach()
 target_include_directories(bramble_core BEFORE PUBLIC

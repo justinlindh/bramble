@@ -252,6 +252,10 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
     return gps_feed_get_utc_hm(&s_feed, gps_now_ms(), hour, min);
 }
 
+bool gps_get_utc_date(uint16_t* year, uint8_t* month, uint8_t* day) {
+    return gps_feed_get_utc_date(&s_feed, gps_now_ms(), year, month, day);
+}
+
 void gps_get_stats(gps_stats_t* out) {
     if (!out)
         return;
@@ -319,6 +323,12 @@ bool gps_get_position(bramble_position_t* out) {
 bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
     (void)hour;
     (void)min;
+    return false;
+}
+bool gps_get_utc_date(uint16_t* year, uint8_t* month, uint8_t* day) {
+    (void)year;
+    (void)month;
+    (void)day;
     return false;
 }
 void gps_get_stats(gps_stats_t* out) {
