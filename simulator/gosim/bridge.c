@@ -1954,7 +1954,7 @@ static void _handle_identity_attestation(sim_node_t* rx, const uint8_t* buf, uin
  * tier+position bytes in cleartext after a 4-byte src_addr (see the crypto
  * simplification note on bridge_handle_generate_location); parsing and
  * caching go through the REAL component functions (location_parse_inner,
- * location_cache_apply_share) so tier decode and cache semantics cannot drift
+ * location_cache_update) so tier decode and cache semantics cannot drift
  * from firmware. */
 static void _handle_location(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint64_t now_us,
                              uint32_t now_ms, node_array_t* nodes) {
@@ -1980,7 +1980,7 @@ static void _handle_location(sim_node_t* rx, const uint8_t* buf, uint16_t len, u
     bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
     if (!ext)
         return;
-    location_cache_apply_share(&ext->location, src_addr, tier, &pos, now_ms);
+    location_cache_update(&ext->location, src_addr, &pos, now_ms);
     g_ext_metrics.location_updates++;
 
     fprintf(stdout,

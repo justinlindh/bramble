@@ -34,7 +34,7 @@ static void node_detail_format_last_seen(char* out, size_t out_len, uint32_t las
 
 static void node_detail_format_location(char* out, size_t out_len, bool has_location,
                                         int32_t latitude_e7, int32_t longitude_e7,
-                                        uint32_t received_ms, uint32_t now_ms, bool age_known) {
+                                        uint32_t received_ms, uint32_t now_ms) {
     if (!out || out_len == 0)
         return;
 
@@ -45,14 +45,6 @@ static void node_detail_format_location(char* out, size_t out_len, bool has_loca
 
     double lat = ((double)latitude_e7) / 1e7;
     double lon = ((double)longitude_e7) / 1e7;
-    if (!age_known) {
-        /* Restored from flash: the receipt time belongs to an earlier boot's
-         * uptime clock, so subtracting it from this one's yields a number with
-         * no meaning. It used to fall through to age_s == 0 and label a
-         * position of any age "(now)". */
-        snprintf(out, out_len, "%.6f, %.6f (last known)", lat, lon);
-        return;
-    }
     uint32_t age_s = (now_ms > received_ms) ? (now_ms - received_ms) / 1000U : 0U;
     if (age_s < 60U) {
         snprintf(out, out_len, "%.6f, %.6f (now)", lat, lon);
@@ -244,7 +236,7 @@ void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neig
     char loc_line[64];
     node_detail_format_location(loc_line, sizeof(loc_line), s_has_location,
                                 s_location.pos.latitude_e7, s_location.pos.longitude_e7,
-                                s_location.received_ms, s_now_ms, s_location.age_known);
+                                s_location.received_ms, s_now_ms);
     lv_obj_t* loc_lbl = lv_label_create(card);
     lv_label_set_text(loc_lbl, loc_line);
     lv_obj_set_width(loc_lbl, lv_pct(100));

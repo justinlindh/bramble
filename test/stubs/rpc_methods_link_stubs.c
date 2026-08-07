@@ -527,25 +527,10 @@ esp_err_t nvs_set_u16(nvs_handle_t h, const char* k, uint16_t v) {
     (void)v;
     return ESP_OK;
 }
-/* One real u32 cell, backing the location store's boot counter. The peer
- * records' age depends on it, so the getPeerLocations suite needs a value that
- * survives the set/get round trip rather than a no-op. */
-static uint32_t g_nvs_loc_u32;
-static bool g_nvs_loc_u32_present;
-
 esp_err_t nvs_set_u32(nvs_handle_t h, const char* k, uint32_t v) {
+    (void)h;
     (void)k;
-    if (h != 3)
-        return ESP_OK;
-    g_nvs_loc_u32 = v;
-    g_nvs_loc_u32_present = true;
-    return ESP_OK;
-}
-esp_err_t nvs_get_u32(nvs_handle_t h, const char* k, uint32_t* o) {
-    (void)k;
-    if (h != 3 || !o || !g_nvs_loc_u32_present)
-        return ESP_FAIL;
-    *o = g_nvs_loc_u32;
+    (void)v;
     return ESP_OK;
 }
 esp_err_t nvs_set_i8(nvs_handle_t h, const char* k, int8_t v) {

@@ -56,26 +56,12 @@ typedef struct {
     bool valid;
 } bramble_position_t;
 
-/*
- * Cached position from a peer.
- *
- * INVARIANT: every active entry holds coordinates that can actually be
- * PLACED on a map. A PRESENCE-tier share carries no coordinates at all (its
- * position struct is zeroed with valid set, meaning "the peer is there", not
- * "the peer is at 0,0"), so it never enters the cache; see
- * location_cache_apply_share.
- *
- * age_known says whether received_ms can be compared against the current
- * uptime clock. It is true for a share received during this boot and false
- * for an entry restored from flash, whose received_ms was written against a
- * clock that no longer exists. See the persisted-record comment below.
- */
+/* Cached position from peer */
 typedef struct {
     uint32_t peer_addr;
     bramble_position_t pos;
     uint32_t received_ms;
     bool active;
-    bool age_known;
 } location_cache_entry_t;
 
 /* Location manager state */
@@ -130,180 +116,11 @@ int location_serialize_for_tier(const bramble_position_t* pos, uint8_t tier, uin
 int location_parse_inner(const uint8_t* plaintext, size_t plaintext_len, uint8_t* tier_out,
                          bramble_position_t* pos_out);
 
-/*
- * A tier that actually carries coordinates. PRESENCE carries a single
- * online/offline bit, and its deserialize leaves an all-zero position with
- * valid set, so anything that PLACES a peer must gate on this or a presence
- * share plants a marker on Null Island.
- */
-static inline bool location_tier_has_coordinates(uint8_t tier) {
-    return tier == LOCATION_TIER_FULL || tier == LOCATION_TIER_COARSE;
-}
-
 /* Cache */
 int location_cache_update(location_manager_t* mgr, uint32_t peer_addr,
                           const bramble_position_t* pos, uint32_t now_ms);
 const location_cache_entry_t* location_cache_get(const location_manager_t* mgr, uint32_t peer_addr);
 void location_cache_purge(location_manager_t* mgr, uint32_t now_ms);
-
-/* Forget everything cached for one peer. */
-void location_cache_drop(location_manager_t* mgr, uint32_t peer_addr);
-
-/*
- * Apply a decoded, authenticated location share to the cache with the tier's
- * own semantics. Every RX path goes through here (firmware handle_location
- * and the simulator's bridge) so the tier rules cannot drift between them:
- *
- *   - a coordinate-bearing tier updates the peer's position;
- *   - PRESENCE DROPS whatever coordinates the cache still holds for that
- *     peer. The sender chose to stop sharing a position, and continuing to
- *     show the last exact one they sent would leak precisely what they just
- *     withdrew.
- */
-void location_cache_apply_share(location_manager_t* mgr, uint32_t peer_addr, uint8_t tier,
-                                const bramble_position_t* pos, uint32_t now_ms);
-
-/*
- * Is a cached or persisted position recent enough to present as current?
- * An entry whose age is not known is never fresh: the node cannot tell
- * whether it is a minute or a month old, and guessing "current" is the
- * failure mode this rule exists to prevent.
- */
-bool location_age_is_fresh(bool age_known, uint32_t received_ms, uint32_t now_ms);
-
-/* ── Persisted peer locations ────────────────────────────────────────────
- *
- * On-flash record for a peer's last known position: NVS namespace
- * NVS_NS_LOCATION, key PEER_LOCATION_KEY_PREFIX followed by the peer address
- * as 8 uppercase hex digits. ONE definition of the layout, deliberately: it
- * used to be hand-copied into three translation units, and a hand-maintained
- * second copy of a flash layout drifts and then mis-reads flash in silence.
- *
- * received_ms is a raw uptime millisecond count, so it only means something
- * inside the boot that wrote it. The counter restarts at zero on every reset,
- * which is why a stored value can read LARGER than the node's current uptime:
- * that is not a timestamp from the future, it is a reading from a clock that
- * no longer exists, and any freshness or staleness arithmetic against the
- * current clock is wrong across a restart. There is nothing better to store
- * instead: the node has no RTC and no time sync, and a position's own
- * timestamp field is the SENDER's uptime seconds, not epoch seconds. No value
- * written to flash can make a cross-boot age computable.
- *
- * What IS knowable is which boot produced the reading. boot_id carries the
- * persistent boot counter's value at write time, and an age is computable
- * only when it matches the current boot's. Otherwise the age is UNKNOWN, and
- * unknown is reported as unknown rather than guessed: the position is still
- * the best last-known fix the node has, and it is still worth showing, but
- * never as a current one.
- */
-#define PEER_LOCATION_KEY_PREFIX "lp_"
-#define PEER_LOCATION_KEY_PREFIX_LEN 3
-#define PEER_LOCATION_KEY_MAX 16 /* "lp_" + 8 hex digits + NUL */
-
-#define PEER_LOCATION_RECORD_VERSION 1
-
-typedef struct __attribute__((packed)) {
-    int32_t latitude_e7;
-    int32_t longitude_e7;
-    int16_t altitude_m;
-    uint8_t accuracy_m;
-    uint8_t speed_kmh;
-    uint8_t heading_deg2;
-    uint32_t timestamp;
-    uint32_t received_ms;
-    uint8_t tier;
-    uint8_t version; /* PEER_LOCATION_RECORD_VERSION */
-    uint32_t boot_id;
-} persisted_peer_location_t;
-
-/*
- * Byte length of the original layout, which had neither version nor boot_id.
- * Records that size are still on flash on every node that has run an earlier
- * build, and the new fields are a pure append, so they decode as "age
- * unknown", which is exactly what they are.
- */
-#define PEER_LOCATION_RECORD_V0_SIZE 22u
-
-/* Decoded view of one on-flash record. */
-typedef struct {
-    bramble_position_t pos;
-    uint8_t tier;
-    uint32_t received_ms;
-    uint32_t boot_id; /* 0 when the record predates the boot counter */
-    bool age_known;   /* received_ms is comparable to the current uptime */
-} peer_location_record_t;
-
-/* Format the NVS key for a peer's record. */
-void peer_location_record_key(char* out, size_t out_len, uint32_t peer_addr);
-
-/* Parse the peer address back out of such a key. Returns false if it is not
- * a peer-location key. */
-bool peer_location_key_parse(const char* key, uint32_t* peer_addr_out);
-
-/* Fill an on-flash record. boot_id is the current boot counter. */
-void peer_location_record_encode(persisted_peer_location_t* out, const bramble_position_t* pos,
-                                 uint8_t tier, uint32_t now_ms, uint32_t boot_id);
-
-/* Decode a blob of either layout. Returns 0 on success, -1 if the blob is not
- * a record this build understands. */
-int peer_location_record_decode(const void* blob, size_t len, uint32_t current_boot_id,
-                                peer_location_record_t* out);
-
-/* One collected record on its way from flash into the in-RAM cache. */
-typedef struct {
-    uint32_t peer_addr;
-    peer_location_record_t rec;
-} peer_location_restore_entry_t;
-
-/*
- * Boot counter, persisted alongside the records it stamps. Bumps once per
- * boot and returns the new value; calling it again in the same boot returns
- * the same value without touching flash. Zero is reserved to mean "no boot
- * counter", so the very first bump yields 1 and a record stamped 0 can never
- * be mistaken for a current-boot record.
- */
-uint32_t location_store_begin_boot(void);
-
-/* The current boot counter, or 0 if location_store_begin_boot has not run or
- * could not reach flash. */
-uint32_t location_store_boot_id(void);
-
-/*
- * Forget the cached boot counter so the next location_store_begin_boot reads
- * flash again. A device gets this from the reset vector; host tests that
- * simulate a reboot (module state cleared, flash contents kept) need to ask
- * for it.
- */
-void location_store_reset_boot_state(void);
-
-/* Persist one peer's position. */
-void location_store_save_peer(uint32_t peer_addr, const bramble_position_t* pos, uint8_t tier,
-                              uint32_t now_ms);
-
-/*
- * Boot-time restore, phase 1 of 2: read flash into `out`, newest first, and
- * touch nothing else. Returns how many entries were filled, at most `max`.
- *
- * Split from the apply phase because the NVS iterator holds the shim's mutex
- * for the whole iteration, and that mutex must stay strictly BELOW every
- * other lock in the system (see the two documented reverse orderings in
- * mesh_send_location_updates). This phase therefore runs holding nothing, and
- * the caller only takes its own state lock afterwards, for the pure-RAM apply
- * below.
- *
- * Flash can hold more records than the cache has slots, so ordering matters:
- * entries come back sorted by (boot_id, received_ms) descending, which puts
- * the most recently written records in the surviving slots.
- */
-int location_store_collect(peer_location_restore_entry_t* out, int max);
-
-/*
- * Boot-time restore, phase 2 of 2: seed the cache from collected records.
- * Pure RAM, no NVS, so the caller may hold the lock that protects `mgr`.
- * Restored entries are marked age-unknown.
- */
-void location_store_apply(location_manager_t* mgr, const peer_location_restore_entry_t* entries,
-                          int count);
 
 /* Policy engine send gating for periodic sharing */
 bool location_policy_should_send(const location_policy_t* policy, bool has_source, bool has_targets,

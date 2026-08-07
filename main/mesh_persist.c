@@ -217,49 +217,6 @@ void mesh_replay_store_load(void) {
 }
 
 /*
- * Boot-time restore of the peer-location cache.
- *
- * Peer positions were persisted on receipt and never read back, so the T-Deck
- * map (which draws the in-RAM cache) showed nothing after a reboot until a
- * fresh share happened to arrive, while bramble.getPeerLocations (which reads
- * flash) listed the same peers the whole time. Two surfaces, two sources, one
- * of them empty.
- *
- * Two phases, exactly like mesh_send_location_updates and for exactly the same
- * reason: location_store_collect holds the NVS shim's mutex for the whole
- * directory iteration, so it runs with NOTHING else held, and s_state_mutex is
- * only taken afterwards for the pure-RAM apply. That keeps the shim mutex
- * strictly below every other lock. Reversing it would put NVS above
- * s_state_mutex and complete a cycle with mesh_add_channel's
- * s_state_mutex-then-NVS ordering.
- *
- * The collect buffer is static rather than stack: it is ~700 bytes, the mesh
- * task's stack has been overflowed on real hardware before, and this runs once
- * so nothing overlaps.
- */
-static peer_location_restore_entry_t s_restore_buf[LOCATION_MAX_CONTACTS];
-
-void mesh_peer_location_restore(void) {
-    /* Bump the boot counter FIRST: it stamps every record written during this
-     * boot, and the collect below compares against it to decide which restored
-     * positions still have a computable age (none, on a fresh boot, which is
-     * the honest answer). */
-    location_store_begin_boot();
-
-    int count = location_store_collect(s_restore_buf, LOCATION_MAX_CONTACTS);
-    if (count <= 0) {
-        return;
-    }
-
-    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    location_store_apply(&s_location_mgr, s_restore_buf, count);
-    int restored = s_location_mgr.cache_count;
-    xSemaphoreGive(s_state_mutex);
-
-    ESP_LOGI(TAG, "Restored %d persisted peer location(s)", restored);
-}
-
-/*
  * Mandatory-provisioning (Task 2): consolidate boot-time key load onto the
  * network_key component (single source of truth for the NVS namespace/key and
  * the in-memory provisioning state). A stored key -> provisioned; none stored

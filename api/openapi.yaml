@@ -2037,20 +2037,10 @@ components:
           $ref: '#/components/schemas/Position'
         online:
           type: boolean
-          description: >-
-            Whether this position is recent enough to present as current.
-            False when the node cannot compute the position's age, which is
-            the case for anything persisted before the current boot: the node
-            has no wall clock, so a stored uptime reading says nothing once
-            the uptime counter has restarted. The position itself is still
-            returned, as the peer's last known one.
+          description: Whether the peer is currently online.
         lastUpdatedMs:
           type: integer
-          description: >-
-            Device uptime in milliseconds at which the position was received,
-            measured on the CURRENT boot. 0 when the node cannot express the
-            receipt time on that clock (a position carried over from an
-            earlier boot), which is also when online is false.
+          description: Unix timestamp (ms) of last update.
 
     # ── Response Schemas ─────────────────────────────────────────────────────
 
