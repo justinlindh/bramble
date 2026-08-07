@@ -89,11 +89,11 @@ static void gps_task(void* arg) {
         if (len <= 0)
             continue;
         uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000ULL);
-        bool had_fix = gps_feed_has_fix(&s_feed);
+        bool had_fix = gps_feed_has_fix(&s_feed, now_ms);
         gps_feed_bytes(&s_feed, data, (size_t)len, now_ms);
-        if (!had_fix && gps_feed_has_fix(&s_feed)) {
+        if (!had_fix && gps_feed_has_fix(&s_feed, now_ms)) {
             bramble_position_t p;
-            gps_feed_get_position(&s_feed, &p);
+            gps_feed_get_position(&s_feed, now_ms, &p);
             ESP_LOGI(TAG, "GPS fix acquired: lat=%.6f lon=%.6f alt=%d", p.latitude_e7 / 1e7,
                      p.longitude_e7 / 1e7, p.altitude_m);
         }
@@ -237,18 +237,25 @@ int gps_set_enabled(bool enabled) {
     return 0;
 }
 
-bool gps_has_fix(void) { return gps_feed_has_fix(&s_feed); }
+/* Milliseconds since boot, the clock every gps_feed call in this file uses.
+ * The feed's liveness gates compare against it, so all readers must share
+ * one time base. */
+static uint64_t gps_now_ms(void) { return (uint64_t)(esp_timer_get_time() / 1000ULL); }
+
+bool gps_has_fix(void) { return gps_feed_has_fix(&s_feed, gps_now_ms()); }
 
 bool gps_get_position(bramble_position_t* out) {
-    return out && gps_feed_get_position(&s_feed, out);
+    return out && gps_feed_get_position(&s_feed, gps_now_ms(), out);
 }
 
-bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) { return gps_feed_get_utc_hm(&s_feed, hour, min); }
+bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
+    return gps_feed_get_utc_hm(&s_feed, gps_now_ms(), hour, min);
+}
 
 void gps_get_stats(gps_stats_t* out) {
     if (!out)
         return;
-    gps_feed_get_stats(&s_feed, (uint64_t)(esp_timer_get_time() / 1000ULL), out);
+    gps_feed_get_stats(&s_feed, gps_now_ms(), out);
 }
 
 void gps_get_debug(gps_debug_t* out) {
@@ -317,6 +324,9 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
 void gps_get_stats(gps_stats_t* out) {
     if (out) {
         memset(out, 0, sizeof(*out));
+        /* Zero would read as "the feed started this instant"; nothing has
+         * ever arrived here, which is what the sentinel says. */
+        out->nmea_age_s = GPS_STATS_NMEA_NEVER;
     }
 }
 void gps_get_debug(gps_debug_t* out) {

@@ -161,8 +161,12 @@ void test_get_status_includes_gnss_fields(void) {
     cJSON* r = get_result(resp);
 
     assert_gnss_status_fields_present(r);
-    /* A capable, powered receiver that has produced no counts is not "absent". */
-    TEST_ASSERT_NOT_EQUAL(0, strcmp("absent", cJSON_GetObjectItem(r, "gps_state")->valuestring));
+    /* A capable, powered receiver that has sent nothing at all is the severe
+     * case and must be named as such: not "absent" (which claims the board has
+     * no receiver) and not "acquiring" (which claims something is being
+     * heard). The harness GPS backend reports a feed that has never produced
+     * an NMEA line. */
+    TEST_ASSERT_EQUAL_STRING("no_signal", cJSON_GetObjectItem(r, "gps_state")->valuestring);
 
     cJSON_Delete(resp);
 }
@@ -188,7 +192,7 @@ void test_get_status_gnss_fields_present_without_gps_cap(void) {
     cJSON_Delete(resp);
 }
 
-/* ── 1c. getGpsPosition ───────────────────────────────────────────── */
+/* ── 1b. getGpsPosition ───────────────────────────────────────────── */
 
 /* The direct regression guard for the field failure: a node that never
  * acquires a fix answered with nothing but valid:false, which cannot tell a
@@ -221,7 +225,7 @@ void test_get_gps_position_not_supported_without_gps_cap(void) {
     cJSON_Delete(resp);
 }
 
-/* ── 1b. getDiagnostics GPS fields ────────────────────────────────── */
+/* ── 1c. getDiagnostics GPS fields ────────────────────────────────── */
 
 void test_get_diagnostics_includes_gps_fields_when_gps_capable(void) {
     g_stub_board_has_gps = true;
@@ -796,11 +800,15 @@ int main(void) {
     /* getStatus */
     RUN_TEST(test_get_status_returns_expected_fields);
 
-    /* getDiagnostics GPS fields */
+    /* getStatus GNSS observability fields */
     RUN_TEST(test_get_status_includes_gnss_fields);
     RUN_TEST(test_get_status_gnss_fields_present_without_gps_cap);
+
+    /* getGpsPosition */
     RUN_TEST(test_get_gps_position_includes_gnss_fields_without_fix);
     RUN_TEST(test_get_gps_position_not_supported_without_gps_cap);
+
+    /* getDiagnostics GPS fields */
     RUN_TEST(test_get_diagnostics_includes_gps_fields_when_gps_capable);
     RUN_TEST(test_get_diagnostics_omits_gps_fields_without_gps_cap);
 

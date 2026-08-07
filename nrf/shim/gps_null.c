@@ -27,6 +27,9 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
 void gps_get_stats(gps_stats_t* out) {
     if (out != NULL) {
         memset(out, 0, sizeof(*out));
+        /* Zero would read as "the feed started this instant"; this board has
+         * no receiver, so nothing has ever arrived. */
+        out->nmea_age_s = GPS_STATS_NMEA_NEVER;
     }
 }
 

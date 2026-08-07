@@ -236,6 +236,12 @@ responses in the field:
 - `absent`: the board has no receiver, or GPS is switched off by preference.
   Check `gps_available` and `gps_enabled` in `bramble.getStatus`.
 
+Every value in this group describes what the receiver is reporting, not what it
+reported at some earlier point. A receiver that says its fix is invalid leaves
+`fix` on that sentence, and a receiver that stops sending NMEA at all drops to
+`no_signal` with zero counts within 30 seconds. A node carried from a place it
+fixed to a place where it hears nothing therefore reports the second place.
+
 ### Messaging
 
 #### `bramble.sendMessage`

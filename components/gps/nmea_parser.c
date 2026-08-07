@@ -226,6 +226,18 @@ bool nmea_parse_gsv(char* sentence, nmea_gsv_t* out) {
         sats = 99;
     out->sats_in_view = (uint8_t)sats;
 
+    /* The NMEA 4.11 signal id is a single hex character appended after the
+     * last satellite group, so it is the only field that can follow a whole
+     * number of groups: (field_count - 4) % 4 == 1 identifies it without
+     * guessing at the group count. */
+    if (field_count > 4 && ((field_count - 4) % 4) == 1) {
+        const char* sig = fields[field_count - 1];
+        if (!field_empty(sig) && isxdigit((unsigned char)sig[0])) {
+            long v = strtol(sig, NULL, 16);
+            out->signal_id = (uint8_t)((v < 0 || v > 15) ? 0 : v);
+        }
+    }
+
     /* Requiring the whole group to be present means an incomplete trailing
      * group (which is what a 4.11 signal-id field looks like) is skipped
      * rather than misread as a C/N0. */
@@ -260,6 +272,43 @@ bool nmea_is_antenna_open(const char* sentence) {
         return false;
     }
     return strstr(sentence, "ANTENNA OPEN") != NULL;
+}
+
+/* Point at field `index` (0-based) of a raw sentence without modifying it.
+ * Returns NULL when the sentence has no such field; the returned pointer runs
+ * to the next ',' or '*' or the end of the string, so callers read only the
+ * leading characters they care about. */
+static const char* nmea_peek_field(const char* sentence, int index) {
+    if (!sentence)
+        return NULL;
+    const char* p = sentence;
+    for (int i = 0; i < index; i++) {
+        while (*p && *p != ',' && *p != '*')
+            p++;
+        if (*p != ',')
+            return NULL;
+        p++;
+    }
+    return p;
+}
+
+bool nmea_reports_no_fix(const char* sentence) {
+    if (!sentence || sentence[0] != '$' || strlen(sentence) < 6)
+        return false;
+
+    if (strncmp(sentence + 3, "RMC", 3) == 0) {
+        const char* status = nmea_peek_field(sentence, 2);
+        return status && status[0] == 'V';
+    }
+    if (strncmp(sentence + 3, "GGA", 3) == 0) {
+        const char* quality = nmea_peek_field(sentence, 6);
+        /* An empty quality field is how a receiver reports an unusable fix
+         * during a cold start, and nmea_parse_gga rejects it for the same
+         * reason. */
+        return quality &&
+               (quality[0] == '0' || quality[0] == ',' || quality[0] == '\0' || quality[0] == '*');
+    }
+    return false;
 }
 
 /* Parse $GPGGA or $GNGGA sentence */
@@ -313,13 +362,20 @@ bool nmea_parse_gga(char* sentence, nmea_position_t* pos) {
     }
 
     /* Fix quality is the receiver's own verdict, reported with or without a
-     * usable fix, so capture it before the gate below rejects the sentence. */
-    pos->fix_quality = (!field_empty(fields[6]) && isdigit((unsigned char)fields[6][0]))
-                           ? (uint8_t)(fields[6][0] - '0')
-                           : 0;
+     * usable fix, so capture it before the gate below rejects the sentence.
+     * NMEA 0183 defines 0-8; a digit outside that range says nothing this
+     * field can express, so it reads as 0 (invalid/unknown) rather than being
+     * clamped to 8, which would claim the receiver is in simulation mode. */
+    pos->fix_quality =
+        (!field_empty(fields[6]) && isdigit((unsigned char)fields[6][0]) && fields[6][0] <= '8')
+            ? (uint8_t)(fields[6][0] - '0')
+            : 0;
 
-    /* Check fix quality (0=invalid, 1=GPS, 2=DGPS, etc.) */
-    if (field_empty(fields[6]) || fields[6][0] == '0') {
+    /* Check fix quality (0=invalid, 1=GPS, 2=DGPS, etc.). The normalization
+     * above already turned an empty, non-numeric or out-of-range field into
+     * 0, so one comparison covers every way a sentence can fail to claim a
+     * usable fix. */
+    if (pos->fix_quality == 0) {
         pos->valid = false;
         return false;
     }

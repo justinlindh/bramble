@@ -25,6 +25,10 @@ static unsigned clamp99(unsigned v) { return v > 99 ? 99 : v; }
 gnss_ui_state_t gnss_ui_classify(const gnss_ui_input_t* in) {
     if (!in || !in->board_has_gnss || !in->powered)
         return GNSS_UI_ABSENT;
+    /* has_fix is the driver's live answer, not a latch: gps_feed drops it when
+     * the receiver reports no fix and when the receiver stops talking, so a
+     * node carried from a place it fixed to a place it hears nothing falls
+     * through to the classes below. */
     if (in->has_fix)
         return GNSS_UI_FIX;
     /* sats_used covers a receiver with GSV disabled, where a nonzero GGA

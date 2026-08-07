@@ -17,23 +17,26 @@ typedef void (*gps_fix_cb_t)(const bramble_position_t* pos, void* ctx);
 #define GPS_STATS_NMEA_NEVER UINT32_MAX
 
 /**
- * Satellite counts and antenna health, tracked independently of position
- * fix validity so a "searching" UI can show progress before the first fix.
- * The satellite counts and signal strength are tracked independently of fix
- * validity so a caller can tell a receiver hearing nothing from one hearing
- * satellites but not yet converging.
+ * Satellite counts, signal strength and antenna health, tracked independently
+ * of position fix validity so a caller can show progress before the first fix
+ * and tell a receiver hearing nothing from one hearing satellites but not yet
+ * converging.
  */
 typedef struct {
     uint8_t sats_used;    /* GGA field 7: satellites used in the fix computation, 0-99 */
-    uint8_t sats_in_view; /* GSV field 3, summed across constellations, 0-99 */
-    uint8_t sats_tracked; /* GSV entries reporting a nonzero C/N0, summed across
-                           * constellations, 0-99. Satellites the receiver is actually
-                           * hearing, as opposed to ones the almanac predicts. */
+    uint8_t sats_in_view; /* GSV field 3, summed across constellations, 0-99. One
+                           * constellation's signal bands combine by maximum rather
+                           * than by sum, since a satellite received on two bands is
+                           * listed once per band and is still one satellite. */
+    uint8_t sats_tracked; /* GSV entries reporting a nonzero C/N0, combined the same
+                           * way, 0-99. Satellites the receiver is actually hearing,
+                           * as opposed to ones the almanac predicts. */
     uint8_t snr_max_dbhz; /* Best C/N0 across all GSV entries in the last complete
                            * message cycle, dB-Hz, 0-99. 0 when nothing is tracked. */
     uint8_t fix_quality;  /* GGA field 6 as a digit: 0 invalid, 1 GPS, 2 DGPS,
                            * 4 RTK fixed, 5 RTK float, 6 dead reckoning. 0 when no
-                           * GGA has been seen. */
+                           * GGA has been seen, and 0 for a digit outside the 0-8
+                           * range NMEA 0183 defines. */
     uint32_t nmea_age_s;  /* Seconds since the first NMEA line after the last feed
                            * reset, or GPS_STATS_NMEA_NEVER when none has arrived. */
     bool antenna_warning; /* true if a $GPTXT ANTENNA OPEN message was seen recently */
@@ -49,6 +52,12 @@ int gps_init(gps_fix_cb_t cb, void* ctx);
 
 /**
  * Check if GPS currently has a valid fix.
+ *
+ * Answers "a fix is held" rather than "a fix was held at some point": it goes
+ * false when the receiver reports its fix as invalid and when the receiver
+ * stops sending NMEA altogether, which is what makes a node carried out of
+ * coverage report losing the fix.
+ *
  * @return true if valid fix available
  */
 bool gps_has_fix(void);

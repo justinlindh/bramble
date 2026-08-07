@@ -55,6 +55,10 @@ typedef struct {
     uint8_t sats_in_view; /* field 3, 0-99 */
     uint8_t tracked;      /* satellite groups in THIS message with a nonzero C/N0 */
     uint8_t snr_max;      /* best C/N0 in THIS message in dB-Hz, 0 if none, 0-99 */
+    uint8_t signal_id;    /* NMEA 4.11 trailing signal id (0-15), 0 when the sentence
+                           * carries no such field. A multi-band receiver emits one
+                           * independent cycle per talker AND signal id, each with its
+                           * own message numbering, so the pair identifies the cycle. */
 } nmea_gsv_t;
 
 /**
@@ -72,5 +76,21 @@ bool nmea_parse_gsv(char* sentence, nmea_gsv_t* out);
  * @return true if the line reports an open/disconnected antenna
  */
 bool nmea_is_antenna_open(const char* sentence);
+
+/**
+ * Check whether a raw RMC or GGA line is the receiver explicitly reporting
+ * that it has no fix (RMC status field 'V', GGA quality field '0' or empty).
+ *
+ * nmea_parse_rmc/nmea_parse_gga return false both for that verdict and for a
+ * sentence that failed to parse for any other reason, and the two demand
+ * opposite handling: a receiver saying "no fix" invalidates a previously held
+ * fix, a garbled line says nothing at all. Does not tokenize or modify the
+ * input, so it can be applied to the original line after a parse attempt has
+ * consumed a mutable copy.
+ *
+ * @param sentence: raw sentence
+ * @return true only when the sentence is a well-formed RMC/GGA reporting no fix
+ */
+bool nmea_reports_no_fix(const char* sentence);
 
 #endif /* BRAMBLE_NMEA_PARSER_H */
