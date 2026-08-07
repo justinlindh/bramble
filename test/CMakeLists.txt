@@ -1575,6 +1575,25 @@ target_include_directories(test_msg_pipeline_uid PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
 
+# Delivery status surviving a reboot: the RAM store pushing a later status
+# change back into the already-written record. Built with persistence ON and a
+# deliberately tiny ring (4 rows against an 8-record file) so ring wrap and
+# rollover both happen, which is where the ring-to-file mapping could break.
+add_executable(test_msg_store_persist_status
+    test_msg_store_persist_status.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/msg_store.c
+)
+target_compile_definitions(test_msg_store_persist_status PRIVATE
+    CONFIG_BRAMBLE_MSG_STORE_CAP=4
+    CONFIG_BRAMBLE_MSG_PERSIST_ENABLED=1
+    CONFIG_BRAMBLE_MSG_PERSIST_MAX=8
+    CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT=75
+)
+target_include_directories(test_msg_store_persist_status PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
+
 # Message store SPIFFS persistence tests
 add_executable(test_msg_store_spiffs
     test_msg_store_spiffs.c
