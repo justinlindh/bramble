@@ -142,9 +142,9 @@ Horizontal flex row, space-between alignment, 2px padding all sides, Montserrat 
 |----------|----------------|----------------------------------------|-----------------|
 | Left     | Battery        | `{sym} {pct}%` (sym varies by level)  | TEXT (colored by level; thresholds below) |
 | -        | Signal         | `📶 {neighbor_count}`                 | TEXT            |
-| -        | GPS            | `GPS` (static)                         | TEXT_SEC        |
-| -        | Time           | `--:--` (static placeholder)          | TEXT            |
-| Right    | Node Name      | `BRAMBLE` (static)                     | PRIMARY (green)  |
+| -        | GNSS           | `{sym} {count}` (2-char right-aligned count, hidden when the board has no receiver) | SUCCESS on fix, WARNING while acquiring, DANGER on no signal |
+| -        | Time           | `HH:MM` UTC from GPS, else mesh network time, else `--:--` | TEXT            |
+| Right    | Node Name      | `mesh_get_node_name()`, trimmed to fit | PRIMARY (green)  |
 
 Battery icon thresholds:
 
@@ -376,7 +376,7 @@ Displays node positions from the location manager (`mesh_get_location_state()`) 
 - Canvas 280x140 px inside a 312x148 px container, LVGL v9 static draw buffer, RGB565.
 - Self position: blue circle marker labeled "You"; peers: green circle markers labeled by node name/address.
 - Crosshair grid centered on self; status line shows current coordinates and peer count.
-- Shows "No GPS data" when no position is available.
+- With no position fix, shows `No position fix.` followed by the GNSS state word and the one-line satellite detail from `gnss_ui_detail_line()`, so an operator can tell a receiver hearing nothing from one that is still converging.
 
 ---
 
@@ -597,9 +597,6 @@ The T-Deck Plus has three input mechanisms that all feed into LVGL's input devic
 | Chat         | Channel concept stubbed at idx=0 only: no multi-channel support          |
 | Chat         | Message preview truncation uses `LV_LABEL_LONG_DOT` with fixed 290px width |
 | Nodes        | Node cards are clickable but no action is defined on click                |
-| Status bar   | GPS label is static text "GPS": no real GPS integration                  |
-| Status bar   | Time label shows `--:--`: no RTC integration                             |
-| Status bar   | Node name is hardcoded "BRAMBLE": `identity` component doesn't expose `get_name()` yet |
 | Settings     | Version is hardcoded `"0.9.1-tdeck"`: should read from `esp_app_desc_t` like splash does |
 | Settings     | Node name is read-only; no edit flow exists                               |
 | Settings     | Backlight slider sets keyboard MCU backlight; display backlight (GPIO42, active-low) not yet controlled here |
