@@ -163,6 +163,22 @@ int emu_node_seed_location_share_from_env(void) {
         err = nvs_set_str(nvs, "def_tier", location_tier_to_string(tier));
     if (err == ESP_OK)
         err = nvs_set_str(nvs, key, value);
+
+    /* EMU_LOCATION_DEAD_CHANNEL_RULE plants a public-channel rule of the shape
+     * a build without the guard could have written, so a scenario can prove the
+     * node deletes it rather than sitting on a rule it will neither send to nor
+     * let the owner remove. Written directly, because the RPC surface refuses
+     * this exact value, which is the whole reason it can become stuck. */
+    const char* dead = getenv("EMU_LOCATION_DEAD_CHANNEL_RULE");
+    if (err == ESP_OK && dead && *dead && dead[0] != '0') {
+        char dead_key[LOCATION_TARGET_KEY_SIZE];
+        snprintf(dead_key, sizeof(dead_key), LOCATION_CHANNEL_RULE_PREFIX "%02d",
+                 LOCATION_PUBLIC_CHANNEL_INDEX);
+        err = nvs_set_str(nvs, dead_key, value);
+        if (err == ESP_OK)
+            ESP_LOGI(TAG, "seeded dead public-channel rule %s (emulator provisioning)", dead_key);
+    }
+
     if (err == ESP_OK)
         err = nvs_commit(nvs);
     nvs_close(nvs);
