@@ -30,6 +30,7 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "chat_target.c"
         "chat_unread.c"
         "chat_message_ui.c"
+        "map_zoom.c"
         "ui_toast.c"
         "ui_confirm.c"
         "ui_focus.c"
