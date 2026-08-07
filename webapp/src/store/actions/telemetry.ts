@@ -43,6 +43,14 @@ export function normalizeStatus(raw: StatusWire): NodeStatus {
     position: raw.position,
     gpsAvailable: raw.gps_available ?? raw.gpsAvailable ?? false,
     gpsEnabled: raw.gps_enabled ?? raw.gpsEnabled ?? true,
+    // Left undefined when the field is absent, so the UI can render "unknown"
+    // rather than claiming zero satellites on firmware that predates this.
+    gpsState: raw.gps_state,
+    gpsSatsInView: raw.gps_sats_in_view,
+    gpsSatsTracked: raw.gps_sats_tracked,
+    gpsSatsUsed: raw.gps_sats_used,
+    gpsSnrMaxDbHz: raw.gps_snr_max_dbhz,
+    gpsFixQuality: raw.gps_fix_quality,
     batteryMv: raw.battery_mv ?? raw.batteryMv,
     batteryPct: raw.battery_pct ?? raw.batteryPct,
     hardware: raw.hardware,

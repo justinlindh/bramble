@@ -4,6 +4,7 @@
 #include "routing.h"
 #include "airtime_budget.h"
 #include "location.h"
+#include "gnss_status.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -21,5 +22,15 @@ typedef struct {
 
 const ui_mesh_state_t* ui_shared_mesh_state(void);
 const location_manager_t* ui_shared_location_state(void);
+
+/**
+ * Fill a GNSS classifier input from the board capability, the GPS power
+ * preference and one gps_get_stats() read. Shared by every screen that shows
+ * GNSS state so the status bar, the map and the stats page cannot disagree.
+ * gps_get_stats() takes the driver lock, so a caller takes one snapshot per
+ * render rather than reading per field.
+ * @param out: filled, must not be NULL
+ */
+void ui_shared_gnss_state(gnss_ui_input_t* out);
 
 #endif

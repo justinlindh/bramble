@@ -14,10 +14,11 @@ typedef struct {
     uint8_t heading_deg2; /* heading / 2 (0-179 = 0-358) */
     uint32_t timestamp;
     bool valid;
-    uint8_t sats_used; /* GGA: satellites used in fix, set even when no fix (0 if unknown) */
-    uint8_t utc_hour;  /* GGA UTC hour 0-23, valid only when utc_valid */
-    uint8_t utc_min;   /* GGA UTC minute 0-59, valid only when utc_valid */
-    bool utc_valid;    /* true when the UTC time-of-day field was parsed */
+    uint8_t sats_used;   /* GGA: satellites used in fix, set even when no fix (0 if unknown) */
+    uint8_t fix_quality; /* GGA field 6 digit: 0 invalid, 1 GPS, 2 DGPS, 4/5 RTK, 6 DR */
+    uint8_t utc_hour;    /* GGA/RMC UTC hour 0-23, valid only when utc_valid */
+    uint8_t utc_min;     /* GGA/RMC UTC minute 0-59, valid only when utc_valid */
+    bool utc_valid;      /* true when the UTC time-of-day field was parsed */
     /* RMC carries the UTC date, which GGA does not. The date is what makes a
      * daylight-saving rule evaluable, so local-time rendering needs it in
      * addition to the time of day. */
@@ -51,13 +52,29 @@ bool nmea_parse_rmc(char* sentence, nmea_position_t* pos);
  */
 bool nmea_parse_gga(char* sentence, nmea_position_t* pos);
 
+/* One GSV message's contribution. A GSV cycle is total_msgs messages from one
+ * talker; sats_in_view is repeated in every message of the cycle, while
+ * tracked/snr_max are per-message and the caller accumulates them. */
+typedef struct {
+    char talker[3];       /* two-character talker id from the sentence, e.g. "GP" */
+    uint8_t total_msgs;   /* field 1, 0 if unparseable */
+    uint8_t msg_num;      /* field 2, 0 if unparseable */
+    uint8_t sats_in_view; /* field 3, 0-99 */
+    uint8_t tracked;      /* satellite groups in THIS message with a nonzero C/N0 */
+    uint8_t snr_max;      /* best C/N0 in THIS message in dB-Hz, 0 if none, 0-99 */
+    uint8_t signal_id;    /* NMEA 4.11 trailing signal id (0-15), 0 when the sentence
+                           * carries no such field. A multi-band receiver emits one
+                           * independent cycle per talker AND signal id, each with its
+                           * own message numbering, so the pair identifies the cycle. */
+} nmea_gsv_t;
+
 /**
- * Parse NMEA GSV sentence for total satellites in view.
- * @param sentence: mutable buffer containing "$GPGSV,..." or "$GNGSV,..."
- * @param sats_in_view: output, set to the total-satellites-in-view field
+ * Parse any NMEA GSV sentence ($GPGSV, $GLGSV, $GAGSV, $GBGSV, $GQGSV, $GNGSV).
+ * @param sentence: mutable buffer containing the sentence
+ * @param out: filled on success
  * @return true if parsed successfully
  */
-bool nmea_parse_gsv(char* sentence, uint8_t* sats_in_view);
+bool nmea_parse_gsv(char* sentence, nmea_gsv_t* out);
 
 /**
  * Check whether a raw NMEA line is a $GPTXT/$GNTXT antenna-open warning.
@@ -66,5 +83,21 @@ bool nmea_parse_gsv(char* sentence, uint8_t* sats_in_view);
  * @return true if the line reports an open/disconnected antenna
  */
 bool nmea_is_antenna_open(const char* sentence);
+
+/**
+ * Check whether a raw RMC or GGA line is the receiver explicitly reporting
+ * that it has no fix (RMC status field 'V', GGA quality field '0' or empty).
+ *
+ * nmea_parse_rmc/nmea_parse_gga return false both for that verdict and for a
+ * sentence that failed to parse for any other reason, and the two demand
+ * opposite handling: a receiver saying "no fix" invalidates a previously held
+ * fix, a garbled line says nothing at all. Does not tokenize or modify the
+ * input, so it can be applied to the original line after a parse attempt has
+ * consumed a mutable copy.
+ *
+ * @param sentence: raw sentence
+ * @return true only when the sentence is a well-formed RMC/GGA reporting no fix
+ */
+bool nmea_reports_no_fix(const char* sentence);
 
 #endif /* BRAMBLE_NMEA_PARSER_H */

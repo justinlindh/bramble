@@ -417,7 +417,7 @@ static void gnss_power_off(void) {
     nrf_gpio_pin_clear(BOARD_PIN_GNSS_EN);
 
     xSemaphoreTake(s_mu, portMAX_DELAY);
-    bool had = gps_feed_has_fix(&s_feed);
+    bool had = gps_feed_has_fix(&s_feed, now_ms());
     gps_feed_reset(&s_feed);
     xSemaphoreGive(s_mu);
 
@@ -668,7 +668,7 @@ bool gps_has_fix(void) {
         return false;
     }
     xSemaphoreTake(mu, portMAX_DELAY);
-    bool has_fix = gps_feed_has_fix(&s_feed);
+    bool has_fix = gps_feed_has_fix(&s_feed, now_ms());
     xSemaphoreGive(mu);
     return has_fix;
 }
@@ -679,7 +679,7 @@ bool gps_get_position(bramble_position_t* out) {
         return false;
     }
     xSemaphoreTake(mu, portMAX_DELAY);
-    bool ok = gps_feed_get_position(&s_feed, out);
+    bool ok = gps_feed_get_position(&s_feed, now_ms(), out);
     xSemaphoreGive(mu);
     return ok;
 }
@@ -690,7 +690,7 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
         return false;
     }
     xSemaphoreTake(mu, portMAX_DELAY);
-    bool ok = gps_feed_get_utc_hm(&s_feed, hour, min);
+    bool ok = gps_feed_get_utc_hm(&s_feed, now_ms(), hour, min);
     xSemaphoreGive(mu);
     return ok;
 }
@@ -701,7 +701,7 @@ bool gps_get_utc_date(uint16_t* year, uint8_t* month, uint8_t* day) {
         return false;
     }
     xSemaphoreTake(mu, portMAX_DELAY);
-    bool ok = gps_feed_get_utc_date(&s_feed, year, month, day);
+    bool ok = gps_feed_get_utc_date(&s_feed, now_ms(), year, month, day);
     xSemaphoreGive(mu);
     return ok;
 }
@@ -713,6 +713,9 @@ void gps_get_stats(gps_stats_t* out) {
     SemaphoreHandle_t mu = s_mu;
     if (!mu) {
         memset(out, 0, sizeof(*out));
+        /* Zero would read as "the feed started this instant"; with no driver
+         * running, nothing has arrived, which is what the sentinel says. */
+        out->nmea_age_s = GPS_STATS_NMEA_NEVER;
         return;
     }
     xSemaphoreTake(mu, portMAX_DELAY);

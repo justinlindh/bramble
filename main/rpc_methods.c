@@ -32,6 +32,7 @@
 #include "freertos/task.h"
 #include "board_config.h"
 #include "display.h"
+#include "gnss_status.h"
 #include "gps.h"
 #include "gps_pref.h"
 #include "location.h"
@@ -133,6 +134,27 @@ typedef struct __attribute__((packed)) {
  * node too low on heap to snapshot its own state cannot report that state.
  */
 
+/* One GNSS snapshot shared by getStatus and getGpsPosition. gps_get_stats
+ * takes the driver lock, so callers take exactly one snapshot per response. */
+static void gnss_snapshot(gnss_ui_input_t* in) {
+    memset(in, 0, sizeof(*in));
+    in->board_has_gnss = board_has_cap(BOARD_CAP_GPS);
+    if (!in->board_has_gnss) {
+        in->nmea_age_s = GNSS_UI_NMEA_NEVER;
+        return;
+    }
+    in->powered = gps_pref_get();
+    in->has_fix = gps_has_fix();
+    gps_stats_t st;
+    gps_get_stats(&st);
+    in->sats_in_view = st.sats_in_view;
+    in->sats_tracked = st.sats_tracked;
+    in->sats_used = st.sats_used;
+    in->snr_max_dbhz = st.snr_max_dbhz;
+    in->fix_quality = st.fix_quality;
+    in->nmea_age_s = st.nmea_age_s;
+}
+
 /* bramble.getStatus */
 static int handle_get_status(const cJSON* params, cJSON* result) {
     (void)params;
@@ -161,6 +183,21 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
     cJSON_AddBoolToObject(result, "gps_enabled", gps_pref_get());
+
+    /* GNSS observability: the three-way state plus the counts behind it, so a
+     * field operator can tell "nothing reaching the receiver" from "signal
+     * present, fix not converging" from "fix". Always emitted, zeroed on a
+     * board without GNSS (gps_available already says which); mirrored in
+     * api/openapi.yaml's StatusResponse. */
+    gnss_ui_input_t gnss;
+    gnss_snapshot(&gnss);
+    cJSON_AddStringToObject(result, "gps_state", gnss_ui_state_wire(gnss_ui_classify(&gnss)));
+    cJSON_AddNumberToObject(result, "gps_sats_in_view", gnss.sats_in_view);
+    cJSON_AddNumberToObject(result, "gps_sats_tracked", gnss.sats_tracked);
+    cJSON_AddNumberToObject(result, "gps_sats_used", gnss.sats_used);
+    cJSON_AddNumberToObject(result, "gps_snr_max_dbhz", gnss.snr_max_dbhz);
+    cJSON_AddNumberToObject(result, "gps_fix_quality", gnss.fix_quality);
+
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync",
                           mesh_supports_delivery_event_sync());
 
@@ -2754,6 +2791,18 @@ static int handle_get_gps_position(const cJSON* params, cJSON* result) {
     } else {
         cJSON_AddBoolToObject(result, "valid", false);
     }
+
+    /* Emitted on both branches: the no-fix branch is the one that matters in
+     * the field, where "valid: false" alone is indistinguishable from a dead
+     * antenna. */
+    gnss_ui_input_t gnss;
+    gnss_snapshot(&gnss);
+    cJSON_AddStringToObject(result, "state", gnss_ui_state_wire(gnss_ui_classify(&gnss)));
+    cJSON_AddNumberToObject(result, "sats_in_view", gnss.sats_in_view);
+    cJSON_AddNumberToObject(result, "sats_tracked", gnss.sats_tracked);
+    cJSON_AddNumberToObject(result, "sats_used", gnss.sats_used);
+    cJSON_AddNumberToObject(result, "snr_max_dbhz", gnss.snr_max_dbhz);
+    cJSON_AddNumberToObject(result, "fix_quality", gnss.fix_quality);
     return 0;
 }
 

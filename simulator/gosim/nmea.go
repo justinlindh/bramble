@@ -1,8 +1,8 @@
 package main
 
 // NMEA synthesis for virtual GPS: while a firmware node's GPS power gate is
-// on (see handleGpsGate), the broker feeds it RMC+GGA sentences derived from
-// the node's scenario slot position, on the simulation clock. This is the
+// on (see handleGpsGate), the broker feeds it RMC+GGA+GSV sentences derived
+// from the node's scenario slot position, on the simulation clock. This is the
 // "later task" the gpsgate hook in extnode.go reserved: it is what exercises
 // the firmware's gps_virt path (nmea parse, fix state, fix callback) in the
 // emulator, where previously no scenario ever drove GPS.
@@ -18,7 +18,7 @@ import (
 	"math"
 )
 
-// One sentence pair per simulated second, the cadence of a real 1 Hz GNSS.
+// One sentence set per simulated second, the cadence of a real 1 Hz GNSS.
 const nmeaFeedIntervalUs = 1_000_000
 
 const (
@@ -79,4 +79,35 @@ func nmeaGGA(x, y float32, simUs uint64) string {
 	lat, ns, lon, ew := nmeaDegrees(x, y)
 	body := fmt.Sprintf("GPGGA,%s,%s,%s,%s,%s,1,08,0.9,100.0,M,46.9,M,,", nmeaTimeUTC(simUs), lat, ns, lon, ew)
 	return "$" + body + "*" + nmeaChecksum(body)
+}
+
+// nmeaGSVSats is the fixture sky: eleven satellites, each with a PRN,
+// elevation, azimuth and carrier-to-noise ratio. All eleven report a nonzero
+// C/N0, so a virtual node is coherently "tracking eleven, using eight" rather
+// than reporting satellites used with none in view. Fixed values keep a
+// scenario replayable; the best C/N0 is 45 dB-Hz.
+var nmeaGSVSats = [11][4]int{
+	{10, 63, 137, 42}, {7, 61, 308, 40}, {5, 59, 169, 38}, {30, 54, 42, 45},
+	{8, 45, 210, 35}, {13, 40, 95, 33}, {15, 36, 275, 31}, {18, 28, 15, 29},
+	{20, 22, 190, 27}, {23, 17, 130, 24}, {27, 11, 305, 20},
+}
+
+// nmeaGSV builds one $GPGSV cycle: three messages covering the eleven
+// satellites in nmeaGSVSats, four groups per message and three in the last.
+// The satellites-in-view total is repeated in every message of the cycle, as
+// a real receiver does. The cycle is time invariant, so unlike RMC and GGA it
+// takes no simulation clock.
+func nmeaGSV() []string {
+	const perMsg = 4
+	total := (len(nmeaGSVSats) + perMsg - 1) / perMsg
+	out := make([]string, 0, total)
+	for msg := 0; msg < total; msg++ {
+		body := fmt.Sprintf("GPGSV,%d,%d,%02d", total, msg+1, len(nmeaGSVSats))
+		for i := msg * perMsg; i < (msg+1)*perMsg && i < len(nmeaGSVSats); i++ {
+			s := nmeaGSVSats[i]
+			body += fmt.Sprintf(",%02d,%02d,%03d,%02d", s[0], s[1], s[2], s[3])
+		}
+		out = append(out, "$"+body+"*"+nmeaChecksum(body))
+	}
+	return out
 }

@@ -255,7 +255,7 @@ static void nmea_handler(const cJSON* msg, void* ctx) {
 
 bool gps_has_fix(void) {
     pthread_mutex_lock(&s_mu);
-    bool f = gps_feed_has_fix(&s_feed);
+    bool f = gps_feed_has_fix(&s_feed, gvirt_now_ms());
     pthread_mutex_unlock(&s_mu);
     return f;
 }
@@ -265,7 +265,7 @@ bool gps_get_position(bramble_position_t* out) {
         return false;
     bool ok;
     pthread_mutex_lock(&s_mu);
-    ok = gps_feed_get_position(&s_feed, out);
+    ok = gps_feed_get_position(&s_feed, gvirt_now_ms(), out);
     pthread_mutex_unlock(&s_mu);
     return ok;
 }
@@ -273,7 +273,7 @@ bool gps_get_position(bramble_position_t* out) {
 bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
     bool ok;
     pthread_mutex_lock(&s_mu);
-    ok = gps_feed_get_utc_hm(&s_feed, hour, min);
+    ok = gps_feed_get_utc_hm(&s_feed, gvirt_now_ms(), hour, min);
     pthread_mutex_unlock(&s_mu);
     return ok;
 }
@@ -281,7 +281,7 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
 bool gps_get_utc_date(uint16_t* year, uint8_t* month, uint8_t* day) {
     bool ok;
     pthread_mutex_lock(&s_mu);
-    ok = gps_feed_get_utc_date(&s_feed, year, month, day);
+    ok = gps_feed_get_utc_date(&s_feed, gvirt_now_ms(), year, month, day);
     pthread_mutex_unlock(&s_mu);
     return ok;
 }
