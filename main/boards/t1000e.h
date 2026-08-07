@@ -14,7 +14,7 @@
  * identity (name, short_name) and the capability mask. GNSS and battery
  * (including charge/VBUS detect) are both brought up on this hardware, but
  * through the nRF port's own board header and drivers (nrf/boards/t1000e.h,
- * nrf/shim/gps_t1000e.c, nrf/shim/battery_t1000e.c), never through this
+ * nrf/shim/gps_t1000e.c, nrf/shim/battery_saadc.c), never through this
  * struct. The buzzer and other sensors on the hardware are not brought up
  * yet, on either port.
  */
@@ -44,7 +44,7 @@ static const bramble_board_config_t board_t1000e = {
 
     /* All -1, same rationale as .battery/.radio above: the real charge and
      * VBUS-sense pins are wired by the nRF port's own battery backend
-     * (nrf/shim/battery_t1000e.c), not this ESP-IDF-facing struct, which no
+     * (nrf/shim/battery_saadc.c), not this ESP-IDF-facing struct, which no
      * ESP driver reads for this board. */
     .charge = {.chrg_gpio = -1, .chrg_active_level = 0, .vbus_gpio = -1},
 

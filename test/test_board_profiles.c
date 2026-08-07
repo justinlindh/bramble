@@ -213,7 +213,7 @@ void test_virtual_pager_profile_matches_bramble_pager_pins(void) {
  * chrg_active_level=0, vbus_gpio=0}, misreading GPIO0 as a wired
  * charge-detect pin. No board wires real pins through this ESP-IDF-facing
  * struct (the T1000-E's real charge/VBUS pins are read by
- * nrf/shim/battery_t1000e.c via its own nRF-specific board header, not
+ * nrf/shim/battery_saadc.c via its own nRF-specific board header, not
  * this one; see main/boards/t1000e.h), so every one of the 8 profiles
  * must ship the explicit "not wired" sentinel {-1, 0, -1}; this checks
  * all of them, not just bramble_pager (which has its own copy above as

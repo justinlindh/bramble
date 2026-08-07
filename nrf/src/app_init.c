@@ -59,9 +59,9 @@ void app_init_stack(void) {
 
     /* Battery before the mesh starts: mesh_task_start's beacon path reads
      * battery_get_status() from its first beacon tick, and on the T1000-E
-     * (shim/battery_t1000e.c) that needs the CHRG/VBUS GPIOs configured
-     * first, matching the ESP boot order (main.c calls battery_init()
-     * before mesh_task_start too). */
+     * (shim/battery_saadc.c) that needs the SAADC channel and the CHRG/VBUS
+     * GPIOs configured first, matching the ESP boot order (main.c calls
+     * battery_init() before mesh_task_start too). */
     battery_init();
     boot_trace_mark(BT_BATTERY_INIT, 0);
     {

@@ -50,19 +50,15 @@
 #define BOARD_PIN_LORA_IRQ (32 + 1)    // P1.01, DIO9 IRQ line
 #define BOARD_PIN_LORA_BUSY 7          // P0.07
 
-// Charge detect. Verified 2026-08-01 against github.com/meshtastic/firmware
-// variants/nrf52840/tracker-t1000-e/variant.h (EXT_CHRG_DETECT,
-// EXT_PWR_DETECT) and src/Power.cpp (the pin modes and the
+// Battery ADC and charge detect. Verified 2026-08-01 against
+// github.com/meshtastic/firmware variants/nrf52840/tracker-t1000-e/variant.h
+// (BATTERY_PIN, ADC_MULTIPLIER, VBAT_AR_INTERNAL/AREF_VOLTAGE, ADC_RESOLUTION,
+// EXT_CHRG_DETECT, EXT_PWR_DETECT) and src/Power.cpp (the pin modes and the
 // isCharging()/isVbusIn() polarity, since variant.h alone does not say how
 // the detect pins are configured).
-//
-// No BAT_ADC pin is mapped. The cell reaches P0.02/AIN0 through a 2x
-// divider, but that divider hangs off a sensor rail gated by P1.06
-// (SENSE_POWER_EN per the vendor SDK). Off, the ADC returns a confident 1
-// to 4 mV; driving the gate high stopped the board within about a
-// millisecond on hardware. Neither pin is defined here so no build can
-// reach either one by accident. See nrf/shim/battery_t1000e.c.
 #define BOARD_HAS_BATTERY 1
+#define BOARD_PIN_VBAT_ADC 2           // P0.02 = AIN0, BAT_ADC
+#define BOARD_BATTERY_DIVIDER 2        // ADC_MULTIPLIER 2.0F
 #define BOARD_PIN_CHRG_DETECT (32 + 3) // P1.03, EXT_CHRG_DETECT, active LOW = charging
 #define BOARD_PIN_VBUS_DETECT 5        // P0.05, EXT_PWR_DETECT, HIGH = external power present
 
