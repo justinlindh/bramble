@@ -484,7 +484,12 @@ location_channel_verdict() {
     LOCATION_RECEIVER="$(grep -F "RX location from $LOCATION_SHARER" "$log" \
         | sed -n 's/.*"node":"\([0-9A-F]*\)".*/\1/p' | head -1)"
     [ -n "$LOCATION_RECEIVER" ] || return 1
-    [ "$LOCATION_RECEIVER" != "$LOCATION_SHARER" ]
+    [ "$LOCATION_RECEIVER" != "$LOCATION_SHARER" ] || return 1
+
+    # The seeded public-channel rule must be gone, not merely unsent. A rule the
+    # send path refuses and the config surface will not delete would otherwise
+    # sit in NVS forever, which is the wedged state this asserts against.
+    grep -qF 'removed location rule lch_00' "$log"
 }
 
 # Two pagers, one channel location target, no DM between them. Both nodes derive

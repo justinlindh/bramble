@@ -91,6 +91,58 @@ static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t
 }
 
 /*
+ * Erase channel-target rules the send path will never act on.
+ *
+ * A rule naming the public channel is inert (target resolution refuses it) and
+ * unreachable through the config surface: the write loop only ever adds or
+ * updates keys, removeLocationContact erases contact keys only, and
+ * setLocationConfig rejects a channel-0 entry before the write loop whatever
+ * its "enabled" field says, so the owner cannot even switch it off. Left alone
+ * such a rule is a permanent occupant that nothing will send to and nobody can
+ * delete. The node deletes it itself rather than reporting a state the user is
+ * powerless to change.
+ *
+ * Called with no NVS handle open and no other lock held, straight after the
+ * collect pass closes its read-only handle, so the shim mutex stays strictly
+ * below every other lock exactly as the two-phase structure requires. Keys are
+ * gathered during the read pass and erased here, never while an iterator is
+ * live.
+ *
+ * This rides the collect pass, which the policy tick only reaches while
+ * sharing is enabled. That is the state worth healing: sharing off transmits
+ * nothing whatever the rules say, and getConfig already omits a rule the send
+ * path would refuse, so a disabled node is neither leaking nor lying. Enabling
+ * sharing runs the next collect and clears the rule then.
+ */
+static void location_purge_dead_channel_rules(const char keys[][LOCATION_TARGET_KEY_SIZE],
+                                              size_t count) {
+    if (count == 0)
+        return;
+
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
+        ESP_LOGW(TAG, "location namespace unavailable; dead channel rules left in place");
+        return;
+    }
+    for (size_t i = 0; i < count; i++) {
+        esp_err_t err = nvs_erase_key(nvs, keys[i]);
+        if (err == ESP_OK) {
+            ESP_LOGW(TAG, "removed location rule %s: the public channel cannot carry location",
+                     keys[i]);
+        } else {
+            /* Say so rather than leaving the owner to infer it. The rule stays
+             * inert either way (resolution and the send path both refuse it),
+             * but a silent failure here means the next boot tries again with
+             * no record of why the first attempt did nothing. */
+            ESP_LOGW(TAG, "could not remove location rule %s (%s); it stays inert and unsent",
+                     keys[i], esp_err_to_name(err));
+        }
+    }
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+/*
  * Read every enabled share target out of the location namespace in one pass.
  *
  * This is the COLLECT half of the two-phase structure documented at
@@ -103,16 +155,33 @@ static void location_collect_targets(location_target_set_t* out) {
     out->count = 0;
     out->skipped = 0;
 
+    /* Dead rules found during the read pass, erased after it closes. */
+    char dead[LOCATION_MAX_CHANNEL_TARGETS][LOCATION_TARGET_KEY_SIZE];
+    size_t dead_count = 0;
+
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK) {
         return;
     }
+
+    const size_t channel_prefix_len = sizeof(LOCATION_CHANNEL_RULE_PREFIX) - 1;
 
     nvs_iterator_t it = NULL;
     if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) == ESP_OK) {
         while (it != NULL) {
             nvs_entry_info_t info;
             nvs_entry_info(it, &info);
+
+            /* A well-formed channel key naming a channel that may not carry
+             * location: inert and unremovable, so mark it for deletion. */
+            if (strncmp(info.key, LOCATION_CHANNEL_RULE_PREFIX, channel_prefix_len) == 0) {
+                int idx = location_channel_index_from_suffix(info.key + channel_prefix_len);
+                if (idx >= 0 && !location_channel_target_is_permitted(idx) &&
+                    dead_count < LOCATION_MAX_CHANNEL_TARGETS) {
+                    snprintf(dead[dead_count], LOCATION_TARGET_KEY_SIZE, "%s", info.key);
+                    dead_count++;
+                }
+            }
 
             char raw[64] = {0};
             size_t raw_len = sizeof(raw);
@@ -152,6 +221,8 @@ static void location_collect_targets(location_target_set_t* out) {
     }
 
     nvs_close(nvs);
+
+    location_purge_dead_channel_rules(dead, dead_count);
 
     if (out->skipped > 0) {
         ESP_LOGW(TAG, "location share: %u targets over the %d-target cap were not sent",
