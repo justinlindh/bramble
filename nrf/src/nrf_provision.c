@@ -7,6 +7,8 @@
 // -DBRAMBLE_NRF_DEV_NETKEY=<64 hex> configure argument. The KEY VALUE is
 // never committed anywhere; without the define this function compiles to a
 // no-op and the node stays INERT until provisioned over BLE.
+#include "nrf_provision.h"
+
 #include "esp_log.h"
 #include "network_key.h"
 
@@ -40,7 +42,15 @@ int nrf_seed_network_key_from_build(void) { return -1; }
  * first-pairing flow for consoleless devices lands, a locally generated
  * token can be seeded at configure time exactly like the dev network key.
  * Seeds only when NO token exists, so a device that already minted or was
- * given one keeps it. The KEY VALUE is never committed anywhere. */
+ * given one keeps it. The KEY VALUE is never committed anywhere.
+ *
+ * Returns 0 when a token is now in place (seeded here, or already stored),
+ * BRAMBLE_TOKEN_SEED_SKIPPED when this build carries no dev token at all,
+ * and -1 only on a real failure. The skipped case needs its own value
+ * because it is the NORMAL result for every build that does not pass
+ * -DBRAMBLE_NRF_DEV_AUTH_TOKEN: folding it into -1 put a failing return
+ * code in the boot trace of every healthy production boot, which cost
+ * someone reading a trace the time to rule it out. */
 int nrf_seed_auth_token_from_build(void) {
     if (strlen(BRAMBLE_NRF_DEV_AUTH_TOKEN) < 16) {
         ESP_LOGE(TAG, "BRAMBLE_NRF_DEV_AUTH_TOKEN too short (16 char minimum), not seeded");
@@ -69,6 +79,8 @@ int nrf_seed_auth_token_from_build(void) {
 
 #else
 
-int nrf_seed_auth_token_from_build(void) { return -1; }
+/* No build-time token compiled in, which is the normal production case and
+ * not a failure: ws_server_load_token() mints one immediately after. */
+int nrf_seed_auth_token_from_build(void) { return BRAMBLE_TOKEN_SEED_SKIPPED; }
 
 #endif
