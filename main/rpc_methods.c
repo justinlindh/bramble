@@ -93,18 +93,6 @@ static void bytes_to_hex(const uint8_t* in, size_t n, char* out) {
     out[2 * n] = '\0';
 }
 
-typedef struct __attribute__((packed)) {
-    int32_t latitude_e7;
-    int32_t longitude_e7;
-    int16_t altitude_m;
-    uint8_t accuracy_m;
-    uint8_t speed_kmh;
-    uint8_t heading_deg2;
-    uint32_t timestamp;
-    uint32_t received_ms;
-    uint8_t tier;
-} persisted_peer_location_t;
-
 /* ── Query handlers (pre-existing) ─────────────────────────────────── */
 
 /*
@@ -2117,33 +2105,43 @@ static int handle_get_peer_locations(const cJSON* params, cJSON* result) {
                     nvs_entry_info_t info;
                     nvs_entry_info(it, &info);
 
-                    if (strncmp(info.key, "lp_", 3) == 0) {
-                        persisted_peer_location_t stored = {0};
-                        size_t len = sizeof(stored);
-                        if (nvs_get_blob(nvs, info.key, &stored, &len) == ESP_OK &&
-                            len == sizeof(stored)) {
+                    uint32_t peer_addr = 0;
+                    if (peer_location_key_parse(info.key, &peer_addr)) {
+                        persisted_peer_location_t blob;
+                        size_t len = sizeof(blob);
+                        peer_location_record_t stored;
+                        if (nvs_get_blob(nvs, info.key, &blob, &len) == ESP_OK &&
+                            peer_location_record_decode(&blob, len, location_store_boot_id(),
+                                                        &stored) == 0) {
                             cJSON* peer = cJSON_CreateObject();
-                            uint32_t freshness_ms =
-                                (now_ms >= stored.received_ms) ? (now_ms - stored.received_ms) : 0;
 
                             cJSON* position = cJSON_CreateObject();
-                            cJSON_AddNumberToObject(position, "lat", stored.latitude_e7 / 1e7);
-                            cJSON_AddNumberToObject(position, "lon", stored.longitude_e7 / 1e7);
-                            cJSON_AddNumberToObject(position, "alt", stored.altitude_m);
-                            cJSON_AddNumberToObject(position, "accuracy", stored.accuracy_m);
-                            cJSON_AddNumberToObject(position, "speed", stored.speed_kmh);
-                            cJSON_AddNumberToObject(position, "heading", stored.heading_deg2 * 2);
+                            cJSON_AddNumberToObject(position, "lat", stored.pos.latitude_e7 / 1e7);
+                            cJSON_AddNumberToObject(position, "lon", stored.pos.longitude_e7 / 1e7);
+                            cJSON_AddNumberToObject(position, "alt", stored.pos.altitude_m);
+                            cJSON_AddNumberToObject(position, "accuracy", stored.pos.accuracy_m);
+                            cJSON_AddNumberToObject(position, "speed", stored.pos.speed_kmh);
+                            cJSON_AddNumberToObject(position, "heading",
+                                                    stored.pos.heading_deg2 * 2);
                             cJSON_AddNumberToObject(position, "timestampMs",
-                                                    (double)stored.timestamp * 1000.0);
+                                                    (double)stored.pos.timestamp * 1000.0);
 
-                            cJSON_AddStringToObject(peer, "addr", info.key + 3);
+                            cJSON_AddStringToObject(peer, "addr",
+                                                    info.key + PEER_LOCATION_KEY_PREFIX_LEN);
                             cJSON_AddStringToObject(peer, "name", "");
                             cJSON_AddStringToObject(peer, "tier",
                                                     location_tier_to_string(stored.tier));
                             cJSON_AddItemToObject(peer, "position", position);
-                            cJSON_AddBoolToObject(peer, "online",
-                                                  freshness_ms < LOCATION_CACHE_TTL_MS);
-                            cJSON_AddNumberToObject(peer, "lastUpdatedMs", stored.received_ms);
+                            cJSON_AddBoolToObject(
+                                peer, "online",
+                                location_age_is_fresh(stored.age_known, stored.received_ms,
+                                                      now_ms));
+                            /* An uptime reading from a previous boot cannot be
+                             * expressed on this boot's clock, so report 0
+                             * ("unknown") rather than a number that reads as a
+                             * plausible, and wrong, moment in this boot. */
+                            cJSON_AddNumberToObject(peer, "lastUpdatedMs",
+                                                    stored.age_known ? stored.received_ms : 0);
 
                             cJSON_AddItemToArray(peer_locations, peer);
                         }

@@ -17,18 +17,6 @@
 
 static const char* TAG = "mesh";
 
-typedef struct __attribute__((packed)) {
-    int32_t latitude_e7;
-    int32_t longitude_e7;
-    int16_t altitude_m;
-    uint8_t accuracy_m;
-    uint8_t speed_kmh;
-    uint8_t heading_deg2;
-    uint32_t timestamp;
-    uint32_t received_ms;
-    uint8_t tier;
-} persisted_peer_location_t;
-
 /* Forward declarations for intra-module static helpers. */
 static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t* policy);
 static bool location_policy_has_targets(void);
@@ -37,8 +25,6 @@ static void mesh_emit_location_event(const char* event, uint32_t peer_addr, uint
                                      uint32_t count);
 static void mesh_send_location_updates(uint32_t t, const location_policy_t* policy,
                                        const bramble_position_t* source_pos);
-static void mesh_persist_peer_location(uint32_t peer_addr, const bramble_position_t* pos,
-                                       uint8_t tier, uint32_t now_ms);
 static int location_rx_decode_channel(const uint8_t* nonce, const uint8_t* ciphertext,
                                       size_t ct_len, const uint8_t* tag, const uint8_t* aad,
                                       size_t aad_len, uint8_t* tier_out,
@@ -393,33 +379,6 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
     }
 }
 
-static void mesh_persist_peer_location(uint32_t peer_addr, const bramble_position_t* pos,
-                                       uint8_t tier, uint32_t now_ms) {
-    nvs_handle_t nvs;
-    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
-        return;
-    }
-
-    char key[16];
-    snprintf(key, sizeof(key), "lp_%08" PRIX32, peer_addr);
-
-    persisted_peer_location_t stored = {
-        .latitude_e7 = pos->latitude_e7,
-        .longitude_e7 = pos->longitude_e7,
-        .altitude_m = pos->altitude_m,
-        .accuracy_m = pos->accuracy_m,
-        .speed_kmh = pos->speed_kmh,
-        .heading_deg2 = pos->heading_deg2,
-        .timestamp = pos->timestamp,
-        .received_ms = now_ms,
-        .tier = tier,
-    };
-
-    nvs_set_blob(nvs, key, &stored, sizeof(stored));
-    nvs_commit(nvs);
-    nvs_close(nvs);
-}
-
 /*
  * SEC-C1 RX channel-path glue (Task 2.2): trial-decrypts against the known
  * channels, then hands the resulting plaintext to location_parse_inner
@@ -547,8 +506,22 @@ void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr)
     }
 
     uint32_t t = now_ms();
-    location_cache_update(&s_location_mgr, src_addr, &pos, t);
-    mesh_persist_peer_location(src_addr, &pos, tier, t);
+    /* The share's tier decides what the cache may hold; see
+     * location_cache_apply_share for why a PRESENCE share clears coordinates
+     * instead of leaving the last exact ones on the map. The flash record
+     * follows the same rule for free: it stores the position as sent, so a
+     * presence share overwrites the coordinates with zeroes.
+     *
+     * Under s_state_mutex because mesh_get_location_state copies the whole
+     * manager under it, and a PRESENCE share compacts the array by moving the
+     * last entry down, so an unlocked write here can hand the UI a torn table.
+     * The critical section is pure RAM (no NVS, no other lock), which is what
+     * keeps it clear of the NVS-at-the-bottom ordering; the flash write below
+     * deliberately stays outside it. */
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    location_cache_apply_share(&s_location_mgr, src_addr, tier, &pos, t);
+    xSemaphoreGive(s_state_mutex);
+    location_store_save_peer(src_addr, &pos, tier, t);
 
     ESP_LOGI(TAG, "RX location from %08" PRIX32 " tier=%u RSSI:%d SNR:%d", src_addr, tier, rssi,
              snr);
