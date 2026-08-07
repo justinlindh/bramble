@@ -247,6 +247,15 @@ bool location_channel_key(char* out, size_t out_len, int channel_index);
  */
 bool location_target_from_entry(const char* key, const char* raw, location_target_t* out);
 
+/*
+ * Channel index from a channel-rule key suffix, which the key builder always
+ * writes as exactly two decimal digits. Returns -1 for anything else, so a
+ * foreign or corrupt key cannot silently resolve to channel 0: atoi alone
+ * reports 0 both for "00" and for a suffix carrying no digits at all, and
+ * channel 0 is the public channel that must never carry location.
+ */
+int location_channel_index_from_suffix(const char* suffix);
+
 /* Shortest interval among the given targets, in seconds, or 0 for none. This
  * is the node's effective share cadence, which is what the GNSS duty cycler
  * has to schedule against. */

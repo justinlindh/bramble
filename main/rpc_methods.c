@@ -2393,13 +2393,23 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
 
                 if (strncmp(info.key, LOCATION_CHANNEL_RULE_PREFIX,
                             strlen(LOCATION_CHANNEL_RULE_PREFIX)) == 0) {
+                    /* Report only what the send path would act on. A stale
+                       lch_00 written by a build predating the public-channel
+                       rejection still sits in NVS after an upgrade, and the
+                       send path now refuses it; emitting it here would tell
+                       the client a target is configured and enabled while
+                       nothing is ever transmitted to it, which is the silent
+                       disagreement between reported and actual state that this
+                       guard exists to prevent. The contact loop above filters
+                       its own legacy keys for the same reason. */
+                    const char* chan_suffix = info.key + strlen(LOCATION_CHANNEL_RULE_PREFIX);
+                    int chan_index = location_channel_index_from_suffix(chan_suffix);
                     char raw[64] = {0};
                     size_t raw_len = sizeof(raw);
-                    if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
+                    if (chan_index >= 0 && location_channel_target_is_permitted(chan_index) &&
+                        nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
                         cJSON* entry = cJSON_CreateObject();
-                        cJSON_AddNumberToObject(
-                            entry, "channel",
-                            atoi(info.key + strlen(LOCATION_CHANNEL_RULE_PREFIX)));
+                        cJSON_AddNumberToObject(entry, "channel", chan_index);
                         rpc_location_rule_emit_fields(entry, raw);
                         cJSON_AddItemToArray(channel_targets, entry);
                     }

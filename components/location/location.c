@@ -341,6 +341,12 @@ static bool location_suffix_is_exact(const char* suffix, size_t digits, bool hex
     return suffix[digits] == '\0';
 }
 
+int location_channel_index_from_suffix(const char* suffix) {
+    if (!suffix || !location_suffix_is_exact(suffix, 2, false))
+        return -1;
+    return atoi(suffix);
+}
+
 bool location_target_from_entry(const char* key, const char* raw, location_target_t* out) {
     if (!key || !raw || !out)
         return false;
