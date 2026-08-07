@@ -172,33 +172,81 @@ bool nmea_parse_rmc(char* sentence, nmea_position_t* pos) {
     return true;
 }
 
-/* Parse $GPGSV or $GNGSV sentence for total satellites in view.
+/* Parse any GSV sentence, whatever the talker.
  * Example: $GPGSV,3,1,11,10,63,137,17,07,61,308,17,05,59,169,18,30,54,042,*7D
- * Fields: 0=GPGSV, 1=total_msgs, 2=msg_num, 3=sats_in_view, 4+=per-satellite groups. */
-bool nmea_parse_gsv(char* sentence, uint8_t* sats_in_view) {
-    if (!sentence || !sats_in_view)
+ * Fields: 0=$xxGSV, 1=total_msgs, 2=msg_num, 3=sats_in_view, then up to four
+ * per-satellite groups of (prn, elevation_deg, azimuth_deg, cn0_dbhz) and an
+ * optional NMEA 4.11 trailing signal-id field.
+ *
+ * A group with an empty or zero C/N0 is a satellite the almanac predicts but
+ * the receiver is not hearing: it counts toward field 3 and not toward
+ * tracked, which is what separates "dead antenna" from "acquiring".
+ *
+ * Every talker is accepted ($GP GPS, $GL GLONASS, $GA Galileo, $GB BeiDou,
+ * $GQ QZSS, $GN combined) because a whitelist undercounts by the number of
+ * constellations it omits. */
+bool nmea_parse_gsv(char* sentence, nmea_gsv_t* out) {
+    if (!sentence || !out)
         return false;
 
-    char* fields[8];
-    int field_count = nmea_split(sentence, fields, 8);
+    memset(out, 0, sizeof(*out));
+
+    /* 4 header fields + 4 satellite groups of 4 + one trailing signal id. */
+    char* fields[21];
+    int field_count = nmea_split(sentence, fields, 21);
 
     if (field_count < 4)
         return false;
 
-    if (strcmp(fields[0], "$GPGSV") != 0 && strcmp(fields[0], "$GNGSV") != 0) {
+    if (strlen(fields[0]) != 6 || fields[0][0] != '$' || !isalpha((unsigned char)fields[0][1]) ||
+        !isalpha((unsigned char)fields[0][2]) || strcmp(fields[0] + 3, "GSV") != 0) {
         return false;
     }
+    out->talker[0] = fields[0][1];
+    out->talker[1] = fields[0][2];
+    out->talker[2] = '\0';
 
     if (field_empty(fields[3]))
         return false;
+
+    int total_msgs = field_empty(fields[1]) ? 0 : atoi(fields[1]);
+    if (total_msgs < 0 || total_msgs > 9)
+        total_msgs = 0;
+    out->total_msgs = (uint8_t)total_msgs;
+
+    int msg_num = field_empty(fields[2]) ? 0 : atoi(fields[2]);
+    if (msg_num < 0 || msg_num > 9)
+        msg_num = 0;
+    out->msg_num = (uint8_t)msg_num;
 
     int sats = atoi(fields[3]);
     if (sats < 0)
         sats = 0;
     if (sats > 99)
         sats = 99;
+    out->sats_in_view = (uint8_t)sats;
 
-    *sats_in_view = (uint8_t)sats;
+    /* Requiring the whole group to be present means an incomplete trailing
+     * group (which is what a 4.11 signal-id field looks like) is skipped
+     * rather than misread as a C/N0. */
+    for (int i = 0; 4 + 4 * i + 3 < field_count; i++) {
+        const char* prn = fields[4 + 4 * i];
+        const char* snr = fields[7 + 4 * i];
+        if (field_empty(prn))
+            continue;
+        if (field_empty(snr))
+            continue;
+        int v = atoi(snr);
+        if (v <= 0)
+            continue;
+        if (v > 99)
+            v = 99;
+        if (out->tracked < 99)
+            out->tracked++;
+        if ((uint8_t)v > out->snr_max)
+            out->snr_max = (uint8_t)v;
+    }
+
     return true;
 }
 
@@ -263,6 +311,12 @@ bool nmea_parse_gga(char* sentence, nmea_position_t* pos) {
     } else {
         pos->sats_used = 0;
     }
+
+    /* Fix quality is the receiver's own verdict, reported with or without a
+     * usable fix, so capture it before the gate below rejects the sentence. */
+    pos->fix_quality = (!field_empty(fields[6]) && isdigit((unsigned char)fields[6][0]))
+                           ? (uint8_t)(fields[6][0] - '0')
+                           : 0;
 
     /* Check fix quality (0=invalid, 1=GPS, 2=DGPS, etc.) */
     if (field_empty(fields[6]) || fields[6][0] == '0') {

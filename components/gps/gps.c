@@ -316,9 +316,7 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
 }
 void gps_get_stats(gps_stats_t* out) {
     if (out) {
-        out->sats_used = 0;
-        out->sats_in_view = 0;
-        out->antenna_warning = false;
+        memset(out, 0, sizeof(*out));
     }
 }
 void gps_get_debug(gps_debug_t* out) {

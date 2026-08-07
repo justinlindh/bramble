@@ -12,13 +12,30 @@
  */
 typedef void (*gps_fix_cb_t)(const bramble_position_t* pos, void* ctx);
 
+/* Sentinel for gps_stats_t.nmea_age_s: no NMEA line has been received since
+ * the feed was last reset (module silent, unpowered, or miswired). */
+#define GPS_STATS_NMEA_NEVER UINT32_MAX
+
 /**
  * Satellite counts and antenna health, tracked independently of position
  * fix validity so a "searching" UI can show progress before the first fix.
+ * The satellite counts and signal strength are tracked independently of fix
+ * validity so a caller can tell a receiver hearing nothing from one hearing
+ * satellites but not yet converging.
  */
 typedef struct {
-    uint8_t sats_used;    /* GGA: satellites used in the most recent fix computation */
-    uint8_t sats_in_view; /* GSV: total satellites currently in view */
+    uint8_t sats_used;    /* GGA field 7: satellites used in the fix computation, 0-99 */
+    uint8_t sats_in_view; /* GSV field 3, summed across constellations, 0-99 */
+    uint8_t sats_tracked; /* GSV entries reporting a nonzero C/N0, summed across
+                           * constellations, 0-99. Satellites the receiver is actually
+                           * hearing, as opposed to ones the almanac predicts. */
+    uint8_t snr_max_dbhz; /* Best C/N0 across all GSV entries in the last complete
+                           * message cycle, dB-Hz, 0-99. 0 when nothing is tracked. */
+    uint8_t fix_quality;  /* GGA field 6 as a digit: 0 invalid, 1 GPS, 2 DGPS,
+                           * 4 RTK fixed, 5 RTK float, 6 dead reckoning. 0 when no
+                           * GGA has been seen. */
+    uint32_t nmea_age_s;  /* Seconds since the first NMEA line after the last feed
+                           * reset, or GPS_STATS_NMEA_NEVER when none has arrived. */
     bool antenna_warning; /* true if a $GPTXT ANTENNA OPEN message was seen recently */
 } gps_stats_t;
 

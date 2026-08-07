@@ -118,11 +118,13 @@ void test_clear_fix_hides_position_and_utc_but_keeps_stats(void) {
     TEST_ASSERT_FALSE(gps_feed_get_position(&f, &p));
     TEST_ASSERT_FALSE(gps_feed_get_utc_hm(&f, &h, &m));
 
-    /* Sats/antenna stats, rx counters, and the chip banner all survive. */
+    /* Sats/antenna stats, the GSV slots, the GGA fix quality, rx counters,
+     * and the chip banner all survive. */
     gps_stats_t st;
     gps_feed_get_stats(&f, 1000, &st);
     TEST_ASSERT_EQUAL_UINT8(8, st.sats_used);
     TEST_ASSERT_EQUAL_UINT8(11, st.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(1, st.fix_quality);
     TEST_ASSERT_EQUAL_UINT32(rx_lines_before, f.rx_lines_total);
     TEST_ASSERT_EQUAL_STRING("$PAIR021,AG3335M,V1.0*3A", f.chip_banner);
 
@@ -140,6 +142,151 @@ void test_gsv_updates_sats_in_view(void) {
     TEST_ASSERT_EQUAL_UINT8(11, st.sats_in_view);
 }
 
+/* A single-message GSV cycle: total_msgs == msg_num == 1 commits immediately. */
+static const char GPGSV_8[] = "$GPGSV,1,1,08,10,63,137,17,07,61,308,21*70";
+static const char GLGSV_6[] = "$GLGSV,1,1,06,65,45,120,33,66,20,300,28*70";
+
+void test_gsv_multi_constellation_sums(void) {
+    gps_feed_line(&f, GPGSV_8, 1000);
+    gps_feed_line(&f, GLGSV_6, 1000);
+    gps_stats_t st;
+    gps_feed_get_stats(&f, 1000, &st);
+    TEST_ASSERT_EQUAL_UINT8(14, st.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(4, st.sats_tracked);
+    TEST_ASSERT_EQUAL_UINT8(33, st.snr_max_dbhz);
+}
+
+void test_gsv_repeat_within_cycle_does_not_double_count(void) {
+    /* Every message of a cycle repeats the same field-3 total. */
+    gps_feed_line(&f, "$GPGSV,3,1,11,10,63,137,17*70", 1000);
+    gps_feed_line(&f, "$GPGSV,3,2,11,07,61,308,18*70", 1000);
+    gps_feed_line(&f, "$GPGSV,3,3,11,05,59,169,19*70", 1000);
+    gps_stats_t st;
+    gps_feed_get_stats(&f, 1000, &st);
+    TEST_ASSERT_EQUAL_UINT8(11, st.sats_in_view);
+}
+
+void test_gsv_tracked_accumulates_across_cycle(void) {
+    gps_stats_t st;
+    gps_feed_line(&f, "$GPGSV,3,1,11,10,63,137,17,07,61,308,18,05,59,169,19,30,54,042,20*70", 1000);
+    gps_feed_get_stats(&f, 1000, &st);
+    TEST_ASSERT_EQUAL_UINT8(0, st.sats_tracked); /* cycle in flight, nothing committed */
+
+    gps_feed_line(&f, "$GPGSV,3,2,11,11,63,137,21,12,61,308,22,13,59,169,23,14,54,042,24*70", 1000);
+    gps_feed_get_stats(&f, 1000, &st);
+    TEST_ASSERT_EQUAL_UINT8(0, st.sats_tracked);
+
+    gps_feed_line(&f, "$GPGSV,3,3,11,15,63,137,25,16,61,308,26,17,59,169,27*70", 1000);
+    gps_feed_get_stats(&f, 1000, &st);
+    TEST_ASSERT_EQUAL_UINT8(11, st.sats_tracked);
+    TEST_ASSERT_EQUAL_UINT8(27, st.snr_max_dbhz);
+}
+
+void test_gsv_cycle_restart_resets_accumulator(void) {
+    gps_stats_t st;
+    gps_feed_line(&f, "$GPGSV,1,1,08,10,63,137,17,07,61,308,18,05,59,169,19*70", 1000);
+    gps_feed_get_stats(&f, 1000, &st);
+    TEST_ASSERT_EQUAL_UINT8(3, st.sats_tracked);
+
+    /* A second cycle replaces the first rather than adding to it. */
+    gps_feed_line(&f, "$GPGSV,1,1,08,10,63,137,17*70", 2000);
+    gps_feed_get_stats(&f, 2000, &st);
+    TEST_ASSERT_EQUAL_UINT8(1, st.sats_tracked);
+}
+
+void test_gsv_expires_after_ttl(void) {
+    gps_feed_line(&f, GPGSV_8, 0);
+    gps_stats_t st;
+    gps_feed_get_stats(&f, 0, &st);
+    TEST_ASSERT_EQUAL_UINT8(8, st.sats_in_view);
+
+    gps_feed_get_stats(&f, GPS_FEED_GSV_TTL_MS + 1, &st);
+    TEST_ASSERT_EQUAL_UINT8(0, st.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(0, st.sats_tracked);
+    TEST_ASSERT_EQUAL_UINT8(0, st.snr_max_dbhz);
+}
+
+void test_gsv_gn_talker_wins_over_per_constellation(void) {
+    gps_feed_line(&f, "$GNGSV,1,1,20,10,63,137,17*70", 1000);
+    gps_feed_line(&f, GPGSV_8, 1000);
+    gps_stats_t st;
+    gps_feed_get_stats(&f, 1000, &st);
+    /* A combined cycle already covers every constellation, so summing it with
+     * the per-constellation slots would double count. */
+    TEST_ASSERT_EQUAL_UINT8(20, st.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(1, st.sats_tracked);
+}
+
+void test_gsv_slot_table_overflow_reclaims_oldest(void) {
+    const char* talkers[7] = {"GP", "GL", "GA", "GB", "GQ", "GI", "GN"};
+    char line[64];
+    for (int i = 0; i < 7; i++) {
+        snprintf(line, sizeof(line), "$%sGSV,1,1,0%d,10,63,137,17*70", talkers[i], i + 1);
+        gps_feed_line(&f, line, 1000 + (uint64_t)i);
+    }
+    /* GN claimed the reclaimed slot and, being combined, wins outright. */
+    gps_stats_t st;
+    gps_feed_get_stats(&f, 1100, &st);
+    TEST_ASSERT_EQUAL_UINT8(7, st.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(1, st.sats_tracked);
+
+    /* A reclaimed slot re-registers cleanly: once every earlier cycle has
+     * expired, a fresh GP cycle reports its own total and nothing else. */
+    gps_feed_line(&f, "$GPGSV,1,1,09,10,63,137,17*70", 40000);
+    gps_feed_get_stats(&f, 40000, &st);
+    TEST_ASSERT_EQUAL_UINT8(9, st.sats_in_view);
+}
+
+void test_nmea_age_never_before_any_line(void) {
+    gps_stats_t st;
+    gps_feed_get_stats(&f, 5000, &st);
+    TEST_ASSERT_EQUAL_UINT32(GPS_STATS_NMEA_NEVER, st.nmea_age_s);
+}
+
+void test_nmea_age_counts_from_first_line(void) {
+    gps_feed_line(&f, "$GPXXX,1,2,3", 1000);
+    gps_stats_t st;
+    gps_feed_get_stats(&f, 31000, &st);
+    TEST_ASSERT_EQUAL_UINT32(30u, st.nmea_age_s);
+}
+
+void test_reset_clears_gsv_slots_and_nmea_age(void) {
+    gps_feed_line(&f, GPGSV_8, 1000);
+    gps_feed_reset(&f);
+    gps_stats_t st;
+    gps_feed_get_stats(&f, 1000, &st);
+    TEST_ASSERT_EQUAL_UINT8(0, st.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(0, st.sats_tracked);
+    TEST_ASSERT_EQUAL_UINT32(GPS_STATS_NMEA_NEVER, st.nmea_age_s);
+}
+
+void test_clear_fix_preserves_gsv_slots_and_fix_quality(void) {
+    gps_feed_line(&f, GPGSV_8, 1000);
+    gps_feed_line(&f, GGA, 1000);
+    gps_feed_line(&f, RMC, 1000);
+    TEST_ASSERT_TRUE(gps_feed_has_fix(&f));
+
+    gps_feed_clear_fix(&f);
+
+    gps_stats_t st;
+    gps_feed_get_stats(&f, 1000, &st);
+    TEST_ASSERT_EQUAL_UINT8(8, st.sats_in_view);
+    TEST_ASSERT_EQUAL_UINT8(2, st.sats_tracked);
+    TEST_ASSERT_EQUAL_UINT8(21, st.snr_max_dbhz);
+    TEST_ASSERT_EQUAL_UINT8(1, st.fix_quality);
+}
+
+void test_fix_quality_survives_a_no_fix_gga(void) {
+    gps_stats_t st;
+    gps_feed_line(&f, "$GPGGA,123519,,,,,0,05,,,M,,M,,*5C", 1000);
+    gps_feed_get_stats(&f, 1000, &st);
+    TEST_ASSERT_EQUAL_UINT8(0, st.fix_quality);
+
+    gps_feed_line(&f, GGA, 2000);
+    gps_feed_get_stats(&f, 2000, &st);
+    TEST_ASSERT_EQUAL_UINT8(1, st.fix_quality);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_bytes_assemble_and_fix);
@@ -153,5 +300,17 @@ int main(void) {
     RUN_TEST(test_reset_clears_fix_keeps_cb);
     RUN_TEST(test_clear_fix_hides_position_and_utc_but_keeps_stats);
     RUN_TEST(test_gsv_updates_sats_in_view);
+    RUN_TEST(test_gsv_multi_constellation_sums);
+    RUN_TEST(test_gsv_repeat_within_cycle_does_not_double_count);
+    RUN_TEST(test_gsv_tracked_accumulates_across_cycle);
+    RUN_TEST(test_gsv_cycle_restart_resets_accumulator);
+    RUN_TEST(test_gsv_expires_after_ttl);
+    RUN_TEST(test_gsv_gn_talker_wins_over_per_constellation);
+    RUN_TEST(test_gsv_slot_table_overflow_reclaims_oldest);
+    RUN_TEST(test_nmea_age_never_before_any_line);
+    RUN_TEST(test_nmea_age_counts_from_first_line);
+    RUN_TEST(test_reset_clears_gsv_slots_and_nmea_age);
+    RUN_TEST(test_clear_fix_preserves_gsv_slots_and_fix_quality);
+    RUN_TEST(test_fix_quality_survives_a_no_fix_gga);
     return UNITY_END();
 }
