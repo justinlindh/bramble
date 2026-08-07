@@ -5,6 +5,9 @@
 #include <stdio.h>
 
 typedef int esp_err_t;
+/* Provided per-test by the suites that need it (see test_audio.c, test_ota.c,
+ * test_wifi_manager.c); declared here so stub-built sources can call it. */
+const char* esp_err_to_name(esp_err_t err);
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define ESP_ERR_INVALID_SIZE 0x106
