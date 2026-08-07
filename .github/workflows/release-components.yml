@@ -345,7 +345,11 @@ jobs:
       contents: read
     with:
       webapp_tag: ${{ needs.release.outputs.webapp_tag }}
-    secrets: inherit
+    # Named rather than `inherit`: the image build runs docker build over the
+    # webapp's npm tree and has no business holding the OTA signing keys.
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      REGISTRY_PAT: ${{ secrets.REGISTRY_PAT }}
 
   # ---------------------------------------------------------------------------
   # Desktop installers for the webapp release. Linux (AppImage, deb, pacman)

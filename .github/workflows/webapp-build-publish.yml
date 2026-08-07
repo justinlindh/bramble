@@ -17,6 +17,16 @@ on:
         description: "webapp-vX.Y.Z tag to build the image from."
         required: true
         type: string
+    # Declared explicitly rather than taking `secrets: inherit` from the
+    # caller. This job runs `docker build` over the webapp's npm dependency
+    # tree, so it should never be holding the OTA signing keys or any other
+    # repo secret it has no use for. The names match the repo secrets, so the
+    # workflow_dispatch path resolves the same two from the repo.
+    secrets:
+      REGISTRY_USERNAME:
+        required: true
+      REGISTRY_PAT:
+        required: true
   workflow_dispatch:
     inputs:
       webapp_tag:
