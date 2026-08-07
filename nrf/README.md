@@ -290,14 +290,17 @@ node reports `present` true with a near-zero voltage, which on USB is
 masked by the charging sentinel and off the charger beacons a real 0
 percent.
 
-Powering the rail is not the remedy. The gate is P1.06 (SENSE_POWER_EN per
-Seeed's vendor SDK), and driving it high on hardware stopped the board
-within about a millisecond, leaving a boot trace that ends on the stamp
-written immediately after the pin write, with no failure tag from any
-instrumented fatal path and no rescue from the no-advertising sentinel.
-Whether that is a brownout or a core lockup is not established, and
-separating the two needs a build that records a reset reason per boot. No
-build here defines that pin.
+Powering the rail is what makes the divider readable, and it is also how
+the board was lost once. The gate is P1.06 (SENSE_POWER_EN per Seeed's
+vendor SDK): driven high at runtime it measured 3920 mV at the pin on a
+charging cell, and released it returned to 2 mV. The same drive issued from
+the boot-time battery snapshot stopped the board within about a
+millisecond, leaving a boot trace that ends on the stamp written
+immediately after the pin write, with no failure tag from any instrumented
+fatal path and no rescue from the no-advertising sentinel. Why the two
+differ is not established, and neither is brownout versus core lockup;
+separating those needs a build that records a reset reason per boot. This
+backend therefore does not define or touch that pin.
 
 Charge detection is confirmed on hardware, tracking a charger being plugged
 and unplugged, and depends on neither the ADC nor that rail. The Wio-WM1110

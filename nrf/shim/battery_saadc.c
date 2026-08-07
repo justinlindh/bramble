@@ -16,18 +16,22 @@
  * sentinel; unplugged, the node beacons a real 0 percent and trips the
  * display's low-battery floor.
  *
- * DO NOT "FIX" THIS BY POWERING THE RAIL. The gate is P1.06,
- * SENSE_POWER_EN per Seeed's vendor SDK (smtc_hal_config.h in
- * Seeed-Tracker-T1000-E-for-LoRaWAN-dev-board), and driving it high on
- * hardware stopped the board within about a millisecond: the flash boot
- * trace ends on the stamp written immediately after the pin write, with no
- * failure tag from any instrumented fatal path (assert, nrfx assert, hard
- * fault, stack overflow, malloc failure) and no rescue from the
- * no-advertising sentinel, so the board reset or locked up rather than
- * blocking. Brownout versus lockup is not established, and separating them
- * needs a build that records a reset reason per boot. Until that question
- * is answered this port does not touch that pin, and a change that drives
- * it will brick the board it is flashed to.
+ * The rail gate is P1.06, SENSE_POWER_EN per Seeed's vendor SDK
+ * (smtc_hal_config.h in Seeed-Tracker-T1000-E-for-LoRaWAN-dev-board), and
+ * powering it is what makes the divider readable: driven high at runtime it
+ * measured 3920 mV at the pin on a charging cell, and released it returned
+ * to 2 mV. Do NOT add that drive here on the strength of that measurement.
+ * The same drive from this file's boot-time path stopped the board within
+ * about a millisecond: the flash boot trace ends on the stamp written
+ * immediately after the pin write, with no failure tag from any
+ * instrumented fatal path (assert, nrfx assert, hard fault, stack overflow,
+ * malloc failure) and no rescue from the no-advertising sentinel, so it
+ * reset or locked up rather than blocking. Why a runtime drive is fine and
+ * a boot-path drive was not is NOT established, and neither is brownout
+ * versus lockup; separating those needs a build that records a reset reason
+ * per boot. The correct implementation of this reading is being built
+ * against the runtime measurement rather than bolted onto this file, so
+ * this backend does not touch that pin.
  *
  * Charge detection below is unaffected by any of this: it needs neither the
  * ADC nor that rail, both detect pins are plain GPIO inputs, and its

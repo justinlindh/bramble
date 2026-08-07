@@ -57,11 +57,13 @@
 // isCharging()/isVbusIn() polarity, since variant.h alone does not say how
 // the detect pins are configured).
 //
-// BOARD_PIN_VBAT_ADC currently reads a DEAD divider: the divider hangs off a
+// BOARD_PIN_VBAT_ADC reads a DEAD divider here: the divider hangs off a
 // sensor rail this port does not power, so conversions succeed and return 1
-// to 4 mV. Do NOT add a define for the rail gate (P1.06, SENSE_POWER_EN per
-// Seeed's vendor SDK) to make it read: driving that pin high stopped the
-// board within about a millisecond on hardware. See nrf/shim/battery_saadc.c.
+// to 4 mV. The rail gate is P1.06 (SENSE_POWER_EN per Seeed's vendor SDK),
+// and driving it is what makes the divider readable, but do NOT add that
+// drive to this board's boot path: the same drive from the boot-time battery
+// snapshot stopped the board within about a millisecond, while a runtime
+// drive measured correctly. See nrf/shim/battery_saadc.c.
 #define BOARD_HAS_BATTERY 1
 #define BOARD_PIN_VBAT_ADC 2           // P0.02 = AIN0, BAT_ADC (reads a dead divider)
 #define BOARD_BATTERY_DIVIDER 2        // ADC_MULTIPLIER 2.0F
