@@ -1977,7 +1977,9 @@ components:
         Per-channel location sharing rule. The node broadcasts its position
         under this channel's key, so every holder of that key receives it and
         no route, DM session or prior traffic is required. The tier is the
-        resolution the whole channel receives.
+        resolution the whole channel receives. A receiver additionally requires
+        a valid network-key origin MAC before it believes the position, so a
+        node outside the network cannot originate one.
       required: [channel]
       properties:
         channel:
@@ -1986,7 +1988,11 @@ components:
           maximum: 15
           description: >-
             Channel index. Outside this range names no channel the node can
-            share to, and setLocationConfig rejects the whole request.
+            share to, and setLocationConfig rejects the whole request. Channel 0
+            is the public channel, whose PSK is well known: targeting it makes
+            the position readable by anyone in radio range, not only by the
+            network. Pick a private channel to keep a group's positions within
+            that group.
         enabled:
           type: boolean
           description: Whether rule is enabled.

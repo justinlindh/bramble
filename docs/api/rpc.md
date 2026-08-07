@@ -63,6 +63,11 @@ Notes:
   channel key and needs no session, no route and no prior traffic, which is
   what makes it work on a mesh whose members have only ever broadcast. Its
   tier is the resolution every member of the channel receives.
+- Channel 0 is the public channel and its PSK is well known, so a target on it
+  publishes the position to anyone in radio range rather than to a group. A
+  private channel keeps a group's positions within that group. Either way a
+  receiver believes a position only after the network-key origin MAC verifies,
+  so a node outside the network cannot originate one.
 - Each target is paced off its own `interval_s`, floored at 30 seconds.
 - A `channel` outside 0 to 15 names no channel the node can share to, and the
   whole request is rejected with an invalid-params error rather than stored as
@@ -70,11 +75,11 @@ Notes:
 - Existing `default_tier` and `interval_s` fields remain supported.
 - Contact rules are stored and read only from canonical `lcr_XXXXXXXX` keys,
   and channel targets from `lch_NN` keys.
-- Legacy `lc_XXXXXXXX` contact keys are no longer read or maintained.
+- Legacy `lc_XXXXXXXX` contact keys are neither read nor maintained.
 
 ### `bramble.getConfig` (location section)
 
-`bramble.getConfig.result.location` now includes:
+`bramble.getConfig.result.location` includes:
 
 - `enabled` (bool)
 - `tier` (string)

@@ -1699,8 +1699,8 @@ static location_rule_t rpc_location_rule_from_json(const cJSON* entry,
 
 /* Parse a stored rule string and append its enabled/tier/interval_s fields to a
    response entry. The caller adds the identifying field (address or channel)
-   first. Shared by the contact_rules and channel_targets read loops in
-   get_location_config. */
+   first. Shared by the contact_rules and channel_targets read loops that
+   handle_get_config runs to emit the location block. */
 static void rpc_location_rule_emit_fields(cJSON* entry, const char* raw) {
     location_rule_t rule = {
         .enabled = true,
