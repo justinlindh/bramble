@@ -71,6 +71,10 @@ int emu_node_start_autosend(void);
 #include "audio.h"
 #endif
 
+#ifdef CONFIG_PM_ENABLE
+#include "esp_pm.h"
+#endif
+
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
 /* lvgl.h not directly included, use ui_graphics API */
 #include "ui_graphics.h"
@@ -1062,6 +1066,32 @@ void app_main(void) {
         return;
     }
 
+#ifdef CONFIG_PM_ENABLE
+    /* Power: dynamic frequency scaling. esp_pm holds a per-core CPU_FREQ_MAX
+     * lock whenever that core has a ready task and releases it only in the
+     * idle hook (pm_impl.c), so busy work always runs at max_freq_mhz; only
+     * genuinely idle time drops to min_freq_mhz. min 80 MHz keeps the PLL on
+     * and the APB clock pinned at 80 MHz, so UART baud (GPS), LEDC PWM
+     * (backlight), SPI (display + SX1262) and I2C (keyboard/touch) clocks
+     * never shift; the IDF v5.4.1 drivers additionally take transaction-scoped
+     * pm locks (verified in esp_driver_spi/esp_driver_i2c/esp_driver_uart).
+     * Light sleep stays OFF deliberately: it would drop the USB-Serial-JTAG
+     * console (the T-Deck's CLI/RPC transport), fight the 1 ms LVGL tick, and
+     * add wake latency to the SX1262 DIO1 interrupt path. */
+    esp_pm_config_t pm_cfg = {
+        .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+        .min_freq_mhz = 80,
+        .light_sleep_enable = false,
+    };
+    esp_err_t pm_err = esp_pm_configure(&pm_cfg);
+    if (pm_err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_pm_configure failed: %s", esp_err_to_name(pm_err));
+    } else {
+        ESP_LOGI(TAG, "DFS enabled: %d/%d MHz, light sleep off", pm_cfg.max_freq_mhz,
+                 pm_cfg.min_freq_mhz);
+    }
+#endif
+
 #ifdef CONFIG_IDF_TARGET_LINUX
     /* Emulator: bind NVS-backed flash to a per-node file ($NODE_DIR/flash.bin)
      * so identity survives a process restart (the supervisor's reset button).
@@ -1256,8 +1286,13 @@ void app_main(void) {
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     /* Init keyboard and trackball (T-Deck Plus only) */
     ESP_LOGI(TAG, "=== BOOT STAGE: keyboard_init ===");
+    /* Power: keyboard_init() already loads the persisted backlight percent
+     * from NVS (default 80%) and applies it. Do NOT force the LEDs here: a
+     * raw keyboard_set_backlight(255) after init used to override the saved
+     * preference on every boot, burning the keyboard LEDs at full brightness
+     * regardless of the Settings slider (which then disagreed with the
+     * hardware, since the raw setter bypasses the percent bookkeeping). */
     keyboard_init();
-    keyboard_set_backlight(255); /* Keyboard LEDs at full brightness */
     ESP_LOGI(TAG, "=== BOOT STAGE: trackball_init ===");
     trackball_init();
 #endif

@@ -40,6 +40,8 @@ static EventBits_t g_set_bits_accum;
 static int g_wifi_set_mode;
 static int g_wifi_connect_calls;
 static wifi_config_t g_last_wifi_cfg;
+static int g_wifi_ps_mode;      /* last esp_wifi_set_ps() argument, -1 = never */
+static int g_wifi_max_tx_power; /* last esp_wifi_set_max_tx_power() arg, 0 = never */
 
 static int g_register_calls;
 static int g_unregister_calls;
@@ -220,6 +222,19 @@ esp_err_t esp_wifi_ap_get_sta_list(wifi_sta_list_t* list) {
     }
     return ESP_OK;
 }
+esp_err_t esp_wifi_set_ps(wifi_ps_type_t type) {
+    g_wifi_ps_mode = (int)type;
+    return ESP_OK;
+}
+esp_err_t esp_wifi_set_max_tx_power(int8_t power) {
+    g_wifi_max_tx_power = power;
+    return ESP_OK;
+}
+
+const char* esp_err_to_name(esp_err_t err) {
+    (void)err;
+    return "ESP_ERR_STUB";
+}
 
 /* esp_log_level_set is provided by the esp_log.h stub as static inline;
    wifi_manager.c will use that version directly. */
@@ -254,6 +269,8 @@ void setUp(void) {
     g_set_bits_accum = 0;
     g_wifi_set_mode = 0;
     g_wifi_connect_calls = 0;
+    g_wifi_ps_mode = -1;
+    g_wifi_max_tx_power = 0;
     memset(&g_last_wifi_cfg, 0, sizeof(g_last_wifi_cfg));
     g_register_calls = 0;
     g_unregister_calls = 0;
@@ -343,6 +360,10 @@ void test_init_prefers_station_with_saved_creds(void) {
     TEST_ASSERT_EQUAL_INT(WIFI_MODE_STA, g_wifi_set_mode);
     TEST_ASSERT_EQUAL_STRING("SavedNet", (char*)g_last_wifi_cfg.sta.ssid);
     TEST_ASSERT_EQUAL_INT(0, g_create_ap_calls);
+    /* Power: station mode pins modem power save to MIN_MODEM and leaves TX
+     * power at the default (the infrastructure AP may be far away). */
+    TEST_ASSERT_EQUAL_INT(WIFI_PS_MIN_MODEM, g_wifi_ps_mode);
+    TEST_ASSERT_EQUAL_INT(0, g_wifi_max_tx_power);
 
     /* In production, IP_EVENT_STA_GOT_IP fires before xEventGroupWaitBits returns BIT0.
      * The mock returns BIT0 directly; fire the event explicitly to set status.mode. */
@@ -368,6 +389,9 @@ void test_init_falls_back_to_ap_when_station_fails(void) {
     TEST_ASSERT_EQUAL_INT(0, wifi_manager_init(0xEC7A));
     TEST_ASSERT_EQUAL_INT(WIFI_MODE_AP, g_wifi_set_mode);
     TEST_ASSERT_TRUE(g_create_ap_calls > 0);
+    /* Power: the SoftAP serves clients a few meters away; TX power is capped
+     * at 11 dBm (44 quarter-dBm units) after esp_wifi_start(). */
+    TEST_ASSERT_EQUAL_INT(44, g_wifi_max_tx_power);
 
     wifi_status_t status = {0};
     wifi_manager_get_status(&status);
