@@ -454,6 +454,24 @@ static void mesh_emit_location_event(const char* event, uint32_t peer_addr, uint
 static bool location_request_dm_session(uint32_t peer, uint32_t t) {
     if (peer == 0 || peer == s_identity->address)
         return false;
+
+    /* Never open a second handshake alongside one already in flight. The chat
+     * path applies the same test (send_dm_packet's handshake_in_progress) and
+     * for the same reason: the desync self-heal, a chat send and this share
+     * round can each want a session with the same peer, and a duplicate INIT
+     * crosses the one already running exactly the way two mutual targets would.
+     * The address tie-break below only orders the two ENDS of a pair; this is
+     * what keeps this node from duelling itself. Read under the mutex and
+     * released before anything is queued, the shape maybe_schedule_dm_epoch_
+     * rekey uses. */
+    xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+    dm_session_t* existing = dm_lookup(s_dm_table, peer);
+    bool busy =
+        existing && (existing->state == DM_STATE_HANDSHAKING || existing->state == DM_STATE_ACTIVE);
+    DM_MUTEX_GIVE();
+    if (busy)
+        return false;
+
     bool reachable = neighbor_lookup(&s_neighbors, peer) != NULL;
     /* Only the lower-addressed side opens immediately. Both ends normally hold
      * each other as targets, so after a fleet reboot every pair would otherwise
