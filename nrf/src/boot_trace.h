@@ -74,7 +74,7 @@
 /* (count) consecutive-failed-boot count carried across a page erase, so
  * outgrowing the page cannot silently reset the boot-loop rescue. */
 #define BT_BOOT_CARRY 0x15u
-#define BT_BOOT_DONE 0xDDu     /* (free heap) app_init complete */
+#define BT_BOOT_DONE 0xDDu /* (free heap) app_init complete */
 
 /* Consecutive boots that never reached BT_BOOT_DONE before boot_trace_init
  * gives up and returns to the bootloader itself. Three: enough that a power
