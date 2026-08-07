@@ -221,6 +221,22 @@ static int try_station_mode(const char* ssid, const char* password) {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    /* Power: pin station-mode modem power save explicitly. WIFI_PS_MIN_MODEM
+     * (RF off between DTIM beacons) is the IDF default, but it is load-bearing
+     * for battery life, so state it rather than inherit it. WIFI_PS_MAX_MODEM
+     * was considered and rejected: it sleeps through beacons up to the AP's
+     * listen interval, which adds user-visible latency to the WebSocket RPC
+     * session the webapp keeps open.
+     *
+     * Best effort, not fatal: a power tweak must never be able to abort the
+     * boot. ESP_ERROR_CHECK here would panic the device, which on a field
+     * unit is indistinguishable from a spontaneous reset. Losing power save
+     * costs battery life; losing the node costs the mesh. */
+    esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    if (ps_err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_set_ps failed: %s", esp_err_to_name(ps_err));
+    }
+
     ESP_LOGI(TAG, "Waiting for station connect (timeout %ds)...",
              CONFIG_BRAMBLE_WIFI_STA_TIMEOUT_S);
 
@@ -310,6 +326,18 @@ static int start_ap_mode(uint32_t node_addr) {
 
     esp_log_level_set("wifi", ESP_LOG_ERROR);
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    /* Power: cap SoftAP TX power at 11 dBm (unit is 0.25 dBm). The default is
+     * the hardware maximum (~19.5 dBm), sized for reaching a distant
+     * infrastructure AP; our SoftAP serves a phone or laptop a few meters
+     * away, where 11 dBm has ample margin. This trims every TX burst (beacons
+     * at ~1% duty plus all WS traffic), so the average saving is modest; the
+     * dominant AP-mode cost is the continuous RX listen, which no
+     * configuration removes. Must be called after esp_wifi_start(). */
+    esp_err_t txp_err = esp_wifi_set_max_tx_power(44);
+    if (txp_err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_set_max_tx_power failed: %s", esp_err_to_name(txp_err));
+    }
 
     strncpy(s_status.ip_addr, "192.168.4.1", sizeof(s_status.ip_addr) - 1);
     strncpy(s_status.ssid, ap_ssid, sizeof(s_status.ssid) - 1);

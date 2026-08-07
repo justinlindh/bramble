@@ -61,6 +61,12 @@ typedef struct {
     int num;
 } wifi_sta_list_t;
 
+typedef enum {
+    WIFI_PS_NONE = 0,
+    WIFI_PS_MIN_MODEM = 1,
+    WIFI_PS_MAX_MODEM = 2,
+} wifi_ps_type_t;
+
 esp_err_t esp_wifi_init(const wifi_init_config_t* config);
 esp_err_t esp_wifi_set_mode(wifi_mode_t mode);
 esp_err_t esp_wifi_set_config(wifi_interface_t interface, wifi_config_t* conf);
@@ -70,5 +76,7 @@ esp_err_t esp_wifi_deinit(void);
 esp_err_t esp_wifi_connect(void);
 esp_err_t esp_wifi_get_mac(int ifx, uint8_t mac[6]);
 esp_err_t esp_wifi_ap_get_sta_list(wifi_sta_list_t* list);
+esp_err_t esp_wifi_set_ps(wifi_ps_type_t type);
+esp_err_t esp_wifi_set_max_tx_power(int8_t power);
 
 #endif

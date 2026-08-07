@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "chat_message_ui.h"
+#include "msg_store.h"
 #include <stdio.h>
 
 void setUp(void) {}
@@ -50,6 +51,28 @@ void test_receipt_summary_truncates_with_plus_n(void) {
     TEST_ASSERT_EQUAL_STRING("Delivered to 9: N11, N22, N33, N44, +5", buf);
 }
 
+void test_route_line_only_for_relayed_direct_messages(void) {
+    /* A relayed DM is the only case worth a route line. */
+    TEST_ASSERT_TRUE(chat_message_route_is_informative(true, MSG_STORE_DM_CHANNEL, 3));
+    TEST_ASSERT_TRUE(chat_message_route_is_informative(true, MSG_STORE_DM_CHANNEL, 8));
+
+    /* Direct DM: the "route" is just sender then recipient, which restates
+     * the addressing already on screen. */
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(true, MSG_STORE_DM_CHANNEL, 2));
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(true, MSG_STORE_DM_CHANNEL, 0));
+
+    /* Channel and broadcast: the store holds one route field that every
+     * recipient's receipt overwrites, so any single line would present one
+     * arbitrary recipient's path as the message's path. */
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(true, 0, 3));
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(true, 0, 8));
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(true, 2, 5));
+
+    /* An incoming broadcast is stored channel-less exactly like a DM, so
+     * without the direction it would be misclassified as a relayed DM. */
+    TEST_ASSERT_FALSE(chat_message_route_is_informative(false, MSG_STORE_DM_CHANNEL, 3));
+}
+
 void test_receipt_summary_empty_reads_no_receipts(void) {
     char buf[128];
     chat_format_receipt_summary(buf, sizeof(buf), NULL, 0, 0, test_name_of);
@@ -81,6 +104,7 @@ int main(void) {
     RUN_TEST(test_receipt_summary_lists_all_when_few);
     RUN_TEST(test_receipt_summary_truncates_with_plus_n);
     RUN_TEST(test_receipt_summary_empty_reads_no_receipts);
+    RUN_TEST(test_route_line_only_for_relayed_direct_messages);
     RUN_TEST(test_format_age_under_a_minute_is_now);
     RUN_TEST(test_format_age_minutes_hours_days);
     return UNITY_END();
