@@ -122,8 +122,8 @@ bool mesh_resolve_self_position(bramble_position_t* out);
  * decision (gps_duty_should_power).
  */
 typedef struct {
-    bool sharing_active;   /* policy.enabled && location_policy_has_targets() */
-    uint16_t interval_s;   /* policy share interval */
+    bool sharing_active;   /* policy enabled AND at least one target configured */
+    uint16_t interval_s;   /* shortest configured target interval */
     uint32_t last_send_ms; /* 0 = never */
 } mesh_location_share_state_t;
 
