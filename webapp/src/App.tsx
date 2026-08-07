@@ -86,8 +86,10 @@ export default function App() {
   // firmware's onGpsEvent fires only on fix transitions, so a node that never
   // acquires one emits nothing and the indicator has to poll. 15 s rather than
   // the Stats tab's 5 s: this is a glanceable health signal, and getStatus
-  // allocates a full mesh state snapshot on the device.
-  usePoll(loadStatus, 15_000, { enabled: isConnected });
+  // allocates a full mesh state snapshot on the device. The Stats tab runs its
+  // own 5 s getStatus refresh, so this one stands down while that tab is open
+  // rather than putting a second timer on the same call.
+  usePoll(loadStatus, 15_000, { enabled: isConnected && activeTab !== 'stats' });
 
   useEffect(() => {
     loadConnectionCapabilities();
@@ -199,6 +201,11 @@ export default function App() {
              : connectionState === 'error' ? 'Reconnecting…'
              : connectionState}
           </span>
+          {/* Ahead of the node label because the label is the one item in this
+              row designed to give way: it ellipsizes, while the indicator can
+              only be clipped, and a clipped satellite count would read as a
+              smaller number rather than as a missing one. */}
+          {isConnected && <GnssDot />}
           {isConnected && nodeIdentifier && (
             <>
               <span className={styles.statusDivider}>•</span>
@@ -207,7 +214,6 @@ export default function App() {
               </span>
             </>
           )}
-          {isConnected && <GnssDot />}
         </span>
 
         {(isConnected || connectionState === 'error') && (

@@ -78,6 +78,16 @@
   .nodeLabel {
     max-width: 80px;
   }
+
+  /* On the narrowest phones the connection word gives way too: the dot beside
+     it already carries that state, and without this the row overflows and
+     clips the GNSS indicator off the end instead. */
+  .statusLabel {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 /* On mobile landscape (small height), keep it compact */

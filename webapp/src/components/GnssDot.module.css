@@ -19,6 +19,17 @@
   white-space: nowrap;
 }
 
+/* Phone portrait: the topbar cannot hold the count next to the connection
+   label, the node name and the Disconnect button, and a partly clipped count
+   reads as a smaller number rather than as a truncated one. The dot carries
+   the state on its own and the full counts stay in its accessible name and on
+   the Stats tab. */
+@media (max-width: 400px) {
+  .count {
+    display: none;
+  }
+}
+
 .dot {
   display: inline-block;
   width: 10px;
