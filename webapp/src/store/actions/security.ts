@@ -12,18 +12,14 @@ import { formatAddrHex } from '../../utils/address';
  * unpinned peer (never DM'd, or DM'd before the identity handshake landed)
  * is not an error: the firmware returns an empty SAS and verified:false.
  */
-export async function loadPeerVerification(
-  addr: number,
-): Promise<import('../../types/bramble').PeerVerification> {
+export async function loadPeerVerification(addr: number): Promise<void> {
   const client = requireClient();
   const result = await client.rpc('bramble.getPeerVerification', { address: formatAddrHex(addr) });
-  const v: import('../../types/bramble').PeerVerification = {
+  useStore.getState().setPeerVerification(addr, {
     sas: result.sas ?? '',
     verified: !!result.verified,
     keyChanged: !!result.keyChanged,
-  };
-  useStore.getState().setPeerVerification(addr, v);
-  return v;
+  });
 }
 
 /** Mark (or unmark) a peer verified. Refreshes the cached state on success. */
