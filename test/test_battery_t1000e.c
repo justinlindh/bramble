@@ -30,9 +30,7 @@ void test_raw_full_scale(void) {
 }
 
 /* Midpoint sanity: half the code range is half of full scale. */
-void test_raw_midpoint(void) {
-    TEST_ASSERT_EQUAL_UINT32(1500, battery_t1000e_raw_to_pin_mv(8192));
-}
+void test_raw_midpoint(void) { TEST_ASSERT_EQUAL_UINT32(1500, battery_t1000e_raw_to_pin_mv(8192)); }
 
 /* raw -> pin mv is monotonically non-decreasing across the code range. */
 void test_raw_monotonic(void) {
@@ -85,6 +83,17 @@ void test_average(void) {
     TEST_ASSERT_EQUAL_UINT32(0, battery_t1000e_average_mv(s2, none, 4));
 }
 
+/* The survival latch permits the rail drive for every stored state except a
+ * recorded died-mid-window verdict; unknown or corrupt bytes count as
+ * untried rather than disabling the feature on garbage. */
+void test_probe_latch_decision(void) {
+    TEST_ASSERT_TRUE(battery_t1000e_vbat_allowed(BATTERY_T1000E_PROBE_UNTRIED));
+    TEST_ASSERT_FALSE(battery_t1000e_vbat_allowed(BATTERY_T1000E_PROBE_ATTEMPTING));
+    TEST_ASSERT_TRUE(battery_t1000e_vbat_allowed(BATTERY_T1000E_PROBE_PROVEN));
+    TEST_ASSERT_TRUE(battery_t1000e_vbat_allowed(0x7f)); /* corrupt byte */
+    TEST_ASSERT_TRUE(battery_t1000e_vbat_allowed(0xff)); /* erased flash */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_raw_clamps_low);
@@ -95,5 +104,6 @@ int main(void) {
     RUN_TEST(test_bench_anchor_3920mv_72pct);
     RUN_TEST(test_dead_divider_reads_zero);
     RUN_TEST(test_average);
+    RUN_TEST(test_probe_latch_decision);
     return UNITY_END();
 }

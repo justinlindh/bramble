@@ -69,6 +69,12 @@
 //     pin, P1.06 driven high = 3920 mV on a charging cell, released = 2 mV.
 #define BOARD_PIN_VBAT_ADC 2            // P0.02 = AIN0, SENSE_ADC_BAT
 #define BOARD_PIN_VBAT_RAIL_EN (32 + 6) // P1.06, SENSE_POWER_EN, HIGH = divider live
+// Declares that reading BOARD_PIN_VBAT_ADC without driving the rail returns
+// a dead divider. Backends that never drive the gate (battery_null.c)
+// refuse at compile time to be built for a board carrying this, because the
+// shim is selected by filename in nrf/CMakeLists.txt and a wrong selection
+// would otherwise compile clean and misread on hardware.
+#define BOARD_BATTERY_NEEDS_RAIL_GATE 1
 
 // RF switch truth table (Meshtastic rfswitch.h for this board):
 //   mode    DIO5 DIO6 DIO7 DIO8

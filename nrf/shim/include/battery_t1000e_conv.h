@@ -40,6 +40,25 @@ static inline uint32_t battery_t1000e_pin_to_vbat_mv(uint32_t pin_mv) {
     return pin_mv * BATTERY_T1000E_DIVIDER;
 }
 
+/* Survival-latch states persisted in NVS (u8). The latch exists because one
+ * boot-context drive of the P1.06 rail stopped the board dead while the
+ * same drive is bench-proven at runtime: before the first-ever gated window
+ * the driver persists ATTEMPTING, and persists PROVEN once the window
+ * completes (survival is the claim, not sample quality). A boot that finds
+ * ATTEMPTING knows the previous attempt died mid-window and disables the
+ * voltage path, so even a drive that is fatal in every context costs one
+ * reset ever, never a loop. */
+#define BATTERY_T1000E_PROBE_UNTRIED 0u
+#define BATTERY_T1000E_PROBE_ATTEMPTING 1u
+#define BATTERY_T1000E_PROBE_PROVEN 2u
+
+/* Whether the stored latch state permits driving the rail this boot. Only a
+ * recorded died-mid-window verdict forbids it; an unknown or corrupt value
+ * is treated as untried rather than bricking the feature on garbage. */
+static inline bool battery_t1000e_vbat_allowed(uint8_t stored) {
+    return stored != BATTERY_T1000E_PROBE_ATTEMPTING;
+}
+
 /* Mean of the samples whose valid flag is set; 0 when none are. A failed
  * conversion is excluded rather than folded in as a fabricated 0 mV sample,
  * which would drag the whole reading toward a false low battery instead of

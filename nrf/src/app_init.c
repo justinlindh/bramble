@@ -10,6 +10,7 @@
 #include <FreeRTOS.h>
 
 #include "battery.h"
+#include "battery_nrf.h"
 #include "esp_log.h"
 #include "identity.h"
 #include "ble_host.h"
@@ -58,19 +59,18 @@ void app_init_stack(void) {
     boot_trace_mark(BT_MSG_STORE, 0);
 
     /* Battery before the mesh starts, matching the ESP boot order (main.c
-     * calls battery_init() before mesh_task_start), and the first gated
-     * read runs here, BEFORE BT_BOOT_DONE, on purpose: on the T1000-E a
-     * read energizes the P1.06 sensor rail (shim/battery_t1000e.c), the one
-     * boot-context action that once stopped an instrumented build dead, so
-     * if that ever recurs this placement turns it into a pre-BOOT_DONE boot
-     * failure the boot-loop rescue escapes to DFU from, with the two stamps
-     * below bracketing the killing window in the decoded trace. A surviving
-     * first window stamps the measured cell voltage. */
+     * calls battery_init() before mesh_task_start): the mesh task's
+     * immediate first beacon reads the battery, so the backend must exist
+     * by then. On the T1000-E, init deliberately does NOT touch the P1.06
+     * sensor rail: energizing it from boot context is the one action that
+     * ever stopped an instrumented build dead, so the backend stays
+     * disarmed (reads return 0, no hardware touched) until the arm call
+     * after BT_BOOT_DONE below, and the first real gated window runs at
+     * the first post-boot poll, the context the bench probe proved safe.
+     * The stamp's aux is the persisted rail-probe verdict (battery_nrf.h):
+     * 0 untried, 1 previous window died (voltage disabled), 2 proven. */
     battery_init();
-    boot_trace_mark(BT_BATTERY_INIT, 0);
-    uint32_t boot_mv = battery_read_mv();
-    boot_trace_mark(BT_BATTERY_MV, boot_mv);
-    ESP_LOGI(TAG, "Battery: %lu mV (%u%%)", (unsigned long)boot_mv, battery_mv_to_pct(boot_mv));
+    boot_trace_mark(BT_BATTERY_INIT, battery_probe_state());
 
     /* The dispatcher and its method table must exist before any transport
      * registers, because rpc_init() clears both tables. */
@@ -113,5 +113,9 @@ void app_init_stack(void) {
         ESP_LOGE(TAG, "BLE did not start; the node is mesh-only this boot");
     }
     boot_trace_mark(BT_BOOT_DONE, (uint32_t)xPortGetFreeHeapSize());
+
+    /* Boot is over: allow rail-gated battery reads from here on. Kept
+     * strictly after BT_BOOT_DONE, see the battery stanza above. */
+    battery_runtime_arm();
     ESP_LOGI(TAG, "mesh_task_start returned; free heap %u bytes", (unsigned)xPortGetFreeHeapSize());
 }

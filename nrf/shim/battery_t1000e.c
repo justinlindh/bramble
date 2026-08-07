@@ -1,29 +1,44 @@
 /*
  * Battery voltage backend for the SenseCAP T1000-E: the cell through the
  * 2x divider on P0.02/AIN0, behind the P1.06 SENSE_POWER_EN gate. Satisfies
- * components/battery/include/battery.h.
+ * components/battery/include/battery.h plus the nRF arm hook in
+ * shim/include/battery_nrf.h.
  *
  * The divider is dead until the gate is high (see nrf/boards/t1000e.h for
  * the vendor-source and bench evidence), so every read is a gated window:
  * drive P1.06 high, let the divider settle, average a burst of samples,
  * drive it low again. That mirrors the vendor's own sensor_bat_sample()
- * (Seeed-Tracker-T1000-E-for-LoRaWAN-dev-board, sensor.c: rail on,
- * sample, times 2, rail off) with the same push-pull standard-drive
- * active-HIGH configuration its hal_gpio_init_out() uses, and it keeps the
- * rail off the rest of the time, which is both the vendor's power posture
- * and what keeps the NTC/photo dividers on the same rail unpowered.
+ * (Seeed-Tracker-T1000-E-for-LoRaWAN-dev-board, sensor.c: rail on, sample,
+ * times 2, rail off) with the same push-pull standard-drive active-HIGH
+ * configuration its hal_gpio_init_out() uses, and it keeps the rail off the
+ * rest of the time, which is both the vendor's power posture and what keeps
+ * the NTC/photo dividers on the same rail unpowered.
  *
- * Context discipline: every caller runs on a FreeRTOS task (mesh beacon
- * tick, BLE RPC handlers, and app_init's task_boot snapshot), never before
- * the scheduler, so vTaskDelay for the settle window is safe here. One
- * boot-time read runs from app_init_stack BEFORE BT_BOOT_DONE on purpose:
- * an instrumented build once stopped dead (reset or lockup, undetermined)
- * the first time boot-context code drove P1.06, and placing the first
- * gated window before BT_BOOT_DONE means that if that ever recurs the
- * boot-loop rescue path escapes to DFU with a decodable multi-boot trace
- * instead of looping until the physical gesture. Runtime windows after a
- * surviving boot re-run an action already proven safe live on this unit
- * (2026-08-06 probe: P1.06 high, correct reading, released, no upset).
+ * TWO LAYERS OF PROTECTION around the one open question on this board. An
+ * instrumented build once stopped dead (reset or lockup, undetermined; no
+ * failure tag) the first time BOOT-context code drove P1.06, while the same
+ * drive is bench-proven safe at runtime (2026-08-06 probe on this unit:
+ * 2 mV off, 3920 mV driven, 2 mV released, no upset), and is what
+ * Meshtastic's initVariant() does at boot fleet-wide. Because boot-vs-
+ * runtime is the only known difference, this driver:
+ *
+ *   1. Never drives the rail in boot context. battery_init() only brings up
+ *      the SAADC and parks the gate LOW; reads return 0 and touch no
+ *      hardware until app_init calls battery_runtime_arm() after
+ *      BT_BOOT_DONE. The mesh task's immediate first beacon (the boot-stage
+ *      send_beacon in main/mesh_task.c) therefore reads a harmless 0; the
+ *      first real gated window runs at the first post-boot poll, in the
+ *      probe-proven context.
+ *
+ *   2. Persists a survival latch (NVS, battery_t1000e_conv.h states) around
+ *      the FIRST-ever gated window: ATTEMPTING is committed before the
+ *      first drive and PROVEN after the window completes, so if the drive
+ *      is somehow fatal even at runtime, the next boot finds ATTEMPTING and
+ *      disables the voltage path outright. Worst case is one reset per
+ *      flash lifetime, self-healing, never a reset loop and never a DFU
+ *      gesture. If the latch cannot be committed, the window does not run:
+ *      an unrecorded attempt would repeat every boot if fatal, and no
+ *      reading is worth that.
  *
  * The SAADC never busy-waits on our behalf: every operation runs in
  * event-handler (non-blocking) mode and this code does its own bounded
@@ -48,6 +63,7 @@
  * handler (also 7) and radio_lr1110.c's documented GPIOTE choice.
  */
 #include "battery.h"
+#include "battery_nrf.h"
 
 #include <FreeRTOS.h>
 #include <semphr.h>
@@ -57,11 +73,22 @@
 #include <nrfx_saadc.h>
 
 #include "battery_t1000e_conv.h"
+#include "boot_trace.h"
 #include "bramble_board.h"
 #include "esp_log.h"
+#include "nvs.h"
+#include "nvs_keys.h"
+
+#ifndef BOARD_PIN_VBAT_RAIL_EN
+#error "this backend gates the sensor rail; the selected board maps no rail-enable pin"
+#endif
 
 static const char* TAG = "battery_t1000e";
 static bool s_initialized = false;
+static bool s_armed = false;    /* set once by battery_runtime_arm() post boot */
+static bool s_disabled = false; /* latched: a previous first window never completed */
+static uint8_t s_probe = BATTERY_T1000E_PROBE_UNTRIED;
+static bool s_first_mv_stamped = false;
 
 static SemaphoreHandle_t s_lock;
 static StaticSemaphore_t s_lock_buf;
@@ -80,6 +107,9 @@ static StaticSemaphore_t s_done_buf;
 #define RAIL_SETTLE_MS 5
 
 #define BATTERY_SAMPLE_COUNT 8
+
+/* NVS key for the survival latch, in the shared bramble namespace. */
+#define BATTERY_PROBE_KEY "vbat_probe"
 
 /* The nRF52840's eight SAADC inputs map to a fixed pin set (nRF52840
  * Product Specification, SAADC chapter): AIN0-AIN3 = P0.02-P0.05, AIN4-AIN7
@@ -114,13 +144,43 @@ static void saadc_event_handler(nrfx_saadc_evt_t const* p_event) {
     }
 }
 
+static uint8_t probe_latch_load(void) {
+    nvs_handle_t h;
+    uint8_t v = BATTERY_T1000E_PROBE_UNTRIED;
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &h) == ESP_OK) {
+        (void)nvs_get_u8(h, BATTERY_PROBE_KEY, &v);
+        nvs_close(h);
+    }
+    return v;
+}
+
+static bool probe_latch_store(uint8_t v) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &h) != ESP_OK)
+        return false;
+    bool ok = nvs_set_u8(h, BATTERY_PROBE_KEY, v) == ESP_OK && nvs_commit(h) == ESP_OK;
+    nvs_close(h);
+    return ok;
+}
+
 void battery_init(void) {
     /* Rail gate first, and off: clear the output latch before flipping the
      * direction so the pin never glitches high, then configure the vendor's
      * exact drive (nrf_gpio_cfg_output = push-pull, standard drive S0S1,
-     * matching hal_gpio_init_out in the vendor's smtc_hal_gpio.c). */
+     * matching hal_gpio_init_out in the vendor's smtc_hal_gpio.c). Nothing
+     * in this function, or anywhere before battery_runtime_arm(), ever
+     * drives it high. */
     nrf_gpio_pin_clear(BOARD_PIN_VBAT_RAIL_EN);
     nrf_gpio_cfg_output(BOARD_PIN_VBAT_RAIL_EN);
+
+    /* Survival latch verdict from the last flash lifetime. NVS is mounted
+     * before battery_init in app_init's boot order. */
+    s_probe = probe_latch_load();
+    if (!battery_t1000e_vbat_allowed(s_probe)) {
+        s_disabled = true;
+        ESP_LOGE(TAG, "previous first gated window never completed; voltage path disabled "
+                      "(erase settings or reflash after diagnosis to re-arm)");
+    }
 
     s_done = xSemaphoreCreateBinaryStatic(&s_done_buf);
     s_lock = xSemaphoreCreateMutexStatic(&s_lock_buf);
@@ -157,7 +217,8 @@ void battery_init(void) {
      * the 2x divider doubles it. Evented with a bounded wait like every
      * other SAADC operation here; a calibration that fails to start or
      * times out logs and continues uncalibrated, a correctness nit rather
-     * than a reason to abandon boot. */
+     * than a reason to abandon boot. Touches only the converter's internal
+     * offset DAC, never the rail. */
     err = nrfx_saadc_offset_calibrate(saadc_event_handler);
     if (err != NRFX_SUCCESS) {
         ESP_LOGW(TAG, "offset calibrate failed to start: %d (continuing uncalibrated)", (int)err);
@@ -171,9 +232,13 @@ void battery_init(void) {
     }
 
     s_initialized = true;
-    ESP_LOGI(TAG, "battery ADC ready (AIN%d via P1.06 gate, gain 1/5, 14-bit)",
-             (int)(BATTERY_SAADC_AIN - NRF_SAADC_INPUT_AIN0));
+    ESP_LOGI(TAG, "battery ADC ready (AIN%d via P1.06 gate, gain 1/5, 14-bit), probe state %u",
+             (int)(BATTERY_SAADC_AIN - NRF_SAADC_INPUT_AIN0), (unsigned)s_probe);
 }
+
+void battery_runtime_arm(void) { s_armed = true; }
+
+uint8_t battery_probe_state(void) { return s_probe; }
 
 /* File-scope, not a stack local: the conversion completes asynchronously
  * (EasyDMA writes it from the SAADC ISR after mode_trigger returns), and on
@@ -216,30 +281,61 @@ static bool read_one_sample_mv(uint32_t* out_mv) {
 }
 
 uint32_t battery_read_mv(void) {
-    if (!s_initialized)
+    /* All three refusals return the header-contract "no reading" value and
+     * touch no hardware: not initialized, not yet armed (still inside the
+     * boot window, see the file header), or latched off. */
+    if (!s_initialized || !s_armed || s_disabled)
         return 0;
 
     uint32_t samples[BATTERY_SAMPLE_COUNT];
     bool valid[BATTERY_SAMPLE_COUNT];
 
-    /* The whole gated window runs under the lock: the rail state and the
-     * nrfx_saadc global control block are both shared, and interleaving a
-     * second task's window would corrupt this sample set (or release the
-     * rail mid-average). The window is bounded: 5 ms settle plus at most
-     * 8 * 50 ms of sample waits, and the rail-off below runs on every
-     * path out, including all-samples-failed. */
+    /* The whole gated window runs under the lock: the rail state, the nrfx
+     * global control block and the probe latch are all shared, and
+     * interleaving a second task's window would corrupt this sample set
+     * (or release the rail mid-average). The window is bounded: 5 ms
+     * settle plus at most 8 * 50 ms of sample waits, and the rail-off
+     * below runs on every path out, including all-samples-failed. */
     xSemaphoreTake(s_lock, portMAX_DELAY);
+
+    bool first_window = (s_probe == BATTERY_T1000E_PROBE_UNTRIED);
+    if (first_window && !probe_latch_store(BATTERY_T1000E_PROBE_ATTEMPTING)) {
+        /* Cannot record the attempt: refuse the window. An unrecorded
+         * fatal attempt would repeat every boot, which is the reset loop
+         * the latch exists to prevent; no reading is worth that. */
+        xSemaphoreGive(s_lock);
+        ESP_LOGE(TAG, "cannot persist rail-probe latch; skipping voltage read");
+        return 0;
+    }
+
     nrf_gpio_pin_set(BOARD_PIN_VBAT_RAIL_EN);
     vTaskDelay(pdMS_TO_TICKS(RAIL_SETTLE_MS));
     for (int i = 0; i < BATTERY_SAMPLE_COUNT; i++)
         valid[i] = read_one_sample_mv(&samples[i]);
     nrf_gpio_pin_clear(BOARD_PIN_VBAT_RAIL_EN);
+
+    if (first_window) {
+        /* Survival, not sample quality, is the latch's claim: the window
+         * completed and the board is alive, so the drive is proven on this
+         * unit regardless of how the samples came out. If the PROVEN store
+         * fails, the next boot repeats the ATTEMPTING/PROVEN pair; the
+         * in-memory state still advances so this boot never re-runs it. */
+        if (!probe_latch_store(BATTERY_T1000E_PROBE_PROVEN))
+            ESP_LOGW(TAG, "rail-probe PROVEN latch store failed; will retry next boot");
+        s_probe = BATTERY_T1000E_PROBE_PROVEN;
+    }
     xSemaphoreGive(s_lock);
 
     uint32_t pin_mv = battery_t1000e_average_mv(samples, valid, BATTERY_SAMPLE_COUNT);
-    if (pin_mv == 0)
-        return 0; /* all samples failed, or a genuinely dead divider */
-    return battery_t1000e_pin_to_vbat_mv(pin_mv);
+    uint32_t mv = (pin_mv == 0) ? 0 : battery_t1000e_pin_to_vbat_mv(pin_mv);
+
+    /* One trace stamp per boot with the first successful reading, so a
+     * decoded page shows what the cell measured without a console. */
+    if (mv != 0 && !s_first_mv_stamped) {
+        s_first_mv_stamped = true;
+        boot_trace_mark(BT_BATTERY_MV, mv);
+    }
+    return mv;
 }
 
 uint8_t battery_read_pct(void) { return battery_mv_to_pct(battery_read_mv()); }
