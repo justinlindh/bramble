@@ -5,6 +5,7 @@ import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/use
 import { addChannel } from '../../store/actions';
 import { useStore, parseConversationId } from '../../store/index';
 import { friendlyErrorFrom } from '../../lib/errors';
+import { tryParseAddr } from '../../lib/addr';
 import { EscapeDialog } from '../../components/EscapeDialog';
 import styles from './ConversationList.module.css';
 
@@ -51,12 +52,6 @@ export function filterDmConversations(conversations: Map<string, Conversation>, 
     if (!hasKnownPeers) return true;
     return knownPeerAddrs!.has(addr);
   });
-}
-
-export function parseDmHexAddress(input: string): number | null {
-  const raw = input.trim().replace(/^0x/i, '');
-  if (!/^[0-9a-fA-F]{1,8}$/.test(raw)) return null;
-  return parseInt(raw, 16);
 }
 
 function DmItem({ conv, active, onSelect }: { conv: Conversation; active: boolean; onSelect: (id: string) => void }) {
@@ -152,7 +147,7 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
 
   const handleOpenDm = () => {
     setDmError('');
-    const addr = parseDmHexAddress(dmAddr);
+    const addr = tryParseAddr(dmAddr);
     if (addr === null) {
       setDmError('Enter a valid hex address (e.g. 0xABCD1234)');
       return;
