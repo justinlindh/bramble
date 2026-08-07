@@ -2640,7 +2640,15 @@ components:
         One used slot of the DM session table. Metadata only: the session key,
         the peer's cached identity key and the ratchet chain keys are never
         returned.
-      required: [address, state, verified, ratchet_valid]
+      required:
+        - address
+        - state
+        - verified
+        - ratchet_valid
+        - msg_count
+        - ke_epoch
+        - established_ms_ago
+        - last_active_ms_ago
       properties:
         address:
           type: string

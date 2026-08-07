@@ -1583,19 +1583,19 @@ export interface components {
             /** @description Override update interval in seconds. */
             interval_s?: number;
         };
-        /** @description Per-channel location sharing rule. */
+        /** @description Per-channel location sharing rule. The node broadcasts its position under this channel's key, so every holder of that key receives it and no route, DM session or prior traffic is required. The tier is the resolution the whole channel receives. A receiver additionally requires a valid network-key origin MAC before it believes the position, so a node outside the network cannot originate one. */
         LocationChannelTarget: {
-            /** @description Channel index. */
+            /** @description Channel index. Outside this range names no channel the node can share to, and setLocationConfig rejects the whole request. Channel 0 is the public channel, whose PSK is well known: targeting it makes the position readable by anyone in radio range, not only by the network. Pick a private channel to keep a group's positions within that group. */
             channel: number;
             /** @description Whether rule is enabled. */
             enabled?: boolean;
             tier?: components["schemas"]["LocationTier"];
-            /** @description Override update interval in seconds. */
+            /** @description Update interval in seconds for this target, paced independently of every other target. Floored at 30. */
             interval_s?: number;
         };
         /** @description Canonical location configuration. */
         LocationConfig: {
-            /** @description Whether location sharing is enabled. */
+            /** @description Whether location sharing is permitted. A node transmits only to the targets in contact_rules and channel_targets, so this being true with no enabled target means nothing is sent. */
             enabled: boolean;
             tier: components["schemas"]["LocationTier"];
             default_tier: components["schemas"]["LocationTier"];
@@ -1854,13 +1854,13 @@ export interface components {
             /** @description Send chain is established, so a payload can be encrypted now. */
             ratchet_valid: boolean;
             /** @description Messages carried by this session since it was established. */
-            msg_count?: number;
+            msg_count: number;
             /** @description Key-exchange epoch this session is on. */
-            ke_epoch?: number;
+            ke_epoch: number;
             /** @description Milliseconds since the slot was established or re-established. */
-            established_ms_ago?: number;
+            established_ms_ago: number;
             /** @description Milliseconds since the last send or receive on this session. */
-            last_active_ms_ago?: number;
+            last_active_ms_ago: number;
         };
         DmSessionsResponse: {
             sessions: components["schemas"]["DmSession"][];
