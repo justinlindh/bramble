@@ -10,6 +10,8 @@
 
 #include <FreeRTOS.h>
 
+#include "battery.h"
+#include "battery_nrf.h"
 #include "esp_log.h"
 #include "identity.h"
 #include "ble_host.h"
@@ -57,6 +59,31 @@ void app_init_stack(void) {
     msg_store_init_with_persistence();
     boot_trace_mark(BT_MSG_STORE, 0);
 
+    /* Battery before the mesh starts, matching the ESP boot order (main.c
+     * calls battery_init() before mesh_task_start): the mesh task's
+     * immediate first beacon reads the battery, so the backend must exist
+     * by then. On the T1000-E, init deliberately does NOT touch the P1.06
+     * sensor rail: energizing it from boot context is the one action that
+     * ever stopped an instrumented build dead, so the backend stays
+     * disarmed (voltage reads return 0, no rail touched) until the arm
+     * call after BT_BOOT_DONE below, and the first real gated window runs
+     * at the first post-boot poll, the context the bench probe proved
+     * safe. The stamp's aux is the persisted rail-probe verdict
+     * (battery_nrf.h): 0 untried, 1 previous window died (voltage
+     * disabled), 2 proven. */
+    battery_init();
+    boot_trace_mark(BT_BATTERY_INIT, battery_probe_state());
+    {
+        /* One status snapshot for the boot log. Pre-arm this reports the
+         * charge-detect verdict and an honest mv 0; it cannot touch the
+         * rail. */
+        battery_status_t boot_bstat;
+        battery_get_status(&boot_bstat);
+        ESP_LOGI(TAG, "Battery: %lu mV (%u%%), present=%d, charging=%d",
+                 (unsigned long)boot_bstat.mv, boot_bstat.pct, boot_bstat.present,
+                 (int)boot_bstat.charging);
+    }
+
     /* The dispatcher and its method table must exist before any transport
      * registers, because rpc_init() clears both tables. */
     rpc_init();
@@ -100,5 +127,9 @@ void app_init_stack(void) {
         ESP_LOGE(TAG, "BLE did not start; the node is mesh-only this boot");
     }
     boot_trace_mark(BT_BOOT_DONE, (uint32_t)xPortGetFreeHeapSize());
+
+    /* Boot is over: allow rail-gated battery reads from here on. Kept
+     * strictly after BT_BOOT_DONE, see the battery stanza above. */
+    battery_runtime_arm();
     ESP_LOGI(TAG, "mesh_task_start returned; free heap %u bytes", (unsigned)xPortGetFreeHeapSize());
 }

@@ -437,6 +437,16 @@ target_include_directories(test_battery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
 )
 
+# T1000-E battery conversion math (SAADC raw -> cell mV, divider, average)
+add_executable(test_battery_t1000e
+    test_battery_t1000e.c
+    unity/unity.c
+)
+target_include_directories(test_battery_t1000e PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+)
+
 # Radio airtime tests
 add_executable(test_radio_airtime
     test_radio_airtime.c
@@ -2332,6 +2342,20 @@ target_include_directories(test_gps_virt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
 )
 target_link_libraries(test_gps_virt pthread)
+
+# Virtual battery driver: charging-aware emu-link mapping (whitebox include
+# of battery_virt.c + battery_pct.c + emu_link.c)
+add_executable(test_battery_virt
+    test_battery_virt.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_battery_virt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+)
+target_link_libraries(test_battery_virt pthread)
 
 # Virtual indicators driver: full-state ind emission per change
 # (Task 6; whitebox include of indicator_virt.c + emu_link.c)

@@ -26,6 +26,7 @@ TAGS = {
     0x0A: "TOKEN_LOADED", 0x0B: "GPS_INIT(rc)", 0x0C: "HFXO_OK",
     0x0D: "LFCLK(xtal)", 0x0E: "BLE_INIT(rc)", 0x0F: "BLE_START(rc)",
     0x10: "ADV(rc)", 0x11: "MESH_STARTED",
+    0x12: "BATTERY_INIT(probe)", 0x13: "BATTERY_MV(mv)",
     0x14: "BOOT_BEGIN(resetreas)", 0x15: "BOOT_CARRY(failed)",
     0xDD: "BOOT_DONE(heap)",
     0xE1: "FAIL_ASSERT(line)", 0xE2: "FAIL_STACK_OVERFLOW",

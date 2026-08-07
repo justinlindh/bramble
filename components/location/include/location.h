@@ -389,11 +389,14 @@ bool location_channel_target_is_permitted(int channel_index);
 #define LOCATION_HS_BACKOFF_MAX_MS (30U * 60U * 1000U)
 #define LOCATION_HS_TRACK 8
 
+/* addr == 0 marks a free slot. It is not a valid peer address and
+ * location_hs_should_attempt already rejects it, so a separate in-use flag
+ * would cost a byte plus three of padding per slot to say what addr already
+ * says. */
 typedef struct {
     uint32_t addr;
     uint32_t next_attempt_ms;
     uint32_t backoff_ms;
-    bool used;
 } location_hs_slot_t;
 
 typedef struct {

@@ -5,9 +5,16 @@ and the SenseCAP T1000-E card tracker. Bare-metal FreeRTOS + nrfx, no
 ESP-IDF, no SoftDevice; the portable protocol components compile unchanged
 and the platform seams are shimmed (`shim/`).
 
-The port landed in phases, and the measured tables below keep their phase
-labels: P0 protocol core on the dev kit, P1 LoRa radio, P2 BLE RPC + flash
-persistence, P3 GNSS (below; power management within P3 not yet started).
+The measured tables below carry the phase labels the port was built under:
+P0 protocol core on the dev kit, P1 LoRa radio, P2 BLE RPC + flash
+persistence, P3 GNSS (below).
+
+Power management covers WFE idle-sleep in the idle task, HFXO ownership
+(NimBLE's rfmgmt cycles the crystal; the boot path stops it after LFCLK
+bring-up, and the RC fallback carries the anomaly-192 workaround), and the
+T1000-E battery backend (`nrf/shim/battery_t1000e.c`): charge and VBUS
+detect plus rail-gated cell voltage, with the safety layers the Battery
+section below describes.
 
 Status, stated per the repo's honesty conventions: builds, boots, and runs
 as a live peer on the bench mesh from the Wio-WM1110 dev kit, with the
@@ -30,7 +37,7 @@ and after a reset the SAME identity, network key and BLE bond all loaded
 from flash and the node rejoined inside a minute. A 10-minute soak followed
 with continuous heartbeats and a stable heap. BLE pairing reliability: 45
 consecutive connected attempts reached encryption with zero link kills
-(the controller previously terminated ~20% of attempts; see
+(unpatched, the controller terminates ~20% of attempts; see
 `patches/nimble-dup-pdu-during-enc-start.patch`).
 
 T1000-E, verified on the physical card 2026-07-28: flashes through its
@@ -43,9 +50,30 @@ a UART.
 
 GNSS (P3) is implemented for the AG3335 module (see below) and bench-verified
 on the physical T1000-E, 2026-07-31 (see the GNSS section for what was
-checked). Still absent: power management (P3, the 32MHz crystal stays on, so
-battery life is untuned) and outdoor cold-start TTFF, which the bench pass
-did not measure. Not a supported device yet.
+checked).
+
+Power management. The 32MHz crystal (HFXO) does not stay on continuously.
+NimBLE's link-layer rfmgmt (upstream, unmodified) duty-cycles HFXO off
+between BLE events, requesting it 1500us ahead of each radio event through
+direct CLOCK-peripheral register writes (source-verified:
+`nimble/controller/src/ble_ll_rfmgmt.c`; binary-verified by disassembling
+the shipped ELF, where `ble_phy_rfclk_enable/disable` are raw register
+stores, not calls into this project's own glue code in
+`src/nimble_glue.c`, which is vestigial on this FreeRTOS build).
+
+This port's own power work covers three things: the CPU's idle task sleeps
+via WFE rather than busy-spinning at 64MHz (binary-verified against the
+fetched FreeRTOS kernel source); the boot path stops HFXO once LFCLK
+bring-up finishes rather than leaving it on until BLE's first natural duty
+cycle; and the RC-oscillator fallback path works around nRF52840 anomaly
+192 (LFRC calibration frequency error), source-verified against Nordic's
+documented errata and nrfx's own reference implementation. That fallback
+is not bench-tested, because every board on the bench fleet has a
+32.768kHz crystal fitted and the path never runs.
+
+Bench-pending: overall current draw under real BLE activity and idle, and
+outdoor cold-start TTFF, which the GNSS bench pass did not measure. Not a
+supported device yet.
 
 ## Build
 
@@ -226,12 +254,70 @@ went out and waking it again at `last_send + interval - GPS_DUTY_WARM_MARGIN_S`,
 matching the policy. A 45-minute soak ran with a byte-stable heap, mesh RX
 observed every minute, and zero stream-buffer overruns throughout.
 
-Still unverified: power management and current draw (the next work, see
-above), outdoor cold-start TTFF, and reacquisition after a multi-hour park
-where ephemeris has gone stale. Airoha's published AG3335 chip
+Still bench-pending: overall current draw under real duty cycling (the
+power-management note above separates what is source- and binary-verified
+from what needs a bench), outdoor cold-start TTFF,
+and reacquisition after a multi-hour park where ephemeris has gone stale.
+Airoha's published AG3335 chip
 specification states a cold-start time to first fix under 25 seconds and a
 tracking sensitivity of -167 dBm; Airoha does not publish current
 consumption figures for the chip, so none are cited here.
+
+## Battery (T1000-E)
+
+The T1000-E carries a LiPo cell plus charger-IC status pins (Seeed's stock
+Meshtastic-compatible wiring). `shim/battery_t1000e.c` is the backend:
+charge and VBUS detect (P1.03, P0.05) as plain GPIO inputs, and cell
+voltage over P0.02/AIN0 through the board's 2x divider with the nRF52840's
+SAADC, satisfying the same `components/battery/include/battery.h` contract
+as the ESP32 fleet and the emulator's virtual battery:
+`battery_get_status()` returns averaged millivolts, a curve percentage,
+presence, and a hardware-informed charging state. Every field flows
+through the shared code the ESP32 fleet already uses: the same LiPo
+discharge curve (`components/battery/battery_pct.c`), the same
+valid-masked averaging (`battery_average_mv`), the same beacon-level 0xFF
+unknown/plugged-in sentinel (`battery_beacon_pct()`,
+`docs/bramble-protocol-spec.md` §beacon layout), the same RPC charging
+fields on `getStatus`/`getBattery`, and the same webapp charging display.
+
+The divider on P0.02 hangs off a sensor rail gated by P1.06
+(SENSE_POWER_EN in Seeed's vendor SDK, `smtc_hal_config.h`; the vendor's
+`sensor.c` drives it per read, and Meshtastic's `initVariant()` drives the
+same pin at boot fleet-wide as `PIN_3V3_EN`). Ungated, the SAADC measures
+the dead divider: conversions succeed and return single-digit millivolts
+with no error a driver could detect, a confident wrong answer that would
+beacon 0 percent off the charger. Every voltage read is therefore a gated
+window mirroring the vendor's sequence: rail high (push-pull, standard
+drive, active HIGH, the vendor's exact configuration), settle, 8-sample
+valid-masked average, rail low. Rail-gated reads are bench-verified on a
+retail unit (2026-08-06): rail off measured 2 mV at the pin, driven
+measured 3920 mV on a charging cell, released returned to 2 mV.
+
+One question about this board remains open, and the backend is designed so
+its answer does not matter. A single instrumented build stopped dead
+(reset or core lockup, undetermined: no failure tag, no sentinel rescue)
+the one time BOOT-context code drove P1.06, while the identical drive is
+bench-proven at runtime. Two layers respond to that: the voltage path
+stays disarmed until `app_init` finishes boot (`battery_runtime_arm()`
+after `BT_BOOT_DONE`; disarmed reads return the mv 0 "no reading"
+sentinel, so beacons carry 0xFF, not a fake percentage), which keeps every
+rail drive in the bench-proven runtime context; and a persisted survival
+latch brackets the first-ever gated window (ATTEMPTING committed before
+the first drive, PROVEN after the window completes), so a drive that is
+somehow fatal even at runtime costs one reset per flash lifetime and
+disables the voltage path on the next boot instead of looping. The
+decoded boot trace shows the latch verdict (`BATTERY_INIT` aux) and each
+boot's first successful reading (`BATTERY_MV`).
+
+Charge detection is bench-confirmed on hardware, tracking a charger being
+plugged and unplugged, and depends on neither the ADC nor the rail. The
+Wio-WM1110 dev kit has no battery hardware and never claims otherwise:
+`shim/battery_null.c` reports `present=false` honestly rather than
+fabricating a reading. The battery shim is selected per board by filename
+in `nrf/CMakeLists.txt`; a board whose divider needs the rail gate
+declares `BOARD_BATTERY_NEEDS_RAIL_GATE`, which non-gating backends refuse
+at compile time, so a wrong selection fails the build instead of shipping
+a dead reading.
 
 ## Dev network key (bench only)
 

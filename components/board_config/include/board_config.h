@@ -97,6 +97,26 @@ typedef struct {
     int divider_factor; /* Voltage divider multiplier (e.g., 2) */
 } board_battery_config_t;
 
+/*
+ * Hardware charge-detect config. -1 = not wired: every board ships
+ * {-1, 0, -1} today, ESP boards because none has these pins routed, and
+ * t1000e because the real pins are owned by the nRF port (nrf/boards/), not
+ * this ESP-IDF-facing struct (see main/boards/t1000e.h). Without a wired
+ * chrg_gpio, battery_get_status() reports BATTERY_CHG_UNKNOWN.
+ *
+ * chrg_gpio: charge-status output from the charger IC (HIGH/LOW).
+ * chrg_active_level: the GPIO level (0 or 1) that means "charging".
+ * vbus_gpio: optional separate VBUS-presence sense, independent of
+ * chrg_gpio; not consumed by the ESP battery driver today, reserved for
+ * boards/backends that need to distinguish "plugged in, not yet charging"
+ * from "unplugged".
+ */
+typedef struct {
+    int chrg_gpio;
+    int chrg_active_level;
+    int vbus_gpio;
+} board_charge_config_t;
+
 /* Trackball pin config */
 typedef struct {
     int up;
@@ -163,6 +183,7 @@ typedef struct {
 
     /* Battery */
     board_battery_config_t battery;
+    board_charge_config_t charge;
 
     /* I2C bus (for keyboard, trackball, sensors) */
     int i2c_sda;

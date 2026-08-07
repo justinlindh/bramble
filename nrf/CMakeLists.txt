@@ -88,6 +88,7 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_nvmc.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_saadc.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
 )
 target_include_directories(nrfx_lib PUBLIC
@@ -173,6 +174,8 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/gps/gps_feed.c
   ${BRAMBLE_COMPONENTS}/gps/gps_duty.c
   ${BRAMBLE_COMPONENTS}/battery/battery_pct.c
+  ${BRAMBLE_COMPONENTS}/battery/battery_helpers.c
+  ${BRAMBLE_COMPONENTS}/battery/battery_wrappers.c
   ${BRAMBLE_COMPONENTS}/indicators/alerts.c
   ${BRAMBLE_COMPONENTS}/ota/ota_progress.c
   ${BRAMBLE_COMPONENTS}/ota/ota_origin.c
@@ -329,6 +332,19 @@ else()
   set(BRAMBLE_NRF_GPS_SRCS shim/gps_null.c)
 endif()
 
+# Battery driver: the T1000-E gets the gated SAADC voltage read (drive the
+# P1.06 sensor rail per read) plus CHRG/VBUS charge detect, all in
+# shim/battery_t1000e.c; the dev kit (no battery sense wired) gets the null
+# backend. Exactly one backend is compiled per board, BY FILENAME, so a
+# wrong name here selects silently; the compile-time guard on
+# BOARD_BATTERY_NEEDS_RAIL_GATE (nrf/boards/t1000e.h, checked by
+# battery_null.c) is what turns a wrong selection into a build error.
+if(BRAMBLE_NRF_BOARD STREQUAL "t1000e")
+  set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_t1000e.c)
+else()
+  set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_null.c)
+endif()
+
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
@@ -353,7 +369,7 @@ add_executable(bramble-nrf
   shim/esp_random_nrf.c
   shim/esp_system_nrf.c
   ${BRAMBLE_NRF_GPS_SRCS}
-  shim/battery_null.c
+  ${BRAMBLE_NRF_BATTERY_SRCS}
   shim/esp_app_desc_nrf.c
   shim/rpc_platform_stubs.c
   shim/nvs_lfs.c

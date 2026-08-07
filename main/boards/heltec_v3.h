@@ -26,6 +26,7 @@ static const bramble_board_config_t board_heltec_v3 = {
     .button_gpio = 0,
 
     .battery = {.gpio = 1, .adc_channel = 0, .divider_factor = 2},
+    .charge = {.chrg_gpio = -1, .chrg_active_level = 0, .vbus_gpio = -1},
 
     .i2c_sda = -1,
     .i2c_scl = -1,

@@ -355,10 +355,12 @@ void location_hs_reset(location_hs_table_t* table) {
 }
 
 void location_hs_clear(location_hs_table_t* table, uint32_t addr) {
-    if (!table)
+    /* addr 0 is the free-slot marker, so clearing it would wipe an empty slot
+     * rather than a peer's backoff. */
+    if (!table || addr == 0)
         return;
     for (int i = 0; i < LOCATION_HS_TRACK; i++) {
-        if (table->slots[i].used && table->slots[i].addr == addr) {
+        if (table->slots[i].addr == addr) {
             memset(&table->slots[i], 0, sizeof(table->slots[i]));
             return;
         }
@@ -378,7 +380,7 @@ bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, bool 
     int oldest = 0;
     for (int i = 0; i < LOCATION_HS_TRACK; i++) {
         location_hs_slot_t* slot = &table->slots[i];
-        if (slot->used && slot->addr == addr) {
+        if (slot->addr != 0 && slot->addr == addr) {
             /* Signed difference so the comparison survives the mesh clock
              * wrapping between the scheduled attempt and now. */
             if ((int32_t)(now_ms - slot->next_attempt_ms) < 0)
@@ -391,7 +393,7 @@ bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, bool 
             slot->next_attempt_ms = now_ms + slot->backoff_ms;
             return true;
         }
-        if (!slot->used && free_idx < 0)
+        if (slot->addr == 0 && free_idx < 0)
             free_idx = i;
         if (table->slots[i].next_attempt_ms < table->slots[oldest].next_attempt_ms)
             oldest = i;
@@ -404,7 +406,6 @@ bool location_hs_should_attempt(location_hs_table_t* table, uint32_t addr, bool 
      * address so mutual targets do not both initiate and cross. */
     int idx = (free_idx >= 0) ? free_idx : oldest;
     table->slots[idx].addr = addr;
-    table->slots[idx].used = true;
     table->slots[idx].backoff_ms = LOCATION_HS_BACKOFF_START_MS;
     table->slots[idx].next_attempt_ms = now_ms + LOCATION_HS_BACKOFF_START_MS;
     return !defer_first;

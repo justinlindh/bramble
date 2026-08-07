@@ -11,9 +11,12 @@
  * The pin fields are deliberately all -1: the real pin mapping is owned by
  * the port (nrf/boards/t1000e.h) and the drivers that consume THESE fields
  * are the ESP-IDF ones, which do not build for nRF. This struct exists for
- * identity (name, short_name) and the capability mask. GNSS is brought up
- * by the nRF driver. Battery, buzzer, and sensors exist on the hardware but
- * are not brought up yet, so they are not claimed here.
+ * identity (name, short_name) and the capability mask. GNSS and battery
+ * (including charge/VBUS detect) are both brought up on this hardware, but
+ * through the nRF port's own board header and drivers (nrf/boards/t1000e.h,
+ * nrf/shim/gps_t1000e.c, nrf/shim/battery_t1000e.c), never through this
+ * struct. The buzzer and other sensors on the hardware are not brought up
+ * yet, on either port.
  */
 static const bramble_board_config_t board_t1000e = {
     .name = "Seeed SenseCAP T1000-E",
@@ -38,6 +41,12 @@ static const bramble_board_config_t board_t1000e = {
     .button_gpio = -1,
 
     .battery = {.gpio = -1, .adc_channel = 0, .divider_factor = 0},
+
+    /* All -1, same rationale as .battery/.radio above: the real charge and
+     * VBUS-sense pins are wired by the nRF port's own battery backend
+     * (nrf/shim/battery_t1000e.c), not this ESP-IDF-facing struct, which no
+     * ESP driver reads for this board. */
+    .charge = {.chrg_gpio = -1, .chrg_active_level = 0, .vbus_gpio = -1},
 
     .i2c_sda = -1,
     .i2c_scl = -1,

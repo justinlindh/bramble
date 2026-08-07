@@ -37,6 +37,7 @@ static const bramble_board_config_t board_heltec_v4 = {
     /* Pending schematic net-label verification for V4 battery ADC path. */
     /* Heltec V4 reference uses ~4.9x battery scaling; integer factor 5 is closest. */
     .battery = {.gpio = 1, .adc_channel = 0, .divider_factor = 5},
+    .charge = {.chrg_gpio = -1, .chrg_active_level = 0, .vbus_gpio = -1},
 
     .i2c_sda = -1,
     .i2c_scl = -1,

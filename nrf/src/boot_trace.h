@@ -59,6 +59,8 @@
 #define BT_BLE_START 0x0Fu     /* (rc) ble_server_start */
 #define BT_ADV 0x10u           /* (rc) ble_gap_adv_start result */
 #define BT_MESH_STARTED 0x11u  /* (0) */
+#define BT_BATTERY_INIT 0x12u  /* (probe state) battery_init complete */
+#define BT_BATTERY_MV 0x13u    /* (mv) boot's first successful cell reading */
 
 /* (RESETREAS) first record of every boot, naming why the PREVIOUS one
  * ended. The register is sticky and cumulative (the hardware only ORs bits
@@ -72,7 +74,7 @@
 /* (count) consecutive-failed-boot count carried across a page erase, so
  * outgrowing the page cannot silently reset the boot-loop rescue. */
 #define BT_BOOT_CARRY 0x15u
-#define BT_BOOT_DONE 0xDDu     /* (free heap) app_init complete */
+#define BT_BOOT_DONE 0xDDu /* (free heap) app_init complete */
 
 /* Consecutive boots that never reached BT_BOOT_DONE before boot_trace_init
  * gives up and returns to the bootloader itself. Three: enough that a power
