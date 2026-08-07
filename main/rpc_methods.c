@@ -3273,13 +3273,8 @@ static int handle_get_beacon_policy(const cJSON* params, cJSON* result) {
  * RPC surface's binary encoding and keeps the firmware free of a base64 dep. */
 static void phy_emit_frame_notify(const uint8_t* data, uint8_t len, const radio_rx_info_t* info,
                                   uint32_t freq_hz) {
-    static const char hexd[] = "0123456789abcdef";
     char frame_hex[2 * 255 + 1];
-    for (uint8_t i = 0; i < len; i++) {
-        frame_hex[i * 2] = hexd[(data[i] >> 4) & 0xF];
-        frame_hex[i * 2 + 1] = hexd[data[i] & 0xF];
-    }
-    frame_hex[len * 2] = '\0';
+    bytes_to_hex(data, len, frame_hex);
 
     cJSON* params = cJSON_CreateObject();
     if (!params) {
