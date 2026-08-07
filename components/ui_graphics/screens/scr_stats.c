@@ -1,5 +1,6 @@
 #include "scr_stats.h"
 #include "ui_shared_state.h"
+#include "gnss_status.h"
 #include "ui_zone.h"
 #include "ui_toast.h"
 #include "scr_traffic.h"
@@ -457,6 +458,35 @@ void scr_stats_create(bramble_layout_t* layout) {
     lv_label_set_text(sys_lbl, sys_buf);
     lv_obj_set_style_text_font(sys_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(sys_lbl, BR_COLOR_TEXT, 0);
+
+    /* GNSS state and the counts behind it, on the page an operator reaches for
+     * when a node is misbehaving. The state word takes the same three colors as
+     * the status-bar badge, so a red "no signal" here and a red icon up there
+     * are visibly the same reading. Boards without a receiver skip the block
+     * rather than print a permanent "off". */
+    gnss_ui_input_t gnss;
+    ui_shared_gnss_state(&gnss);
+    if (gnss.board_has_gnss) {
+        gnss_ui_state_t gstate = gnss_ui_classify(&gnss);
+        char gnss_buf[64];
+        snprintf(gnss_buf, sizeof(gnss_buf), "GNSS: %s", gnss_ui_state_label(gstate));
+        lv_obj_t* gnss_lbl = lv_label_create(cont);
+        lv_label_set_text(gnss_lbl, gnss_buf);
+        lv_obj_set_style_text_font(gnss_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(gnss_lbl,
+                                    gstate == GNSS_UI_FIX         ? BR_COLOR_SUCCESS
+                                    : gstate == GNSS_UI_ACQUIRING ? BR_COLOR_WARNING
+                                    : gstate == GNSS_UI_NO_SIGNAL ? BR_COLOR_DANGER
+                                                                  : BR_COLOR_TEXT_SEC,
+                                    0);
+
+        char gnss_detail[48];
+        gnss_ui_detail_line(&gnss, gnss_detail, sizeof(gnss_detail));
+        lv_obj_t* gnss_detail_lbl = lv_label_create(cont);
+        lv_label_set_text(gnss_detail_lbl, gnss_detail);
+        lv_obj_set_style_text_font(gnss_detail_lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(gnss_detail_lbl, BR_COLOR_TEXT_SEC, 0);
+    }
 
     lv_obj_t* sep2 = lv_obj_create(cont);
     lv_obj_set_size(sep2, 296, 1);
