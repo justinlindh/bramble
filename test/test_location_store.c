@@ -116,8 +116,7 @@ void test_legacy_record_without_boot_id_decodes_as_age_unknown(void) {
     peer_location_record_encode(&rec, &pos, LOCATION_TIER_COARSE, 5000, 3);
 
     peer_location_record_t out;
-    TEST_ASSERT_EQUAL(0,
-                      peer_location_record_decode(&rec, PEER_LOCATION_RECORD_V0_SIZE, 3, &out));
+    TEST_ASSERT_EQUAL(0, peer_location_record_decode(&rec, PEER_LOCATION_RECORD_V0_SIZE, 3, &out));
     TEST_ASSERT_EQUAL_INT32(FICTIONAL_LAT_E7, out.pos.latitude_e7);
     TEST_ASSERT_EQUAL(LOCATION_TIER_COARSE, out.tier);
     TEST_ASSERT_EQUAL_UINT32(5000, out.received_ms);

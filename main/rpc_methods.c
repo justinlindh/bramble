@@ -2176,10 +2176,10 @@ static int handle_get_peer_locations(const cJSON* params, cJSON* result) {
                             cJSON_AddStringToObject(peer, "tier",
                                                     location_tier_to_string(stored.tier));
                             cJSON_AddItemToObject(peer, "position", position);
-                            cJSON_AddBoolToObject(
-                                peer, "online",
-                                location_age_is_fresh(stored.age_known, stored.received_ms,
-                                                      now_ms));
+                            cJSON_AddBoolToObject(peer, "online",
+                                                  location_age_is_fresh(stored.age_known,
+                                                                        stored.received_ms,
+                                                                        now_ms));
                             /* An uptime reading from a previous boot cannot be
                              * expressed on this boot's clock, so report 0
                              * ("unknown") rather than a number that reads as a

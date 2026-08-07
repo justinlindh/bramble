@@ -526,8 +526,7 @@ uint32_t location_store_begin_boot(void) {
     if (next == 0)
         next = 1; /* wrap past the reserved "unknown" value */
 
-    if (nvs_set_u32(nvs, PEER_LOCATION_BOOT_ID_KEY, next) == ESP_OK &&
-        nvs_commit(nvs) == ESP_OK) {
+    if (nvs_set_u32(nvs, PEER_LOCATION_BOOT_ID_KEY, next) == ESP_OK && nvs_commit(nvs) == ESP_OK) {
         s_boot_id = next;
     }
     nvs_close(nvs);

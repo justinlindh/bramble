@@ -532,8 +532,8 @@ void scr_map_create(bramble_layout_t* layout) {
          * present it as a live fix. */
         bool live = location_age_is_fresh(entry->age_known, entry->received_ms, now_ms);
         lv_color_t marker_color = (entry->peer_addr == s_focus_peer_addr) ? BR_COLOR_ACCENT
-                                  : live                                 ? lv_color_hex(0x00CC00)
-                                                                         : lv_color_hex(0x6E7B6E);
+                                  : live                                  ? lv_color_hex(0x00CC00)
+                                                                          : lv_color_hex(0x6E7B6E);
         /* Wide-zoom pruning: drop the text for everyone but the focused peer. */
         const char* draw_label =
             (wide_zoom && entry->peer_addr != s_focus_peer_addr) ? NULL : label;
