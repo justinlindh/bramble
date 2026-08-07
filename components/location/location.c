@@ -308,6 +308,10 @@ bool location_contact_key(char* out, size_t out_len, uint32_t addr) {
     return true;
 }
 
+bool location_channel_target_is_permitted(int channel_index) {
+    return channel_index != LOCATION_PUBLIC_CHANNEL_INDEX;
+}
+
 bool location_channel_key(char* out, size_t out_len, int channel_index) {
     if (!out || out_len < LOCATION_TARGET_KEY_SIZE)
         return false;
@@ -337,6 +341,12 @@ static bool location_suffix_is_exact(const char* suffix, size_t digits, bool hex
     return suffix[digits] == '\0';
 }
 
+int location_channel_index_from_suffix(const char* suffix) {
+    if (!suffix || !location_suffix_is_exact(suffix, 2, false))
+        return -1;
+    return atoi(suffix);
+}
+
 bool location_target_from_entry(const char* key, const char* raw, location_target_t* out) {
     if (!key || !raw || !out)
         return false;
@@ -358,6 +368,12 @@ bool location_target_from_entry(const char* key, const char* raw, location_targe
             return false;
         int index = atoi(suffix);
         if (index < 0 || index >= LOCATION_MAX_CHANNEL_TARGETS)
+            return false;
+        /* Defence in depth on the upgrade path: a public-channel rule written
+         * by an earlier build, or by any path that did not go through the RPC
+         * setter, must not resolve to a target here either, so upgrading
+         * neutralises it rather than only preventing new ones. */
+        if (!location_channel_target_is_permitted(index))
             return false;
         kind = LOCATION_TARGET_CHANNEL;
         id = (uint32_t)index;

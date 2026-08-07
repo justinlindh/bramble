@@ -162,9 +162,11 @@ void test_location_target_from_entry_channel(void) {
     location_target_t target;
     memset(&target, 0, sizeof(target));
 
-    TEST_ASSERT_TRUE(location_target_from_entry("lch_00", "1|coarse|60", &target));
+    /* Channel 1 rather than 0: the public channel is never a target, which
+       test_location_send_path_refuses_stored_public_channel_rule covers. */
+    TEST_ASSERT_TRUE(location_target_from_entry("lch_01", "1|coarse|60", &target));
     TEST_ASSERT_EQUAL(LOCATION_TARGET_CHANNEL, target.kind);
-    TEST_ASSERT_EQUAL_UINT32(0, target.id);
+    TEST_ASSERT_EQUAL_UINT32(1, target.id);
     TEST_ASSERT_EQUAL(LOCATION_TIER_COARSE, target.tier);
     TEST_ASSERT_EQUAL_UINT16(60, target.interval_s);
 
@@ -199,6 +201,42 @@ void test_location_target_from_entry_rejects_non_targets(void) {
     /* Outside the channel key space, so it names no channel. */
     TEST_ASSERT_FALSE(location_target_from_entry("lch_99", "1|coarse|60", &target));
     TEST_ASSERT_FALSE(location_target_from_entry("lch_", "1|coarse|60", &target));
+}
+
+/* The public channel cannot carry position: its key is well known, so a target
+ * on it is a broadcast of exact coordinates in the clear. */
+void test_location_public_channel_is_not_a_permitted_target(void) {
+    TEST_ASSERT_FALSE(location_channel_target_is_permitted(LOCATION_PUBLIC_CHANNEL_INDEX));
+    TEST_ASSERT_TRUE(location_channel_target_is_permitted(1));
+    TEST_ASSERT_TRUE(location_channel_target_is_permitted(LOCATION_MAX_CHANNEL_TARGETS - 1));
+}
+
+/* Send-path guard, not just the setter: a public-channel rule already sitting
+ * in NVS (written by an earlier build, or by any path that bypassed the setter)
+ * must not resolve to a target, so an upgrade stops it transmitting rather than
+ * merely preventing new ones. A private-channel rule in the same storage still
+ * resolves. */
+void test_location_send_path_refuses_stored_public_channel_rule(void) {
+    location_target_t target;
+
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_00", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_00", "1|coarse|300", &target));
+
+    TEST_ASSERT_TRUE(location_target_from_entry("lch_01", "1|full|60", &target));
+    TEST_ASSERT_EQUAL_UINT8(LOCATION_TARGET_CHANNEL, target.kind);
+    TEST_ASSERT_EQUAL_UINT32(1u, target.id);
+}
+
+/* A malformed channel suffix must not fall back to channel 0, which the public
+ * channel occupies: a corrupt key becoming a public-channel target is exactly
+ * the leak the guard above exists to stop. */
+void test_location_malformed_channel_key_does_not_become_public_target(void) {
+    location_target_t target;
+
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_xx", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_0x", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_0", "1|full|60", &target));
 }
 
 /* Only the exact suffix shape the key builders emit names a target: 8 hex
@@ -437,6 +475,9 @@ int main(void) {
     RUN_TEST(test_location_target_from_entry_contact);
     RUN_TEST(test_location_target_from_entry_rejects_non_targets);
     RUN_TEST(test_location_target_from_entry_rejects_malformed_suffixes);
+    RUN_TEST(test_location_public_channel_is_not_a_permitted_target);
+    RUN_TEST(test_location_send_path_refuses_stored_public_channel_rule);
+    RUN_TEST(test_location_malformed_channel_key_does_not_become_public_target);
     RUN_TEST(test_location_target_interval_floor);
     RUN_TEST(test_location_rule_codec_roundtrip);
     RUN_TEST(test_location_target_keys);

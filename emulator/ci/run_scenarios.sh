@@ -487,14 +487,17 @@ location_channel_verdict() {
     [ "$LOCATION_RECEIVER" != "$LOCATION_SHARER" ]
 }
 
-# Two pagers, one channel location target, no DM between them. The sharer's
-# location namespace is seeded from EMU_LOCATION_CHANNEL with the same keys and
-# rule format bramble.setLocationConfig writes, so the mesh task's real policy
-# tick has to collect the channel target, encrypt under the channel key and
-# broadcast it, and the listener has to authenticate, decrypt and cache it.
-# Neither node has a route or a DM session to the other, which is the condition
-# a channel share exists to work under. This catches the failure a parser unit
-# test cannot see: configuration accepted, nothing transmitted.
+# Two pagers, one channel location target, no DM between them. Both nodes derive
+# the same keyed channel from EMU_LOCATION_CHANNEL_PSK, and only the sharer sets
+# EMU_LOCATION_SHARE, so its location namespace is seeded with the same keys and
+# rule format bramble.setLocationConfig writes. The mesh task's real policy tick
+# has to collect the channel target, encrypt under the channel key and broadcast
+# it, and the listener has to authenticate, decrypt and cache it. The channel is
+# keyed rather than the public one because the public channel cannot carry
+# location: its PSK is well known. Neither node has a route or a DM session to
+# the other, which is the condition a channel share exists to work under. This
+# catches the failure a parser unit test cannot see: configuration accepted,
+# nothing transmitted.
 location_suite() {
     echo "[4] emu-location-channel"
     local scen="$SCEN_DIR/emu-location-channel.json"

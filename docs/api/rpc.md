@@ -42,7 +42,7 @@ Accepted params (all optional for partial updates):
   - `tier` (string, optional)
   - `interval_s` (number, optional)
 - `channel_targets` (array of objects):
-  - `channel` (number, 0 to 15)
+  - `channel` (number, 1 to 15; 0 is the public channel and is rejected)
   - `enabled` (bool, optional)
   - `tier` (string, optional)
   - `interval_s` (number, optional)
@@ -63,13 +63,19 @@ Notes:
   channel key and needs no session, no route and no prior traffic, which is
   what makes it work on a mesh whose members have only ever broadcast. Its
   tier is the resolution every member of the channel receives.
-- Channel 0 is the public channel and its PSK is well known, so a target on it
-  publishes the position to anyone in radio range rather than to a group. A
-  private channel keeps a group's positions within that group. Either way a
-  receiver believes a position only after the network-key origin MAC verifies,
-  so a node outside the network cannot originate one.
+- A `channel` target must name a keyed channel. Channel 0 is the public channel
+  and is rejected: its PSK is well known, so a target on it would broadcast
+  exact coordinates to anyone in radio range, and the shared replay window is
+  deliberately skipped for public-channel decrypts. A keyed channel gives
+  location both confidentiality and the full per-sender replay window. Add one
+  with `bramble.addChannel` and target the index it returns; that index is
+  per-device and nodes agree by deriving the same key from the same PSK, not by
+  occupying the same slot. A public-channel rule left in storage by an earlier
+  build does not resolve to a target, so an upgrade stops it transmitting.
+- A receiver believes a position only after the network-key origin MAC
+  verifies, so a node outside the network cannot originate one.
 - Each target is paced off its own `interval_s`, floored at 30 seconds.
-- A `channel` outside 0 to 15 names no channel the node can share to, and the
+- A `channel` outside 1 to 15 names no channel the node can share to, and the
   whole request is rejected with an invalid-params error rather than stored as
   a rule that never fires.
 - Existing `default_tier` and `interval_s` fields remain supported.

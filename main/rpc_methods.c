@@ -1831,8 +1831,12 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
     /* Validate every channel target before writing any of this config. A
        channel index outside the key space resolves to no target at all, and
        accepting it would leave the caller with a policy that reads back as
-       configured while the send path has nothing to send to. Rejecting up
-       front also keeps the write below all-or-nothing. */
+       configured while the send path has nothing to send to. The public
+       channel is rejected outright: its PSK is well known, so a target on it
+       broadcasts exact coordinates in the clear to anyone in range, and the
+       shared replay window is deliberately skipped there. Rejecting up front
+       also keeps the write below all-or-nothing, so no part of a request
+       carrying a bad target is applied. */
     const cJSON* proposed_targets = cJSON_GetObjectItem(params, "channel_targets");
     if (proposed_targets && cJSON_IsArray(proposed_targets)) {
         const cJSON* proposed = NULL;
@@ -1841,6 +1845,14 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
             char probe[LOCATION_TARGET_KEY_SIZE];
             if (!cJSON_IsNumber(channel) ||
                 !location_channel_key(probe, sizeof(probe), channel->valueint)) {
+                return RPC_ERR_INVALID_PARAMS;
+            }
+            if (!location_channel_target_is_permitted(channel->valueint)) {
+                cJSON_AddStringToObject(
+                    result, "error",
+                    "channel 0 is the public channel and cannot carry location: its key is "
+                    "well known, so a target on it would broadcast coordinates in the clear. "
+                    "Create a channel with a PSK and target that instead.");
                 return RPC_ERR_INVALID_PARAMS;
             }
         }
@@ -2429,13 +2441,23 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
 
                 if (strncmp(info.key, LOCATION_CHANNEL_RULE_PREFIX,
                             strlen(LOCATION_CHANNEL_RULE_PREFIX)) == 0) {
+                    /* Report only what the send path would act on. A stale
+                       lch_00 written by a build predating the public-channel
+                       rejection still sits in NVS after an upgrade, and the
+                       send path now refuses it; emitting it here would tell
+                       the client a target is configured and enabled while
+                       nothing is ever transmitted to it, which is the silent
+                       disagreement between reported and actual state that this
+                       guard exists to prevent. The contact loop above filters
+                       its own legacy keys for the same reason. */
+                    const char* chan_suffix = info.key + strlen(LOCATION_CHANNEL_RULE_PREFIX);
+                    int chan_index = location_channel_index_from_suffix(chan_suffix);
                     char raw[64] = {0};
                     size_t raw_len = sizeof(raw);
-                    if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
+                    if (chan_index >= 0 && location_channel_target_is_permitted(chan_index) &&
+                        nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
                         cJSON* entry = cJSON_CreateObject();
-                        cJSON_AddNumberToObject(
-                            entry, "channel",
-                            atoi(info.key + strlen(LOCATION_CHANNEL_RULE_PREFIX)));
+                        cJSON_AddNumberToObject(entry, "channel", chan_index);
                         rpc_location_rule_emit_fields(entry, raw);
                         cJSON_AddItemToArray(channel_targets, entry);
                     }

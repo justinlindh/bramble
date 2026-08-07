@@ -181,6 +181,37 @@ void test_get_config_ignores_legacy_location_contact_keys(void) {
     cJSON_Delete(cfg_root);
 }
 
+/* A node upgraded from a build that predates the public-channel rejection can
+ * still hold an lch_00 rule in NVS. The send path refuses it, so getConfig must
+ * not report it as a configured target: a client showing an enabled channel-0
+ * target while nothing is ever transmitted is the same silent disagreement
+ * between reported and actual state that the rejection exists to remove. A
+ * malformed suffix is dropped for the same reason, since atoi would otherwise
+ * resolve it to channel 0. */
+void test_get_config_omits_public_channel_and_malformed_channel_targets(void) {
+    g_nvs_allow_open = true;
+    strcpy(g_nvs_loc_kv[0].key, "lch_00");
+    strcpy(g_nvs_loc_kv[0].value, "1|full|60");
+    g_nvs_loc_kv[0].used = true;
+    strcpy(g_nvs_loc_kv[1].key, "lch_xx");
+    strcpy(g_nvs_loc_kv[1].value, "1|full|60");
+    g_nvs_loc_kv[1].used = true;
+    strcpy(g_nvs_loc_kv[2].key, "lch_03");
+    strcpy(g_nvs_loc_kv[2].value, "1|coarse|120");
+    g_nvs_loc_kv[2].used = true;
+    g_nvs_loc_kv_count = 3;
+
+    cJSON* cfg_root = dispatch_get_config();
+    cJSON* cfg_result = cJSON_GetObjectItem(cfg_root, "result");
+    cJSON* location = cJSON_GetObjectItem(cfg_result, "location");
+    cJSON* channel_targets = cJSON_GetObjectItem(location, "channel_targets");
+    TEST_ASSERT_TRUE(cJSON_IsArray(channel_targets));
+    TEST_ASSERT_EQUAL(1, cJSON_GetArraySize(channel_targets));
+    cJSON* only = cJSON_GetArrayItem(channel_targets, 0);
+    TEST_ASSERT_EQUAL(3, cJSON_GetObjectItem(only, "channel")->valueint);
+    cJSON_Delete(cfg_root);
+}
+
 void test_get_config_location_includes_canonical_fields_shape(void) {
     g_nvs_allow_open = false;
 
@@ -292,6 +323,7 @@ int main(void) {
     RUN_TEST(test_get_config_keeps_default_broadcast_semantics);
     RUN_TEST(test_location_contact_roundtrip_uses_canonical_rule_key);
     RUN_TEST(test_get_config_ignores_legacy_location_contact_keys);
+    RUN_TEST(test_get_config_omits_public_channel_and_malformed_channel_targets);
     RUN_TEST(test_get_config_location_includes_canonical_fields_shape);
     RUN_TEST(test_get_peer_locations_exports_peer_identity_and_timestamps);
     RUN_TEST(test_get_config_returns_mailbox_enabled_false_by_default);

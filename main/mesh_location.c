@@ -35,6 +35,8 @@ typedef struct __attribute__((packed)) {
  * component); this is where the two are held to each other. */
 _Static_assert(LOCATION_MAX_CHANNEL_TARGETS >= MAX_CHANNELS,
                "location channel-target key space must cover every channel");
+_Static_assert(LOCATION_PUBLIC_CHANNEL_INDEX == BRAMBLE_PUBLIC_CHANNEL_INDEX,
+               "location must reject the same index the channel component calls public");
 
 /* How often the share policy is evaluated. Every pass reads the location NVS
  * namespace, and the shortest interval a target can be configured with is
@@ -309,6 +311,14 @@ static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, u
 static uint32_t location_tx_channel(int channel_idx, const uint8_t* inner, uint8_t tier) {
     if (channel_idx < 0 || channel_idx >= s_num_channels) {
         ESP_LOGW(TAG, "Location channel target %d is not a channel this node holds", channel_idx);
+        return 0;
+    }
+    /* Last line of defence before the radio. Target resolution already refuses
+     * to produce a public-channel target, so reaching this is a bug in a
+     * caller, not user configuration: fail loudly rather than emit coordinates
+     * under a well-known key. */
+    if (!location_channel_target_is_permitted(channel_idx)) {
+        ESP_LOGE(TAG, "Refusing to share location on the public channel (index %d)", channel_idx);
         return 0;
     }
 
