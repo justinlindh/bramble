@@ -118,9 +118,17 @@ static void location_purge_dead_channel_rules(const char keys[][LOCATION_TARGET_
         return;
     }
     for (size_t i = 0; i < count; i++) {
-        if (nvs_erase_key(nvs, keys[i]) == ESP_OK) {
+        esp_err_t err = nvs_erase_key(nvs, keys[i]);
+        if (err == ESP_OK) {
             ESP_LOGW(TAG, "removed location rule %s: the public channel cannot carry location",
                      keys[i]);
+        } else {
+            /* Say so rather than leaving the owner to infer it. The rule stays
+             * inert either way (resolution and the send path both refuse it),
+             * but a silent failure here means the next boot tries again with
+             * no record of why the first attempt did nothing. */
+            ESP_LOGW(TAG, "could not remove location rule %s (%s); it stays inert and unsent",
+                     keys[i], esp_err_to_name(err));
         }
     }
     nvs_commit(nvs);
