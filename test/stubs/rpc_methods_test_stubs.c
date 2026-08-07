@@ -713,6 +713,12 @@ esp_err_t nvs_set_u32(nvs_handle_t h, const char* k, uint32_t v) {
     (void)v;
     return ESP_OK;
 }
+esp_err_t nvs_get_u32(nvs_handle_t h, const char* k, uint32_t* o) {
+    (void)h;
+    (void)k;
+    (void)o;
+    return ESP_FAIL;
+}
 esp_err_t nvs_set_i8(nvs_handle_t h, const char* k, int8_t v) {
     (void)h;
     (void)k;

@@ -7,6 +7,7 @@
 #include "gnss_status.h"
 #include "routing.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <math.h>
@@ -544,6 +545,8 @@ void scr_map_create(bramble_layout_t* layout) {
     int peer_count = 0;
     int offmap_count = 0;
     bool focused_peer_has_location = false;
+    bool focused_peer_is_live = false;
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     double focus_dist_km = 0.0;
     double focus_bearing_deg = 0.0;
     for (int i = 0; i < loc_state->cache_count && i < LOCATION_MAX_CONTACTS; i++) {
@@ -577,8 +580,14 @@ void scr_map_create(bramble_layout_t* layout) {
             snprintf(label, sizeof(label), "%04lX", (unsigned long)(entry->peer_addr & 0xFFFF));
         }
 
-        lv_color_t marker_color =
-            (entry->peer_addr == s_focus_peer_addr) ? BR_COLOR_ACCENT : lv_color_hex(0x00CC00);
+        /* A position restored from flash has no computable age (its timestamp
+         * belongs to a boot whose clock is gone), so it is the peer's last
+         * known spot, not their current one. Draw it muted so the map does not
+         * present it as a live fix. */
+        bool live = location_age_is_fresh(entry->age_known, entry->received_ms, now_ms);
+        lv_color_t marker_color = (entry->peer_addr == s_focus_peer_addr) ? BR_COLOR_ACCENT
+                                  : live                                  ? lv_color_hex(0x00CC00)
+                                                                          : lv_color_hex(0x6E7B6E);
         /* Wide-zoom pruning: drop the text for everyone but the focused peer. */
         const char* draw_label =
             (wide_zoom && entry->peer_addr != s_focus_peer_addr) ? NULL : label;
@@ -589,6 +598,7 @@ void scr_map_create(bramble_layout_t* layout) {
          * at all, not for off-map ones. */
         if (entry->peer_addr == s_focus_peer_addr) {
             focused_peer_has_location = true;
+            focused_peer_is_live = live;
             focus_dist_km = sqrt(x_km * x_km + y_km * y_km);
             focus_bearing_deg = atan2(x_km, y_km) * 180.0 / M_PI;
             if (focus_bearing_deg < 0)
@@ -624,12 +634,13 @@ void scr_map_create(bramble_layout_t* layout) {
          * mesh pager's map is really answering. */
         char dist_buf[16];
         format_distance(dist_buf, sizeof(dist_buf), focus_dist_km);
-        char focus_info[96];
-        snprintf(focus_info, sizeof(focus_info), "%08lX: %s %s  |  Acc: %um",
+        char focus_info[112];
+        snprintf(focus_info, sizeof(focus_info), "%08lX: %s %s  |  Acc: %um%s",
                  (unsigned long)s_focus_peer_addr, dist_buf, bearing_to_compass(focus_bearing_deg),
-                 self_pos->accuracy_m);
+                 self_pos->accuracy_m, focused_peer_is_live ? "" : "  |  last known");
         lv_label_set_text(info_lbl, focus_info);
-        lv_obj_set_style_text_color(info_lbl, BR_COLOR_ACCENT, 0);
+        lv_obj_set_style_text_color(info_lbl,
+                                    focused_peer_is_live ? BR_COLOR_ACCENT : BR_COLOR_TEXT_SEC, 0);
     } else if (s_focus_peer_addr != 0) {
         char focus_info[160];
         snprintf(focus_info, sizeof(focus_info),

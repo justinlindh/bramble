@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "cJSON.h"
+#include "location.h"
 #include "rpc_dispatcher.h"
 #include "rpc_methods.h"
 #include <stdint.h>
@@ -30,6 +31,13 @@ extern struct {
     size_t len;
     bool used;
 } g_nvs_loc_blob[16];
+
+/* Controllable clock (ESP_TIMER_CUSTOM_IMPL is set in CMake): whether a stored
+ * position reads as current is a question about where "now" sits relative to
+ * it, which a clock frozen at zero cannot ask. */
+static int64_t s_now_us = 0;
+int64_t esp_timer_get_time(void) { return s_now_us; }
+static void set_now_ms(uint32_t ms) { s_now_us = (int64_t)ms * 1000; }
 
 static bramble_identity_t s_id = {
     .address = 0xAABBCCDD,
@@ -71,6 +79,9 @@ void setUp(void) {
     memset(g_nvs_loc_kv, 0, sizeof(g_nvs_loc_kv));
     g_nvs_loc_blob_count = 0;
     memset(g_nvs_loc_blob, 0, sizeof(g_nvs_loc_blob));
+
+    location_store_reset_boot_state();
+    set_now_ms(0);
 
     g_stub_mailbox_enabled = false;
 }
@@ -231,41 +242,47 @@ void test_get_config_location_includes_canonical_fields_shape(void) {
     cJSON_Delete(cfg_root);
 }
 
-void test_get_peer_locations_exports_peer_identity_and_timestamps(void) {
-    typedef struct __attribute__((packed)) {
-        int32_t latitude_e7;
-        int32_t longitude_e7;
-        int16_t altitude_m;
-        uint8_t accuracy_m;
-        uint8_t speed_kmh;
-        uint8_t heading_deg2;
-        uint32_t timestamp;
-        uint32_t received_ms;
-        uint8_t tier;
-    } persisted_peer_location_t;
+/* Stage one persisted peer record. The layout comes from location.h: this
+ * test used to carry its own copy of it, which is precisely how a flash layout
+ * drifts from the code that reads it. Coordinates are fictional. */
+static void stage_peer_record(const char* key, int32_t lat_e7, int32_t lon_e7, uint8_t tier,
+                              uint32_t received_ms, uint32_t boot_id, bool legacy_layout) {
+    bramble_position_t pos;
+    memset(&pos, 0, sizeof(pos));
+    pos.latitude_e7 = lat_e7;
+    pos.longitude_e7 = lon_e7;
+    pos.altitude_m = 15;
+    pos.accuracy_m = 8;
+    pos.speed_kmh = 12;
+    pos.heading_deg2 = 45;
+    pos.timestamp = 1234;
+    pos.valid = true;
 
-    g_nvs_allow_open = true;
+    persisted_peer_location_t stored;
+    peer_location_record_encode(&stored, &pos, tier, received_ms, boot_id);
 
-    persisted_peer_location_t stored = {
-        .latitude_e7 = 377749000,
-        .longitude_e7 = -1224194000,
-        .altitude_m = 15,
-        .accuracy_m = 8,
-        .speed_kmh = 12,
-        .heading_deg2 = 45,
-        .timestamp = 1234,
-        .received_ms = 4242,
-        .tier = 0,
-    };
+    size_t len = legacy_layout ? PEER_LOCATION_RECORD_V0_SIZE : sizeof(stored);
+    int i = g_nvs_loc_blob_count;
+    strcpy(g_nvs_loc_blob[i].key, key);
+    memcpy(g_nvs_loc_blob[i].value, &stored, len);
+    g_nvs_loc_blob[i].len = len;
+    g_nvs_loc_blob[i].used = true;
+    g_nvs_loc_blob_count = i + 1;
+}
 
-    strcpy(g_nvs_loc_blob[0].key, "lp_A1B2C3D4");
-    memcpy(g_nvs_loc_blob[0].value, &stored, sizeof(stored));
-    g_nvs_loc_blob[0].len = sizeof(stored);
-    g_nvs_loc_blob[0].used = true;
-    g_nvs_loc_blob_count = 1;
-
-    cJSON* root = dispatch_request(
+static cJSON* dispatch_get_peer_locations(void) {
+    return dispatch_request(
         "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"bramble.getPeerLocations\",\"params\":{}}");
+}
+
+void test_get_peer_locations_exports_peer_identity_and_timestamps(void) {
+    g_nvs_allow_open = true;
+    uint32_t boot_id = location_store_begin_boot();
+    stage_peer_record("lp_A1B2C3D4", 123456700, -456789000, LOCATION_TIER_FULL, 4242, boot_id,
+                      false);
+    set_now_ms(9000); /* received during this boot, well inside the TTL */
+
+    cJSON* root = dispatch_get_peer_locations();
     cJSON* result = cJSON_GetObjectItem(root, "result");
     cJSON* peer_locations = cJSON_GetObjectItem(result, "peerLocations");
     TEST_ASSERT_TRUE(cJSON_IsArray(peer_locations));
@@ -281,6 +298,103 @@ void test_get_peer_locations_exports_peer_identity_and_timestamps(void) {
 
     cJSON* legacy = cJSON_GetObjectItem(result, "peers");
     TEST_ASSERT_NULL(legacy);
+
+    cJSON_Delete(root);
+}
+
+void test_get_peer_locations_reports_a_previous_boots_record_as_offline(void) {
+    /* The bench symptom: a stored uptime LARGER than the node's current one,
+     * reported as a fresh position because the arithmetic clamped to zero.
+     * A record from another boot has no computable age, so it is never
+     * "online" and its lastUpdatedMs is 0 rather than a plausible-looking
+     * value on a clock that never produced it. */
+    g_nvs_allow_open = true;
+    uint32_t boot_id = location_store_begin_boot();
+    stage_peer_record("lp_D0C9D311", 123456700, -456789000, LOCATION_TIER_FULL, 3601167,
+                      boot_id - 1, false);
+    set_now_ms(900000); /* up ~15 minutes, against a stored 3601167 */
+
+    cJSON* root = dispatch_get_peer_locations();
+    cJSON* peer_locations =
+        cJSON_GetObjectItem(cJSON_GetObjectItem(root, "result"), "peerLocations");
+    TEST_ASSERT_EQUAL(1, cJSON_GetArraySize(peer_locations));
+
+    cJSON* peer = cJSON_GetArrayItem(peer_locations, 0);
+    /* The position is still exported: unknown age, known place. */
+    cJSON* position = cJSON_GetObjectItem(peer, "position");
+    double lat = cJSON_GetObjectItem(position, "lat")->valuedouble;
+    TEST_ASSERT_TRUE(lat > 12.3 && lat < 12.4);
+    TEST_ASSERT_FALSE(cJSON_IsTrue(cJSON_GetObjectItem(peer, "online")));
+    TEST_ASSERT_EQUAL(0, cJSON_GetObjectItem(peer, "lastUpdatedMs")->valueint);
+
+    cJSON_Delete(root);
+}
+
+void test_get_peer_locations_reads_records_written_before_the_boot_counter(void) {
+    /* Records in the shorter pre-boot_id layout are on flash on every node
+     * that has run an earlier build. They must still export, as age-unknown. */
+    g_nvs_allow_open = true;
+    location_store_begin_boot();
+    stage_peer_record("lp_3575D5D7", 123456700, -456789000, LOCATION_TIER_COARSE, 5000, 0, true);
+
+    cJSON* root = dispatch_get_peer_locations();
+    cJSON* peer_locations =
+        cJSON_GetObjectItem(cJSON_GetObjectItem(root, "result"), "peerLocations");
+    TEST_ASSERT_EQUAL(1, cJSON_GetArraySize(peer_locations));
+
+    cJSON* peer = cJSON_GetArrayItem(peer_locations, 0);
+    TEST_ASSERT_EQUAL_STRING("3575D5D7", cJSON_GetObjectItem(peer, "addr")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("coarse", cJSON_GetObjectItem(peer, "tier")->valuestring);
+    TEST_ASSERT_FALSE(cJSON_IsTrue(cJSON_GetObjectItem(peer, "online")));
+    TEST_ASSERT_EQUAL(0, cJSON_GetObjectItem(peer, "lastUpdatedMs")->valueint);
+
+    cJSON_Delete(root);
+}
+
+void test_get_peer_locations_omits_a_position_for_a_presence_tier_peer(void) {
+    /* A PRESENCE share carries an online bit and no coordinates, so its stored
+     * position is all zeroes. Exporting one would report a peer who chose not
+     * to share a position as sitting at 0,0. The peer is still listed: the node
+     * does know they are there. */
+    g_nvs_allow_open = true;
+    uint32_t boot_id = location_store_begin_boot();
+    stage_peer_record("lp_10B76F29", 0, 0, LOCATION_TIER_PRESENCE, 4000, boot_id, false);
+    set_now_ms(9000);
+
+    cJSON* root = dispatch_get_peer_locations();
+    cJSON* peer_locations =
+        cJSON_GetObjectItem(cJSON_GetObjectItem(root, "result"), "peerLocations");
+    TEST_ASSERT_EQUAL(1, cJSON_GetArraySize(peer_locations));
+
+    cJSON* peer = cJSON_GetArrayItem(peer_locations, 0);
+    TEST_ASSERT_EQUAL_STRING("10B76F29", cJSON_GetObjectItem(peer, "addr")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("presence", cJSON_GetObjectItem(peer, "tier")->valuestring);
+    TEST_ASSERT_NULL_MESSAGE(cJSON_GetObjectItem(peer, "position"),
+                             "a presence-tier peer must not be given coordinates");
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(peer, "online")));
+
+    cJSON_Delete(root);
+}
+
+void test_get_peer_locations_keeps_coordinates_for_coordinate_bearing_tiers(void) {
+    /* The complement of the presence case: FULL and COARSE do carry
+     * coordinates, and gating the emit must not drop them. */
+    g_nvs_allow_open = true;
+    uint32_t boot_id = location_store_begin_boot();
+    stage_peer_record("lp_D0C9D311", 123456700, -456789000, LOCATION_TIER_FULL, 4000, boot_id,
+                      false);
+    stage_peer_record("lp_3575D5D7", 123456700, -456789000, LOCATION_TIER_COARSE, 4100, boot_id,
+                      false);
+    set_now_ms(9000);
+
+    cJSON* root = dispatch_get_peer_locations();
+    cJSON* peer_locations =
+        cJSON_GetObjectItem(cJSON_GetObjectItem(root, "result"), "peerLocations");
+    TEST_ASSERT_EQUAL(2, cJSON_GetArraySize(peer_locations));
+    for (int i = 0; i < 2; i++) {
+        cJSON* peer = cJSON_GetArrayItem(peer_locations, i);
+        TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(peer, "position"));
+    }
 
     cJSON_Delete(root);
 }
@@ -326,6 +440,10 @@ int main(void) {
     RUN_TEST(test_get_config_omits_public_channel_and_malformed_channel_targets);
     RUN_TEST(test_get_config_location_includes_canonical_fields_shape);
     RUN_TEST(test_get_peer_locations_exports_peer_identity_and_timestamps);
+    RUN_TEST(test_get_peer_locations_reports_a_previous_boots_record_as_offline);
+    RUN_TEST(test_get_peer_locations_reads_records_written_before_the_boot_counter);
+    RUN_TEST(test_get_peer_locations_omits_a_position_for_a_presence_tier_peer);
+    RUN_TEST(test_get_peer_locations_keeps_coordinates_for_coordinate_bearing_tiers);
     RUN_TEST(test_get_config_returns_mailbox_enabled_false_by_default);
     RUN_TEST(test_get_config_returns_mailbox_enabled_true_when_set);
     return UNITY_END();

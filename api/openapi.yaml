@@ -2123,7 +2123,7 @@ components:
     LocationPeer:
       type: object
       description: Location data for a peer node.
-      required: [addr, name, tier, position, online, lastUpdatedMs]
+      required: [addr, name, tier, online, lastUpdatedMs]
       properties:
         addr:
           type: string
@@ -2134,13 +2134,30 @@ components:
         tier:
           $ref: '#/components/schemas/LocationTier'
         position:
-          $ref: '#/components/schemas/Position'
+          allOf:
+            - $ref: '#/components/schemas/Position'
+          description: >-
+            Omitted when the peer's tier carries no coordinates, which is the
+            case for the presence tier: it reports only that the peer is
+            there. Coordinates are never synthesized for such a peer, so a
+            consumer must treat an absent position as "no position shared",
+            not as the origin.
         online:
           type: boolean
-          description: Whether the peer is currently online.
+          description: >-
+            Whether this position is recent enough to present as current.
+            False when the node cannot compute the position's age, which is
+            the case for anything persisted before the current boot: the node
+            has no wall clock, so a stored uptime reading says nothing once
+            the uptime counter has restarted. The position itself is still
+            returned, as the peer's last known one.
         lastUpdatedMs:
           type: integer
-          description: Unix timestamp (ms) of last update.
+          description: >-
+            Device uptime in milliseconds at which the position was received,
+            measured on the CURRENT boot. 0 when the node cannot express the
+            receipt time on that clock (a position carried over from an
+            earlier boot), which is also when online is false.
 
     # ── Response Schemas ─────────────────────────────────────────────────────
 
