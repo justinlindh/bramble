@@ -3,6 +3,7 @@
 #include "ui_zone.h"
 #include "theme/bramble_theme.h"
 #include "location.h"
+#include "gnss_status.h"
 #include "routing.h"
 #include "esp_log.h"
 #include <stdio.h>
@@ -91,6 +92,19 @@ static uint32_t map_signature(void) {
     if (loc->my_position.valid) {
         sig = sig * 31u + (uint32_t)loc->my_position.latitude_e7;
         sig = sig * 31u + (uint32_t)loc->my_position.longitude_e7;
+    } else {
+        /* The no-fix panel renders live GNSS state, and without a fix nothing
+         * else in this signature moves, so the counts have to be part of it or
+         * the panel would freeze on whatever it first drew. They are folded in
+         * only on this branch: a satellite count that ticks between 6 and 7
+         * must not tear down and rebuild the drawn map. */
+        gnss_ui_input_t gnss;
+        ui_shared_gnss_state(&gnss);
+        sig = sig * 31u + (uint32_t)gnss_ui_classify(&gnss);
+        sig = sig * 31u + gnss.sats_in_view;
+        sig = sig * 31u + gnss.sats_tracked;
+        sig = sig * 31u + gnss.sats_used;
+        sig = sig * 31u + gnss.snr_max_dbhz;
     }
     for (int i = 0; i < loc->cache_count && i < LOCATION_MAX_CONTACTS; i++) {
         const location_cache_entry_t* e = &loc->cache[i];
@@ -349,9 +363,18 @@ void scr_map_create(bramble_layout_t* layout) {
     bool has_self = self_pos->valid;
 
     if (!has_self) {
-        /* No GPS data yet */
+        /* No fix: name which of the three GNSS states the receiver is in, so
+         * the screen a field operator opens first tells them whether anything
+         * is reaching the antenna at all. */
+        gnss_ui_input_t gnss;
+        ui_shared_gnss_state(&gnss);
+        char detail[48];
+        char msg_buf[96];
+        gnss_ui_detail_line(&gnss, detail, sizeof(detail));
+        snprintf(msg_buf, sizeof(msg_buf), "No position fix.\n\nGNSS: %s\n%s",
+                 gnss_ui_state_label(gnss_ui_classify(&gnss)), detail);
         lv_obj_t* msg = lv_label_create(cont);
-        lv_label_set_text(msg, "No GPS data available.\n\nWaiting for position fix...");
+        lv_label_set_text(msg, msg_buf);
         lv_obj_set_style_text_color(msg, BR_COLOR_TEXT_SEC, 0);
         lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(msg);
