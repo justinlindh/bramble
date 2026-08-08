@@ -18,6 +18,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -69,6 +70,13 @@ static void rx_seq_unlock(void) {
 
 /* Consecutive CAD-timeout run state for the fail-open/closed policy (#118). */
 static cad_timeout_policy_t s_cad_timeout_policy;
+
+/* Retry state for radio_check_and_clear_reinit(); mesh-task-only. */
+static radio_reinit_policy_t s_reinit_policy;
+
+/* Millisecond clock for the reinit backoff. Sampled separately before and
+ * after an attempt: a failing recovery can take longer than the backoff. */
+static inline uint32_t reinit_now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -783,12 +791,45 @@ void radio_sleep(void) {
 bool radio_check_and_clear_reinit(void) {
     if (!sx1262_needs_reinit())
         return false;
+
+    if (!radio_reinit_policy_should_attempt(&s_reinit_policy, reinit_now_ms())) {
+        /* An earlier attempt failed and its backoff is still running; the
+         * latch stays raised so the next pass picks it up. */
+        return false;
+    }
+
+    /* Cleared before the attempt, not after: a stuck-BUSY hard reset raised
+     * from inside the reconfigure below must survive. The policy re-raises the
+     * request if the attempt did not take. */
     sx1262_clear_reinit();
     ESP_LOGW(TAG, "Radio reinit after hard reset, reconfiguring");
     int rc = radio_reconfigure(&s_config);
-    if (rc != 0) {
+    bool ok = rc == 0;
+    if (!ok) {
         ESP_LOGE(TAG, "Radio reconfigure failed after hard reset: %d", rc);
+    } else if (radio_get_state() != RADIO_STATE_RX) {
+        /* radio_reconfigure returns 0 once its configure commands land, but its
+         * trailing radio_start_rx() returns void and only records
+         * RADIO_STATE_IDLE if it failed. A single failed SetRx that did not
+         * trip BUSY_STUCK_THRESHOLD therefore looks like a clean recovery while
+         * the chip is not listening, which is the exact condition this function
+         * exists to escape. Recovery means receiving. */
+        ESP_LOGE(TAG, "Radio reinit reconfigured but did not re-enter RX");
+        ok = false;
     }
+    if (!ok) {
+        /* Without this the request is gone for good: the chip stays at
+         * power-on defaults, DIO2 is no longer the RF switch so nothing
+         * radiates, and the node looks healthy from every other angle. */
+        sx1262_request_reinit();
+    }
+    /* Clock re-read, not the one sampled above: the backoff has to run from
+     * when the attempt FINISHED. A reconfigure against a wedged SX1262 can
+     * burn more than the backoff itself before returning (BUSY_STUCK_THRESHOLD
+     * is 3 consecutive timeouts and the command waits are 2000ms, 5000ms for
+     * calibration), which would leave the deadline already in the past and put
+     * the mesh task in a back-to-back reconfigure loop with no gap at all. */
+    radio_reinit_policy_on_result(&s_reinit_policy, ok, reinit_now_ms());
     return true;
 }
 

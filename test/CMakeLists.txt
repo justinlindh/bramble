@@ -529,6 +529,15 @@ target_include_directories(test_cad_timeout_policy PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
 )
 
+# Radio reinit retry policy: a failed recovery must be attempted again.
+add_executable(test_radio_reinit_policy
+    test_radio_reinit_policy.c
+    unity/unity.c
+)
+target_include_directories(test_radio_reinit_policy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+
 # Crypto tests
 add_executable(test_crypto
     test_crypto.c
