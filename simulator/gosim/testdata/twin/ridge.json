@@ -1,0 +1,68 @@
+{
+  "twin_schema": 1,
+  "node": {
+    "address": "1B2C3D4E",
+    "name": "ridge",
+    "firmware_version": "0.9.3",
+    "protocol_version": "0.5.0",
+    "hardware": "heltec_v3",
+    "uptime_s": 88120
+  },
+  "radio": {
+    "frequency_mhz": 915.0,
+    "sf": 9,
+    "bw_hz": 125000,
+    "coding_rate": 1,
+    "tx_power_dbm": 22,
+    "region": "US915",
+    "regulatory": "FCC Part 15.247",
+    "max_duty_cycle_pct": 100,
+    "duty_cycle_enforced": false
+  },
+  "neighbors": [
+    {
+      "address": "3D4E5F60",
+      "rssi": -101,
+      "snr": 4,
+      "deliveryRate": 238,
+      "airtimeRemaining": 95,
+      "last_seen_ms": 9037,
+      "name": "tower"
+    },
+    {
+      "address": "4E5F6071",
+      "rssi": -88,
+      "snr": 11,
+      "deliveryRate": 253,
+      "airtimeRemaining": 98,
+      "last_seen_ms": 30402,
+      "name": "north-cabin"
+    }
+  ],
+  "routes": [
+    {
+      "dest": "3D4E5F60",
+      "next_hop": "3D4E5F60",
+      "hop_count": 1,
+      "metric": 39,
+      "state": "active",
+      "use_count": 87
+    },
+    {
+      "dest": "4E5F6071",
+      "next_hop": "4E5F6071",
+      "hop_count": 1,
+      "metric": 27,
+      "state": "active",
+      "use_count": 64
+    },
+    {
+      "dest": "0A1B2C3D",
+      "next_hop": "3D4E5F60",
+      "hop_count": 2,
+      "metric": 68,
+      "state": "active",
+      "use_count": 41
+    }
+  ]
+}

@@ -60,3 +60,10 @@
  * tested directly), and it keeps gosim's receipt storm spread by firmware's
  * real constants instead of a copy of them. */
 #include "../../main/broadcast_delivery_receipt.c"
+/* Mesh digital twin: the bramble.exportTopology document builder. Compiled in
+ * for the same reason as the two above (pure serialization over the real
+ * routing tables, no ESP-IDF deps), and for one more: it makes the twin's
+ * round-trip check meaningful, because the export gosim writes for a simulated
+ * node is written by the firmware's export code rather than by a second
+ * implementation of the schema. See ../../docs/digital-twin.md. */
+#include "../../main/topology_export.c"

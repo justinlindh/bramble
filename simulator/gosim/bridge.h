@@ -403,4 +403,21 @@ void bridge_set_broadcast_receipt_tx_kind(int kind);
 void bridge_handle_receipt_tx(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
                               pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics);
 
+/*
+ * bridge_export_topology (mesh digital twin, ../../docs/digital-twin.md):
+ *   Serializes one simulated node's observed mesh state into the same
+ *   bramble.exportTopology document a real device returns, by calling the
+ *   firmware's own builder (main/topology_export.c, compiled into the sim via
+ *   all.c) over the node's real neighbour_table_t and routing_table_t.
+ *
+ *   This is what makes the twin's round trip a check and not a tautology: a
+ *   simulated deployment is exported by firmware code, re-imported by the
+ *   twin importer, and the reconstructed link graph is compared against the
+ *   links the radio actually carried.
+ *
+ *   Returns a malloc'd NUL-terminated JSON string the caller must free, or
+ *   NULL if the document could not be built.
+ */
+char* bridge_export_topology(const sim_node_t* node, const radio_config_t* radio, uint64_t now_us);
+
 #endif /* BRIDGE_H */

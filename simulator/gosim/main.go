@@ -25,9 +25,17 @@ func findDir(candidates []string) string {
 func main() {
 	// Subcommands come before the server flags. `screen-assert` replays a
 	// headless event log and asserts rendered-screen content (cmd_screen_assert.go),
-	// the OCR-free check the scenario suite gates on.
-	if len(os.Args) > 1 && os.Args[1] == "screen-assert" {
-		os.Exit(runScreenAssert(os.Args[2:]))
+	// the OCR-free check the scenario suite gates on. `twin` imports a real
+	// deployment's bramble.exportTopology documents and reports what the
+	// reconstructed mesh carries and where it is fragile (cmd_twin.go,
+	// ../../docs/digital-twin.md).
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "screen-assert":
+			os.Exit(runScreenAssert(os.Args[2:]))
+		case "twin":
+			os.Exit(runTwin(os.Args[2:]))
+		}
 	}
 
 	port := flag.Int("port", 3000, "HTTP server port")
