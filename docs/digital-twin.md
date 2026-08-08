@@ -284,7 +284,10 @@ The pipeline is verified end to end by round-trip, in
    invented and none dropped.
 4. The reconstruction is then re-simulated as a twin scenario and exported
    again, and the second graph matches the first link for link, including every
-   RSSI and SNR.
+   RSSI and SNR. The SNR column is checked to be the link quality the radio
+   actually computed (RSSI above a -120 dBm noise floor, within the model's
+   2 dB of jitter) rather than a constant, so that comparison is between two
+   populated vectors.
 
 That verifies the fidelity of the export, merge, scenario and re-export path.
 It does not verify the simulator's propagation against a real hillside, which

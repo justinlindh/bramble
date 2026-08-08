@@ -342,3 +342,49 @@ func TestTwinFixturesMatchAFirmwareWrittenExport(t *testing.T) {
 		})
 	}
 }
+
+// TestTwinExportsCarryTheLinkQualityTheRadioComputed pins the SNR half of the
+// round trip. The neighbour table is what an export reports, and it is filled
+// from the rssi and snr the radio computed for each reception, so an export
+// whose SNR column were a constant would make every link-quality comparison in
+// this file vacuous: two all-zero vectors agree with each other and detect
+// nothing.
+//
+// The simulator's position mode derives SNR as RSSI minus a -120 dBm noise
+// floor, with up to 2 dB of jitter either way (radio_deliver_packet in
+// simulator/engine/sim_radio.c), which is the range checked here.
+func TestTwinExportsCarryTheLinkQualityTheRadioComputed(t *testing.T) {
+	const noiseFloorDBm = -120
+	const jitterDB = 2
+
+	run := runTwinScenarioFile(t, twinRoundTripScenario(400000))
+	docs := run.TwinExports()
+	if len(docs) != 4 {
+		t.Fatalf("%d exports captured, want one per node", len(docs))
+	}
+
+	entries := 0
+	for _, d := range docs {
+		var doc struct {
+			Neighbors []struct {
+				Address string `json:"address"`
+				RSSI    int    `json:"rssi"`
+				SNR     int    `json:"snr"`
+			} `json:"neighbors"`
+		}
+		if err := json.Unmarshal(d.JSON, &doc); err != nil {
+			t.Fatalf("export from %s is not JSON: %v", d.ScenarioID, err)
+		}
+		for _, nb := range doc.Neighbors {
+			entries++
+			want := nb.RSSI - noiseFloorDBm
+			if nb.SNR < want-jitterDB || nb.SNR > want+jitterDB {
+				t.Fatalf("%s heard %s at %d dBm and reports %d dB SNR, want %d +/- %d",
+					d.ScenarioID, nb.Address, nb.RSSI, nb.SNR, want, jitterDB)
+			}
+		}
+	}
+	if entries != 6 {
+		t.Fatalf("%d neighbour entries across the line, want 6", entries)
+	}
+}

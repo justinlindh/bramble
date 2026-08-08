@@ -615,12 +615,17 @@ bool bridge_msg_track_confirm(msg_tracker_t* track, int count, uint32_t packet_i
 /* ─── Internal packet handlers ─────────────────────────────────────────── */
 
 static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_t rssi,
-                           uint64_t now_us, uint32_t now_ms, node_array_t* nodes) {
+                           int8_t snr, uint64_t now_us, uint32_t now_ms, node_array_t* nodes) {
     bramble_beacon_t beacon;
     if (bramble_beacon_deserialize(&beacon, buf, len) != ESP_OK)
         return;
 
-    neighbor_update(&rx->neighbors, beacon.src_addr, rssi, 0, beacon.pubkey_hash, now_ms);
+    /* Both link-quality figures the radio computed for this reception go into
+     * the neighbour table, matching firmware's handle_beacon
+     * (main/mesh_beacon.c), which passes the received rssi and snr straight to
+     * neighbor_update. The table is what bramble.exportTopology reports, so a
+     * dropped snr here would make every exported neighbour read 0 dB. */
+    neighbor_update(&rx->neighbors, beacon.src_addr, rssi, snr, beacon.pubkey_hash, now_ms);
 
     /* Phase 1 Task 1 (delivery-core plan): firmware's handle_beacon
      * (main/mesh_task.c) never installs a route on a heard beacon, only the
@@ -2070,7 +2075,8 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
 
     switch (hdr.type) {
     case PKT_TYPE_BEACON:
-        _handle_beacon(rx, buf, len, rssi, event->timestamp_us, now_ms, nodes);
+        _handle_beacon(rx, buf, len, rssi, event->data.packet.snr, event->timestamp_us, now_ms,
+                       nodes);
         break;
     case PKT_TYPE_RREQ:
         _handle_rreq(rx, buf, len, rssi, event->timestamp_us, now_ms, nodes, radio, rng, events,
