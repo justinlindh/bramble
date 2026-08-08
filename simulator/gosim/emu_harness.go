@@ -55,7 +55,7 @@ func (h *emuHarness) startBroker(path string) error {
 
 // reserveSlot reserves an external-node position (attach order binds slots).
 func (h *emuHarness) reserveSlot(x, y float32, label string) {
-	h.sim.broker.reserveSlot(x, y, label, "")
+	h.sim.broker.reserveSlot(x, y, label)
 }
 
 // disableLBT turns off listen-before-talk on the shared radio config, letting

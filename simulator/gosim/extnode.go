@@ -97,7 +97,6 @@ type nmeaMsg struct {
 type extSlot struct {
 	x, y      float32
 	label     string
-	nodeDir   string
 	nodeIndex int
 	addr      uint32
 	conn      *extConn
@@ -211,8 +210,8 @@ func (b *Broker) resetSlots() {
 // reserveSlot reserves a position in the ether for one external node and
 // returns its slot. The supervisor calls this before spawning each firmware
 // instance; tests call it before dialing a fake node.
-func (b *Broker) reserveSlot(x, y float32, label, nodeDir string) *extSlot {
-	slot := &extSlot{x: x, y: y, label: label, nodeDir: nodeDir, nodeIndex: -1}
+func (b *Broker) reserveSlot(x, y float32, label string) *extSlot {
+	slot := &extSlot{x: x, y: y, label: label, nodeIndex: -1}
 	b.mu.Lock()
 	b.slots = append(b.slots, slot)
 	b.mu.Unlock()

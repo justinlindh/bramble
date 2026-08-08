@@ -125,7 +125,7 @@ func (s *Supervisor) run() {
 			nodeLabel := fmt.Sprintf("%s-%d", label, i)
 			nodeDir := filepath.Join(s.baseDir, nodeLabel)
 			_ = os.MkdirAll(nodeDir, 0o755)
-			slot := s.broker.reserveSlot(x, y, nodeLabel, nodeDir)
+			slot := s.broker.reserveSlot(x, y, nodeLabel)
 
 			p := &superProc{
 				sup:      s,
