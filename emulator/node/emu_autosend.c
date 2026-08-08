@@ -39,6 +39,19 @@
  * drive the post-#138 heal (the first lands on a receiver with no session and
  * fires the re-handshake; a later one decrypts and renders).
  *
+ * EMU_AUTO_PARK=1 with the same phase-1/phase-2 shape drives a DIFFERENT
+ * scenario: the peer-never-left parked-delivery case
+ * (emu-parked-delivery-live.json). Phase 2 there is a single send (REPEAT=1)
+ * against the peer's now-stale session, which fails via the ACTIVE-session
+ * pending-ack path (not the DM-desync self-heal-and-redeliver flow); once it
+ * reads MSG_STATUS_FAILED, wait_and_park_phase2 parks it. See
+ * wait_and_park_phase2's own comment for the timing this relies on.
+ *
+ * Attestation cadence (EMU_ATTEST_EVERY_MS, EMU_ATTEST_REPEAT) and the phase-2
+ * pin gate (EMU_WAIT_PEER_PINNED=1) exist for that same scenario, and together
+ * they construct a precondition the firmware genuinely requires rather than
+ * hoping for it. See attest_task and wait_peer_pinned below.
+ *
  * Drop-session (EMU_DROP_DM_SESSION_AT_MS): at that time the node tears down its
  * own DM sessions in-process (emu_mesh_drop_dm_sessions) while staying up and
  * still neighboring the peer, so the peer keeps its stale session. That is the
@@ -98,6 +111,8 @@ extern int emu_mesh_dm_session_count(void);
 extern uint32_t msg_store_total_incoming(void);
 extern uint32_t msg_store_count_outgoing_delivered(void);
 extern bool mesh_park_message(uint32_t uid);
+extern void mesh_trigger_attestation(void);
+extern bool mesh_get_peer_verify_flags(uint32_t addr, bool* verified, bool* key_changed);
 
 static const char* TAG = "emu_autosend";
 
@@ -222,6 +237,97 @@ static void send_burst(const char* text, uint32_t dest, unsigned repeat, unsigne
     }
 }
 
+/* Waits (event-driven, wide budget) for one outgoing DM matching text/dest to
+ * read MSG_STATUS_FAILED, then parks it via mesh_park_message. Built for the
+ * peer-never-left scenario (emu-parked-delivery-live.json): the peer stays a
+ * live, beaconing neighbor throughout, so this is NOT park_test_task's
+ * unreachable-peer/route-queue-TTL construction. Here phase 2 sends under a
+ * session the receiver can no longer decrypt (its half was dropped via
+ * EMU_DROP_DM_SESSION_AT_MS while it kept beaconing normally), so the row
+ * fails via the ACTIVE-session pending-ack path instead: MSG_TIER_NORMAL's 3
+ * attempts with exponential backoff from a 2s base land FAILED well inside a
+ * minute, no route-queue TTL involved. 150 tries * 2s = 300s of headroom over
+ * that budget covers CPU-starvation slack. Only called when EMU_AUTO_PARK is
+ * set; a scenario that wants phase 2 to simply succeed or fail on its own
+ * never reaches this, and it is a no-op if text is unset. */
+static void wait_and_park_phase2(const char* text, uint32_t dest) {
+    if (!text || !*text)
+        return;
+    const char* park_env = getenv("EMU_AUTO_PARK");
+    if (!park_env || !*park_env || strcmp(park_env, "0") == 0)
+        return;
+    size_t text_len = strlen(text);
+    uint32_t uid = 0;
+    for (int i = 0; i < 150; i++) {
+        int n = msg_store_count();
+        for (int idx = 0; idx < n; idx++) {
+            stored_msg_t m;
+            if (!msg_store_get_copy(idx, &m))
+                continue;
+            if (m.direction != MSG_DIR_OUTGOING || m.channel_index >= 0 || m.peer_addr != dest ||
+                m.status != MSG_STATUS_FAILED)
+                continue;
+            if (m.text_len == text_len && memcmp(m.text, text, text_len) == 0) {
+                uid = m.uid;
+                break;
+            }
+        }
+        if (uid != 0)
+            break;
+        if (i > 0 && i % 10 == 0)
+            ESP_LOGW(TAG, "auto-park: still waiting for '%s' to FAIL (%d tries)", text, i);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+    if (uid == 0) {
+        ESP_LOGE(TAG, "auto-park: timed out waiting for '%s' to FAIL", text);
+        return;
+    }
+    bool ok = mesh_park_message(uid);
+    ESP_LOGI(TAG, "auto-park: parked uid=%08X ok=%d after phase 2 failed", (unsigned)uid, ok);
+}
+
+/* Blocks until this node holds an ATTESTATION PIN for dest, when
+ * EMU_WAIT_PEER_PINNED is set. Returns true if the pin is in place.
+ *
+ * This gates the peer-never-left scenario on a precondition the firmware
+ * really has, instead of letting the scenario win or lose a coin flip. When
+ * the receiver drops its session half and then fails to decrypt, its #138
+ * self-heal INIT is a FIRST-CONTACT init carrying a zero auth tag (it no
+ * longer holds a peer_id to tag with). The sender still holds its stale
+ * session, so process_ke_init takes dm_verify_init's strict tag path and
+ * rejects that zero tag by design (the Item 2 downgrade defense). The one
+ * escape is main/mesh_dm.c's pinned-peer branch, which needs an
+ * attestation-verified X25519 pin for the peer. With no pin the session never
+ * heals, every redelivery is encrypted under the dead session, and the
+ * scenario can prove nothing about parked_retry no matter how long it runs.
+ *
+ * Observed directly: a run where the receiver's single boot-time attestation
+ * collided with the sender's own beacon TX (half-duplex) left the sender
+ * unpinned, the sender logged "INIT verify failed" twice, and the parked
+ * message was flushed onto the air and lost. So this is a real gate, not
+ * defensive padding: mesh_get_peer_verify_flags returns false for an unpinned
+ * address, and if the pin never lands the phase-2 send never happens and the
+ * suite fails honestly rather than passing on a healthy-looking accident. */
+static bool wait_peer_pinned(uint32_t dest) {
+    const char* want = getenv("EMU_WAIT_PEER_PINNED");
+    if (!want || !*want || strcmp(want, "0") == 0)
+        return true;
+    if (dest == 0)
+        return true;
+    bool verified = false, key_changed = false;
+    for (int i = 0; i < 240; i++) {
+        if (mesh_get_peer_verify_flags(dest, &verified, &key_changed)) {
+            ESP_LOGI(TAG, "phase 2: peer %08X is attestation-pinned", (unsigned)dest);
+            return true;
+        }
+        if (i > 0 && i % 20 == 0)
+            ESP_LOGW(TAG, "phase 2: still waiting to pin peer %08X (%d tries)", (unsigned)dest, i);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    ESP_LOGE(TAG, "phase 2: never pinned peer %08X; the desync cannot self-heal", (unsigned)dest);
+    return false;
+}
+
 /* Runs as a FreeRTOS task (not a raw pthread): the mesh send API posts to the
  * mesh task's queue, which is only safe from a real task context under the
  * IDF-linux FreeRTOS port. */
@@ -287,7 +393,17 @@ static void autosend_task(void* arg) {
          * recovers if the neighbor was only learned during phase 1. */
         if (getenv("EMU_AUTO_SEND_TO"))
             dest = resolve_dest();
+        /* After the re-resolve, so the pin is checked against the address the
+         * send will actually use. A false return leaves phase 2 unsent, which
+         * is the honest outcome: without the pin the scenario's heal cannot
+         * happen and a delivered payload would have to come from somewhere
+         * this scenario does not claim. */
+        if (!wait_peer_pinned(dest)) {
+            vTaskDelete(NULL);
+            return;
+        }
         send_burst(text2, dest, repeat2, interval2, "auto-sent2");
+        wait_and_park_phase2(text2, dest);
     }
 
     vTaskDelete(NULL);
@@ -333,6 +449,37 @@ static void reboot_task(void* arg) {
     }
     ESP_LOGI(TAG, "EMU_REBOOT_AT_MS reached; exiting for supervisor restart");
     exit(0);
+}
+
+/* Re-announces this node's identity attestation EMU_ATTEST_REPEAT times, every
+ * EMU_ATTEST_EVERY_MS, through the same public entry point the setEndorsement
+ * RPC uses (mesh_trigger_attestation, itself airtime-budget gated).
+ *
+ * This COMPRESSES A REAL CADENCE, exactly as EMU_BEACON_INTERVAL_MS does for
+ * beacons: the firmware re-attests every ATTESTATION_INTERVAL_MS (15 minutes),
+ * which is far outside any scenario's run, so a scenario that needs its peer
+ * pinned would otherwise depend on the single post-boot attestation landing.
+ * That send is a coin flip, not a construction: at the emulator's 3s beacon
+ * interval each node is transmitting a large fraction of the time, and a
+ * half-duplex peer that is mid-beacon simply does not hear it (observed
+ * directly, and the run it cost is described in wait_peer_pinned). Repeating
+ * on a short cadence makes the exchange happen, and the receiving side's
+ * EMU_WAIT_PEER_PINNED gate is what proves it actually did rather than
+ * absorbing the failure. */
+static void attest_task(void* arg) {
+    (void)arg;
+    unsigned every_ms = env_uint("EMU_ATTEST_EVERY_MS", 0);
+    if (every_ms == 0) {
+        vTaskDelete(NULL);
+        return;
+    }
+    unsigned repeat = env_uint("EMU_ATTEST_REPEAT", 6);
+    for (unsigned i = 0; i < repeat; i++) {
+        vTaskDelay(pdMS_TO_TICKS(every_ms));
+        mesh_trigger_attestation();
+    }
+    ESP_LOGI(TAG, "attestation cadence done (%u re-announcements)", repeat);
+    vTaskDelete(NULL);
 }
 
 /* Tears down this node's DM sessions ONCE at EMU_DROP_DM_SESSION_AT_MS, leaving
@@ -447,15 +594,17 @@ static void park_test_task(void* arg) {
             if (uid1 == 0 && m.text_len == text1_len && memcmp(m.text, text1, text1_len) == 0) {
                 uid1 = m.uid;
             } else if (uid2 == 0 && m.text_len == text2_len &&
-                      memcmp(m.text, text2, text2_len) == 0) {
+                       memcmp(m.text, text2, text2_len) == 0) {
                 uid2 = m.uid;
             }
         }
         if (uid1 != 0 && uid2 != 0)
             break;
         if (i > 0 && i % 10 == 0)
-            ESP_LOGW(TAG, "park test: still waiting for both sends to fail (%d tries, uid1=%08X uid2=%08X)",
-                     i, (unsigned)uid1, (unsigned)uid2);
+            ESP_LOGW(
+                TAG,
+                "park test: still waiting for both sends to fail (%d tries, uid1=%08X uid2=%08X)",
+                i, (unsigned)uid1, (unsigned)uid2);
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
@@ -465,7 +614,8 @@ static void park_test_task(void* arg) {
         vTaskDelete(NULL);
         return;
     }
-    ESP_LOGI(TAG, "park test: both DMs FAILED (uid1=%08X uid2=%08X)", (unsigned)uid1, (unsigned)uid2);
+    ESP_LOGI(TAG, "park test: both DMs FAILED (uid1=%08X uid2=%08X)", (unsigned)uid1,
+             (unsigned)uid2);
 
     if (do_park) {
         bool ok1 = mesh_park_message(uid1);
@@ -473,7 +623,8 @@ static void park_test_task(void* arg) {
         ESP_LOGI(TAG, "park test: parked uid=%08X ok=%d, uid=%08X ok=%d", (unsigned)uid1, ok1,
                  (unsigned)uid2, ok2);
     } else {
-        ESP_LOGI(TAG, "park test: EMU_AUTO_PARK not set, leaving both rows FAILED (negative control)");
+        ESP_LOGI(TAG,
+                 "park test: EMU_AUTO_PARK not set, leaving both rows FAILED (negative control)");
     }
 
     vTaskDelete(NULL);
@@ -525,6 +676,17 @@ int emu_node_start_autosend(void) {
             started = 0;
         } else {
             ESP_LOGW(TAG, "could not start reboot task");
+        }
+    }
+    if (getenv("EMU_ATTEST_EVERY_MS") && *getenv("EMU_ATTEST_EVERY_MS")) {
+        /* 4 KB: mesh_trigger_attestation builds and Ed25519-signs the
+         * attestation on the calling task, so this needs more than the 2 KB
+         * the pure timer tasks around it run on. */
+        if (xTaskCreate(attest_task, "emu_attest", 4096, NULL, 5, NULL) == pdPASS) {
+            ESP_LOGI(TAG, "attestation cadence armed");
+            started = 0;
+        } else {
+            ESP_LOGW(TAG, "could not start attestation cadence task");
         }
     }
     if (getenv("EMU_DROP_DM_SESSION_AT_MS") && *getenv("EMU_DROP_DM_SESSION_AT_MS")) {

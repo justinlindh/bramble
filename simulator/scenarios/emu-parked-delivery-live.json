@@ -1,0 +1,61 @@
+{
+  "name": "emu-parked-delivery-live",
+  "description": "Proves the peer-never-left parked-delivery path (main/parked_retry.c): unlike emu-parked-delivery.json's absent peer, b2-b stays a live, beaconing neighbor of b2-a for the whole run, so the rejoin edge (is_new_peer) never fires again and only parked_retry's beacon-armed trigger can redeliver. Construction, in order. (1) b2-a and b2-b establish a normal DM session with a SINGLE 'NEVERLEFT SETUP' DM (EMU_AUTO_SEND, resolved via the live neighbor table, not a handoff file: this scenario needs an established, ACTIVE session, not an absent peer). EMU_AUTO_SEND_REPEAT is 1 and that is load bearing. b2-b's drop task fires once ANY incoming DM has landed, so with a phase-1 burst the second copy can still be retransmitting when the drop happens; its post-drop arrival is then the first failed decrypt, the heal completes seconds before phase 2 is even sent, and the payload goes out over a healthy session and is delivered on the first try with nothing ever parked. That run still prints the marker, so it would pass while proving nothing about parked_retry (observed directly). One send makes the drop task's incoming gate and b2-a's phase-2 delivered gate refer to the SAME message, so nothing is in flight when the session is dropped and the payload is guaranteed to be the first thing b2-b cannot decrypt. (2) b2-b re-announces its identity attestation on a compressed cadence (EMU_ATTEST_EVERY_MS) until b2-a pins it, and b2-a holds phase 2 until that pin exists (EMU_WAIT_PEER_PINNED). That pin is LOAD BEARING, not hygiene: in step 5 b2-b's self-heal INIT is a first-contact INIT carrying a zero auth tag, b2-a still holds its stale session, and dm_verify_init's strict tag path refuses a zero tag against a known identity by design, so the ONLY route to a healed session is mesh_dm.c's attestation-pinned branch. The firmware re-attests every 15 minutes, far outside this run, and a single post-boot attestation is a coin flip against the peer's own half-duplex beacon TX, so without this the sender is often left unpinned and the redelivery is encrypted under a dead session and lost. (3) b2-b drops its own session half in-process (EMU_DROP_DM_SESSION_AT_MS, the same deterministic construction emu-dm-desync.json uses) while staying fully up and still beaconing on schedule: the ACK-loss condition this path targets, not an outage. (4) b2-a sends EMU_AUTO_SEND2 ('NEVERLEFT PAYLOAD') once, under its own still-ACTIVE (now stale) session. (5) b2-b cannot decrypt it and fires its #138 self-heal re-INIT, which b2-a accepts on the pinned-peer branch, tears its stale session down and re-handshakes: the link is healthy again, but the payload is not saved by that, because b2-a's pending-ack retries are retransmissions of the ciphertext already sealed under the dead session. Those retries (MSG_TIER_NORMAL: 3 attempts, exponential backoff from a 2s base) exhaust and the row reads MSG_STATUS_FAILED within well under a minute, no route-queue TTL involved. (6) EMU_AUTO_PARK=1 parks it (mesh_park_message), which arms b2-b's still-present neighbor entry (parked_retry_arm), and b2-a's next beacon RECEIVED FROM b2-b (still a known neighbor, so is_new_peer is false) is recognised as armed by parked_retry_beacon_decide_flush. The flush re-encrypts the row under the healed session and b2-b renders it. The peer was never absent and REPEAT is 1, so no rejoin edge and no later scripted send could have delivered this. run_scenarios.sh asserts the specific 'NEVERLEFT PAYLOAD' text lands in b2-b's console log via the receive-only '[MSG from <addr>] NEVERLEFT PAYLOAD' marker (main/mesh_task.c's CLI stdout echo, only ever emitted on a genuine decoded receive), not a count or the absence of a crash, and the negative control (EMU_AUTO_PARK off, everything else identical) must NOT produce it.",
+  "mode": "deterministic",
+  "duration_ms": 240000,
+  "nodes": [],
+  "firmware_nodes": [
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [
+        [
+          0,
+          0
+        ]
+      ],
+      "label": "b2-a",
+      "env": {
+        "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "EMU_BEACON_INTERVAL_MS": "3000",
+        "EMU_AUTO_SEND": "NEVERLEFT SETUP",
+        "EMU_AUTO_SEND_TO": "neighbor",
+        "EMU_AUTO_SEND_DELAY_MS": "3000",
+        "EMU_AUTO_SEND_REPEAT": "1",
+        "EMU_AUTO_SEND_INTERVAL_MS": "3000",
+        "EMU_AUTO_SEND2": "NEVERLEFT PAYLOAD",
+        "EMU_AUTO_SEND2_DELAY_MS": "10000",
+        "EMU_AUTO_SEND2_REPEAT": "1",
+        "EMU_AUTO_SEND2_INTERVAL_MS": "3000",
+        "EMU_WAIT_PEER_PINNED": "1",
+        "EMU_AUTO_PARK": "1"
+      }
+    },
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [
+        [
+          30,
+          0
+        ]
+      ],
+      "label": "b2-b",
+      "env": {
+        "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "EMU_BEACON_INTERVAL_MS": "3000",
+        "EMU_ATTEST_EVERY_MS": "5000",
+        "EMU_ATTEST_REPEAT": "6",
+        "EMU_DROP_DM_SESSION_AT_MS": "5000"
+      }
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": []
+}
