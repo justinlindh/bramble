@@ -18,6 +18,16 @@
 #                         firmware's 'GPS position updated' console line at the
 #                         origin latitude). One run, no retries; any node death
 #                         fails the suite.
+#   emu-playground        the playground fleet, the one scenario that boots
+#                         UNPROVISIONED on purpose. Asserts the fail-closed
+#                         state end to end: three nodes attach, each reports it
+#                         has no beacon key, each opens the emu-link control
+#                         path an operator drives it through, and NOTHING is
+#                         transmitted by anyone. The interactive half (provision,
+#                         relay, safety number, receipt) is gated by the browser
+#                         suite, emulator/e2e/specs/playground-tour.spec.ts,
+#                         which drives it through the real UI; running it twice
+#                         would only duplicate that work.
 #   emu-dm-desync         a DM session establishes and renders on the receiver;
 #                         the receiver then DROPS its session half in-process at a
 #                         fixed instant (EMU_DROP_DM_SESSION_AT_MS) to construct
@@ -567,6 +577,55 @@ location_suite() {
     return 1
 }
 
+# --- Scenario 5: the playground fleet boots inert -------------------------
+# The playground is the only emulator scenario with no EMU_NETWORK_KEY, and
+# that is its whole teaching point: real hardware ships unprovisioned and inert,
+# and the guided tour shows that before it shows anything else. This gate holds
+# that property, which is otherwise easy to lose by "helpfully" seeding a key.
+#
+# Inertness is asserted as an ABSENCE OF AIR, not as a log line: an unprovisioned
+# node emits no beacon, no attestation and no data, so the broker records zero
+# emu_tx events for the whole run. A regression that keyed the fleet up would
+# put beacons on the ether within seconds and fail here. The presence assertions
+# (the fail-closed log line, and the control path an operator drives) are per
+# node, so a fleet where only some nodes are inert fails too.
+#
+# The scenario's own duration is 30 minutes because a person reads a tour at
+# their own pace; a headless run caps itself well below that, since every
+# assertion is settled once the three nodes have booted.
+playground_suite() {
+    echo "[5] emu-playground"
+    local scen="$SCEN_DIR/emu-playground.json"
+    [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
+    local budget_s="${EMU_PLAYGROUND_BUDGET_S:-180}"
+    local sim_ms="${EMU_PLAYGROUND_SIM_CAP_MS:-45000}"
+    local log; log="$LOG_DIR/emu-playground-$(date +%s).log"
+
+    info "running emu-playground (budget ${budget_s}s, sim cap $((sim_ms / 1000))s)..."
+    EMU_SCENARIO_DURATION_MS="$sim_ms" \
+        timeout "$budget_s" "$GOSIM_BIN" -headless -scenario "$scen" >"$log" 2>&1 &
+    local pid=$!
+    CHILD_PIDS+=("$pid")
+    wait "$pid"
+
+    check_no_deaths "$log" 3 "emu-playground" || return 1
+
+    local joined inert ready txs
+    joined="$(grep -c '"type":"node_joined"' "$log")" || true
+    inert="$(grep -c 'inert until provisioned' "$log")" || true
+    ready="$(grep -c 'emu-link control path ready' "$log")" || true
+    txs="$(grep -c '"type":"emu_tx"' "$log")" || true
+
+    if [ "${joined:-0}" -eq 3 ] && [ "${inert:-0}" -eq 3 ] && [ "${ready:-0}" -eq 3 ] \
+       && [ "${txs:-0}" -eq 0 ]; then
+        green "PASS: emu-playground: 3 nodes booted inert (0 transmissions) with the control path up"
+        return 0
+    fi
+    red "FAIL: emu-playground: joined=$joined inert=$inert control-ready=$ready emu_tx=$txs (want 3/3/3/0)"
+    dump_diagnostics "$log" "emu-playground"
+    return 1
+}
+
 # Run the suites one after the other so only one scenario's firmware nodes
 # are on the host at a time (see the isolation note above).
 channel_suite; chan_rc=$?
@@ -577,11 +636,14 @@ gps_suite; gps_rc=$?
 echo
 location_suite; loc_rc=$?
 echo
+playground_suite; play_rc=$?
+echo
 
 [ "$chan_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$dm_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$gps_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$loc_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
+[ "$play_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 
 # --- verdict --------------------------------------------------------------
 if [ "$FAILURES" -eq 0 ]; then

@@ -27,6 +27,7 @@ int node_array_add(node_array_t* array, const char* id, uint32_t addr, float x, 
     strncpy(node->id, id, NODE_ID_LEN - 1);
     node->id[NODE_ID_LEN - 1] = '\0';
     node->addr = addr;
+    node->index = array->count;
     node->x = x;
     node->y = y;
     node->home_x = x;

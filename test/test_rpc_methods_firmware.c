@@ -2,7 +2,7 @@
  * test_rpc_methods_firmware.c
  *
  * Tests against the real rpc_methods.c handlers (not mock handlers).
- * Covers: getStatus, getNeighbors, sendMessage, sendBroadcast,
+ * Covers: getStatus, getNeighbors, exportTopology, sendMessage, sendBroadcast,
  *         otaUpdate, setNodeName.
  */
 #include "unity.h"
@@ -11,6 +11,10 @@
 #include "rpc_methods.h"
 #include "phy_passthrough.h"
 #include "ota_progress.h"
+#include "mesh_task.h"
+#include "routing.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 
@@ -30,6 +34,14 @@ extern int32_t g_nvs_lon_e6;
 extern int g_wifi_set_creds_rc;
 extern char g_wifi_set_creds_ssid[33];
 extern char g_wifi_set_creds_password[65];
+
+/* Observed-state hooks: what mesh_get_state / mesh_get_routes / radio_get_config
+ * hand the handlers, so bramble.exportTopology can be checked against known
+ * neighbours, routes and a known PHY rather than against an empty mesh. */
+extern void (*g_stub_mesh_state_fill)(mesh_shared_state_t* out);
+extern void (*g_stub_mesh_routes_fill)(routing_table_t* out);
+void stub_set_radio_config(float frequency_mhz, uint8_t sf, uint32_t bw_hz, uint8_t coding_rate,
+                           int8_t tx_power);
 
 /* phy.tx routes raw frames through the tx gate; the stub captures the call. */
 extern int g_stub_tx_gate_calls;
@@ -64,6 +76,11 @@ void setUp(void) {
     phy_passthrough_disable();
     g_stub_tx_gate_calls = 0;
     g_stub_tx_gate_last_len = 0;
+    /* Observed-state hooks are process-global too: every case starts from an
+     * empty mesh and a zeroed PHY unless it plants its own. */
+    g_stub_mesh_state_fill = NULL;
+    g_stub_mesh_routes_fill = NULL;
+    stub_set_radio_config(0.0f, 0, 0, 0, 0);
 }
 
 void tearDown(void) {}
@@ -299,6 +316,136 @@ void test_get_neighbors_empty_table(void) {
     TEST_ASSERT_NOT_NULL(arr);
     TEST_ASSERT_TRUE(cJSON_IsArray(arr));
     TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(arr));
+    cJSON_Delete(resp);
+}
+
+/* ── 2a. exportTopology ───────────────────────────────────────────── */
+
+/* One neighbour and one route, planted through the stubs, so the export is
+ * checked against known observations rather than against an empty mesh. */
+static void export_fill_state(mesh_shared_state_t* out) {
+    out->neighbors.count = 2;
+    out->neighbors.entries[0].addr = 0x11112222;
+    out->neighbors.entries[0].rssi = -97;
+    out->neighbors.entries[0].snr = 6;
+    out->neighbors.entries[0].delivery_rate = 240;
+    out->neighbors.entries[0].airtime_remaining = 71;
+    out->neighbors.entries[0].last_heard = 0;
+    snprintf(out->neighbors.entries[0].name, sizeof(out->neighbors.entries[0].name), "ridge");
+    /* A zeroed slot: the emitter drops address 0 rather than exporting a link
+     * to nowhere, so the twin importer never sees a phantom node. */
+    out->neighbors.entries[1].addr = 0;
+}
+
+static void export_fill_routes(routing_table_t* out) {
+    out->count = 1;
+    out->entries[0].dest_addr = 0x33334444;
+    out->entries[0].next_hop = 0x11112222;
+    out->entries[0].hop_count = 2;
+    out->entries[0].metric = 180;
+    out->entries[0].state = ROUTE_ACTIVE;
+    out->entries[0].use_count = 5;
+}
+
+void test_export_topology_carries_identity_radio_neighbors_and_routes(void) {
+    g_stub_mesh_state_fill = export_fill_state;
+    g_stub_mesh_routes_fill = export_fill_routes;
+    stub_set_radio_config(915.0f, 9, 125000, 1, 22);
+
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":90,\"method\":\"bramble.exportTopology\",\"params\":{}}");
+    cJSON* r = get_result(resp);
+
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItem(r, "twin_schema")->valueint);
+
+    cJSON* node = cJSON_GetObjectItem(r, "node");
+    TEST_ASSERT_NOT_NULL(node);
+    TEST_ASSERT_EQUAL_STRING("AABBCCDD", cJSON_GetObjectItem(node, "address")->valuestring);
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(node, "firmware_version"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(node, "protocol_version"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(node, "hardware"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(node, "uptime_s"));
+    /* No name written to NVS in this case, so the field is absent rather than
+     * carrying a placeholder the importer would have to know to ignore. */
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(node, "name"));
+
+    cJSON* radio = cJSON_GetObjectItem(r, "radio");
+    TEST_ASSERT_NOT_NULL(radio);
+    TEST_ASSERT_EQUAL_INT(9, cJSON_GetObjectItem(radio, "sf")->valueint);
+    TEST_ASSERT_EQUAL_INT(125000, cJSON_GetObjectItem(radio, "bw_hz")->valueint);
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItem(radio, "coding_rate")->valueint);
+    TEST_ASSERT_EQUAL_INT(22, cJSON_GetObjectItem(radio, "tx_power_dbm")->valueint);
+    TEST_ASSERT_EQUAL_FLOAT(915.0, cJSON_GetObjectItem(radio, "frequency_mhz")->valuedouble);
+    /* Real freq_plan table, not a stub: the region decides the duty-cycle
+     * ceiling the twin is allowed to spend airtime against. */
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(radio, "region"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(radio, "regulatory"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(radio, "max_duty_cycle_pct"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(radio, "duty_cycle_enforced"));
+
+    cJSON* neighbors = cJSON_GetObjectItem(r, "neighbors");
+    TEST_ASSERT_TRUE(cJSON_IsArray(neighbors));
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetArraySize(neighbors));
+    cJSON* n0 = cJSON_GetArrayItem(neighbors, 0);
+    TEST_ASSERT_EQUAL_STRING("11112222", cJSON_GetObjectItem(n0, "address")->valuestring);
+    TEST_ASSERT_EQUAL_INT(-97, cJSON_GetObjectItem(n0, "rssi")->valueint);
+    TEST_ASSERT_EQUAL_INT(6, cJSON_GetObjectItem(n0, "snr")->valueint);
+    TEST_ASSERT_EQUAL_INT(240, cJSON_GetObjectItem(n0, "deliveryRate")->valueint);
+    TEST_ASSERT_EQUAL_INT(71, cJSON_GetObjectItem(n0, "airtimeRemaining")->valueint);
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(n0, "last_seen_ms"));
+    TEST_ASSERT_EQUAL_STRING("ridge", cJSON_GetObjectItem(n0, "name")->valuestring);
+
+    cJSON* routes = cJSON_GetObjectItem(r, "routes");
+    TEST_ASSERT_TRUE(cJSON_IsArray(routes));
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetArraySize(routes));
+    cJSON* r0 = cJSON_GetArrayItem(routes, 0);
+    TEST_ASSERT_EQUAL_STRING("33334444", cJSON_GetObjectItem(r0, "dest")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("11112222", cJSON_GetObjectItem(r0, "next_hop")->valuestring);
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItem(r0, "hop_count")->valueint);
+    TEST_ASSERT_EQUAL_INT(180, cJSON_GetObjectItem(r0, "metric")->valueint);
+    TEST_ASSERT_EQUAL_STRING("active", cJSON_GetObjectItem(r0, "state")->valuestring);
+    TEST_ASSERT_EQUAL_INT(5, cJSON_GetObjectItem(r0, "use_count")->valueint);
+
+    cJSON_Delete(resp);
+}
+
+/* The export must not be a second, drifting spelling of the two methods it
+ * subsumes: the arrays it embeds are compared field for field against what
+ * bramble.getNeighbors and bramble.getRoutes return from the same state. */
+void test_export_topology_matches_get_neighbors_and_get_routes(void) {
+    g_stub_mesh_state_fill = export_fill_state;
+    g_stub_mesh_routes_fill = export_fill_routes;
+
+    cJSON* exp_resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":91,\"method\":\"bramble.exportTopology\",\"params\":{}}");
+    cJSON* nb_resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":92,\"method\":\"bramble.getNeighbors\",\"params\":{}}");
+    cJSON* rt_resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":93,\"method\":\"bramble.getRoutes\",\"params\":{}}");
+
+    char* exp_nb = cJSON_PrintUnformatted(cJSON_GetObjectItem(get_result(exp_resp), "neighbors"));
+    char* got_nb = cJSON_PrintUnformatted(cJSON_GetObjectItem(get_result(nb_resp), "neighbors"));
+    char* exp_rt = cJSON_PrintUnformatted(cJSON_GetObjectItem(get_result(exp_resp), "routes"));
+    char* got_rt = cJSON_PrintUnformatted(cJSON_GetObjectItem(get_result(rt_resp), "routes"));
+
+    TEST_ASSERT_EQUAL_STRING(got_nb, exp_nb);
+    TEST_ASSERT_EQUAL_STRING(got_rt, exp_rt);
+
+    free(exp_nb);
+    free(got_nb);
+    free(exp_rt);
+    free(got_rt);
+    cJSON_Delete(exp_resp);
+    cJSON_Delete(nb_resp);
+    cJSON_Delete(rt_resp);
+}
+
+void test_export_topology_reports_configured_node_name(void) {
+    snprintf(g_nvs_node_name, sizeof(g_nvs_node_name), "ridge-relay");
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":94,\"method\":\"bramble.exportTopology\",\"params\":{}}");
+    cJSON* node = cJSON_GetObjectItem(get_result(resp), "node");
+    TEST_ASSERT_EQUAL_STRING("ridge-relay", cJSON_GetObjectItem(node, "name")->valuestring);
     cJSON_Delete(resp);
 }
 
@@ -905,6 +1052,11 @@ int main(void) {
     RUN_TEST(test_set_gps_enabled_non_bool_param_invalid);
     RUN_TEST(test_set_gps_enabled_persists_and_reads_back_false);
     RUN_TEST(test_set_gps_enabled_persists_and_reads_back_true);
+
+    /* exportTopology */
+    RUN_TEST(test_export_topology_carries_identity_radio_neighbors_and_routes);
+    RUN_TEST(test_export_topology_matches_get_neighbors_and_get_routes);
+    RUN_TEST(test_export_topology_reports_configured_node_name);
 
     /* shareLocationOnce */
     RUN_TEST(test_share_location_once_no_source_errors);

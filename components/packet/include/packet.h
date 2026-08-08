@@ -19,6 +19,15 @@
  * (bramble_header_is_supported_version, exact ==) and re-handshake once. */
 #define BRAMBLE_VERSION 5
 
+/* The protocol release this build speaks, as reported to clients by
+ * bramble.getStatus / bramble.getVersion / bramble.exportTopology. Distinct
+ * from BRAMBLE_VERSION above, which is the single wire byte the RX version
+ * gate compares: this is the human-facing release string, and it lives beside
+ * the wire version so the two are revised together. It is here rather than in
+ * main/ because the simulator (simulator/gosim) reports it too, from the same
+ * protocol code. */
+#define BRAMBLE_PROTOCOL_VERSION "0.5.0"
+
 /* Packet types */
 #define PKT_TYPE_ACK 0x01
 #define PKT_TYPE_RREQ 0x02

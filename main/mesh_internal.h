@@ -15,6 +15,8 @@
  *   mesh_mailbox.c      store-and-forward mailbox glue
  *   mesh_persist.c      NVS: nonce ceiling, pin store, replay store, net key
  *   mesh_channels.c     channel table management
+ *   mesh_rollcall.c     attested roll-call: announce rounds, staggered
+ *                       identity-signed answers, and the initiator ledger
  *
  * These modules include this header to reach the shared state and each other's
  * cross-module entry points. This is deliberately the ONE place visibility is
@@ -70,6 +72,7 @@
 #include "timesync.h"
 #include "delivery_event_ring.h"
 #include "mailbox.h"
+#include "mesh_rollcall.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"

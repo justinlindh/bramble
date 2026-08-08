@@ -12,6 +12,8 @@
 #include "phy_passthrough.h"
 #include "tx_gate.h"
 #include "freq_plan.h"
+#include "packet.h" /* BRAMBLE_PROTOCOL_VERSION */
+#include "topology_export.h"
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -42,6 +44,7 @@
 #include "ble_pairing_policy.h"
 #include "ble_pairing_store.h"
 #include "network_key.h"
+#include "mesh_rollcall.h"
 /* Deep sleep, GPIO wake, esp_wifi and mDNS exist only on the ESP32 targets:
  * not on the POSIX/Linux simulator, and not on the nRF52840 (which has no
  * Wi-Fi at all). The affected RPC handlers degrade on both; see the gates
@@ -61,8 +64,6 @@
 #include <stdlib.h>
 #include <string.h>
 /* statvfs not available in ESP-IDF newlib */
-
-#define BRAMBLE_PROTOCOL_VERSION "0.5.0"
 
 /* NVS namespaces and keys are defined in nvs_keys.h */
 #define NVS_NAMESPACE NVS_NS_BRAMBLE
@@ -590,6 +591,30 @@ static int handle_get_delivery_events(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* Milliseconds since boot, the clock topology_export_neighbors turns each
+ * entry's last_heard into an age against. */
+static uint32_t rpc_now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000ULL); }
+
+/* Node name as stored in NVS. Returns false (leaving out an empty string) when
+ * no name is set or NVS cannot be opened, so each caller picks its own answer
+ * for the unnamed case: getConfig substitutes a placeholder, exportTopology
+ * omits the field. */
+static bool rpc_get_node_name(char* out, size_t len) {
+    out[0] = '\0';
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    size_t name_len = len;
+    esp_err_t err = nvs_get_str(nvs, NVS_KEY_NODE_NAME, out, &name_len);
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        out[0] = '\0';
+        return false;
+    }
+    return out[0] != '\0';
+}
+
 /* bramble.getNeighbors */
 static int handle_get_neighbors(const cJSON* params, cJSON* result) {
     (void)params;
@@ -599,30 +624,8 @@ static int handle_get_neighbors(const cJSON* params, cJSON* result) {
         return RPC_ERR_INTERNAL;
     }
     mesh_get_state(st);
-
-    cJSON* arr = cJSON_AddArrayToObject(result, "neighbors");
-    char buf[12];
-
-    for (int i = 0; i < st->neighbors.count; i++) {
-        const neighbor_entry_t* n = &st->neighbors.entries[i];
-        if (n->addr == 0)
-            continue;
-
-        cJSON* obj = cJSON_CreateObject();
-        cJSON_AddStringToObject(obj, "address", addr_hex(n->addr, buf, sizeof(buf)));
-        cJSON_AddNumberToObject(obj, "rssi", n->rssi);
-        cJSON_AddNumberToObject(obj, "snr", n->snr);
-        cJSON_AddNumberToObject(obj, "deliveryRate", n->delivery_rate);
-        cJSON_AddNumberToObject(obj, "airtimeRemaining", n->airtime_remaining);
-        /* Return time since last heard (ms ago), not absolute timestamp */
-        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
-        uint32_t ago = (now > n->last_heard) ? (now - n->last_heard) : 0;
-        cJSON_AddNumberToObject(obj, "last_seen_ms", ago);
-        if (n->name[0] != '\0') {
-            cJSON_AddStringToObject(obj, "name", n->name);
-        }
-        cJSON_AddItemToArray(arr, obj);
-    }
+    topology_export_neighbors(cJSON_AddArrayToObject(result, "neighbors"), &st->neighbors,
+                              rpc_now_ms());
     free(st);
     return 0;
 }
@@ -636,23 +639,77 @@ static int handle_get_routes(const cJSON* params, cJSON* result) {
         return RPC_ERR_INTERNAL;
     }
     mesh_get_routes(routes);
-
-    cJSON* arr = cJSON_AddArrayToObject(result, "routes");
-    char buf[12];
-    static const char* state_names[] = {"discovering", "unverified", "active", "stale", "broken"};
-    for (int i = 0; i < routes->count; i++) {
-        const route_entry_t* r = &routes->entries[i];
-        cJSON* obj = cJSON_CreateObject();
-        cJSON_AddStringToObject(obj, "dest", addr_hex(r->dest_addr, buf, sizeof(buf)));
-        cJSON_AddStringToObject(obj, "next_hop", addr_hex(r->next_hop, buf, sizeof(buf)));
-        cJSON_AddNumberToObject(obj, "hop_count", r->hop_count);
-        cJSON_AddNumberToObject(obj, "metric", r->metric);
-        cJSON_AddStringToObject(obj, "state",
-                                r->state <= ROUTE_BROKEN ? state_names[r->state] : "unknown");
-        cJSON_AddNumberToObject(obj, "use_count", r->use_count);
-        cJSON_AddItemToArray(arr, obj);
-    }
+    topology_export_routes(cJSON_AddArrayToObject(result, "routes"), routes);
     free(routes);
+    return 0;
+}
+
+/* bramble.exportTopology
+ *
+ * One node's observed mesh state as a single document, shaped for the
+ * simulator's digital-twin importer (docs/digital-twin.md): who this node is,
+ * every neighbor it hears and the link quality it hears them at, its routing
+ * table, and the PHY and regulatory parameters that decide time-on-air and the
+ * airtime a deployment is allowed to spend.
+ *
+ * The document is written by main/topology_export.c, which also writes the
+ * arrays bramble.getNeighbors and bramble.getRoutes return, so an export and
+ * those two methods cannot disagree. The simulator compiles that same file, so
+ * the twin importer reads documents built by firmware code rather than by a
+ * second implementation of the schema.
+ *
+ * Nothing here is a fresh measurement: it is the state the node already keeps,
+ * read at the moment of the call.
+ */
+static int handle_export_topology(const cJSON* params, cJSON* result) {
+    (void)params;
+    mesh_shared_state_t* st = calloc(1, sizeof(*st));
+    if (!st) {
+        ESP_LOGE(TAG, "exportTopology: out of memory for state snapshot");
+        return RPC_ERR_INTERNAL;
+    }
+    routing_table_t* routes = calloc(1, sizeof(*routes));
+    if (!routes) {
+        ESP_LOGE(TAG, "exportTopology: out of memory for routing-table snapshot");
+        free(st);
+        return RPC_ERR_INTERNAL;
+    }
+    mesh_get_state(st);
+    mesh_get_routes(routes);
+
+    char name[64];
+    topology_export_identity_t identity = {
+        .address = s_identity->address,
+        .name = rpc_get_node_name(name, sizeof(name)) ? name : NULL,
+        .firmware_version = esp_app_get_description()->version,
+        .protocol_version = BRAMBLE_PROTOCOL_VERSION,
+        .hardware = bramble_hardware(),
+        .uptime_s = (uint64_t)(esp_timer_get_time() / 1000000),
+    };
+
+    /* Runtime PHY, not the profile table: sf/bw/cr/tx power are what
+     * bramble_calculate_airtime_us prices a frame at, and the twin charges the
+     * same time-on-air for the same frame. The frequency plan rides along
+     * because its duty-cycle ceiling bounds what the deployment may spend. */
+    radio_config_t rcfg;
+    radio_get_config(&rcfg);
+    const bramble_freq_plan_t* plan = freq_plan_get_default();
+    topology_export_phy_t phy = {
+        .frequency_mhz = rcfg.frequency_mhz,
+        .sf = rcfg.sf,
+        .bw_hz = rcfg.bw_hz,
+        .coding_rate = rcfg.coding_rate,
+        .tx_power_dbm = rcfg.tx_power,
+        .region = plan->name,
+        .regulatory = plan->regulatory,
+        .max_duty_cycle_pct = plan->max_duty_cycle_pct,
+        .duty_cycle_enforced = plan->duty_cycle_enforced,
+    };
+
+    topology_export_document(result, &identity, &phy, &st->neighbors, routes, rpc_now_ms());
+
+    free(routes);
+    free(st);
     return 0;
 }
 
@@ -923,6 +980,154 @@ static int handle_send_probe(const cJSON* params, cJSON* result) {
     cJSON_AddStringToObject(result, "probe_id", buf);
     cJSON_AddNumberToObject(result, "ack_window", 5);
     cJSON_AddNumberToObject(result, "rounds_total", 3);
+    return 0;
+}
+
+/*
+ * bramble.startRollCall: start an attested roll-call (docs/rollcall.md).
+ *
+ * Optional "text" is the operator payload the announce carries, bounded at
+ * ROLLCALL_TEXT_MAX bytes. Initiation is RATE LIMITED in the firmware, not
+ * in the client: a roll-call is the most expensive primitive in the protocol
+ * (one flood per round plus one unicast answer per member), so the bound has
+ * to hold for a script driving the RPC directly.
+ *
+ * An operational refusal (still collecting, inside the rate-limit interval,
+ * nothing reached the air) is reported as ok:false with a reason and
+ * retry_after_ms, the soft-refusal shape phy.enable already uses, NOT as a
+ * JSON-RPC error: rpc_dispatch discards a handler's result object whenever
+ * the handler returns nonzero, so an error code cannot carry the one number
+ * the operator actually needs. A malformed request is still a real
+ * RPC_ERR_INVALID_PARAMS, because that is a client defect rather than a
+ * state the mesh will grow out of.
+ */
+static int handle_start_rollcall(const cJSON* params, cJSON* result) {
+    const char* text = cJSON_GetStringValue(cJSON_GetObjectItem(params, "text"));
+    size_t text_len = (text != NULL) ? strlen(text) : 0;
+
+    if (text_len > ROLLCALL_TEXT_MAX) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    uint32_t rollcall_id = 0;
+    int rc = mesh_rollcall_start(text, text_len, &rollcall_id);
+    if (rc != MESH_ROLLCALL_OK) {
+        const char* reason;
+        switch (rc) {
+        case MESH_ROLLCALL_ERR_BUSY:
+            reason = "busy";
+            break;
+        case MESH_ROLLCALL_ERR_RATE_LIMITED:
+            reason = "rate_limited";
+            break;
+        case MESH_ROLLCALL_ERR_TX:
+            reason = "not_transmitted";
+            break;
+        case MESH_ROLLCALL_ERR_TEXT_TOO_LONG:
+            /* The length gate above already covers this for a well-formed
+             * request; reaching it here means the caller's string and the
+             * firmware's cap disagree, which is still a client defect. */
+            return RPC_ERR_INVALID_PARAMS;
+        default:
+            return RPC_ERR_INTERNAL;
+        }
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "reason", reason);
+        cJSON_AddNumberToObject(result, "retry_after_ms", mesh_rollcall_retry_after_ms());
+        cJSON_AddNumberToObject(result, "min_interval_ms", ROLLCALL_MIN_INTERVAL_MS);
+        return 0;
+    }
+
+    const rollcall_ledger_t* l = mesh_rollcall_ledger();
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%08" PRIX32, rollcall_id);
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "rollcall_id", buf);
+    cJSON_AddNumberToObject(result, "window_ms", rollcall_window_ms());
+    cJSON_AddNumberToObject(result, "rounds_total", ROLLCALL_MAX_ROUNDS);
+    cJSON_AddNumberToObject(result, "expected", (l != NULL) ? l->expected_count : 0);
+    cJSON_AddBoolToObject(result, "anchored", (l != NULL) && l->anchored);
+    return 0;
+}
+
+/*
+ * bramble.getRollCall: the ledger of the roll-call this node started.
+ *
+ * Times are reported as milliseconds INTO the roll-call (at_ms), never as
+ * raw device uptime: the device clock is boot-relative and means nothing to
+ * a client, while "answered 4.2s in" is directly comparable across nodes.
+ *
+ * `anchored` is the honesty switch the whole report turns on. False means
+ * this node pins trust-on-first-use identities, so there is no authoritative
+ * expected set: `expected` is 0 and `missing` is empty BY CONSTRUCTION, and
+ * the ledger reports only the responders it observed. See docs/rollcall.md.
+ */
+static int handle_get_rollcall(const cJSON* params, cJSON* result) {
+    (void)params;
+
+    cJSON_AddNumberToObject(result, "rounds_total", ROLLCALL_MAX_ROUNDS);
+    cJSON_AddNumberToObject(result, "window_ms", rollcall_window_ms());
+    cJSON_AddNumberToObject(result, "min_interval_ms", ROLLCALL_MIN_INTERVAL_MS);
+    cJSON_AddNumberToObject(result, "max_text_bytes", ROLLCALL_TEXT_MAX);
+    cJSON_AddNumberToObject(result, "pending_dropped", mesh_rollcall_pending_dropped());
+    cJSON_AddNumberToObject(result, "answer_limited", mesh_rollcall_answer_limited());
+    cJSON_AddNumberToObject(result, "answer_max_per_hour", ROLLCALL_ANSWER_MAX_PER_HOUR);
+
+    const rollcall_ledger_t* l = mesh_rollcall_ledger();
+    if (l == NULL) {
+        cJSON_AddBoolToObject(result, "active", false);
+        return 0;
+    }
+
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%08" PRIX32, l->rollcall_id);
+    cJSON_AddBoolToObject(result, "active", true);
+    cJSON_AddStringToObject(result, "rollcall_id", buf);
+    cJSON_AddBoolToObject(result, "open", l->open);
+    cJSON_AddStringToObject(result, "text", l->text);
+    cJSON_AddNumberToObject(result, "rounds_sent", l->rounds_sent);
+    cJSON_AddBoolToObject(result, "anchored", l->anchored);
+    cJSON_AddNumberToObject(result, "expected", l->expected_count);
+    cJSON_AddNumberToObject(result, "responded", rollcall_ledger_responded_count(l));
+    cJSON_AddNumberToObject(result, "unattested", l->unattested);
+    cJSON_AddNumberToObject(result, "overflow", l->overflow);
+    cJSON_AddNumberToObject(result, "late", l->late);
+    uint32_t rc_now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    cJSON_AddNumberToObject(result, "elapsed_ms", rc_now_ms - l->started_ms);
+
+    cJSON* responders = cJSON_AddArrayToObject(result, "responders");
+    for (uint8_t i = 0; responders != NULL && i < l->entry_count; i++) {
+        const rollcall_entry_t* e = &l->entries[i];
+        if (!e->used)
+            continue;
+        cJSON* item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "address", addr_hex(e->addr, buf, sizeof(buf)));
+        cJSON_AddBoolToObject(item, "responded", e->responded);
+        if (e->responded) {
+            cJSON_AddNumberToObject(item, "at_ms", e->responded_at_ms - l->started_ms);
+            cJSON_AddNumberToObject(item, "round", e->round);
+        }
+        if (e->have_path) {
+            cJSON_AddNumberToObject(item, "hops", e->hop_count);
+            cJSON* path = cJSON_AddArrayToObject(item, "path");
+            for (uint8_t h = 0; path != NULL && h < e->hop_count; h++) {
+                cJSON_AddItemToArray(
+                    path, cJSON_CreateString(addr_hex(e->relay_path[h], buf, sizeof(buf))));
+            }
+        }
+        cJSON_AddItemToArray(responders, item);
+    }
+
+    uint32_t missing[ROLLCALL_MAX_EXPECTED];
+    uint8_t missing_count = rollcall_ledger_missing(l, missing, ROLLCALL_MAX_EXPECTED);
+    cJSON_AddNumberToObject(result, "missing_count", missing_count);
+    cJSON* missing_arr = cJSON_AddArrayToObject(result, "missing");
+    uint8_t written =
+        (missing_count > ROLLCALL_MAX_EXPECTED) ? ROLLCALL_MAX_EXPECTED : missing_count;
+    for (uint8_t i = 0; missing_arr != NULL && i < written; i++) {
+        cJSON_AddItemToArray(missing_arr,
+                             cJSON_CreateString(addr_hex(missing[i], buf, sizeof(buf))));
+    }
     return 0;
 }
 
@@ -2461,14 +2666,13 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
     (void)params;
 
     /* Node name from NVS (falls back to "(unnamed)" if not set) */
-    char name[64] = "(unnamed)";
-    nvs_handle_t nvs;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        size_t len = sizeof(name);
-        nvs_get_str(nvs, NVS_KEY_NODE_NAME, name, &len);
-        nvs_close(nvs);
+    char name[64];
+    if (!rpc_get_node_name(name, sizeof(name))) {
+        snprintf(name, sizeof(name), "(unnamed)");
     }
     cJSON_AddStringToObject(result, "node_name", name);
+
+    nvs_handle_t nvs;
 
     /* Node address */
     char buf[12];
@@ -3683,6 +3887,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.getDeliveryEvents", handle_get_delivery_events);
     rpc_register("bramble.getNeighbors", handle_get_neighbors);
     rpc_register("bramble.getRoutes", handle_get_routes);
+    rpc_register("bramble.exportTopology", handle_export_topology);
     rpc_register("bramble.getDmSessions", handle_get_dm_sessions);
     rpc_register("bramble.getAirtime", handle_get_airtime);
     rpc_register("bramble.ping", handle_ping);
@@ -3696,6 +3901,8 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.reboot", handle_reboot);
     rpc_register("bramble.enterDfu", handle_enter_dfu);
     rpc_register("bramble.sendProbe", handle_send_probe);
+    rpc_register("bramble.startRollCall", handle_start_rollcall);
+    rpc_register("bramble.getRollCall", handle_get_rollcall);
     rpc_register("bramble.setRadio", handle_set_radio);
     rpc_register("bramble.setNodeName", handle_set_node_name);
     rpc_register("bramble.getBleSecurity", handle_get_ble_security);

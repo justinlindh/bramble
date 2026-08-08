@@ -634,3 +634,131 @@ Emitted during a background OTA update started by bramble.otaUpdate.
   }
 }
 ```
+
+---
+
+## `bramble.onRollCall`
+
+**Description**  
+This node heard an attested roll-call announce and queued its own signed answer for a staggered slot. Raised on a MEMBER. See [../rollcall.md](../rollcall.md).
+
+**Trigger conditions**
+
+- A broadcast DATA frame with app type `APP_TYPE_ROLLCALL` decoded, after the same replay and freshness gates every other DATA payload passes.
+- This node had not already claimed an answer for that (roll-call id, initiator) pair, so re-announce rounds raise nothing.
+
+**Params**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `rollcall_id` | string | Roll-call identifier (8-char uppercase hex). |
+| `from` | string | Initiator address (8-char uppercase hex). |
+| `text` | string | Operator payload the announce carried (up to 48 bytes). |
+| `round` | integer | Announce round this frame was (1-based). |
+
+**Semantics notes**
+
+- Raised as its own event rather than filed as a chat message: a roll-call is an operational request, not traffic somebody sent.
+- The answer itself goes out later, after the response stagger; this event fires when it is queued.
+
+**JSON-RPC example**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onRollCall",
+  "params": {
+    "rollcall_id": "00C0FFE1",
+    "from": "CAFEBABE",
+    "text": "sound off",
+    "round": 1
+  }
+}
+```
+
+---
+
+## `bramble.onRollCallResponse`
+
+**Description**  
+A member's signed answer verified against its pinned identity key. Raised on the INITIATOR, once per responder.
+
+**Trigger conditions**
+
+- A unicast DATA frame with app type `APP_TYPE_ROLLCALL_REPLY` decoded for the roll-call this node started.
+- Its responder field matched the sending envelope, the responder holds a verified pin here, and the Ed25519 signature over the canonical roll-call message verified.
+
+**Params**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `rollcall_id` | string | Roll-call identifier (8-char uppercase hex). |
+| `address` | string | Responder address (8-char uppercase hex). |
+| `round` | integer | Announce round the answer named. |
+| `responded` | integer | Members whose signed answer has verified so far. |
+| `expected` | integer | Size of the anchor-certified expected set (0 when not anchored). |
+
+**Semantics notes**
+
+- An answer that fails to attest raises nothing; it is only counted, in the ledger's `unattested` field.
+- A retransmitted answer is idempotent at the ledger and raises no second event.
+
+**JSON-RPC example**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onRollCallResponse",
+  "params": {
+    "rollcall_id": "00C0FFE1",
+    "address": "AABBCC01",
+    "round": 1,
+    "responded": 2,
+    "expected": 5
+  }
+}
+```
+
+---
+
+## `bramble.onRollCallComplete`
+
+**Description**  
+The roll-call's collection window closed. Raised on the INITIATOR exactly once.
+
+**Trigger conditions**
+
+- 135 seconds elapsed since the roll-call started (the two round gaps plus the collection tail).
+
+**Params**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `rollcall_id` | string | Roll-call identifier (8-char uppercase hex). |
+| `responded` | integer | Members whose signed answer verified. |
+| `expected` | integer | Size of the anchor-certified expected set (0 when not anchored). |
+| `anchored` | boolean | True when the expected set is authoritative; false means observed responders only, and nobody can be named missing. |
+| `rounds` | integer | Announce rounds sent. |
+| `unattested` | integer | Answers that could not be attested. |
+
+**Semantics notes**
+
+- The ledger stays readable after it closes; fetch it with `bramble.getRollCall`.
+- An answer arriving after the close is counted as `late` and does not reopen the roll-call.
+
+**JSON-RPC example**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onRollCallComplete",
+  "params": {
+    "rollcall_id": "00C0FFE1",
+    "responded": 4,
+    "expected": 5,
+    "anchored": true,
+    "rounds": 3,
+    "unattested": 0
+  }
+}
+```

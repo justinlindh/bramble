@@ -40,9 +40,10 @@
 #include "../../components/fragment/fragment.c"
 #include "../../components/crypto/crypto_host.c"
 #include "../../components/security/security.c"
-/* routing_auth.c + identity_store.c live in identity_unit.c, a separate
- * compilation unit: routing_auth.c's static ct_eq collides with
- * discovery.c's in this single-TU build. */
+/* routing_auth.c + identity_store.c live in identity_unit.c, and the attested
+ * roll-call core in rollcall_unit.c: both are separate compilation units
+ * because their static helpers (routing_auth.c's ct_eq, rollcall.c's
+ * put_be32/get_be32) collide with identically named ones here. */
 
 /* New components (Phase 6) */
 #include "../../components/mailbox/mailbox.c"
@@ -60,3 +61,10 @@
  * tested directly), and it keeps gosim's receipt storm spread by firmware's
  * real constants instead of a copy of them. */
 #include "../../main/broadcast_delivery_receipt.c"
+/* Mesh digital twin: the bramble.exportTopology document builder. Compiled in
+ * for the same reason as the two above (pure serialization over the real
+ * routing tables, no ESP-IDF deps), and for one more: it makes the twin's
+ * round-trip check meaningful, because the export gosim writes for a simulated
+ * node is written by the firmware's export code rather than by a second
+ * implementation of the schema. See ../../docs/digital-twin.md. */
+#include "../../main/topology_export.c"

@@ -44,6 +44,11 @@ export {
   shareLocationOnce,
 } from './config';
 export {
+  loadRollCall,
+  startRollCall,
+  normalizeRollCallLedger,
+} from './rollcall';
+export {
   loadStatus,
   normalizeStatus,
   normalizeAirtime,

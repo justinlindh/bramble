@@ -52,6 +52,20 @@ typedef enum {
      * (bridge.h's bridge_node_ext_t.receipt_queue), exactly like firmware
      * keeps them in s_receipt_queue rather than in the event. */
     EVT_RECEIPT_TX,
+    /* Attested roll-call: a scripted initiation ("start_rollcall" scenario
+     * event). data.rollcall names the initiating node and carries the
+     * operator payload the announce floods. */
+    EVT_GENERATE_ROLLCALL,
+    /* One roll-call announce round has come due on the initiator, the sim
+     * analog of the round schedule firmware drives from its maintenance
+     * tick. data.rollcall_slot.round is the 1-based round to send, or 0 for
+     * the close sweep scheduled after the last round. */
+    EVT_ROLLCALL_ROUND,
+    /* One member's staggered answer has come due. data.rollcall_slot names
+     * the node and its pending-answer slot; the answer itself lives in that
+     * slot (bridge.h's bridge_node_ext_t.rollcall_pending), exactly like the
+     * receipt queue above keeps its bytes out of the event. */
+    EVT_ROLLCALL_TX,
 } event_type_t;
 
 /* Packet event data */
@@ -98,6 +112,27 @@ typedef struct {
     int slot;           /* index into that node's receipt_queue */
 } receipt_tx_event_data_t;
 
+/* Roll-call initiation event data (EVT_GENERATE_ROLLCALL). The operator
+ * payload is carried inline because it is the whole content of the announce.
+ * SIM_ROLLCALL_TEXT_MAX must equal components/rollcall's ROLLCALL_TEXT_MAX;
+ * bridge.c static-asserts that rather than trusting the two to stay in step,
+ * because the engine deliberately includes no component headers. */
+#define SIM_ROLLCALL_TEXT_MAX 48
+typedef struct {
+    char node_id[16];
+    char text[SIM_ROLLCALL_TEXT_MAX + 1];
+} rollcall_event_data_t;
+
+/* Roll-call round / staggered-answer event data (EVT_ROLLCALL_ROUND,
+ * EVT_ROLLCALL_TX). One struct for both because both name a node and one
+ * index into its roll-call state: EVT_ROLLCALL_ROUND uses `round` (0 = the
+ * close sweep), EVT_ROLLCALL_TX uses `slot`. */
+typedef struct {
+    uint32_t node_addr;
+    int slot;
+    uint8_t round;
+} rollcall_slot_event_data_t;
+
 /* Interference event data */
 typedef struct {
     int zone_index;
@@ -131,6 +166,8 @@ typedef struct {
         tick_event_data_t tick;
         broadcast_delivery_event_data_t broadcast_delivery;
         receipt_tx_event_data_t receipt_tx;
+        rollcall_event_data_t rollcall;
+        rollcall_slot_event_data_t rollcall_slot;
         uint32_t timer_id;
     } data;
 } sim_event_t;

@@ -5,3 +5,32 @@ services:
       dockerfile: emulator/Dockerfile
     ports:
       - "3004:3000"
+
+  # The playground: the same image, booted straight into the emu-playground
+  # scenario with the guided tour enabled, so opening the URL is the whole
+  # setup (the container equivalent of `make playground`). See
+  # docs/playground.md.
+  #
+  # Behind a profile, and on its own port, so `docker compose up` still brings
+  # up just the simulator UI: both services spawn three firmware node
+  # processes, and starting them together would put six real-time processes on
+  # the host for someone who asked for one. Start it by name:
+  #
+  #   docker compose --profile playground up playground
+  playground:
+    build:
+      context: ..
+      dockerfile: emulator/Dockerfile
+    command:
+      - simulator/gosim/bramble-gosim
+      - --ui
+      - simulator/ui/dist
+      - --scenarios
+      - simulator/scenarios
+      - --port
+      - "3000"
+      - --playground
+    ports:
+      - "3005:3000"
+    profiles:
+      - playground

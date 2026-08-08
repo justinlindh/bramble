@@ -261,6 +261,64 @@ export interface ProbeResult {
   complete: boolean;
 }
 
+// ─── Attested roll-call ────────────────────────────────────────────────
+
+export interface RollCallResponder {
+  addr: number;
+  /** True when an Ed25519 signature verified against this address's pin. */
+  responded: boolean;
+  /** Milliseconds INTO the roll-call, not device uptime. */
+  atMs?: number;
+  round?: number;
+  relayPath?: number[];
+}
+
+export interface RollCallLedger {
+  /** False when this node has never started a roll-call. */
+  active: boolean;
+  /** True while the ledger is still collecting answers. */
+  open: boolean;
+  rollcallId?: string;
+  text?: string;
+  roundsSent: number;
+  roundsTotal: number;
+  windowMs: number;
+  elapsedMs: number;
+  minIntervalMs: number;
+  maxTextBytes: number;
+  /**
+   * True when the expected set is anchor-certified and therefore
+   * authoritative. False means the ledger reports observed responders only
+   * and can name nobody missing: see docs/rollcall.md.
+   */
+  anchored: boolean;
+  expected: number;
+  responded: number;
+  unattested: number;
+  overflow: number;
+  late: number;
+  pendingDropped: number;
+  /** Answers this node refused because its hourly answer budget was spent. */
+  answerLimited: number;
+  missing: number[];
+  missingCount: number;
+  responders: RollCallResponder[];
+}
+
+/**
+ * Outcome of bramble.startRollCall. A refusal is ok:false with a reason and
+ * the interval to wait, not a thrown error: the mesh is telling the operator
+ * to come back later, which is not the same as the call failing.
+ */
+export interface RollCallStart {
+  ok: boolean;
+  rollcallId?: string;
+  reason?: 'busy' | 'rate_limited' | 'not_transmitted';
+  retryAfterMs?: number;
+  expected: number;
+  anchored: boolean;
+}
+
 // ─── Transport abstraction ─────────────────────────────────────────────
 
 export interface Transport {

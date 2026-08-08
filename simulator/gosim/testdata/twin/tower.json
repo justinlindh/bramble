@@ -1,0 +1,85 @@
+{
+  "twin_schema": 1,
+  "node": {
+    "address": "3D4E5F60",
+    "name": "tower",
+    "firmware_version": "0.9.3",
+    "protocol_version": "0.5.0",
+    "hardware": "heltec_v3",
+    "uptime_s": 264310
+  },
+  "radio": {
+    "frequency_mhz": 915.0,
+    "sf": 9,
+    "bw_hz": 125000,
+    "coding_rate": 1,
+    "tx_power_dbm": 22,
+    "region": "US915",
+    "regulatory": "FCC Part 15.247",
+    "max_duty_cycle_pct": 100,
+    "duty_cycle_enforced": false
+  },
+  "neighbors": [
+    {
+      "address": "0A1B2C3D",
+      "rssi": -95,
+      "snr": 8,
+      "deliveryRate": 249,
+      "airtimeRemaining": 96,
+      "last_seen_ms": 41208,
+      "name": "basecamp"
+    },
+    {
+      "address": "1B2C3D4E",
+      "rssi": -99,
+      "snr": 5,
+      "deliveryRate": 241,
+      "airtimeRemaining": 95,
+      "last_seen_ms": 12744,
+      "name": "ridge"
+    },
+    {
+      "address": "2C3D4E5F",
+      "rssi": -110,
+      "snr": 1,
+      "deliveryRate": 197,
+      "airtimeRemaining": 97,
+      "last_seen_ms": 58301,
+      "name": "creek"
+    }
+  ],
+  "routes": [
+    {
+      "dest": "0A1B2C3D",
+      "next_hop": "0A1B2C3D",
+      "hop_count": 1,
+      "metric": 34,
+      "state": "active",
+      "use_count": 118
+    },
+    {
+      "dest": "1B2C3D4E",
+      "next_hop": "1B2C3D4E",
+      "hop_count": 1,
+      "metric": 38,
+      "state": "active",
+      "use_count": 96
+    },
+    {
+      "dest": "2C3D4E5F",
+      "next_hop": "2C3D4E5F",
+      "hop_count": 1,
+      "metric": 52,
+      "state": "active",
+      "use_count": 61
+    },
+    {
+      "dest": "4E5F6071",
+      "next_hop": "1B2C3D4E",
+      "hop_count": 2,
+      "metric": 71,
+      "state": "active",
+      "use_count": 27
+    }
+  ]
+}

@@ -65,6 +65,16 @@ type Command struct {
 	Node  string `json:"node,omitempty"`
 	BtnID string `json:"id,omitempty"`
 	Edge  string `json:"edge,omitempty"`
+	// Key/Text/To: the emulator control path (emulator/node/emu_control.c).
+	// "prov" provisions Key (64 hex chars) on Node, or on every attached
+	// firmware node when Node is empty; "send" makes Node originate Text,
+	// as a DM when To names a peer address and a channel broadcast when it
+	// does not; "attest" makes Node announce its identity now and carries no
+	// fields of its own. Node is the emu-link hello id, like the button
+	// fields above.
+	Key  string `json:"key,omitempty"`
+	Text string `json:"text,omitempty"`
+	To   string `json:"to,omitempty"`
 }
 
 // Sim is the core simulation engine.
@@ -95,6 +105,18 @@ type Sim struct {
 	origStdout int // saved original stdout fd
 
 	nextAddr uint32
+
+	// lastFB / recentConsole hold the most recent device_fb event and the tail
+	// of the console stream per node id, guarded by fbMu (a lock of its own,
+	// so these hot paths never contend on s.mu). They are what SnapshotEvents
+	// replays to a client that connects after the fleet already booted: a node
+	// only emits a frame when its screen changes (an e-paper pager can go a
+	// minute between frames), and a console line is a one-shot broadcast that
+	// a later client would otherwise never see, so both would be missing from
+	// a fresh browser's view of a fleet that has been running for a while.
+	fbMu          sync.Mutex
+	lastFB        map[string][]byte
+	recentConsole map[string][][]byte
 
 	cmdCh                  chan Command
 	stopCh                 chan struct{}
@@ -166,10 +188,9 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 		broadcastTelemetryMode: "full",
 		emuListen:              emuListenPath,
 		extConns:               make(map[uint32]*extConn),
+		lastFB:                 make(map[string][]byte),
+		recentConsole:          make(map[string][][]byte),
 	}
-
-	// Initialize bridge-level state
-	C.bridge_init()
 
 	// Firmware-default beacon policy until a scenario overrides it (cmdLoad)
 	C.sim_beacon_policy_init(&s.beacon)
@@ -195,6 +216,12 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 		w.Close()
 		return nil, fmt.Errorf("dup2: %w", err)
 	}
+
+	// Bridge-level state, initialized only once fd 1 points at the capture
+	// pipe: bridge_init emits a public_channel_init event of its own, and
+	// before this ordering that one line went straight to the process's real
+	// stdout, so it reached neither a WebSocket client nor a captured run.
+	C.bridge_init()
 
 	return s, nil
 }
@@ -290,6 +317,12 @@ func (s *Sim) handleCommand(cmd Command) {
 		s.cmdSetBroadcastTelemetryMode(cmd)
 	case "btn":
 		s.cmdButton(cmd)
+	case "prov":
+		s.cmdProvision(cmd)
+	case "send":
+		s.cmdSend(cmd)
+	case "attest":
+		s.cmdAttest(cmd)
 	default:
 		log.Printf("unknown command: %s", cmd.Type)
 	}
@@ -443,6 +476,17 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 		// through the real firmware C path in bridge.c, same rationale as
 		// attestations above.
 		s.handleGenerateLocation(evt)
+	case C.EVT_GENERATE_ROLLCALL:
+		// Attested roll-call: a scripted initiation, driven through the
+		// real components/rollcall core in bridge.c (same rationale as
+		// attestations above: there is no Go-model equivalent).
+		s.handleGenerateRollCall(evt)
+	case C.EVT_ROLLCALL_ROUND:
+		// One re-announce round, or the close sweep after the last one.
+		s.handleRollCallRound(evt)
+	case C.EVT_ROLLCALL_TX:
+		// One member's staggered, identity-signed answer has come due.
+		s.handleRollCallTx(evt)
 	}
 }
 
@@ -509,6 +553,30 @@ func (s *Sim) handleGenerateAttestation(evt *C.sim_event_t) {
 // in-range receiver caches it via the real location_cache_update.
 func (s *Sim) handleGenerateLocation(evt *C.sim_event_t) {
 	C.bridge_handle_generate_location(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
+}
+
+// handleGenerateRollCall starts a scripted attested roll-call: the real
+// initiation rate limit, the real ledger, and round 1 flooded as an ordinary
+// broadcast DATA frame on the BROADCAST airtime lane.
+func (s *Sim) handleGenerateRollCall(evt *C.sim_event_t) {
+	C.bridge_handle_generate_rollcall(evt, &s.nodes, &s.radio, &s.rng, &s.events,
+		&s.metrics, &s.msgTrack[0], C.MAX_MSG_TRACK)
+}
+
+// handleRollCallRound fires one due re-announce round, or (round 0) the close
+// sweep that shuts the ledger and reports who answered.
+func (s *Sim) handleRollCallRound(evt *C.sim_event_t) {
+	C.bridge_handle_rollcall_round(evt, &s.nodes, &s.radio, &s.rng, &s.events,
+		&s.metrics, &s.msgTrack[0], C.MAX_MSG_TRACK)
+}
+
+// handleRollCallTx fires one member's staggered answer: signed with that
+// node's real Ed25519 identity key and unicast home on the NORMAL lane,
+// waiting behind ordinary reactive route discovery when the member holds no
+// route to the initiator.
+func (s *Sim) handleRollCallTx(evt *C.sim_event_t) {
+	C.bridge_handle_rollcall_tx(evt, &s.nodes, &s.radio, &s.rng, &s.events,
+		&s.metrics, &s.anomaly[0], &s.msgTrack[0], C.MAX_MSG_TRACK)
 }
 
 // handleProvisionAnchor (trust-anchor campaign P2 red-team): a scripted runtime
@@ -623,7 +691,7 @@ func (s *Sim) handleNodeLeave(evt *C.sim_event_t) {
 		"type": "node_left", "timestamp_us": ts, "node": nodeID,
 	})
 
-	anomalyCheckPartition(&s.nodes, float32(s.radio._range), ts)
+	anomalyCheckPartition(&s.nodes, &s.radio, ts)
 }
 
 func (s *Sim) handleNodeMove(evt *C.sim_event_t) {
@@ -1050,7 +1118,7 @@ func (s *Sim) cmdRemoveNode(cmd Command) {
 		"type": "node_left", "timestamp_us": s.simTime, "node": cmd.NodeID,
 	})
 
-	anomalyCheckPartition(&s.nodes, float32(s.radio._range), s.simTime)
+	anomalyCheckPartition(&s.nodes, &s.radio, s.simTime)
 }
 
 // cmdButton forwards a face-button edge from a device card (PagerDevice.tsx)
@@ -1072,6 +1140,103 @@ func (s *Sim) cmdButton(cmd Command) {
 		return
 	}
 	ec.sendButton(cmd.BtnID, cmd.Edge)
+}
+
+// isHex reports whether s is exactly n hex digits. Used to reject a malformed
+// network key or peer address at the broker rather than shipping it to the
+// firmware, which would only drop it silently.
+func isHex(s string, n int) bool {
+	if len(s) != n {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// cmdProvision provisions a control-plane network key on attached firmware
+// nodes at runtime (emulator/node/emu_control.c serves the "prov" message).
+// An empty cmd.Node means the whole attached fleet, which is what the
+// playground's one-click "provision the fleet" does; naming a node keys that
+// one alone, which is how a scenario shows a still-inert neighbor next to a
+// provisioned one.
+//
+// The key is validated here and never logged: it is the fleet secret, and the
+// emulator's console stream is rendered in a browser.
+func (s *Sim) cmdProvision(cmd Command) {
+	if s.broker == nil {
+		log.Printf("prov: no broker attached")
+		return
+	}
+	if !isHex(cmd.Key, 64) {
+		log.Printf("prov: rejected, key must be 64 hex chars")
+		return
+	}
+	if cmd.Node != "" {
+		ec := s.broker.findByNode(cmd.Node)
+		if ec == nil {
+			log.Printf("prov: no attached node %q", cmd.Node)
+			return
+		}
+		ec.sendProvision(cmd.Key)
+		log.Printf("prov: provisioned %s", cmd.Node)
+		return
+	}
+	n := 0
+	for _, ec := range s.broker.allConns() {
+		ec.sendProvision(cmd.Key)
+		n++
+	}
+	log.Printf("prov: provisioned %d attached node(s)", n)
+}
+
+// cmdSend makes one attached firmware node originate a message through the
+// real mesh send API (emulator/node/emu_control.c serves the "send" message):
+// a DM when cmd.To names a peer address, a channel broadcast otherwise.
+// Unlike cmdProvision this always names a sender, because "who sent it" is the
+// whole point of the message.
+func (s *Sim) cmdSend(cmd Command) {
+	if s.broker == nil {
+		log.Printf("send: no broker attached (node %q)", cmd.Node)
+		return
+	}
+	if cmd.Text == "" {
+		log.Printf("send: rejected, empty text (node %q)", cmd.Node)
+		return
+	}
+	if cmd.To != "" && !isHex(cmd.To, 8) {
+		log.Printf("send: rejected, dest %q is not an 8-hex-digit address", cmd.To)
+		return
+	}
+	ec := s.broker.findByNode(cmd.Node)
+	if ec == nil {
+		log.Printf("send: no attached node %q", cmd.Node)
+		return
+	}
+	ec.sendMessage(cmd.Text, cmd.To)
+}
+
+// cmdAttest asks one attached firmware node to announce its identity now
+// (emulator/node/emu_control.c serves the "attest" message). Always names a
+// node: an announcement is about one node's identity, and blanket-announcing a
+// whole fleet at once would put every node's attestation on the air in the
+// same instant, which is exactly the collision the real cadence spreads out.
+func (s *Sim) cmdAttest(cmd Command) {
+	if s.broker == nil {
+		log.Printf("attest: no broker attached (node %q)", cmd.Node)
+		return
+	}
+	ec := s.broker.findByNode(cmd.Node)
+	if ec == nil {
+		log.Printf("attest: no attached node %q", cmd.Node)
+		return
+	}
+	ec.sendAttest()
 }
 
 func (s *Sim) cmdMoveNode(cmd Command) {
@@ -1422,6 +1587,101 @@ func (s *Sim) emitRaw(data []byte) {
 	if s.headless {
 		syscall.Write(s.origStdout, data)
 	}
+}
+
+// recordDeviceFB keeps the newest framebuffer event for a node so a client
+// connecting later can be shown the screen the pager is already displaying.
+// Every device_fb carries a whole panel, not a delta (the "partial" kind names
+// the e-paper refresh mode, not a partial payload), so the newest one alone
+// reconstitutes the view.
+func (s *Sim) recordDeviceFB(node string, data []byte) {
+	frame := make([]byte, len(data))
+	copy(frame, data)
+	s.fbMu.Lock()
+	s.lastFB[node] = frame
+	s.fbMu.Unlock()
+}
+
+// recordConsole keeps the tail of a node's console so a client connecting
+// later still sees what the node has been saying. Bounded per node: this is a
+// replay buffer for a fresh browser, not a log store, and the UI keeps a ring
+// of its own at the same order of magnitude.
+const consoleReplayLines = 200
+
+func (s *Sim) recordConsole(node string, data []byte) {
+	line := make([]byte, len(data))
+	copy(line, data)
+	s.fbMu.Lock()
+	lines := append(s.recentConsole[node], line)
+	if len(lines) > consoleReplayLines {
+		lines = append([][]byte(nil), lines[len(lines)-consoleReplayLines:]...)
+	}
+	s.recentConsole[node] = lines
+	s.fbMu.Unlock()
+}
+
+// forgetDeviceFBs drops every node's cached frame and console tail. Called
+// when a scenario is torn down, so a snapshot can never show a fresh client
+// the previous scenario's screens or output.
+func (s *Sim) forgetDeviceFBs() {
+	s.fbMu.Lock()
+	s.lastFB = make(map[string][]byte)
+	s.recentConsole = make(map[string][][]byte)
+	s.fbMu.Unlock()
+}
+
+// SnapshotEvents returns the events a client needs to render the world that
+// already exists, in the order a live client would have received them: the
+// nodes that have joined, then each device's console tail and the last screen
+// it painted.
+//
+// Without this, a UI that connects AFTER the scenario loaded sees an empty
+// map forever, because joins and frames are one-shot broadcasts. That is the
+// normal case for `gosim --playground`, which boots its fleet at startup and
+// is then opened in a browser, and it is also what a page reload does to any
+// live session.
+func (s *Sim) SnapshotEvents() [][]byte {
+	s.mu.RLock()
+	if s.state == StateIdle {
+		s.mu.RUnlock()
+		return nil
+	}
+	var out [][]byte
+	var nodeIDs []string
+	for i := 0; i < nodeCount(&s.nodes); i++ {
+		node := C.node_array_get(&s.nodes, C.int(i))
+		if !bool(node.active) {
+			continue
+		}
+		id := C.GoString(&node.id[0])
+		nodeIDs = append(nodeIDs, id)
+		evt := map[string]any{
+			"type": "node_joined", "timestamp_us": s.simTime,
+			"node": id,
+			"addr": fmt.Sprintf("0x%08X", uint32(node.addr)),
+			"x":    float32(node.x), "y": float32(node.y),
+		}
+		// Firmware nodes carry kind:"firmware", which is what makes the UI
+		// give them a device card; the broker knows them by the emu-link
+		// connection bound to their address.
+		if _, ok := s.extConns[uint32(node.addr)]; ok {
+			evt["kind"] = "firmware"
+		}
+		if data, err := json.Marshal(evt); err == nil {
+			out = append(out, append(data, '\n'))
+		}
+	}
+	s.mu.RUnlock()
+
+	s.fbMu.Lock()
+	for _, id := range nodeIDs {
+		out = append(out, s.recentConsole[id]...)
+		if frame, ok := s.lastFB[id]; ok {
+			out = append(out, frame)
+		}
+	}
+	s.fbMu.Unlock()
+	return out
 }
 
 // emitJSON marshals and broadcasts a JSON event.

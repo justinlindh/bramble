@@ -5,6 +5,7 @@ import { AirtimeCard } from './AirtimeCard';
 import { CounterGrid } from './CounterGrid';
 import { SystemInfo } from './SystemInfo';
 import { NetworkReach } from './NetworkReach';
+import { RollCallPanel } from './RollCallPanel';
 import { TrafficMonitor } from './TrafficMonitor';
 import styles from './Stats.module.css';
 
@@ -93,6 +94,9 @@ export function Stats() {
 
       {/* Network Reach probe */}
       <NetworkReach />
+
+      {/* Attested roll call */}
+      <RollCallPanel />
 
       {/* Traffic Monitor */}
       <TrafficMonitor />

@@ -28,7 +28,9 @@ The simulator detects four categories of mesh network anomalies. These represent
 - Physical obstruction blocks RF between clusters
 - Interference zone isolates a region
 
-**Detection:** After any `node_leave` event, BFS traversal from an arbitrary active node checks reachability of all other active nodes using Euclidean distance ≤ radio range. If any node is unreachable, the partition is reported with a list of isolated nodes.
+**Detection:** After any `node_leave` event, a breadth-first traversal from an arbitrary active node checks reachability of all other active nodes. Adjacency is RF audibility in both directions (`radio_nodes_connected`): Euclidean distance ≤ radio range for a positioned scenario, the explicit link table for a link-mode one (a scenario reconstructed from a real deployment, see [digital-twin.md](digital-twin.md)). If any node is unreachable, the partition is reported with a list of isolated nodes.
+
+The same traversal is exposed as `anomaly_partition_components`, which labels every active node with its connected component. The digital twin's node-criticality sweep runs on it, so "what counts as still connected" has one definition in the detector and in the twin.
 
 **Simulator scenario:** `anomaly-partition.json`: Linear topology A-B-C-D-E with range 150 and spacing 100. Killing bridge node C splits {A,B} from {D,E}. Detected immediately at kill time. After C rejoins, the mesh heals.
 
@@ -84,7 +86,7 @@ In real deployments, packet corruption, RF interference causing partial packet r
 ## False Positive Prevention
 
 - **Black hole:** Only counts DATA packets (not beacons, RREQs, RREPs, RERRs). Leaf nodes receiving many beacons but no DATA to forward are NOT flagged.
-- **Partition:** Only runs after `node_leave` events, using physical radio range for adjacency (not routing table state).
+- **Partition:** Only runs after `node_leave` events, using RF audibility for adjacency (not routing table state).
 - **Excessive RREQ:** Per-destination tracking prevents cross-contamination between different route discoveries.
 - **Route loop:** 5s TTL on seen packet_ids prevents stale detections. Only DATA packets are tracked.
 
