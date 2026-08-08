@@ -21,15 +21,15 @@ typedef enum {
  * Traffic event structure
  * Captures essential metadata for TX/RX telemetry
  */
+/* Field order is deliberate: the four-byte members lead, then the small ones
+ * pack into the tail. This struct is the element type of a ring buffer sized
+ * in the hundreds, so a member landing after a bool costs four bytes of
+ * padding per event, and on the nRF52840 that is enough to breach the static
+ * RAM budget. Reorder only with the resulting sizeof in mind; nothing here is
+ * a wire layout, so the order itself carries no compatibility meaning. */
 typedef struct {
-    uint32_t seq;                /* Monotonic sequence number */
-    uint32_t timestamp_ms;       /* Event timestamp */
-    uint8_t pkt_type;            /* Packet type from packet.h */
-    traffic_category_t category; /* Classified category */
-    uint8_t airtime_tier;        /* Airtime tier (broadcast/normal/critical) */
-    uint16_t packet_len;         /* Packet length in bytes */
-    int8_t rssi;                 /* RSSI for RX, 0 for TX */
-    bool is_tx;                  /* true=TX, false=RX */
+    uint32_t seq;          /* Monotonic sequence number */
+    uint32_t timestamp_ms; /* Event timestamp */
     /* Claimed origin of an RX frame, 0 when unknown or for TX. Without it an
      * RSSI sample cannot be tied to a peer, which makes the event stream
      * useless for per-link RF work: neighbor-table RSSI only refreshes on
@@ -37,6 +37,12 @@ typedef struct {
      * the unauthenticated wire prefix (see bramble_packet_origin_addr), so it
      * is telemetry, never a trust input. */
     uint32_t src_addr;
+    traffic_category_t category; /* Classified category */
+    uint8_t pkt_type;            /* Packet type from packet.h */
+    uint8_t airtime_tier;        /* Airtime tier (broadcast/normal/critical) */
+    uint16_t packet_len;         /* Packet length in bytes */
+    int8_t rssi;                 /* RSSI for RX, 0 for TX */
+    bool is_tx;                  /* true=TX, false=RX */
 } traffic_event_t;
 
 /**

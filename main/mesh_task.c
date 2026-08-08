@@ -282,8 +282,21 @@ pending_rreq_fwd_t s_rreq_fwd_queue[RREQ_FWD_QUEUE_CAPACITY];
 /* Reliability: ACK tracking for outgoing unicast messages */
 pending_ack_table_t s_pending_acks;
 
-/* Traffic debug telemetry */
+/* Traffic debug telemetry.
+ *
+ * The ring is one of the largest static allocations on the nRF52840, where RAM
+ * is the binding constraint and the budget gate leaves under a kilobyte of
+ * headroom. It holds debug telemetry, not anything the mesh needs to function,
+ * so that target keeps a shorter history rather than spending its remaining
+ * RAM on one. The ESP32-S3 has room for the full ring and keeps it.
+ *
+ * The nRF also packs enums into a byte, so an event is smaller there; the
+ * shorter ring is about the budget, not the element size. */
+#if defined(BRAMBLE_PLATFORM_NRF)
+#define TRAFFIC_DEBUG_CAPACITY 256
+#else
 #define TRAFFIC_DEBUG_CAPACITY 512
+#endif
 static traffic_event_t s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
 static traffic_debug_t s_traffic_debug;
 timesync_state_t s_timesync;

@@ -352,6 +352,15 @@ void test_record_rx_unknown_src_is_zero(void) {
     TEST_ASSERT_EQUAL_HEX32(0u, evt->src_addr);
 }
 
+/* The event is the element type of a ring buffer sized in the hundreds, so
+ * every byte is multiplied by capacity. Adding src_addr after the trailing
+ * bool cost four bytes of padding per event and breached the nRF52840 static
+ * RAM budget in CI; the field order now packs it into space that was already
+ * padding. Pin the size so a future field cannot repeat that silently. */
+void test_event_struct_stays_packed(void) {
+    TEST_ASSERT_EQUAL_UINT(24, (unsigned)sizeof(traffic_event_t));
+}
+
 /* TX events have no remote origin to report. */
 void test_record_tx_has_zero_src_addr(void) {
     traffic_debug_init(&td, events, 32);
@@ -411,6 +420,7 @@ int main(void) {
     RUN_TEST(test_record_rx_carries_src_addr);
     RUN_TEST(test_record_rx_unknown_src_is_zero);
     RUN_TEST(test_record_tx_has_zero_src_addr);
+    RUN_TEST(test_event_struct_stays_packed);
 
     return UNITY_END();
 }
