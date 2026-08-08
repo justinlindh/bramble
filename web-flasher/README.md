@@ -16,6 +16,15 @@ Web Serial-based firmware flasher for Bramble boards, powered by [esptool-js](ht
 | LILYGO T-Deck Plus | ESP32-S3 | 16MB |
 | Heltec V4 | ESP32-S3 | 8MB |
 
+## Provisioning model
+
+A node with no network key is INERT: it neither emits nor accepts authenticated control-plane traffic, so it does not mesh at all. The Device Setup step therefore offers a **Network Key** field, and the flow is deliberately asymmetric:
+
+- **Join** (offered here): paste a `bramble://net/v1?k=...` share string or a bare 64-hex key from a node already on the mesh. It is validated in the browser first, then provisioned over the already-open serial link with `bramble.setNetworkKey`, before the closing reboot. The completion screen shows the key's fingerprint so the operator can compare it against the founder node.
+- **Found** (not offered here): minting a fleet's root key belongs in the web app, which has the QR code, the copy-confirm, the persistent fingerprint readout, and the re-key guard. A one-shot page the user closes cannot offer those, and the key is never recoverable from a device afterwards.
+
+Skipping setup, or submitting with the field blank, ends on a completion screen that states plainly that the node is UNPROVISIONED and will not mesh, and points at the web app. A node that looks configured but is silently inert is the failure this avoids.
+
 ## UX model
 
 - Simple mode is default: board select, connect, flash, compact status.
@@ -40,6 +49,7 @@ Only complete releases are shown. A release is considered complete only if it co
 - `flasher.js`: UI controller; uses `esptool.Transport` + `esptool.ESPLoader` for connect/sync/flash
 
 - `wifi-config.js`: WiFi credential provisioning during flash
+- `network-key.js`: network-key share-string parsing and fingerprint derivation
 - `style.css`: styling
 
 ## Browser requirements

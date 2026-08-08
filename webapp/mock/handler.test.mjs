@@ -68,6 +68,91 @@ describe('mock handler shapes', () => {
     expect(handlers['bramble.otaGetOrigin']({}).overridden).toBe(false);
   });
 
+  it('getTimezone reports the default until setTimezone stores one', async () => {
+    const { handlers } = await load();
+    const before = handlers['bramble.getTimezone']({});
+    expect(before).toMatchObject({ ok: true, configured: false, timezone: 'UTC0' });
+    expect(before.timezone).toBe(before.default_timezone);
+    expect(before.presets.length).toBeGreaterThan(0);
+    for (const p of before.presets) {
+      expect(typeof p.label).toBe('string');
+      expect(typeof p.spec).toBe('string');
+    }
+
+    expect(handlers['bramble.setTimezone']({ timezone: 'PST8PDT,M3.2.0,M11.1.0' })).toEqual({ ok: true });
+    const after = handlers['bramble.getTimezone']({});
+    expect(after).toMatchObject({ configured: true, timezone: 'PST8PDT,M3.2.0,M11.1.0' });
+    expect(after.default_timezone).toBe('UTC0');
+  });
+
+  it('setTimezone rejects malformed specs', async () => {
+    const { handlers } = await load();
+    for (const timezone of [undefined, '', 42, 'x'.repeat(64)]) {
+      expect(() => handlers['bramble.setTimezone']({ timezone })).toThrow();
+    }
+    expect(handlers['bramble.getTimezone']({}).configured).toBe(false);
+  });
+
+  it('boots UNPROVISIONED so the inert-node banner is reachable without hardware', async () => {
+    const { handlers } = await load();
+    expect(handlers['bramble.getNetworkKeyStatus']({})).toEqual({
+      provisioned: false,
+      fingerprint: '00000000',
+    });
+  });
+
+  it('setNetworkKey provisions and reports a fingerprint derived from the key', async () => {
+    const { handlers } = await load();
+    const key = 'a'.repeat(64);
+    expect(handlers['bramble.setNetworkKey']({ key })).toEqual({ ok: true });
+
+    const status = handlers['bramble.getNetworkKeyStatus']({});
+    expect(status.provisioned).toBe(true);
+    expect(status.fingerprint).toMatch(/^[0-9a-f]{8}$/);
+    expect(status.fingerprint).not.toBe('00000000');
+
+    // The same key must always yield the same fingerprint: that is the whole
+    // basis for confirming a fleet converged.
+    handlers['bramble.setNetworkKey']({ key: key.toUpperCase() });
+    expect(handlers['bramble.getNetworkKeyStatus']({}).fingerprint).toBe(status.fingerprint);
+  });
+
+  it('setNetworkKey rejects malformed keys', async () => {
+    const { handlers } = await load();
+    for (const key of [undefined, '', 'abc', 'z'.repeat(64), 'a'.repeat(63), 'a'.repeat(65)]) {
+      expect(() => handlers['bramble.setNetworkKey']({ key })).toThrow();
+    }
+    expect(handlers['bramble.getNetworkKeyStatus']({}).provisioned).toBe(false);
+  });
+
+  it('generateNetworkKey mints, provisions atomically, and returns the key once', async () => {
+    const { handlers } = await load();
+    const gen = handlers['bramble.generateNetworkKey']({});
+    expect(gen.key).toMatch(/^[0-9a-f]{64}$/);
+    expect(gen.fingerprint).toMatch(/^[0-9a-f]{8}$/);
+
+    // Provisioned by the same call, and the reported fingerprint agrees.
+    const status = handlers['bramble.getNetworkKeyStatus']({});
+    expect(status.provisioned).toBe(true);
+    expect(status.fingerprint).toBe(gen.fingerprint);
+
+    // Re-keying yields a different key, and the status follows it.
+    const again = handlers['bramble.generateNetworkKey']({});
+    expect(again.key).not.toBe(gen.key);
+    expect(handlers['bramble.getNetworkKeyStatus']({}).fingerprint).toBe(again.fingerprint);
+  });
+
+  it('a joining node converges on the founder fingerprint', async () => {
+    const { handlers } = await load();
+    const founder = handlers['bramble.generateNetworkKey']({});
+
+    // A second node handed the founder's key reports the same fingerprint.
+    const { handlers: joiner } = await load();
+    expect(joiner['bramble.getNetworkKeyStatus']({}).provisioned).toBe(false);
+    joiner['bramble.setNetworkKey']({ key: founder.key });
+    expect(joiner['bramble.getNetworkKeyStatus']({}).fingerprint).toBe(founder.fingerprint);
+  });
+
   it('BLE pairing RPCs answer the firmware shapes for set, clear and rejects', async () => {
     const { handlers } = await load();
     expect(handlers['bramble.getBleSecurity']({})).toEqual({
