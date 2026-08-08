@@ -13,6 +13,7 @@
 #include "ui_toast.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -45,6 +46,19 @@ static lv_obj_t* s_presence_dot = NULL;
  * ever points into the widgets that pass created. */
 static lv_obj_t* s_bubble_btns[2] = {NULL, NULL};
 static int s_bubble_btn_count = 0;
+
+/* Registers a bubble action button for the trackball splice. The array is
+ * sized for the worst case one bubble can offer today: Retry+Queue together
+ * on a failed DM, or Cancel alone on a parked one, never more than two,
+ * because can_retry/can_park and is_parked are mutually exclusive on
+ * msg_status_t (FAILED vs QUEUED). That invariant lives in the predicates,
+ * not here, so assert against the array's own size rather than a bare
+ * literal: a future status that lets more buttons coexist trips this
+ * immediately instead of silently overwriting past the end of the array. */
+static void bubble_btn_add(lv_obj_t* btn) {
+    assert(s_bubble_btn_count < (int)(sizeof(s_bubble_btns) / sizeof(s_bubble_btns[0])));
+    s_bubble_btns[s_bubble_btn_count++] = btn;
+}
 
 /* Key-change interstitial (DM forward-secrecy + SAS, Task 8): which DM this
  * interstitial's buttons act on. Set right before it is shown, read only from
@@ -341,15 +355,41 @@ static void retry_click_cb(lv_event_t* e) {
     ui_defer(retry_async, lv_event_get_user_data(e));
 }
 
-/* Queue: park a failed DM instead of retyping it. No re-read against
- * chat_message_is_parkable is needed before the call: mesh_park_message
- * itself only succeeds on a row that is still eligible (see msg_store's
- * "parked is sticky" contract), so a stale row simply reports nothing to
- * queue rather than doing the wrong thing. */
+/* Queue: park a failed DM instead of retyping it. mesh_park_message only
+ * gates on uid != 0 and otherwise parks unconditionally: msg_store's sticky
+ * rule protects a QUEUED row against being demoted back to FAILED, but does
+ * nothing to stop a DELIVERED or SENT row from being promoted to QUEUED. So
+ * without a re-read here, a late ACK landing between the bubble being drawn
+ * and the tap would re-park a message that already arrived, and the next
+ * rejoin would resend it, a real duplicate on the wire, not just a stale
+ * button. Re-read the row and re-check chat_message_is_parkable against its
+ * current state before calling, mirroring retry_async's guard above for
+ * exactly the same reason. */
 static void park_async(void* arg) {
     uint32_t uid = (uint32_t)(uintptr_t)arg;
     if (uid == 0)
         return;
+
+    stored_msg_t msg;
+    bool found = false;
+    for (int i = msg_store_count() - 1; i >= 0; i--) {
+        if (msg_store_get_copy(i, &msg) && msg.uid == uid) {
+            found = true;
+            break;
+        }
+    }
+    if (!found || !chat_message_is_parkable(msg.direction == MSG_DIR_OUTGOING, msg.channel_index,
+                                            msg.status, msg.uid)) {
+        /* The row moved on between the render and the tap (a late ACK, or the
+         * ring rotated it out). Say so rather than no-opping: a button that
+         * silently does nothing reads as broken hardware. */
+        ESP_LOGW(TAG, "park uid=%lu: found=%d no longer a parkable DM", (unsigned long)uid,
+                 (int)found);
+        ui_toast_show("Nothing to queue");
+        render_messages_for_target(false);
+        return;
+    }
+
     if (mesh_park_message(uid)) {
         ui_toast_show("Will send when back");
     } else {
@@ -763,7 +803,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
              * report: it says why it is waiting instead. */
             char receipt_buf[192];
             if (is_parked) {
-                char peer_buf[24];
+                char peer_buf[CHAT_RECEIPT_NAME_MAX];
                 format_peer_name(peer_buf, sizeof(peer_buf), msg->peer_addr, false);
                 snprintf(receipt_buf, sizeof(receipt_buf), "Waiting until %s is back", peer_buf);
             } else {
@@ -817,7 +857,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
                     lv_obj_add_event_cb(retry_btn, retry_click_cb, LV_EVENT_CLICKED,
                                         (void*)(uintptr_t)msg->uid);
-                    s_bubble_btns[s_bubble_btn_count++] = retry_btn;
+                    bubble_btn_add(retry_btn);
                 }
 
                 if (can_park) {
@@ -838,7 +878,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
                     lv_obj_add_event_cb(queue_btn, park_click_cb, LV_EVENT_CLICKED,
                                         (void*)(uintptr_t)msg->uid);
-                    s_bubble_btns[s_bubble_btn_count++] = queue_btn;
+                    bubble_btn_add(queue_btn);
                 }
             }
 
@@ -860,7 +900,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
                 lv_obj_add_event_cb(cancel_btn, cancel_park_click_cb, LV_EVENT_CLICKED,
                                     (void*)(uintptr_t)msg->uid);
-                s_bubble_btns[s_bubble_btn_count++] = cancel_btn;
+                bubble_btn_add(cancel_btn);
             }
         }
 
