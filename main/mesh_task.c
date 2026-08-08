@@ -2430,8 +2430,13 @@ void mesh_flush_parked_for(uint32_t peer_addr) {
     ESP_LOGI(TAG, "Flushing %d parked message(s) for %08" PRIX32, n, peer_addr);
     for (int i = 0; i < n; i++) {
         stored_msg_t msg;
-        if (!msg_store_get_copy_by_uid(uids[i], &msg))
+        if (!msg_store_get_copy_by_uid(uids[i], &msg)) {
+            /* Expected, not an error: the row can be evicted from the ring
+             * between msg_store_parked_uids_for_peer's selection above and
+             * this lookup, on a small or busy ring. Skip this uid and keep
+             * going with the rest of the batch. */
             continue;
+        }
         /* A failed send leaves the row parked, so it waits for the next
          * genuine rejoin rather than retrying against a peer that is present
          * but unreachable. */
