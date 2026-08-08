@@ -84,22 +84,13 @@ bool ble_pairing_pending_unpack(uint32_t word, uint32_t* out_passkey, bool* out_
 }
 
 void ble_pairing_format_code(uint32_t code, char* out, size_t out_len) {
-    /* Sized for GCC's -Wformat-truncation worst case, not the real one: it
-     * does not track that code/1000u and code%1000u are both well under
-     * 1000, so it assumes each %03u could print a full unsigned int (10
-     * digits). Worst case is 10 + 1 (space) + 10 + 1 (nul) = 22; 24 leaves
-     * a little slack rather than sizing to the exact byte. Formatting here
-     * rather than directly into caller-supplied out keeps that oversized
-     * scratch buffer local instead of forcing every caller to size for it. */
-    char scratch[24];
-    snprintf(scratch, sizeof(scratch), "%03u %03u", (unsigned)(code / 1000u),
-             (unsigned)(code % 1000u));
     if (out == NULL || out_len == 0) {
         return;
     }
-    size_t i = 0;
-    for (; i < out_len - 1 && scratch[i] != '\0'; i++) {
-        out[i] = scratch[i];
-    }
-    out[i] = '\0';
+    /* Formatting behind a runtime-sized destination also keeps callers clear
+     * of -Wformat-truncation: the checker does not track that code/1000u and
+     * code%1000u are both under 1000, so it scores each %03u as a full
+     * unsigned int and rejects the 8-byte buffer the output actually needs.
+     * It cannot make that judgement about a pointer parameter. */
+    snprintf(out, out_len, "%03u %03u", (unsigned)(code / 1000u), (unsigned)(code % 1000u));
 }
