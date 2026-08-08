@@ -139,7 +139,8 @@ export async function getBleSecurity(): Promise<BleSecurityInfo> {
   return { mode, staticPasskeySet: !!r.staticPasskeySet };
 }
 
-export async function setBlePasskey(passkey: string | null): Promise<void> {
+export async function setBlePasskey(passkey: string | null): Promise<{ ok: boolean; error?: string }> {
   const client = requireClient();
-  await client.rpc('bramble.setBlePasskey', { passkey });
+  const r = await client.rpc('bramble.setBlePasskey', { passkey });
+  return { ok: !!r.ok, error: r.error };
 }

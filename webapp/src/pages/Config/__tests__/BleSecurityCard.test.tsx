@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 // Mock the store actions so we can assert exactly what the card sends,
 // matching the idiom in AnchorSection.test.tsx.
 const getBleSecurity = vi.fn<() => Promise<{ mode: string; staticPasskeySet: boolean }>>();
-const setBlePasskey = vi.fn<(passkey: string | null) => Promise<void>>();
+const setBlePasskey = vi.fn<(passkey: string | null) => Promise<{ ok: boolean; error?: string }>>();
 
 vi.mock('../../../store/actions', () => ({
   getBleSecurity: () => getBleSecurity(),
@@ -17,7 +17,7 @@ afterEach(cleanup);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  setBlePasskey.mockResolvedValue(undefined);
+  setBlePasskey.mockResolvedValue({ ok: true });
 });
 
 describe('BleSecurityCard', () => {
@@ -60,5 +60,20 @@ describe('BleSecurityCard', () => {
     fireEvent.change(input, { target: { value: '12345' } });
 
     expect(screen.getByRole('button', { name: 'Save passkey' })).toBeDisabled();
+  });
+
+  it('surfaces a rejected save instead of claiming success', async () => {
+    getBleSecurity.mockResolvedValue({ mode: 'just-works', staticPasskeySet: false });
+    setBlePasskey.mockResolvedValue({ ok: false, error: 'This board displays its own pairing code.' });
+    render(<BleSecurityCard />);
+
+    const input = await screen.findByPlaceholderText('6 digits');
+    fireEvent.change(input, { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save passkey' }));
+
+    expect(await screen.findByText('This board displays its own pairing code.')).toBeInTheDocument();
+    expect(screen.queryByText(/paired devices were unpaired and must pair again/)).not.toBeInTheDocument();
+    const stillDraft = (await screen.findByPlaceholderText('6 digits')) as HTMLInputElement;
+    expect(stillDraft).toHaveValue('123456');
   });
 });

@@ -40,7 +40,8 @@ export function BleSecurityCard() {
     setError(null);
     setNotice(null);
     try {
-      await setBlePasskey(next);
+      const r = await setBlePasskey(next);
+      if (!r.ok) { setError(r.error ?? 'Could not set passkey.'); return; }
       await load();
       setNotice(REPAIR_NOTICE);
       setPasskeyDraft('');
