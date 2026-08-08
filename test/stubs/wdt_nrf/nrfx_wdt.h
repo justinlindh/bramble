@@ -16,7 +16,7 @@ typedef int nrfx_err_t;
 typedef struct {
     int dummy; /* unused; a real instance carries a register base pointer */
 } nrfx_wdt_t;
-#define NRFX_WDT_INSTANCE(id) \
+#define NRFX_WDT_INSTANCE(id)                                                                      \
     { .dummy = (id) }
 
 typedef int nrfx_wdt_channel_id;
