@@ -222,7 +222,8 @@ answer, and `bramble.onRollCallComplete` once when the window closes. Full
 schemas are in [`api/openapi.yaml`](../api/openapi.yaml); the notification
 reference is [rpc/events.md](rpc/events.md).
 
-`bramble-go` and `bramble-cli` do not speak these methods.
+Client support in `bramble-go` and `bramble-cli` follows their own release
+cadence; [VERSIONING.md](../VERSIONING.md) is the compatibility matrix.
 
 ## How this is verified
 
