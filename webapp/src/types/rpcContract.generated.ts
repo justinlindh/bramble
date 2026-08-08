@@ -1598,10 +1598,10 @@ export interface components {
             /** @description SNR at receive time (omitted when 0/unknown). */
             snr?: number;
             /**
-             * @description Delivery status for outgoing messages (omitted when none).
+             * @description Delivery status for outgoing messages (omitted when none). queued means the message is parked by the user for delivery when the peer rejoins the mesh.
              * @enum {string}
              */
-            status?: "sent" | "delivered" | "failed";
+            status?: "sent" | "delivered" | "failed" | "queued";
         };
         /**
          * @description Location sharing tier.

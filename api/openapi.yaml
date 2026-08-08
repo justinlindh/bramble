@@ -2066,8 +2066,11 @@ components:
           description: SNR at receive time (omitted when 0/unknown).
         status:
           type: string
-          enum: [sent, delivered, failed]
-          description: Delivery status for outgoing messages (omitted when none).
+          enum: [sent, delivered, failed, queued]
+          description: >-
+            Delivery status for outgoing messages (omitted when none).
+            queued means the message is parked by the user for delivery
+            when the peer rejoins the mesh.
 
     LocationTier:
       type: string

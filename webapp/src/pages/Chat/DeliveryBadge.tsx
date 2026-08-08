@@ -13,6 +13,7 @@ const STATUS_META: Record<DeliveryStatus, { label: string; cls: string }> = {
   delivered: { label: 'Delivered',              cls: 'delivered' },
   failed:    { label: 'Failed – not delivered', cls: 'failed'    },
   timeout:   { label: 'No confirmation yet',    cls: 'warning'   },
+  parked:    { label: 'Parked, peer offline',   cls: 'pending'   },
 };
 
 export function DeliveryBadge({ status, broadcastRecipientCount }: DeliveryBadgeProps) {
