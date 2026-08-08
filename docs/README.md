@@ -17,6 +17,7 @@ This index separates **operator/developer reference docs** from **historical pla
 - [auth.md](auth.md): RPC authentication, pairing, and the browser origin allowlist
 - [network-key-provisioning.md](network-key-provisioning.md): generating, distributing, and verifying the control-plane network key across a fleet
 - [trust-anchor.md](trust-anchor.md): optional per-fleet trust anchor: enrollment ceremony, endorsed-only pinning, and what Sybil scarcity it does and does not close
+- [rollcall.md](rollcall.md): attested roll-call: proving which members answered, its airtime envelope and rate limit, and why a missing answer proves nothing
 - [api/rpc.md](api/rpc.md): RPC method reference and wire-format notes
 - [COMPARISON.md](COMPARISON.md): comparison with Meshtastic and MeshCore
 - [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md): current measured scale results (supersedes [results/simulation-2026-06.md](results/simulation-2026-06.md))
