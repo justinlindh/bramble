@@ -112,6 +112,14 @@ suites), `scripts/`, `docs/`, `api/openapi.yaml` (the RPC contract).
   doc, Dockerfile, or script disagrees with it, so bumping ESP-IDF means
   editing that file plus every reference the script names. Flash real hardware only through
   `scripts/flash.sh` or `scripts/flash-all.py`, never raw esptool.
+- The nRF52840 target needs `arm-none-eabi-gcc 13.2.1`, pinned the same way in
+  `.arm-gcc-version` and gated by `scripts/lint/check-arm-gcc-version.sh`. This
+  pin is not a preference: the nRF build's memory gate fails on a byte count,
+  and GCC releases disagree on that count by more than the headroom this target
+  runs at, so a size number from an unpinned compiler is not comparable to CI's
+  and must never be reported as if it were. `nrf/README.md` has the download for
+  the pinned Arm release; a mismatched build warns at configure time and every
+  size report names the compiler behind its numbers.
 
 ## CI and releases
 

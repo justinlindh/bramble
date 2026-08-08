@@ -77,7 +77,29 @@ supported device yet.
 
 ## Build
 
-Needs `arm-none-eabi-gcc`, CMake >= 3.24, Ninja, Python 3. Dependencies
+Needs `arm-none-eabi-gcc 13.2.1`, CMake >= 3.24, Ninja, Python 3. The
+compiler version is pinned, not incidental: the memory gate below fails the
+build on a byte count, and different GCC releases produce different byte
+counts from the same source. On this target that difference is larger than
+the headroom the T1000-E build runs at, so a build with the wrong compiler
+produces a number that looks like CI's and is not. `.arm-gcc-version` at the
+repo root is the single source of truth, CI asserts its runner image matches
+it, `scripts/lint/check-arm-gcc-version.sh` gates every reference against it,
+and configuring with anything else prints a loud CMake warning.
+
+Distro packages of `arm-none-eabi-gcc` track whatever their release shipped,
+so install Arm's own build to match:
+
+```sh
+curl -LO https://developer.arm.com/-/media/Files/downloads/gnu/13.2.rel1/binrel/arm-gnu-toolchain-13.2.rel1-x86_64-arm-none-eabi.tar.xz
+tar -xJf arm-gnu-toolchain-13.2.rel1-x86_64-arm-none-eabi.tar.xz -C ~/.local/opt
+export PATH="$HOME/.local/opt/arm-gnu-toolchain-13.2.Rel1-x86_64-arm-none-eabi/bin:$PATH"
+arm-none-eabi-gcc --version   # 13.2.1, the pin
+```
+
+Arm labels that release `13.2.Rel1` and its compiler reports `13.2.1`;
+`aarch64` and `darwin-arm64` builds of the same release are published beside
+it. Dependencies
 (nrfx, CMSIS, FreeRTOS-Kernel, mbedtls, Monocypher, cJSON) are
 FetchContent-pinned in `nrf/CMakeLists.txt` and
 `components/crypto/crypto_deps.cmake` (the crypto pins are shared with the
@@ -93,6 +115,9 @@ cmake --build nrf/build
 Every build ends with `scripts/size_report.py`, which prints the memory
 report and fails the build on any of three limits: total RAM over
 252KB, static (non-heap) RAM over 104KB, or the heap below its 144KB floor.
+The report stamps the compiler that produced it into its verdict line and
+into `size-report.json`, so a number copied out of a local build always
+carries whether it is comparable to CI's.
 
 Board selection: `-DBRAMBLE_NRF_BOARD=wm1110_devkit` (default) or
 `t1000e`. The board header (`boards/`) owns the pin map, the LR1110 RF

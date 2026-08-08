@@ -101,6 +101,19 @@ with. The pin lives in `.esp-idf-version` at the repo root and
 [docs/BUILDING.md](docs/BUILDING.md). Flash real hardware only through
 `scripts/flash.sh` or `scripts/flash-all.py`, never raw `esptool`.
 
+**nRF52840 target (`nrf/`):** `arm-none-eabi-gcc 13.2.1`, the exact compiler
+CI builds with, plus CMake, Ninja and Python 3. The pin lives in
+`.arm-gcc-version` at the repo root and `scripts/lint/check-arm-gcc-version.sh`
+gates every reference against it. This one matters more than a normal
+toolchain preference: the nRF build's memory gate fails on a byte count, GCC
+releases produce different byte counts from identical source, and the
+difference exceeds the headroom this target runs at, so a build with a
+different compiler cannot be compared to a CI result. Distro packages track
+their own release, so install Arm's build of the pinned version; the download
+and the `PATH` line are in [nrf/README.md](nrf/README.md). Configuring with
+anything else still works and prints a loud CMake warning, and every size
+report names the compiler behind its numbers.
+
 **Emulator:** ESP-IDF with the **linux** target installed (`install.sh linux`,
 not `install.sh esp32s3`), plus Go, Node, and `jq`. Run
 `bash emulator/scripts/check_prereqs.sh` and it will tell you exactly what is

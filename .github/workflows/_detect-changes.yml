@@ -251,8 +251,11 @@ jobs:
           # nrf is the bare-metal nRF52840 target tree. Its build also compiles
           # components/ sources directly, but that dependency is expressed in
           # the nRF build job's `if:` (which also fires on the firmware area),
-          # not by widening this area.
-          nrf=$(area_changed '^nrf/')
+          # not by widening this area. The `.arm-gcc-version` pin belongs here
+          # even though it lives at the repo root: it names the compiler the nRF
+          # build's memory gate measures with, so changing it changes every byte
+          # count that gate enforces and must re-run the build that enforces them.
+          nrf=$(area_changed '^nrf/|^\.arm-gcc-version$')
           # ci_core is the force-everything trigger, but scoped to ONLY the
           # workflows that DEFINE the heavy build/test jobs: quality.yml,
           # firmware-quality.yml, webapp-quality.yml, and the reusable

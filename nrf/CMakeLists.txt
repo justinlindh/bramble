@@ -6,6 +6,34 @@
 cmake_minimum_required(VERSION 3.24)
 project(bramble-nrf C ASM)
 
+# Toolchain identity, announced loudly at configure time.
+#
+# The RAM budget gate below fails the build on a byte count, and that count is a
+# property of the compiler as much as of the source: at the margins this target
+# runs at (single-digit bytes of headroom on the T1000-E static gate) a different
+# GCC is a different measurement. `.arm-gcc-version` at the repo root is the
+# single source of truth, CI asserts its runner image matches it, and a local
+# build that does not match cannot be compared to a CI number. That is a warning
+# rather than an error because a developer cannot always install an exact GCC
+# from their distro; the fix is the pinned Arm release named in nrf/README.md,
+# and until then every size number this build prints carries the mismatch with
+# it (scripts/size_report.py stamps the toolchain into its output and JSON).
+set(BRAMBLE_ARM_GCC_PIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../.arm-gcc-version")
+file(READ "${BRAMBLE_ARM_GCC_PIN_FILE}" BRAMBLE_ARM_GCC_PIN)
+string(STRIP "${BRAMBLE_ARM_GCC_PIN}" BRAMBLE_ARM_GCC_PIN)
+message(STATUS "bramble-nrf toolchain: arm-none-eabi-gcc ${CMAKE_C_COMPILER_VERSION} (${CMAKE_C_COMPILER})")
+if(CMAKE_C_COMPILER_VERSION VERSION_EQUAL "${BRAMBLE_ARM_GCC_PIN}")
+  message(STATUS "bramble-nrf toolchain: matches the pin in .arm-gcc-version (${BRAMBLE_ARM_GCC_PIN}); size numbers are comparable with CI")
+else()
+  message(WARNING
+    "bramble-nrf toolchain MISMATCH: this build uses arm-none-eabi-gcc "
+    "${CMAKE_C_COMPILER_VERSION} but .arm-gcc-version pins ${BRAMBLE_ARM_GCC_PIN}, "
+    "which is what CI builds with. Code size differs between GCC versions, so the "
+    "RAM budget gate can pass here and fail in CI (or the reverse). Do not report "
+    "these size numbers as CI numbers. See nrf/README.md for the pinned toolchain "
+    "download.")
+endif()
+
 include(FetchContent)
 
 # SOURCE_SUBDIR points at a directory without a CMakeLists.txt on purpose:
@@ -464,5 +492,6 @@ add_custom_command(TARGET bramble-nrf POST_BUILD
   COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:bramble-nrf> bramble-nrf.hex
   COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/size_report.py
           $<TARGET_FILE:bramble-nrf> --json size-report.json
+          --toolchain ${CMAKE_C_COMPILER_VERSION}
   COMMENT "Generating bramble-nrf.hex and enforcing the RAM budget"
 )

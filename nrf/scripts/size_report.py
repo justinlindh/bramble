@@ -28,12 +28,19 @@ moving the shortfall to runtime, where this script cannot see it at all.
 Runtime headroom within the heap is still a separate question, answered by
 the free-heap figure in the boot log and heartbeats.
 
-Usage: size_report.py ELF [--budget-kb 252] [--static-budget-kb 100]
+Every number here is stamped with the compiler that produced it. The margins on
+this target are single-digit bytes, and GCC versions disagree by more than that
+on the same source, so a report without a toolchain on it is not a number anyone
+can compare to CI's. The pin lives in `.arm-gcc-version` at the repo root.
+
+Usage: size_report.py ELF [--budget-kb 252] [--static-budget-kb 104]
                           [--heap-floor-kb 144] [--json PATH]
+                          [--toolchain VERSION]
 """
 
 import argparse
 import json
+import pathlib
 import re
 import subprocess
 import sys
@@ -42,12 +49,32 @@ RAM_BASE = 0x20000000
 RAM_SIZE = 256 * 1024
 FLASH_SIZE = 1024 * 1024
 TOP_SYMBOLS = 20
+# nrf/scripts/size_report.py -> repo root.
+PIN_FILE = pathlib.Path(__file__).resolve().parents[2] / ".arm-gcc-version"
 
 
 def run(tool, *args):
     return subprocess.run(
         ["arm-none-eabi-" + tool, *args], check=True, capture_output=True, text=True
     ).stdout
+
+
+def toolchain_version(explicit):
+    """The compiler version behind these numbers. CMake passes the version it
+    actually compiled with; the probe is the fallback for a hand-run report."""
+    if explicit:
+        return explicit
+    try:
+        return run("gcc", "-dumpversion").strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def pinned_version():
+    try:
+        return PIN_FILE.read_text().strip()
+    except OSError:
+        return ""
 
 
 def parse_sections(elf):
@@ -88,7 +115,21 @@ def main():
     ap.add_argument("--static-budget-kb", type=int, default=104)
     ap.add_argument("--heap-floor-kb", type=int, default=144)
     ap.add_argument("--json")
+    ap.add_argument(
+        "--toolchain",
+        help="arm-none-eabi-gcc version that produced the ELF; probed from PATH when omitted",
+    )
     args = ap.parse_args()
+
+    toolchain = toolchain_version(args.toolchain)
+    pin = pinned_version()
+    toolchain_matches_pin = bool(pin) and toolchain == pin
+    if not pin:
+        toolchain_note = "no pin found in .arm-gcc-version"
+    elif toolchain_matches_pin:
+        toolchain_note = f"matches the CI pin {pin}"
+    else:
+        toolchain_note = f"DOES NOT match the CI pin {pin}, so these bytes are not CI's bytes"
 
     rows = parse_sections(args.elf)
     sections = {
@@ -120,6 +161,7 @@ def main():
     heap_floor = args.heap_floor_kb * 1024
 
     print("=== bramble-nrf memory report ===")
+    print(f"  Toolchain  arm-none-eabi-gcc {toolchain} ({toolchain_note})")
     for name, size in sorted(sections.items(), key=lambda kv: -kv[1]):
         print(f"  {name:<12} {size:>8} bytes")
     print(f"  {'MSP stack':<12} {stack:>8} bytes (linker-reserved, not a section)")
@@ -141,6 +183,9 @@ def main():
         with open(args.json, "w") as f:
             json.dump(
                 {
+                    "toolchain": toolchain,
+                    "toolchain_pin": pin,
+                    "toolchain_matches_pin": toolchain_matches_pin,
                     "sections": sections,
                     "msp_stack": stack,
                     "ram_total": ram_total,
@@ -182,11 +227,18 @@ def main():
     if not heap:
         print("FAIL: ucHeap symbol not found; the heap gate cannot run.", file=sys.stderr)
         failed = True
+    # The verdict line is the one that gets copied into PR bodies and chat, so it
+    # carries the compiler with it. Without that, a local pass and a CI failure
+    # on the same commit read as a contradiction rather than as two toolchains.
     if failed:
+        print(
+            f"(measured with arm-none-eabi-gcc {toolchain}, {toolchain_note})",
+            file=sys.stderr,
+        )
         return 1
     print(
         f"OK: {budget - ram_total} bytes under budget, static {static_ram}/{static_budget}, "
-        f"heap {heap} >= {heap_floor}"
+        f"heap {heap} >= {heap_floor} [arm-none-eabi-gcc {toolchain}, {toolchain_note}]"
     )
     return 0
 

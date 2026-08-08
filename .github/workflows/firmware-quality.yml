@@ -96,6 +96,13 @@ jobs:
         run: bash scripts/lint/check-board-matrix.sh
       - name: ESP-IDF version pins agree
         run: bash scripts/lint/check-idf-version.sh
+      - name: ARM toolchain version pins agree
+        # Same anti-drift shape, for the compiler the nRF52840 target's RAM
+        # budget gate measures with. That gate fails on a byte count, and GCC
+        # versions disagree on the same source by more than the single-digit
+        # margin the T1000-E build runs at, so an unpinned local toolchain
+        # produces a number that looks like CI's and is not.
+        run: bash scripts/lint/check-arm-gcc-version.sh
       - name: nRF sdkconfig shim matches Kconfig defaults
         # Same anti-drift shape: the nRF target hand-carries a few Kconfig
         # values (nrf/shim/include/sdkconfig.h); a Kconfig default bump that
