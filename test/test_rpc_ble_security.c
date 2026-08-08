@@ -8,6 +8,8 @@
 extern bool g_nvs_allow_open;
 extern bool g_ble_has_passkey_display;
 extern int g_ble_pairing_config_changed_calls;
+extern int g_ble_wipe_bonds_calls;
+extern int g_ble_wipe_bonds_result;
 
 static bramble_identity_t s_id = {
     .address = 0xAABBCCDD,
@@ -18,6 +20,8 @@ void setUp(void) {
     g_nvs_allow_open = true;
     g_ble_has_passkey_display = false;
     g_ble_pairing_config_changed_calls = 0;
+    g_ble_wipe_bonds_calls = 0;
+    g_ble_wipe_bonds_result = 0;
     rpc_init();
     rpc_methods_init(&s_id);
     /* Reset store state between tests */
@@ -26,6 +30,7 @@ void setUp(void) {
                  "\"params\":{\"passkey\":null}}",
                  resp, sizeof(resp));
     g_ble_pairing_config_changed_calls = 0;
+    g_ble_wipe_bonds_calls = 0;
 }
 void tearDown(void) {}
 
@@ -59,16 +64,20 @@ void test_set_passkey_switches_mode_and_wipes_bonds(void) {
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(res, "ok")));
     TEST_ASSERT_EQUAL_STRING("static-passkey",
                              cJSON_GetObjectItem(res, "mode")->valuestring);
+    /* Write-only: the setBlePasskey response itself never echoes the digits
+     * back (checked against this call's own buffer, not a later one). */
+    TEST_ASSERT_NULL(strstr(resp, "042042"));
     cJSON_Delete(j);
+    TEST_ASSERT_EQUAL_INT(1, g_ble_wipe_bonds_calls);
     TEST_ASSERT_EQUAL_INT(1, g_ble_pairing_config_changed_calls);
 
-    j = call("bramble.getBleSecurity", "{}", resp, sizeof(resp));
+    char resp2[512];
+    j = call("bramble.getBleSecurity", "{}", resp2, sizeof(resp2));
     res = cJSON_GetObjectItem(j, "result");
     TEST_ASSERT_EQUAL_STRING("static-passkey",
                              cJSON_GetObjectItem(res, "mode")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(res, "staticPasskeySet")));
-    /* Write-only: the value never appears in any response */
-    TEST_ASSERT_NULL(strstr(resp, "042042"));
+    TEST_ASSERT_NULL(strstr(resp2, "042042"));
     cJSON_Delete(j);
 }
 
@@ -82,6 +91,9 @@ void test_clear_passkey_returns_to_just_works(void) {
     TEST_ASSERT_EQUAL_STRING("just-works",
                              cJSON_GetObjectItem(res, "mode")->valuestring);
     cJSON_Delete(j);
+    /* Bonds get wiped and the policy reapplied exactly once per successful
+     * change: two successful changes here means two of each. */
+    TEST_ASSERT_EQUAL_INT(2, g_ble_wipe_bonds_calls);
     TEST_ASSERT_EQUAL_INT(2, g_ble_pairing_config_changed_calls);
 }
 
@@ -91,6 +103,21 @@ void test_empty_string_clears_too(void) {
     cJSON* res = cJSON_GetObjectItem(j, "result");
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(res, "ok")));
     cJSON_Delete(j);
+    TEST_ASSERT_EQUAL_INT(1, g_ble_wipe_bonds_calls);
+}
+
+void test_missing_passkey_member_is_error(void) {
+    /* No "passkey" member at all: distinct from an explicit null, must be
+     * rejected rather than silently treated as a clear. */
+    char resp[512];
+    cJSON* j = call("bramble.setBlePasskey", "{}", resp, sizeof(resp));
+    cJSON* res = cJSON_GetObjectItem(j, "result");
+    TEST_ASSERT_NOT_NULL(res);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(res, "ok")));
+    TEST_ASSERT_NOT_NULL(strstr(cJSON_GetObjectItem(res, "error")->valuestring, "missing"));
+    cJSON_Delete(j);
+    TEST_ASSERT_EQUAL_INT(0, g_ble_wipe_bonds_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_ble_pairing_config_changed_calls);
 }
 
 void test_invalid_passkeys_rejected(void) {
@@ -104,6 +131,7 @@ void test_invalid_passkeys_rejected(void) {
         TEST_ASSERT_TRUE_MESSAGE(cJSON_IsFalse(cJSON_GetObjectItem(res, "ok")), bad[i]);
         cJSON_Delete(j);
     }
+    TEST_ASSERT_EQUAL_INT(0, g_ble_wipe_bonds_calls);
     TEST_ASSERT_EQUAL_INT(0, g_ble_pairing_config_changed_calls);
 }
 
@@ -114,6 +142,7 @@ void test_rejected_on_display_boards(void) {
     cJSON* res = cJSON_GetObjectItem(j, "result");
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(res, "ok")));
     cJSON_Delete(j);
+    TEST_ASSERT_EQUAL_INT(0, g_ble_wipe_bonds_calls);
     TEST_ASSERT_EQUAL_INT(0, g_ble_pairing_config_changed_calls);
 
     j = call("bramble.getBleSecurity", "{}", resp, sizeof(resp));
@@ -123,13 +152,42 @@ void test_rejected_on_display_boards(void) {
     cJSON_Delete(j);
 }
 
+void test_wipe_failure_leaves_store_unchanged(void) {
+    char resp[512];
+    /* Establish a known-good static passkey first (wipe succeeds). */
+    cJSON* j = call("bramble.setBlePasskey", "{\"passkey\":\"111111\"}", resp, sizeof(resp));
+    cJSON_Delete(j);
+    g_ble_wipe_bonds_calls = 0;
+    g_ble_pairing_config_changed_calls = 0;
+
+    /* Now simulate a wipe failure on the next change attempt. */
+    g_ble_wipe_bonds_result = -1;
+    j = call("bramble.setBlePasskey", "{\"passkey\":\"222222\"}", resp, sizeof(resp));
+    cJSON* res = cJSON_GetObjectItem(j, "result");
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(res, "ok")));
+    cJSON_Delete(j);
+    TEST_ASSERT_EQUAL_INT(1, g_ble_wipe_bonds_calls);
+    /* The wipe failed, so the store must not be touched and the policy must
+     * not be reapplied: no false claim of success. */
+    TEST_ASSERT_EQUAL_INT(0, g_ble_pairing_config_changed_calls);
+
+    j = call("bramble.getBleSecurity", "{}", resp, sizeof(resp));
+    res = cJSON_GetObjectItem(j, "result");
+    TEST_ASSERT_EQUAL_STRING("static-passkey",
+                             cJSON_GetObjectItem(res, "mode")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(res, "staticPasskeySet")));
+    cJSON_Delete(j);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_get_ble_security_default_just_works);
     RUN_TEST(test_set_passkey_switches_mode_and_wipes_bonds);
     RUN_TEST(test_clear_passkey_returns_to_just_works);
     RUN_TEST(test_empty_string_clears_too);
+    RUN_TEST(test_missing_passkey_member_is_error);
     RUN_TEST(test_invalid_passkeys_rejected);
     RUN_TEST(test_rejected_on_display_boards);
+    RUN_TEST(test_wipe_failure_leaves_store_unchanged);
     return UNITY_END();
 }

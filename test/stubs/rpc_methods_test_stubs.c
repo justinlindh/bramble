@@ -906,6 +906,7 @@ const char* ws_server_get_extra_origins(void) { return ""; }
 
 /* BLE pairing: no display path and no static passkey by default (just-works). */
 bool ble_server_has_passkey_display(void) { return false; }
+int ble_server_wipe_bonds(void) { return 0; }
 void ble_server_pairing_config_changed(void) {}
 static uint32_t s_test_stub_ble_passkey_value;
 static bool s_test_stub_ble_passkey_set = false;
