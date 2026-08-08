@@ -42,7 +42,6 @@ describe('NetworkReach session persistence', () => {
       connectionState: 'connected',
       neighbors: [],
       config: { identity: { address: 0x0001 } } as any,
-      probeCollecting: false,
       probeResult: null,
     });
   });
@@ -53,7 +52,7 @@ describe('NetworkReach session persistence', () => {
   });
 
   it('persists completed probe results into sessionStorage', async () => {
-    useStore.setState({ probeResult: sampleProbeResult(), probeCollecting: false });
+    useStore.setState({ probeResult: sampleProbeResult() });
 
     render(<NetworkReach />);
 
@@ -83,7 +82,7 @@ describe('NetworkReach session persistence', () => {
   });
 
   it('shows a Refresh button after results are available', () => {
-    useStore.setState({ probeResult: sampleProbeResult(), probeCollecting: false });
+    useStore.setState({ probeResult: sampleProbeResult() });
 
     render(<NetworkReach />);
 

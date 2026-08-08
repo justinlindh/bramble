@@ -125,7 +125,11 @@ function ResultsTable({ rows }: { rows: ProbeRow[] }) {
 
 export function NetworkReach() {
   const probeResult = useStore(s => s.probeResult);
-  const collecting = useStore(s => s.probeCollecting);
+  /* A probe is collecting exactly while it exists and is not yet finalized.
+   * Finalization happens on bramble.onProbeComplete or at the ack-window
+   * fallback (both set complete: true), so this is the single source of
+   * truth rather than a second boolean kept in sync by hand. */
+  const collecting = probeResult != null && !probeResult.complete;
   const isConnected = useStore(s => s.connectionState === 'connected');
   const neighbors = useStore(s => s.neighbors);
   const selfAddr = useStore(s => s.config?.identity.address);
@@ -153,7 +157,10 @@ export function NetworkReach() {
     if (probeResult) return;
     const persisted = loadPersistedProbeResult();
     if (!persisted) return;
-    setProbeResult(persisted.probeResult);
+    /* A restored probe has no live collection window (its ack-window
+     * fallback timer did not survive the reload), so it is always shown as
+     * finalized rather than resuming a countdown that can never complete. */
+    setProbeResult({ ...persisted.probeResult, complete: true });
     setPersistedAt(persisted.persistedAt);
   }, [probeResult, setProbeResult]);
 

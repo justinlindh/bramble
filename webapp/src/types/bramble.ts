@@ -345,7 +345,6 @@ export interface AppState {
   activeConversationId: string;
   activeTab: string;
   probeResult: ProbeResult | null;
-  probeCollecting: boolean;
   devices: SavedDevice[];
   peerLocations: PeerLocation[];
   mapFocusAddr: number | null;
