@@ -175,6 +175,8 @@ changed. When in doubt, run the real checks rather than silently skip them.
 | `api` | `api/` |
 | `idf_build_scripts` | `scripts/ci-source-idf*`, `scripts/ci-ensure-idf*`, `scripts/ci-ccache-env*`, `scripts/flash*`, `scripts/flash-all*`, `scripts/ensure-ota-signing-key*`, `.esp-idf-version` |
 | `release_config` | `.releaserc.*`, `scripts/release/`, root `package.json` / `package-lock.json` |
+| `ota_index` | `scripts/build-firmware-index.js`, `scripts/validate-firmware-index.js`, `test/test-validate-firmware-index.js`, `test/fixtures/firmware-index-*.json` |
+| `nrf` | `nrf/`, `.arm-gcc-version` |
 | `docker_firmware_builder` | `docker/firmware-builder/` |
 | `coverage_tooling` | `scripts/ci/check_coverage.py`, `scripts/ci/host_coverage.py`, `scripts/ci/run-host-coverage.sh`, `ci/coverage-baseline.json` |
 | `size_tooling` | `scripts/ci/check-firmware-size.sh`, `scripts/ci/check_size.py`, `scripts/ci/extract_firmware_sizes.py`, `ci/size-baseline.json` |
@@ -224,7 +226,10 @@ size) so a ratchet-script-only or baseline-only change still self-verifies.
 `nrf` is the bare-metal nRF52840 target tree (`nrf/`): its build job compiles
 `components/` sources directly, so it fires on `firmware` too, but a
 `nrf/`-only change (its shims, configs, or scripts) runs just that job plus the
-always-on bundle.
+always-on bundle. The `.arm-gcc-version` pin sits in this area despite living at
+the repo root, because it names the compiler the job's memory gate measures
+with: changing it changes every byte count that gate enforces, so it has to
+re-run the build that enforces them.
 
 ### The safety rule: job-defining workflow edits force everything
 
@@ -310,6 +315,42 @@ initializer layout, with no text satisfying both). `run-clang-format-check.sh`
 performs the same comparison locally and prints a warning banner (not a hard
 failure, so a contributor without the exact version can still get advisory
 signal) naming the mismatch and pointing at this file.
+
+The ARM cross-compiler is pinned the same way and for a sharper reason.
+`.arm-gcc-version` at the repo root is the single source of truth for the
+compiler the nRF52840 target builds with; `scripts/lint/check-arm-gcc-version.sh`
+gates every reference against it, and both the `nRF52840 build` job's assert
+step and `nrf/CMakeLists.txt` read that file rather than restating the version.
+The pin is load-bearing because that job's memory gate fails the build on a byte
+count, and a byte count is a property of the compiler as much as of the source:
+across GCC releases the same commit differs by more than the headroom the
+T1000-E build runs at. Without the pin, a developer's distro compiler produces a
+size number in the same format as CI's, against a different budget consumption,
+and the two get compared as though they were one measurement. Configuring the
+nRF build with an unpinned compiler is a loud CMake warning rather than an error,
+because a contributor cannot always install an exact GCC from their distro;
+`nrf/scripts/size_report.py` then stamps the compiler into its verdict line and
+its JSON, so a mismatched number is never mistaken for CI's.
+
+The version pin narrows the gap without closing it. A toolchain ships a C
+library with the compiler, and newlib's own statics differ between distributions
+of the same GCC release: Arm's `13.2.Rel1` binary release reports the pinned
+`13.2.1` and still lands 144 bytes below the runner image's count for the
+T1000-E. Only CI's exact packaging reproduces CI's bytes, so `nrf/README.md`
+documents an `ubuntu:24.04` container that installs the same
+`gcc-arm-none-eabi` package the image bakes, and that is the answer for a
+question that turns on bytes. Where the pin sits is a judgement, not an
+accident: `13.2.1` is what the runner image bakes from Ubuntu Noble and what
+every nRF budget margin is measured against, and across the three toolchains
+measured for this gate the T1000-E static figure spans 106336 to 106488 bytes
+against a 106496 ceiling. Which toolchain builds is therefore worth more than
+the margin the gate has left, which is what makes a move to a newer GCC a
+deliberate change rather than a version bump: it edits `.arm-gcc-version`,
+bumps `ARM_GCC_VERSION` in the private runner-image definition so the image
+agrees, updates every file `check-arm-gcc-version.sh` names, and re-measures
+both boards' budgets in the same change. The version pin is still what keeps the
+runner image, the workflow and the docs from drifting apart, and what keeps a local
+build in the same GCC generation as CI.
 
 ### `quality.yml`
 
