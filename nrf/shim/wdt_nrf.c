@@ -3,14 +3,29 @@
 // bramble_wdt.h.
 //
 // Hardware model: nrfx_wdt exposes up to 8 independent reload-request
-// channels (RR0-RR7) sharing one countdown. Every allocated channel must
-// be fed within the window or the peripheral resets, regardless of which
-// channel was missed; that maps directly onto ESP-IDF's task watchdog
-// "every subscribed task must check in" semantics, one hardware channel
-// per task instead of software subscriber bookkeeping. This build gives a
-// channel to exactly 4 tasks (mesh, radio, the NimBLE link layer, the
-// NimBLE host); see nrf/src/app_init.c and this file's identification
-// scheme below for why not more.
+// channels (RR0-RR7) sharing one countdown. Every ENABLED channel must be
+// fed within the window or the peripheral resets, regardless of which
+// channel was missed (nRF52840 Product Specification, WDT chapter: "To
+// reload the watchdog counter, the special value 0x6E524635 needs to be
+// written to all enabled reload registers"). That maps directly onto
+// ESP-IDF's task watchdog "every subscribed task must check in" semantics,
+// one hardware channel per task instead of software subscriber
+// bookkeeping. This build gives a channel to exactly 2 tasks: mesh and
+// radio. See "Why only mesh and radio" below for why NimBLE's link-layer
+// and host tasks do not get one, and why that is not a coverage gap for
+// the failure this change targets.
+//
+// Timeout: 60 seconds. This number is load-bearing for DFU safety, not
+// just hang-detection latency; read "DFU survival" below before changing
+// it. It comfortably covers every legitimate blocking operation in the
+// firmware: the worst is the 4s LoRa TX wait (main/mesh_task.c), NVMC page
+// erase is 85ms (nRF52840 Product Specification, NVMC chapter,
+// tERASEPAGE), and littlefs operations are built from those same word
+// writes and page erases. A hung node recovering in up to 60s instead of
+// never is the entire win this change delivers; a mesh node that beacons
+// on the order of minutes loses essentially nothing by that margin
+// compared to a shorter window, and a shorter window is unsafe here (see
+// below).
 //
 // Two hard nRF52840 constraints shape this file:
 //
@@ -20,18 +35,18 @@
 //     therefore called exactly once, from nrf/src/app_init.c, only after
 //     every subscriber task is guaranteed to have already registered. That
 //     guarantee comes from FreeRTOS's fixed-priority preemptive scheduler,
-//     not a timing heuristic: mesh (prio 5), radio (5), the NimBLE link
-//     layer (8) and host (6) all outrank the boot task (3) that calls
-//     bramble_wdt_arm(), each calls esp_task_wdt_add() as the first thing
-//     it does, and creating a strictly-higher-priority task preempts the
-//     creator immediately in this port (configUSE_PREEMPTION 1). The boot
-//     task therefore cannot reach the arm call until every one of those
-//     tasks has run at least as far as its own wdt_add and then blocked,
-//     which is exactly the registration this file depends on.
-//     esp_task_wdt_add() below still refuses an add() that arrives after
-//     arm rather than trusting that argument to hold forever, since a
-//     future subscriber added without extending it would otherwise hit an
-//     NRFX_ASSERT and reboot the board.
+//     not a timing heuristic: mesh (prio 5) and radio (5) both outrank the
+//     boot task (3) that calls bramble_wdt_arm(), each calls
+//     esp_task_wdt_add() as the first thing it does, and creating a
+//     strictly-higher-priority task preempts the creator immediately in
+//     this port (configUSE_PREEMPTION 1). The boot task therefore cannot
+//     reach the arm call until both of those tasks have run at least as
+//     far as their own wdt_add and then blocked, which is exactly the
+//     registration this file depends on. esp_task_wdt_add() below still
+//     refuses an add() that arrives after arm rather than trusting that
+//     argument to hold forever, since a future subscriber added without
+//     extending this reasoning would otherwise hit an NRFX_ASSERT and
+//     reboot the board.
 //   - The nRF52840's WDT has no TASKS_STOP register at all (confirmed in
 //     the vendored SVD headers: NRF_WDT_HAS_STOP, which nrfx_wdt.h derives
 //     from whether WDT_TASKS_STOP_TASKS_STOP_Msk is defined, resolves to 0
@@ -41,16 +56,67 @@
 //     That is why bramble_wdt_arm() is deferred to steady state instead of
 //     called from main(): see the comment at its call site.
 //
+// DFU survival: the stock Adafruit nRF52 bootloader this board ships
+// (Seeed's build) has NO watchdog code anywhere in it (checked its
+// src/main.c: no reference to NRF_WDT, WDT_RUNSTATUS, or any reload
+// register, in any DFU mode: UF2, serial, or BLE OTA). It cannot feed a
+// channel this file armed, and per the "all enabled channels" rule above,
+// feeding only some would not help anyway. Whether the WDT keeps counting
+// across the SYSRESETREQ that nrf/src/boot_trace.c's reboot_to_dfu() (and
+// bramble.enterDfu, nrf/shim/esp_system_nrf.c) use to enter DFU is not
+// settled by the Product Specification text alone ("after a reset ... the
+// watchdog configuration registers will be available for configuration
+// again" is ambiguous about a still-running countdown), but Nordic's own
+// nRF5 SDK bootloader includes watchdog-feed code for exactly this
+// situation, which would be pointless if a soft reset stopped it. This
+// file treats SURVIVAL AS THE DESIGN ASSUMPTION, the unsafe direction,
+// since the watchdog cannot be stopped once armed regardless. The
+// consequence: once armed, every DFU session on this board (a UF2
+// drag-and-drop copy, ~695 KB measured from this build's own
+// bramble-nrf.uf2, 1357 blocks of 512 bytes) is on a clock, and must
+// complete within one watchdog period or risk a reset mid-write that
+// strands a partially flashed app recoverable only by the physical button
+// gesture. 60s is chosen with that in mind, not just hang latency: a
+// drag-and-drop copy of an image this size, including USB enumeration and
+// the host noticing the new volume, plausibly takes low tens of seconds,
+// and 60s leaves real margin over that without being so long that a
+// resumed-but-still-hung board takes an unreasonable time to self-heal in
+// the field. This is a design assumption, not a bench-confirmed fact; the
+// bench test that would confirm or refute it (arm the watchdog, trigger
+// enterDfu, and watch whether the UF2 volume stays mounted past one
+// watchdog period) has not been run, per this repo's evidence-before-
+// assertion standard. If survival turns out to be false, this design is
+// still safe (the DFU session simply is never at risk); if survival is
+// true and a session ever runs long, this is the residual risk that
+// remains.
+//
+// Why only mesh and radio: NimBLE's link layer and host tasks (both real
+// stall risks per the investigation this change implements) block forever
+// on the vendored NimBLE OS porting layer's single blocking primitive
+// (porting/npl/freertos/src/npl_os_freertos.c), which has no per-iteration
+// hook to feed from without patching link-layer-owned upstream code. This
+// port already carries two patches against that area (nrf/CMakeLists.txt)
+// for correctness fixes that needed real bench time to trust; a third,
+// purely for a watchdog feed, was tried and reverted; a patch that only
+// applies cleanly to a pristine NimBLE checkout is fragile against normal
+// CI cache behavior (a restored, differently-patched source tree makes the
+// whole multi-patch git apply abort, observed in this PR's own CI), and
+// every extra channel is another task that must never block longer than
+// the (now 60s) period or it becomes an instant reset loop. Mesh and
+// radio, which this build does cover, catch the cross-cutting hangs the
+// field evidence actually shows (BLE and mesh going dark together,
+// PR #514's bench report); a BLE-only hang that leaves mesh and radio both
+// healthy is the residual, explicitly accepted gap.
+//
 // Identification by task NAME, not TaskHandle_t: the t1000e static-RAM gate
 // (nrf/scripts/size_report.py) has essentially no slack (it was passing by
 // 8 bytes before this file existed), so a per-task table cannot afford a
-// 4-byte TaskHandle_t slot on top of the channel it maps to. Every task
-// this build ever gives a channel to already has a fixed name assigned at
-// xTaskCreate (main/mesh_task.c "mesh", nrf/src/radio_lr1110.c "radio",
-// nrf/src/nimble_port_freertos.c "ll" and "ble"), and pcTaskGetName() reads
-// it straight out of the TCB FreeRTOS already allocated, so matching on
-// that name costs this file only the channel byte itself, not an identity
-// field alongside it.
+// 4-byte TaskHandle_t slot on top of the channel it maps to. Both tasks
+// this build gives a channel to already have a fixed name assigned at
+// xTaskCreate (main/mesh_task.c "mesh", nrf/src/radio_lr1110.c "radio"),
+// and pcTaskGetName() reads it straight out of the TCB FreeRTOS already
+// allocated, so matching on that name costs this file only the channel
+// byte itself, not an identity field alongside it.
 //
 // A registered task that stops feeding its channel resets the device by
 // design. The corollary is the one real correctness hazard in this file:
@@ -60,13 +126,18 @@
 // legitimately exits after registering, such as mesh_task when
 // radio_init() fails (main/mesh_task.c), would otherwise starve its own
 // channel and reset the device forever: a graceful "no radio" degraded
-// mode turned into a boot loop. s_deleted_mask tracks exactly this case. A
-// deleted channel is kept fed forever, as a proxy, by every other live
-// esp_task_wdt_reset() call, standing in for "no longer monitored". If
-// every other subscriber ever stops too, the deleted channel stops being
-// fed along with them, and the device resets, which is correct: at that
-// point the whole system, not just the task that opted out, has actually
-// hung.
+// mode turned into a boot loop. s_state's deleted bits track exactly this
+// case. A deleted channel is kept fed forever, as a proxy, by every other
+// live esp_task_wdt_reset() call, standing in for "no longer monitored".
+// If every other subscriber ever stops too, the deleted channel stops
+// being fed along with them, and the device resets, which is correct: at
+// that point the whole system, not just the task that opted out, has
+// actually hung.
+//
+// Known hardware limit, not solved here: a wedge that also stops LFCLK
+// (the watchdog's clock source) leaves the WDT unable to fire at all.
+// Nothing in software can recover that case; it is a genuine limit of the
+// hardware, not a design choice this file makes.
 #include "esp_task_wdt.h"
 #include "bramble_wdt.h"
 
@@ -79,10 +150,8 @@
 
 #include "esp_log.h"
 
-// 8-10s per the investigation this change implements: the same margin the
-// ESP32 build proves over its worst legitimate blocking op, the 4s LoRa TX
-// wait (main/mesh_task.c). Picked near the middle of that band.
-#define BRAMBLE_WDT_RELOAD_MS 9000u
+// See the file header's "Timeout" section for the full justification.
+#define BRAMBLE_WDT_RELOAD_MS 60000u
 
 // One instance on this part (WDT0); NRFX_WDT0_ENABLED selects it in
 // nrf/config/nrfx_config.h. const: lives in flash, not RAM.
@@ -91,8 +160,6 @@ static const nrfx_wdt_t s_wdt = NRFX_WDT_INSTANCE(0);
 typedef enum {
     WDT_TASK_MESH = 0,
     WDT_TASK_RADIO,
-    WDT_TASK_LL,
-    WDT_TASK_HOST,
     WDT_TASK_COUNT,
 } wdt_task_id_t;
 
@@ -101,9 +168,9 @@ typedef enum {
 static uint8_t s_channel[WDT_TASK_COUNT]; // nrfx channel per task id, or WDT_CHANNEL_NONE
 
 // One byte, not three: the t1000e static-RAM gate has no room to spare
-// (see the file header). Bits 0-3 are the per-task deleted mask
-// (esp_task_wdt_delete); bit 6 is "nrfx_wdt_init succeeded"; bit 7 is
-// "nrfx_wdt_enable has run, countdown is live".
+// (see the file header). Bits 0-1 are the per-task deleted mask
+// (esp_task_wdt_delete, one bit per wdt_task_id_t); bit 6 is "nrfx_wdt_init
+// succeeded"; bit 7 is "nrfx_wdt_enable has run, countdown is live".
 static uint8_t s_state;
 #define WDT_STATE_DRIVER_READY (1u << 6)
 #define WDT_STATE_ARMED (1u << 7)
@@ -118,12 +185,6 @@ static int task_id_for(TaskHandle_t task) {
     }
     if (strcmp(name, "radio") == 0) {
         return WDT_TASK_RADIO;
-    }
-    if (strcmp(name, "ll") == 0) {
-        return WDT_TASK_LL;
-    }
-    if (strcmp(name, "ble") == 0) {
-        return WDT_TASK_HOST;
     }
     return -1;
 }

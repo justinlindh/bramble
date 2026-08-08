@@ -74,6 +74,9 @@
 /* (count) consecutive-failed-boot count carried across a page erase, so
  * outgrowing the page cannot silently reset the boot-loop rescue. */
 #define BT_BOOT_CARRY 0x15u
+/* (count) consecutive-DOG-reset count carried across a page erase; the DOG
+ * counterpart to BT_BOOT_CARRY. See BT_FAIL_DOGLOOP. */
+#define BT_BOOT_CARRY_DOG 0x16u
 #define BT_BOOT_DONE 0xDDu /* (free heap) app_init complete */
 
 /* Consecutive boots that never reached BT_BOOT_DONE before boot_trace_init
@@ -82,6 +85,22 @@
  * a healthy board to DFU, few enough that a real loop is caught in seconds
  * instead of leaving the board dark. */
 #define BT_BOOT_LOOP_LIMIT 3u
+
+/* Consecutive boots whose BT_BOOT_BEGIN aux (RESETREAS) has the DOG bit set,
+ * before boot_trace_init() gives up and returns to the bootloader itself.
+ * This is the chronic-wedge counterpart to BT_BOOT_LOOP_LIMIT: the nRF
+ * watchdog (nrf/shim/wdt_nrf.c) resets a hung node on its own, but every one
+ * of those boots reaches BT_BOOT_DONE (that is the whole point of the
+ * watchdog working), so BT_BOOT_LOOP_LIMIT's failed-boot count never climbs
+ * past one no matter how many times the node hangs, and a device that hangs
+ * every watchdog period forever would otherwise sit in a silent, invisible
+ * reboot loop on a board with no console and no way to tell "recovered"
+ * from "gone dark" from the outside. Same value as BT_BOOT_LOOP_LIMIT for
+ * the same reason: enough that one legitimate DOG reset (a real, one-off
+ * hang the watchdog is meant to fix) does not send a healthy board to DFU,
+ * few enough that a genuinely chronic wedge is caught in a small, bounded
+ * number of watchdog periods rather than repeating forever. */
+#define BT_DOG_LOOP_LIMIT 3u
 
 /* Failure tags: boot_trace_fail stamps these and reboots into DFU. */
 #define BT_FAIL_ASSERT 0xE1u    /* (line) */
@@ -92,6 +111,10 @@
 /* (consecutive failed boots) BT_BOOT_LOOP_LIMIT boots in a row never
  * reached BT_BOOT_DONE, so this boot did not run the app at all. */
 #define BT_FAIL_BOOTLOOP 0xE6u
+/* (consecutive DOG resets) BT_DOG_LOOP_LIMIT boots in a row were reset by
+ * the watchdog, i.e. reached steady state and then hung again every time.
+ * See BT_DOG_LOOP_LIMIT. */
+#define BT_FAIL_DOGLOOP 0xE7u
 #define BT_FAIL_HARDFAULT 0xEFu /* (stacked PC) */
 
 /* Opens the trace for this boot: reads and clears RESETREAS, finds the free
@@ -101,7 +124,10 @@
  * Does NOT return when the page shows BT_BOOT_LOOP_LIMIT consecutive boots
  * that never reached BT_BOOT_DONE: it stamps BT_FAIL_BOOTLOOP and goes back
  * to the bootloader instead, which is the whole point of calling it before
- * the rest of boot rather than after. */
+ * the rest of boot rather than after. Same for BT_DOG_LOOP_LIMIT consecutive
+ * DOG-reset boots: it stamps BT_FAIL_DOGLOOP and goes back to the
+ * bootloader, so a chronic post-boot wedge parks itself in DFU instead of
+ * resetting itself forever with nobody able to tell from the outside. */
 void boot_trace_init(void);
 
 /* Appends one (tag, aux) pair. Safe from any context including faults. */

@@ -29,7 +29,6 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#include "esp_task_wdt.h"
 #include "nimble/nimble_port.h"
 
 /* Above the mesh and radio tasks (5), below the timer task (7) and the link
@@ -42,30 +41,26 @@
 
 #if NIMBLE_CFG_CONTROLLER
 static TaskHandle_t ll_task_h;
-
-/* nimble_port_ll_task_func (porting/nimble/src/nimble_port.c, vendored) is
- * a thin wrapper straight into ble_ll_task(), which never returns; there is
- * no per-iteration hook there to add a WDT registration without patching
- * link-layer-owned code. Registering here instead, in this port's own task
- * entry point, runs on the LL task's own context as its first action,
- * before it can be preempted back out, which is what the arm-time
- * guarantee in wdt_nrf.c depends on. Feeding is handled separately, inside
- * the vendored OS porting layer (nrf/patches/nimble-wdt-eventq-feed.patch),
- * because that is the one place both this task and the host task block. */
-static void ll_task_entry(void* arg) {
-    esp_task_wdt_add(NULL);
-    nimble_port_ll_task_func(arg);
-}
 #endif
 static TaskHandle_t host_task_h;
 
+/* Neither the LL nor the host task holds a WDT channel (nrf/shim/wdt_nrf.c):
+ * both block forever on the vendored NimBLE OS porting layer's single
+ * blocking primitive (porting/npl/freertos/src/npl_os_freertos.c), which has
+ * no per-iteration hook to feed from without patching link-layer-owned
+ * upstream code, and this port already carries two patches against that
+ * area for correctness fixes that needed real bench time to trust. Mesh and
+ * radio, which this build does cover, catch the cross-cutting hangs the
+ * field evidence actually shows (BLE and mesh going dark together); a
+ * BLE-only hang that leaves mesh healthy is the residual, explicitly
+ * accepted gap. */
 void nimble_port_freertos_init(TaskFunction_t host_task_fn) {
 #if NIMBLE_CFG_CONTROLLER
     /* The link layer has its own event queue and must outrank everything
      * else on the chip; missing its scheduled radio events is fatal to a
      * connection. Upstream's priority is already correct here. */
-    xTaskCreate(ll_task_entry, "ll", configMINIMAL_STACK_SIZE + 400, NULL, configMAX_PRIORITIES - 1,
-                &ll_task_h);
+    xTaskCreate(nimble_port_ll_task_func, "ll", configMINIMAL_STACK_SIZE + 400, NULL,
+                configMAX_PRIORITIES - 1, &ll_task_h);
 #endif
 
     xTaskCreate(host_task_fn, "ble", BRAMBLE_BLE_HOST_TASK_STACK, NULL, BRAMBLE_BLE_HOST_TASK_PRIO,

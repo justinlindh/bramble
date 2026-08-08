@@ -17,7 +17,7 @@ static volatile bool s_adv_ok;
  * load. Volatile because the same words are written through the NVMC. */
 static const volatile uint32_t* const s_page = (const volatile uint32_t*)BOOT_TRACE_PAGE;
 
-static void page_reset(uint32_t carry_failed_boots) {
+static void page_reset(uint32_t carry_failed_boots, uint32_t carry_dog_boots) {
     nrfx_nvmc_page_erase(BOOT_TRACE_PAGE);
     nrfx_nvmc_word_write(BOOT_TRACE_PAGE, BOOT_TRACE_MAGIC);
     while (!nrfx_nvmc_write_done_check()) {
@@ -25,6 +25,9 @@ static void page_reset(uint32_t carry_failed_boots) {
     s_next = 1;
     if (carry_failed_boots > 0) {
         boot_trace_mark(BT_BOOT_CARRY, carry_failed_boots);
+    }
+    if (carry_dog_boots > 0) {
+        boot_trace_mark(BT_BOOT_CARRY_DOG, carry_dog_boots);
     }
 }
 
@@ -40,11 +43,11 @@ void boot_trace_init(void) {
 
     if (!scan.valid) {
         /* Virgin, corrupt, or not a trace page at all. */
-        page_reset(0);
+        page_reset(0, 0);
     } else {
         s_next = scan.next;
         if (boot_trace_page_exhausted(s_next)) {
-            page_reset(scan.failed_boots);
+            page_reset(scan.failed_boots, scan.dog_boots);
         }
     }
 
@@ -56,6 +59,17 @@ void boot_trace_init(void) {
          * holds every one of those boots and their reset reasons, is
          * readable. Never returns. */
         boot_trace_fail(BT_FAIL_BOOTLOOP, scan.failed_boots);
+    }
+
+    if (scan.dog_boots >= BT_DOG_LOOP_LIMIT) {
+        /* The watchdog (nrf/shim/wdt_nrf.c) already recovered this node
+         * BT_DOG_LOOP_LIMIT times in a row on its own, each time reaching
+         * BT_BOOT_DONE and then hanging again: a chronic wedge, not a
+         * one-off. The board is consoleless, so left running it becomes a
+         * silent reboot loop indistinguishable from a dead node in the
+         * field. Park it in DFU instead, with the full reset history
+         * readable from CURRENT.UF2. Never returns. */
+        boot_trace_fail(BT_FAIL_DOGLOOP, scan.dog_boots);
     }
 
     boot_trace_mark(BT_BOOT_BEGIN, resetreas);
@@ -80,14 +94,15 @@ void boot_trace_mark(uint32_t tag, uint32_t aux) {
 static void reboot_to_dfu(void) __attribute__((noreturn));
 
 static void reboot_to_dfu(void) {
-    /* Defense in depth: whether the nRF52840 WDT survives this
-     * NVIC_SystemReset() (a SYSRESETREQ-class soft reset) is not confirmed
-     * against real hardware. A no-op before the watchdog is armed, and
-     * still no substitute for that confirmation once it is (a channel
-     * left unfed while the bootloader waits for a UF2 copy can only be
-     * fed by the code that isn't running anymore), but if it does survive,
-     * a full fresh window here is strictly better than whatever was left
-     * on the clock. */
+    /* This build assumes the nRF52840 WDT survives this NVIC_SystemReset()
+     * (a SYSRESETREQ-class soft reset): the stock bootloader never feeds
+     * it, so once armed a DFU session is on the clock either way (see
+     * wdt_nrf.c's "DFU survival" section for the full evidence and why the
+     * watchdog period is sized to fit a whole session). A no-op before the
+     * watchdog is armed; once armed, this is a full fresh window for
+     * whatever DFU session follows rather than whatever was left on the
+     * clock, not a substitute for the session finishing inside one
+     * period. */
     bramble_wdt_feed_all();
     NRF_POWER->GPREGRET = 0x57;
     __DSB();

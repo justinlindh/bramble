@@ -47,6 +47,19 @@ static void put_failed_boot(uint32_t resetreas) {
     put(BT_MSG_STORE, 0);
 }
 
+/* nRF52840 POWER->RESETREAS bit 1: matches
+ * BOOT_TRACE_RESETREAS_DOG_MSK in boot_trace_scan.c. */
+#define TEST_RESETREAS_DOG 0x2u
+
+/* The watchdog-recovery shape: a boot that started because the watchdog
+ * fired, and (like every real one, since the watchdog is armed only after
+ * BT_BOOT_DONE) went on to reach steady state again anyway. */
+static void put_dog_reset_boot(void) {
+    put(BT_BOOT_BEGIN, TEST_RESETREAS_DOG);
+    put(BT_MAIN_ENTRY, 0x27000);
+    put(BT_BOOT_DONE, 40000);
+}
+
 static boot_trace_scan_t run_scan(void) {
     boot_trace_scan_t scan;
     boot_trace_scan(page, &scan);
@@ -163,6 +176,93 @@ static void test_carry_replaces_rather_than_adds(void) {
     TEST_ASSERT_EQUAL_UINT32(2, scan.failed_boots);
 }
 
+/* A one-off DOG reset is exactly what the watchdog is for: it must not, by
+ * itself, look like a chronic wedge. */
+static void test_single_dog_reset_boot_counts_one(void) {
+    write_magic();
+    put_dog_reset_boot();
+    boot_trace_scan_t scan = run_scan();
+    TEST_ASSERT_EQUAL_UINT32(1, scan.dog_boots);
+    TEST_ASSERT_TRUE(scan.dog_boots < BT_DOG_LOOP_LIMIT);
+}
+
+/* The behavior the whole feature depends on: every DOG-reset boot reaches
+ * BT_BOOT_DONE (the watchdog is armed only after that mark), so unlike
+ * failed_boots, dog_boots must NOT clear on BT_BOOT_DONE, or a chronic wedge
+ * could never accumulate past one and the rescue below would never trip. */
+static void test_dog_count_survives_boot_done_and_accumulates(void) {
+    write_magic();
+    put_dog_reset_boot();
+    put_dog_reset_boot();
+    boot_trace_scan_t scan = run_scan();
+    TEST_ASSERT_EQUAL_UINT32(2, scan.dog_boots);
+    TEST_ASSERT_TRUE(scan.dog_boots < BT_DOG_LOOP_LIMIT);
+
+    put_dog_reset_boot();
+    scan = run_scan();
+    TEST_ASSERT_EQUAL_UINT32(3, scan.dog_boots);
+    TEST_ASSERT_TRUE(scan.dog_boots >= BT_DOG_LOOP_LIMIT);
+}
+
+/* A normal reset (RESETPIN, power-on, a deliberate reflash) breaks the
+ * streak: only CONSECUTIVE DOG resets count. */
+static void test_non_dog_boot_breaks_the_streak(void) {
+    write_magic();
+    put_dog_reset_boot();
+    put_dog_reset_boot();
+    put_good_boot(); /* resetreas 0: not a DOG reset */
+    boot_trace_scan_t scan = run_scan();
+    TEST_ASSERT_EQUAL_UINT32(0, scan.dog_boots);
+}
+
+/* The DOG count and the failed-boot count are independent tallies of the
+ * same event stream: a DOG-reset boot that also completes must not leave
+ * failed_boots elevated, and must not itself bump failed_boots beyond the
+ * one BT_BOOT_BEGIN already accounts for. */
+static void test_dog_count_does_not_leak_into_the_failed_count(void) {
+    write_magic();
+    put_dog_reset_boot();
+    put_dog_reset_boot();
+    boot_trace_scan_t scan = run_scan();
+    TEST_ASSERT_EQUAL_UINT32(0, scan.failed_boots);
+    TEST_ASSERT_EQUAL_UINT32(2, scan.dog_boots);
+}
+
+/* Without this the device bounces straight back into DFU on the boot after
+ * the DOG-loop rescue, same reasoning as the boot-loop rescue. */
+static void test_dogloop_rescue_record_clears_both_counts(void) {
+    write_magic();
+    put_dog_reset_boot();
+    put_dog_reset_boot();
+    put_dog_reset_boot();
+    put(BT_FAIL_DOGLOOP, 3);
+    boot_trace_scan_t scan = run_scan();
+    TEST_ASSERT_EQUAL_UINT32(0, scan.failed_boots);
+    TEST_ASSERT_EQUAL_UINT32(0, scan.dog_boots);
+
+    /* And the next streak is counted from scratch. */
+    put_dog_reset_boot();
+    scan = run_scan();
+    TEST_ASSERT_EQUAL_UINT32(1, scan.dog_boots);
+}
+
+/* The DOG count outlives the page it was counted on, same as the failed
+ * count. */
+static void test_dog_carry_record_seeds_the_dog_count(void) {
+    write_magic();
+    put(BT_BOOT_CARRY_DOG, 2);
+    put_dog_reset_boot();
+    boot_trace_scan_t scan = run_scan();
+    TEST_ASSERT_EQUAL_UINT32(3, scan.dog_boots);
+}
+
+static void test_dog_carry_replaces_rather_than_adds(void) {
+    write_magic();
+    put(BT_BOOT_CARRY_DOG, 2);
+    boot_trace_scan_t scan = run_scan();
+    TEST_ASSERT_EQUAL_UINT32(2, scan.dog_boots);
+}
+
 static void test_exhaustion_leaves_room_for_a_whole_boot(void) {
     TEST_ASSERT_FALSE(boot_trace_page_exhausted(1));
     TEST_ASSERT_TRUE(boot_trace_page_exhausted(BOOT_TRACE_PAGE_WORDS - 1));
@@ -197,6 +297,13 @@ int main(void) {
     RUN_TEST(test_rescue_record_clears_the_failure_count);
     RUN_TEST(test_carry_record_seeds_the_failure_count);
     RUN_TEST(test_carry_replaces_rather_than_adds);
+    RUN_TEST(test_single_dog_reset_boot_counts_one);
+    RUN_TEST(test_dog_count_survives_boot_done_and_accumulates);
+    RUN_TEST(test_non_dog_boot_breaks_the_streak);
+    RUN_TEST(test_dog_count_does_not_leak_into_the_failed_count);
+    RUN_TEST(test_dogloop_rescue_record_clears_both_counts);
+    RUN_TEST(test_dog_carry_record_seeds_the_dog_count);
+    RUN_TEST(test_dog_carry_replaces_rather_than_adds);
     RUN_TEST(test_exhaustion_leaves_room_for_a_whole_boot);
     RUN_TEST(test_full_page_scan_stops_at_the_page_end);
     return UNITY_END();

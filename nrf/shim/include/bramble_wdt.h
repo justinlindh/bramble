@@ -25,11 +25,13 @@ void bramble_wdt_init(void);
 void bramble_wdt_arm(void);
 
 // Feeds every channel, including opted-out ones, once. No-op before the
-// watchdog is armed. Defense in depth for reboot_to_dfu(): whether the
-// nRF52840 WDT survives NVIC_SystemReset() is not confirmed against real
-// hardware (see nrf/src/boot_trace.c), so every path into DFU refreshes
+// watchdog is armed. Defense in depth for reboot_to_dfu(): this build
+// treats "the nRF52840 WDT survives NVIC_SystemReset()" as the design
+// assumption (see nrf/shim/wdt_nrf.c's "DFU survival" section for why,
+// and why the 60s period is sized around a whole DFU session fitting
+// inside it), not a bench-confirmed fact, so every path into DFU refreshes
 // every channel immediately beforehand to give the bootloader as full a
-// window as this watchdog can offer, in case it does survive.
+// window as this watchdog can offer.
 void bramble_wdt_feed_all(void);
 
 #ifdef __cplusplus
