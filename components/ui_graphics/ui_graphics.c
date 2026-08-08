@@ -34,6 +34,16 @@ static int s_unread_count = 0;
  * one capture can be in flight); s_shot_done is given by the UI task when a
  * requested capture completes (success or failure). */
 #define UI_SCREENSHOT_BUF_SIZE (UI_SCREENSHOT_LEN + 256) /* lv_snapshot alignment slack */
+/* Top-layer compositing scratch: lv_screen_active() does not include
+ * lv_layer_top(), where every modal lives (pairing code, confirm dialogs,
+ * toasts), so a capture taken while one is up shows the screen underneath
+ * it instead of what the panel displays. The top layer is snapshotted
+ * separately in ARGB8888 (it is mostly transparent, so alpha is needed to
+ * blend it) and composited over the base frame. Allocated only when a
+ * capture actually finds children on the top layer. */
+#define UI_SCREENSHOT_TOP_LEN (UI_SCREENSHOT_WIDTH * UI_SCREENSHOT_HEIGHT * 4)
+#define UI_SCREENSHOT_TOP_BUF_SIZE (UI_SCREENSHOT_TOP_LEN + 256)
+static uint8_t* s_shot_top_buf = NULL;
 static uint8_t* s_shot_buf = NULL;
 static const uint8_t* s_shot_data = NULL; /* pixel data start within s_shot_buf */
 static size_t s_shot_len = 0;
@@ -247,6 +257,60 @@ int ui_graphics_init(void) {
     return 0;
 }
 
+/* Blends lv_layer_top() over an already-captured RGB565 base frame, in
+ * place. lv_screen_active() excludes the top layer, so without this a
+ * capture taken while a modal is up (BLE pairing code, confirm dialog,
+ * toast) shows only the screen behind it. Silently leaves the base frame
+ * untouched when the top layer is empty or its scratch buffer cannot be
+ * allocated: a capture without the overlay beats no capture at all. */
+static void composite_top_layer(uint8_t* base) {
+    lv_obj_t* top = lv_layer_top();
+    if (top == NULL || lv_obj_get_child_count(top) == 0)
+        return;
+
+    if (!s_shot_top_buf) {
+        s_shot_top_buf = heap_caps_calloc(1, UI_SCREENSHOT_TOP_BUF_SIZE, MALLOC_CAP_SPIRAM);
+        if (!s_shot_top_buf)
+            s_shot_top_buf = calloc(1, UI_SCREENSHOT_TOP_BUF_SIZE);
+        if (!s_shot_top_buf) {
+            ESP_LOGW(TAG, "No memory for top-layer capture (%u bytes); overlay omitted",
+                     (unsigned)UI_SCREENSHOT_TOP_BUF_SIZE);
+            return;
+        }
+    }
+
+    lv_image_dsc_t tdsc;
+    if (lv_snapshot_take_to_buf(top, LV_COLOR_FORMAT_ARGB8888, &tdsc, s_shot_top_buf,
+                                UI_SCREENSHOT_TOP_BUF_SIZE) != LV_RESULT_OK ||
+        !tdsc.data) {
+        ESP_LOGW(TAG, "Top-layer snapshot failed; overlay omitted");
+        return;
+    }
+    if (tdsc.header.w != UI_SCREENSHOT_WIDTH || tdsc.header.h != UI_SCREENSHOT_HEIGHT) {
+        ESP_LOGW(TAG, "Top-layer shape %ux%u unexpected; overlay omitted", (unsigned)tdsc.header.w,
+                 (unsigned)tdsc.header.h);
+        return;
+    }
+
+    /* ARGB8888 is byte order B,G,R,A (lv_color32_t on little-endian). */
+    const uint8_t* src = tdsc.data;
+    for (int i = 0; i < UI_SCREENSHOT_WIDTH * UI_SCREENSHOT_HEIGHT; i++) {
+        uint8_t a = src[i * 4 + 3];
+        if (a == 0)
+            continue;
+        uint16_t px = (uint16_t)(base[i * 2] | (base[i * 2 + 1] << 8));
+        uint8_t dr = (uint8_t)(((px >> 11) & 0x1F) << 3);
+        uint8_t dg = (uint8_t)(((px >> 5) & 0x3F) << 2);
+        uint8_t db = (uint8_t)((px & 0x1F) << 3);
+        uint8_t r = (uint8_t)((src[i * 4 + 2] * a + dr * (255 - a)) / 255);
+        uint8_t g = (uint8_t)((src[i * 4 + 1] * a + dg * (255 - a)) / 255);
+        uint8_t b = (uint8_t)((src[i * 4 + 0] * a + db * (255 - a)) / 255);
+        uint16_t out = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+        base[i * 2] = (uint8_t)(out & 0xFF);
+        base[i * 2 + 1] = (uint8_t)(out >> 8);
+    }
+}
+
 /* Services a pending screenshot request. MUST only run on the LVGL-owning
  * task (called from ui_graphics_tick below) since lv_snapshot_take_to_buf
  * walks the live object tree exactly like a render pass would. */
@@ -297,6 +361,8 @@ static void service_screenshot_request(void) {
         xSemaphoreGive(s_shot_done);
         return;
     }
+
+    composite_top_layer((uint8_t*)dsc.data);
 
     s_shot_data = dsc.data;
     s_shot_len = len;
