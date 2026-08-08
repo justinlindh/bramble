@@ -48,6 +48,16 @@ const rollcall_ledger_t* mesh_rollcall_ledger(void);
  * only appearing as a hole in someone else's ledger. */
 uint32_t mesh_rollcall_pending_dropped(void);
 
+/*
+ * Milliseconds until mesh_rollcall_start would be accepted, 0 when it would
+ * be accepted now. Covers BOTH refusals with one number, taking whichever
+ * bites later: the remaining collection window of a roll-call still open,
+ * and the remainder of ROLLCALL_MIN_INTERVAL_MS since the last start. An
+ * operator told only "rate limited" has to poll blindly; told "in 247s" can
+ * simply wait.
+ */
+uint32_t mesh_rollcall_retry_after_ms(void);
+
 /* RX: a decrypted, authenticated APP_TYPE_ROLLCALL payload (broadcast
  * announce). Claims the answer-once slot and queues a staggered response. */
 void mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uint8_t* data,

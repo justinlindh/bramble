@@ -282,6 +282,7 @@ int mesh_send_probe(uint32_t t, uint16_t c, bool p) {
     (void)p;
     return 0;
 }
+
 uint32_t mesh_get_last_broadcast_id(void) { return 0xABCDEF01; }
 void mesh_set_broadcast_telemetry_mode(broadcast_telemetry_mode_t mode) { (void)mode; }
 broadcast_telemetry_mode_t mesh_get_broadcast_telemetry_mode(void) {

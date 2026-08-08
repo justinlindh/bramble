@@ -42,6 +42,7 @@
 #include "ble_pairing_policy.h"
 #include "ble_pairing_store.h"
 #include "network_key.h"
+#include "mesh_rollcall.h"
 /* Deep sleep, GPIO wake, esp_wifi and mDNS exist only on the ESP32 targets:
  * not on the POSIX/Linux simulator, and not on the nRF52840 (which has no
  * Wi-Fi at all). The affected RPC handlers degrade on both; see the gates
@@ -923,6 +924,152 @@ static int handle_send_probe(const cJSON* params, cJSON* result) {
     cJSON_AddStringToObject(result, "probe_id", buf);
     cJSON_AddNumberToObject(result, "ack_window", 5);
     cJSON_AddNumberToObject(result, "rounds_total", 3);
+    return 0;
+}
+
+/*
+ * bramble.startRollCall: start an attested roll-call (docs/rollcall.md).
+ *
+ * Optional "text" is the operator payload the announce carries, bounded at
+ * ROLLCALL_TEXT_MAX bytes. Initiation is RATE LIMITED in the firmware, not
+ * in the client: a roll-call is the most expensive primitive in the protocol
+ * (one flood per round plus one unicast answer per member), so the bound has
+ * to hold for a script driving the RPC directly.
+ *
+ * An operational refusal (still collecting, inside the rate-limit interval,
+ * nothing reached the air) is reported as ok:false with a reason and
+ * retry_after_ms, the soft-refusal shape phy.enable already uses, NOT as a
+ * JSON-RPC error: rpc_dispatch discards a handler's result object whenever
+ * the handler returns nonzero, so an error code cannot carry the one number
+ * the operator actually needs. A malformed request is still a real
+ * RPC_ERR_INVALID_PARAMS, because that is a client defect rather than a
+ * state the mesh will grow out of.
+ */
+static int handle_start_rollcall(const cJSON* params, cJSON* result) {
+    const char* text = cJSON_GetStringValue(cJSON_GetObjectItem(params, "text"));
+    size_t text_len = (text != NULL) ? strlen(text) : 0;
+
+    if (text_len > ROLLCALL_TEXT_MAX) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    uint32_t rollcall_id = 0;
+    int rc = mesh_rollcall_start(text, text_len, &rollcall_id);
+    if (rc != MESH_ROLLCALL_OK) {
+        const char* reason;
+        switch (rc) {
+        case MESH_ROLLCALL_ERR_BUSY:
+            reason = "busy";
+            break;
+        case MESH_ROLLCALL_ERR_RATE_LIMITED:
+            reason = "rate_limited";
+            break;
+        case MESH_ROLLCALL_ERR_TX:
+            reason = "not_transmitted";
+            break;
+        case MESH_ROLLCALL_ERR_TEXT_TOO_LONG:
+            /* The length gate above already covers this for a well-formed
+             * request; reaching it here means the caller's string and the
+             * firmware's cap disagree, which is still a client defect. */
+            return RPC_ERR_INVALID_PARAMS;
+        default:
+            return RPC_ERR_INTERNAL;
+        }
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "reason", reason);
+        cJSON_AddNumberToObject(result, "retry_after_ms", mesh_rollcall_retry_after_ms());
+        cJSON_AddNumberToObject(result, "min_interval_ms", ROLLCALL_MIN_INTERVAL_MS);
+        return 0;
+    }
+
+    const rollcall_ledger_t* l = mesh_rollcall_ledger();
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%08" PRIX32, rollcall_id);
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "rollcall_id", buf);
+    cJSON_AddNumberToObject(result, "window_ms", rollcall_window_ms());
+    cJSON_AddNumberToObject(result, "rounds_total", ROLLCALL_MAX_ROUNDS);
+    cJSON_AddNumberToObject(result, "expected", (l != NULL) ? l->expected_count : 0);
+    cJSON_AddBoolToObject(result, "anchored", (l != NULL) && l->anchored);
+    return 0;
+}
+
+/*
+ * bramble.getRollCall: the ledger of the roll-call this node started.
+ *
+ * Times are reported as milliseconds INTO the roll-call (at_ms), never as
+ * raw device uptime: the device clock is boot-relative and means nothing to
+ * a client, while "answered 4.2s in" is directly comparable across nodes.
+ *
+ * `anchored` is the honesty switch the whole report turns on. False means
+ * this node pins trust-on-first-use identities, so there is no authoritative
+ * expected set: `expected` is 0 and `missing` is empty BY CONSTRUCTION, and
+ * the ledger reports only the responders it observed. See docs/rollcall.md.
+ */
+static int handle_get_rollcall(const cJSON* params, cJSON* result) {
+    (void)params;
+
+    cJSON_AddNumberToObject(result, "rounds_total", ROLLCALL_MAX_ROUNDS);
+    cJSON_AddNumberToObject(result, "window_ms", rollcall_window_ms());
+    cJSON_AddNumberToObject(result, "min_interval_ms", ROLLCALL_MIN_INTERVAL_MS);
+    cJSON_AddNumberToObject(result, "max_text_bytes", ROLLCALL_TEXT_MAX);
+    cJSON_AddNumberToObject(result, "pending_dropped", mesh_rollcall_pending_dropped());
+
+    const rollcall_ledger_t* l = mesh_rollcall_ledger();
+    if (l == NULL) {
+        cJSON_AddBoolToObject(result, "active", false);
+        return 0;
+    }
+
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%08" PRIX32, l->rollcall_id);
+    cJSON_AddBoolToObject(result, "active", true);
+    cJSON_AddStringToObject(result, "rollcall_id", buf);
+    cJSON_AddBoolToObject(result, "open", l->open);
+    cJSON_AddStringToObject(result, "text", l->text);
+    cJSON_AddNumberToObject(result, "rounds_sent", l->rounds_sent);
+    cJSON_AddBoolToObject(result, "anchored", l->anchored);
+    cJSON_AddNumberToObject(result, "expected", l->expected_count);
+    cJSON_AddNumberToObject(result, "responded", rollcall_ledger_responded_count(l));
+    cJSON_AddNumberToObject(result, "unattested", l->unattested);
+    cJSON_AddNumberToObject(result, "overflow", l->overflow);
+    cJSON_AddNumberToObject(result, "late", l->late);
+    uint32_t rc_now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    cJSON_AddNumberToObject(result, "elapsed_ms", rc_now_ms - l->started_ms);
+
+    cJSON* responders = cJSON_AddArrayToObject(result, "responders");
+    for (uint8_t i = 0; responders != NULL && i < l->entry_count; i++) {
+        const rollcall_entry_t* e = &l->entries[i];
+        if (!e->used)
+            continue;
+        cJSON* item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "address", addr_hex(e->addr, buf, sizeof(buf)));
+        cJSON_AddBoolToObject(item, "responded", e->responded);
+        if (e->responded) {
+            cJSON_AddNumberToObject(item, "at_ms", e->responded_at_ms - l->started_ms);
+            cJSON_AddNumberToObject(item, "round", e->round);
+        }
+        if (e->have_path) {
+            cJSON_AddNumberToObject(item, "hops", e->hop_count);
+            cJSON* path = cJSON_AddArrayToObject(item, "path");
+            for (uint8_t h = 0; path != NULL && h < e->hop_count; h++) {
+                cJSON_AddItemToArray(
+                    path, cJSON_CreateString(addr_hex(e->relay_path[h], buf, sizeof(buf))));
+            }
+        }
+        cJSON_AddItemToArray(responders, item);
+    }
+
+    uint32_t missing[ROLLCALL_MAX_EXPECTED];
+    uint8_t missing_count = rollcall_ledger_missing(l, missing, ROLLCALL_MAX_EXPECTED);
+    cJSON_AddNumberToObject(result, "missing_count", missing_count);
+    cJSON* missing_arr = cJSON_AddArrayToObject(result, "missing");
+    uint8_t written =
+        (missing_count > ROLLCALL_MAX_EXPECTED) ? ROLLCALL_MAX_EXPECTED : missing_count;
+    for (uint8_t i = 0; missing_arr != NULL && i < written; i++) {
+        cJSON_AddItemToArray(missing_arr,
+                             cJSON_CreateString(addr_hex(missing[i], buf, sizeof(buf))));
+    }
     return 0;
 }
 
@@ -3696,6 +3843,8 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.reboot", handle_reboot);
     rpc_register("bramble.enterDfu", handle_enter_dfu);
     rpc_register("bramble.sendProbe", handle_send_probe);
+    rpc_register("bramble.startRollCall", handle_start_rollcall);
+    rpc_register("bramble.getRollCall", handle_get_rollcall);
     rpc_register("bramble.setRadio", handle_set_radio);
     rpc_register("bramble.setNodeName", handle_set_node_name);
     rpc_register("bramble.getBleSecurity", handle_get_ble_security);

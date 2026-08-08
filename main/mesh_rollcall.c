@@ -225,8 +225,7 @@ int mesh_rollcall_start(const char* text, size_t text_len, uint32_t* rollcall_id
 
     if (rollcall_id_out != NULL)
         *rollcall_id_out = id;
-    ESP_LOGI(TAG,
-             "ROLLCALL START id=%08" PRIX32 " expected=%u anchored=%d window_ms=%" PRIu32, id,
+    ESP_LOGI(TAG, "ROLLCALL START id=%08" PRIX32 " expected=%u anchored=%d window_ms=%" PRIu32, id,
              (unsigned)rc->ledger.expected_count, (int)anchored, rollcall_window_ms());
     return MESH_ROLLCALL_OK;
 }
@@ -238,6 +237,32 @@ const rollcall_ledger_t* mesh_rollcall_ledger(void) {
 }
 
 uint32_t mesh_rollcall_pending_dropped(void) { return (s_rc == NULL) ? 0u : s_rc->pending_dropped; }
+
+uint32_t mesh_rollcall_retry_after_ms(void) {
+    if (s_rc == NULL)
+        return 0;
+    uint32_t t = now_ms();
+    uint32_t wait = 0;
+
+    /* An open ledger blocks a new start until its collection window closes. */
+    if (s_rc->ledger.active && s_rc->ledger.open) {
+        int32_t left = (int32_t)(rollcall_ledger_close_at(&s_rc->ledger) - t);
+        if (left > 0)
+            wait = (uint32_t)left;
+    }
+
+    /* The interval floor is measured start to start, so it can outlast the
+     * collection window; report whichever bites later. */
+    if (s_rc->rate.ever_started) {
+        uint32_t since = t - s_rc->rate.last_start_ms;
+        if (since < ROLLCALL_MIN_INTERVAL_MS) {
+            uint32_t left = ROLLCALL_MIN_INTERVAL_MS - since;
+            if (left > wait)
+                wait = left;
+        }
+    }
+    return wait;
+}
 
 /* Emit the completion notification. Fired exactly once, from the single
  * rollcall_ledger_maybe_close that returns true. */
@@ -296,9 +321,8 @@ void mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uin
         return;
     }
 
-    uint32_t delay = rollcall_response_delay_ms(s_identity->address, ann.rollcall_id,
-                                                (uint8_t)neighbor_count(&s_neighbors),
-                                                esp_random());
+    uint32_t delay = rollcall_response_delay_ms(
+        s_identity->address, ann.rollcall_id, (uint8_t)neighbor_count(&s_neighbors), esp_random());
     rc->pending[slot].used = true;
     rc->pending[slot].rollcall_id = ann.rollcall_id;
     rc->pending[slot].initiator_addr = src_addr;
@@ -440,7 +464,7 @@ void mesh_rollcall_handle_response(uint32_t src_addr, const uint8_t* data, size_
 }
 
 void mesh_rollcall_note_receipt(uint32_t responder_addr, uint32_t orig_packet_id, uint8_t hop_count,
-                               const uint32_t* relay_path) {
+                                const uint32_t* relay_path) {
     if (s_rc == NULL || !s_rc->ledger.active || !s_rc->ledger.open)
         return;
 

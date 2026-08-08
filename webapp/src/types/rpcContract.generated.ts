@@ -404,6 +404,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.startRollCall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start an attested roll-call
+         * @description Starts an attested roll-call: an authenticated broadcast asking every member to answer with an Ed25519-signed, identity-bound reply. The primitive is expensive (one flood per round plus one unicast answer per member), so initiation is rate limited in the firmware and only one roll-call this node started may be collecting at a time. Both refusals come back as ok=false with a reason and retry_after_ms, so a caller waits a known interval instead of polling. A payload over max_text_bytes is a malformed request and returns -32602. Progress arrives as bramble.onRollCallResponse notifications followed by bramble.onRollCallComplete; the ledger is readable at any time via bramble.getRollCall.
+         */
+        post: operations["startRollCall"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rpc/bramble.getRollCall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get the roll-call ledger
+         * @description Returns the ledger of the roll-call this node started: which members answered with a verified signature, how far into the roll-call each answered, and the relay path where the broadcast delivery-receipt machinery supplied one. On an anchored mesh the expected set is this node's anchor-certified peers, so missing lists the addresses that did not answer. On an un-anchored mesh there is no authoritative expected set: anchored is false, expected is 0 and missing is empty by construction, and the ledger reports observed responders only.
+         */
+        post: operations["getRollCall"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.setRadio": {
         parameters: {
             query?: never;
@@ -2049,6 +2089,90 @@ export interface components {
             /** @description Number of probe rounds in the sweep. */
             rounds_total: number;
         };
+        /** @description Roll-call parameters. All fields optional. */
+        StartRollCallParams: {
+            /** @description Operator payload the announce carries, at most 48 bytes. Kept short because it is paid for once per relay per round. */
+            text?: string;
+        };
+        /** @description Roll-call start outcome. ok=true carries the identifier and the schedule; ok=false is an operational refusal carrying reason and retry_after_ms, and none of the roll-call fields are present. */
+        StartRollCallResponse: {
+            /** @description True when the first announce round reached the air. */
+            ok: boolean;
+            /**
+             * @description Why the roll-call was refused (present only when ok=false). busy = one this node started is still collecting; rate_limited = inside min_interval_ms of the last start; not_transmitted = the announce never reached the air, so nothing is owed an answer and the rate limiter was not charged.
+             * @enum {string}
+             */
+            reason?: "busy" | "rate_limited" | "not_transmitted";
+            /** @description Milliseconds until a start would be accepted (present only when ok=false). 0 means immediately. */
+            retry_after_ms?: number;
+            /** @description Enforced floor between two roll-calls started by this node (present only when ok=false). */
+            min_interval_ms?: number;
+            /** @description Roll-call identifier as 8-char uppercase hex. */
+            rollcall_id?: string;
+            /** @description Milliseconds from start to ledger close. */
+            window_ms?: number;
+            /** @description Announce rounds this roll-call will send, including the first. */
+            rounds_total?: number;
+            /** @description Size of the anchor-certified expected set. Always 0 on an un-anchored mesh, where no authoritative expected set exists. */
+            expected?: number;
+            /** @description True when this node pins anchor-certified peers, which is the only configuration in which missing members can be named. */
+            anchored?: boolean;
+        };
+        RollCallResponder: {
+            /** @description Responder address as 8-char uppercase hex. */
+            address: string;
+            /** @description True when an Ed25519 signature over (roll-call id, initiator, responder) verified against this address's pinned identity key. A row may exist with responded false when the announce's delivery receipt reported a path for a member that never answered. */
+            responded: boolean;
+            /** @description Milliseconds into the roll-call at which the answer was recorded. Present only when responded is true. */
+            at_ms?: number;
+            /** @description Announce round the answer named. Present only when responded is true. */
+            round?: number;
+            /** @description Relay path length, present only when a delivery receipt supplied one. */
+            hops?: number;
+            /** @description Relay path initiator to responder, as 8-char uppercase hex addresses. Present only when a delivery receipt supplied one. */
+            path?: string[];
+        };
+        RollCallLedger: {
+            /** @description False when this node has never started a roll-call. */
+            active: boolean;
+            /** @description Roll-call identifier as 8-char uppercase hex. */
+            rollcall_id?: string;
+            /** @description True while the ledger is still collecting answers. */
+            open?: boolean;
+            /** @description The operator payload the announce carried. */
+            text?: string;
+            /** @description Announce rounds sent so far. */
+            rounds_sent?: number;
+            /** @description Announce rounds a roll-call sends, including the first. */
+            rounds_total: number;
+            /** @description Milliseconds from start to ledger close. */
+            window_ms: number;
+            /** @description Milliseconds since this roll-call started. */
+            elapsed_ms?: number;
+            /** @description Enforced floor between two roll-calls started by this node. */
+            min_interval_ms: number;
+            /** @description Maximum operator payload size. */
+            max_text_bytes: number;
+            /** @description True when the expected set is anchor-certified and therefore authoritative. False means the ledger reports observed responders only. */
+            anchored?: boolean;
+            /** @description Size of the anchor-certified expected set, 0 when not anchored. */
+            expected?: number;
+            /** @description Members whose signed answer verified. */
+            responded?: number;
+            /** @description Answers that could not be attested: a signature that did not verify, a responder that does not match the sending envelope, or a responder this node holds no pinned identity key for. Counted, never recorded as a responder. */
+            unattested?: number;
+            /** @description Answers dropped because the ledger table was full. */
+            overflow?: number;
+            /** @description Answers that arrived after the ledger closed. */
+            late?: number;
+            /** @description Answers THIS node could not queue because its pending-answer queue was full, reported so a node that failed to take part says so locally. */
+            pending_dropped: number;
+            /** @description Expected members with no verified answer. Always 0 on an un-anchored mesh: absence of an authoritative expected set means nothing can honestly be called missing. */
+            missing_count?: number;
+            /** @description Expected members with no verified answer, as 8-char uppercase hex. */
+            missing?: string[];
+            responders?: components["schemas"]["RollCallResponder"][];
+        };
         /** @description Radio parameters to update. All fields optional. */
         SetRadioParams: {
             /** @description Transmit power in dBm. */
@@ -2810,6 +2934,45 @@ export interface components {
              */
             reason: "address_collision";
         };
+        /** @description Params of the bramble.onRollCall notification, raised on a MEMBER that heard a roll-call announce. Surfaced as its own event rather than filed as a chat message: a roll-call is an operational request, not traffic somebody sent. */
+        OnRollCallPayload: {
+            /** @description Roll-call identifier as 8-char uppercase hex. */
+            rollcall_id: string;
+            /** @description Initiator address as 8-char uppercase hex. */
+            from: string;
+            /** @description The operator payload the announce carried. */
+            text: string;
+            /** @description Announce round this frame was (1-based). */
+            round: number;
+        };
+        /** @description Params of the bramble.onRollCallResponse notification, raised on the INITIATOR once a member's signature verified against its pinned identity key. An answer that failed to attest raises nothing; it is only counted, in the ledger's unattested field. */
+        OnRollCallResponsePayload: {
+            /** @description Roll-call identifier as 8-char uppercase hex. */
+            rollcall_id: string;
+            /** @description Responder address as 8-char uppercase hex. */
+            address: string;
+            /** @description Announce round the answer named. */
+            round: number;
+            /** @description Members whose signed answer has verified so far. */
+            responded: number;
+            /** @description Size of the anchor-certified expected set, 0 when not anchored. */
+            expected: number;
+        };
+        /** @description Params of the bramble.onRollCallComplete notification, raised once when the collection window closes. The ledger stays readable after it closes via bramble.getRollCall. */
+        OnRollCallCompletePayload: {
+            /** @description Roll-call identifier as 8-char uppercase hex. */
+            rollcall_id: string;
+            /** @description Members whose signed answer verified. */
+            responded: number;
+            /** @description Size of the anchor-certified expected set, 0 when not anchored. */
+            expected: number;
+            /** @description True when the expected set is anchor-certified. False means the ledger reports observed responders only and names nobody missing. */
+            anchored: boolean;
+            /** @description Announce rounds sent. */
+            rounds: number;
+            /** @description Answers that could not be attested. */
+            unattested: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -3446,6 +3609,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SendProbeResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    startRollCall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StartRollCallParams"];
+            };
+        };
+        responses: {
+            /** @description Roll-call started */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartRollCallResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getRollCall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description Roll-call ledger */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RollCallLedger"];
                 };
             };
             /** @description Bad request (invalid params or request body) */
