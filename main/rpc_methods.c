@@ -590,21 +590,18 @@ static int handle_get_delivery_events(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getNeighbors */
-static int handle_get_neighbors(const cJSON* params, cJSON* result) {
-    (void)params;
-    mesh_shared_state_t* st = calloc(1, sizeof(*st));
-    if (!st) {
-        ESP_LOGE(TAG, "getNeighbors: out of memory for state snapshot");
-        return RPC_ERR_INTERNAL;
-    }
-    mesh_get_state(st);
-
-    cJSON* arr = cJSON_AddArrayToObject(result, "neighbors");
+/* Serialize a neighbor table into `arr`. One writer for the neighbor wire
+ * shape, shared by bramble.getNeighbors and the neighbor array embedded in
+ * bramble.exportTopology, so a client and the simulator's twin importer can
+ * never be handed two different spellings of the same observation. */
+static void rpc_emit_neighbors(cJSON* arr, const neighbor_table_t* table) {
     char buf[12];
+    /* Time since last heard (ms ago), not an absolute timestamp: a node's
+     * clock means nothing to a client, elapsed time means the same to both. */
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
-    for (int i = 0; i < st->neighbors.count; i++) {
-        const neighbor_entry_t* n = &st->neighbors.entries[i];
+    for (int i = 0; i < table->count; i++) {
+        const neighbor_entry_t* n = &table->entries[i];
         if (n->addr == 0)
             continue;
 
@@ -614,15 +611,64 @@ static int handle_get_neighbors(const cJSON* params, cJSON* result) {
         cJSON_AddNumberToObject(obj, "snr", n->snr);
         cJSON_AddNumberToObject(obj, "deliveryRate", n->delivery_rate);
         cJSON_AddNumberToObject(obj, "airtimeRemaining", n->airtime_remaining);
-        /* Return time since last heard (ms ago), not absolute timestamp */
-        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
-        uint32_t ago = (now > n->last_heard) ? (now - n->last_heard) : 0;
-        cJSON_AddNumberToObject(obj, "last_seen_ms", ago);
+        cJSON_AddNumberToObject(obj, "last_seen_ms", (now > n->last_heard) ? (now - n->last_heard)
+                                                                          : 0);
         if (n->name[0] != '\0') {
             cJSON_AddStringToObject(obj, "name", n->name);
         }
         cJSON_AddItemToArray(arr, obj);
     }
+}
+
+/* Serialize a routing table into `arr`; the route counterpart of
+ * rpc_emit_neighbors, shared by bramble.getRoutes and bramble.exportTopology. */
+static void rpc_emit_routes(cJSON* arr, const routing_table_t* table) {
+    char buf[12];
+    static const char* state_names[] = {"discovering", "unverified", "active", "stale", "broken"};
+    for (int i = 0; i < table->count; i++) {
+        const route_entry_t* r = &table->entries[i];
+        cJSON* obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(obj, "dest", addr_hex(r->dest_addr, buf, sizeof(buf)));
+        cJSON_AddStringToObject(obj, "next_hop", addr_hex(r->next_hop, buf, sizeof(buf)));
+        cJSON_AddNumberToObject(obj, "hop_count", r->hop_count);
+        cJSON_AddNumberToObject(obj, "metric", r->metric);
+        cJSON_AddStringToObject(obj, "state",
+                                r->state <= ROUTE_BROKEN ? state_names[r->state] : "unknown");
+        cJSON_AddNumberToObject(obj, "use_count", r->use_count);
+        cJSON_AddItemToArray(arr, obj);
+    }
+}
+
+/* Node name as stored in NVS. Returns false (leaving out an empty string) when
+ * no name is set or NVS cannot be opened, so each caller picks its own answer
+ * for the unnamed case: getConfig substitutes a placeholder, exportTopology
+ * omits the field. */
+static bool rpc_get_node_name(char* out, size_t len) {
+    out[0] = '\0';
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    size_t name_len = len;
+    esp_err_t err = nvs_get_str(nvs, NVS_KEY_NODE_NAME, out, &name_len);
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        out[0] = '\0';
+        return false;
+    }
+    return out[0] != '\0';
+}
+
+/* bramble.getNeighbors */
+static int handle_get_neighbors(const cJSON* params, cJSON* result) {
+    (void)params;
+    mesh_shared_state_t* st = calloc(1, sizeof(*st));
+    if (!st) {
+        ESP_LOGE(TAG, "getNeighbors: out of memory for state snapshot");
+        return RPC_ERR_INTERNAL;
+    }
+    mesh_get_state(st);
+    rpc_emit_neighbors(cJSON_AddArrayToObject(result, "neighbors"), &st->neighbors);
     free(st);
     return 0;
 }
@@ -636,23 +682,82 @@ static int handle_get_routes(const cJSON* params, cJSON* result) {
         return RPC_ERR_INTERNAL;
     }
     mesh_get_routes(routes);
-
-    cJSON* arr = cJSON_AddArrayToObject(result, "routes");
-    char buf[12];
-    static const char* state_names[] = {"discovering", "unverified", "active", "stale", "broken"};
-    for (int i = 0; i < routes->count; i++) {
-        const route_entry_t* r = &routes->entries[i];
-        cJSON* obj = cJSON_CreateObject();
-        cJSON_AddStringToObject(obj, "dest", addr_hex(r->dest_addr, buf, sizeof(buf)));
-        cJSON_AddStringToObject(obj, "next_hop", addr_hex(r->next_hop, buf, sizeof(buf)));
-        cJSON_AddNumberToObject(obj, "hop_count", r->hop_count);
-        cJSON_AddNumberToObject(obj, "metric", r->metric);
-        cJSON_AddStringToObject(obj, "state",
-                                r->state <= ROUTE_BROKEN ? state_names[r->state] : "unknown");
-        cJSON_AddNumberToObject(obj, "use_count", r->use_count);
-        cJSON_AddItemToArray(arr, obj);
-    }
+    rpc_emit_routes(cJSON_AddArrayToObject(result, "routes"), routes);
     free(routes);
+    return 0;
+}
+
+/* Schema version of the bramble.exportTopology document. The simulator's twin
+ * importer refuses a version it does not know rather than guessing at fields,
+ * so this number moves whenever the document's meaning changes. */
+#define TOPOLOGY_EXPORT_SCHEMA 1
+
+/* bramble.exportTopology
+ *
+ * One node's observed mesh state as a single document, shaped for the
+ * simulator's digital-twin importer (docs/digital-twin.md): who this node is,
+ * every neighbor it hears and the link quality it hears them at, its routing
+ * table, and the PHY and regulatory parameters that decide time-on-air and the
+ * airtime a deployment is allowed to spend.
+ *
+ * The neighbor and route arrays come from the same emitters bramble.getNeighbors
+ * and bramble.getRoutes use, so an export and those two methods cannot disagree.
+ * Nothing here is a fresh measurement: it is the state the node already keeps,
+ * read at the moment of the call.
+ */
+static int handle_export_topology(const cJSON* params, cJSON* result) {
+    (void)params;
+    mesh_shared_state_t* st = calloc(1, sizeof(*st));
+    if (!st) {
+        ESP_LOGE(TAG, "exportTopology: out of memory for state snapshot");
+        return RPC_ERR_INTERNAL;
+    }
+    routing_table_t* routes = calloc(1, sizeof(*routes));
+    if (!routes) {
+        ESP_LOGE(TAG, "exportTopology: out of memory for routing-table snapshot");
+        free(st);
+        return RPC_ERR_INTERNAL;
+    }
+    mesh_get_state(st);
+    mesh_get_routes(routes);
+
+    cJSON_AddNumberToObject(result, "twin_schema", TOPOLOGY_EXPORT_SCHEMA);
+
+    char buf[12];
+    cJSON* node = cJSON_AddObjectToObject(result, "node");
+    cJSON_AddStringToObject(node, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
+    char name[64];
+    if (rpc_get_node_name(name, sizeof(name))) {
+        cJSON_AddStringToObject(node, "name", name);
+    }
+    cJSON_AddStringToObject(node, "firmware_version", esp_app_get_description()->version);
+    cJSON_AddStringToObject(node, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
+    cJSON_AddStringToObject(node, "hardware", bramble_hardware());
+    cJSON_AddNumberToObject(node, "uptime_s", (double)(esp_timer_get_time() / 1000000));
+
+    /* Runtime PHY, not the profile table: sf/bw/cr/tx power are what
+     * bramble_calculate_airtime_us prices a frame at, and the twin charges the
+     * same time-on-air for the same frame. The frequency plan rides along
+     * because its duty-cycle ceiling bounds what the deployment may spend. */
+    radio_config_t rcfg;
+    radio_get_config(&rcfg);
+    cJSON* radio = cJSON_AddObjectToObject(result, "radio");
+    cJSON_AddNumberToObject(radio, "frequency_mhz", rcfg.frequency_mhz);
+    cJSON_AddNumberToObject(radio, "sf", rcfg.sf);
+    cJSON_AddNumberToObject(radio, "bw_hz", rcfg.bw_hz);
+    cJSON_AddNumberToObject(radio, "coding_rate", rcfg.coding_rate);
+    cJSON_AddNumberToObject(radio, "tx_power_dbm", rcfg.tx_power);
+    const bramble_freq_plan_t* plan = freq_plan_get_default();
+    cJSON_AddStringToObject(radio, "region", plan->name);
+    cJSON_AddStringToObject(radio, "regulatory", plan->regulatory);
+    cJSON_AddNumberToObject(radio, "max_duty_cycle_pct", plan->max_duty_cycle_pct);
+    cJSON_AddBoolToObject(radio, "duty_cycle_enforced", plan->duty_cycle_enforced);
+
+    rpc_emit_neighbors(cJSON_AddArrayToObject(result, "neighbors"), &st->neighbors);
+    rpc_emit_routes(cJSON_AddArrayToObject(result, "routes"), routes);
+
+    free(routes);
+    free(st);
     return 0;
 }
 
@@ -2461,14 +2566,13 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
     (void)params;
 
     /* Node name from NVS (falls back to "(unnamed)" if not set) */
-    char name[64] = "(unnamed)";
-    nvs_handle_t nvs;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        size_t len = sizeof(name);
-        nvs_get_str(nvs, NVS_KEY_NODE_NAME, name, &len);
-        nvs_close(nvs);
+    char name[64];
+    if (!rpc_get_node_name(name, sizeof(name))) {
+        snprintf(name, sizeof(name), "(unnamed)");
     }
     cJSON_AddStringToObject(result, "node_name", name);
+
+    nvs_handle_t nvs;
 
     /* Node address */
     char buf[12];
@@ -3683,6 +3787,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.getDeliveryEvents", handle_get_delivery_events);
     rpc_register("bramble.getNeighbors", handle_get_neighbors);
     rpc_register("bramble.getRoutes", handle_get_routes);
+    rpc_register("bramble.exportTopology", handle_export_topology);
     rpc_register("bramble.getDmSessions", handle_get_dm_sessions);
     rpc_register("bramble.getAirtime", handle_get_airtime);
     rpc_register("bramble.ping", handle_ping);
