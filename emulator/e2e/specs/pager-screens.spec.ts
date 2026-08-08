@@ -176,9 +176,31 @@ test.describe('pager e-paper per-screen capture', () => {
 
     await loadScenario(page, 'emu-pager-screens');
 
-    // Resolve the pager: the only e-paper node in the scenario (its neighbors
-    // are OLED, so only the pager's card carries an epaper-canvas). Pick that
-    // card rather than the first, which may be an OLED neighbor.
+    // Wait for the panel faces to settle BEFORE resolving the pager.
+    //
+    // A device card is created on node_joined with the e-paper default
+    // geometry (getOrCreateDevice in useSimulation.ts) and only swaps to the
+    // OLED face once DEVICE_FB carries the real 128x64 size, which
+    // DeviceView.tsx spells out. So during boot every node wears the pager
+    // face: an OLED neighbor that attaches before Pat carries an
+    // epaper-canvas at exactly 250x122, which satisfies both the visibility
+    // and the dimension check below, and then stops matching the moment its
+    // first frame lands. Resolving on `.first()` alone could therefore latch a
+    // neighbor's id and die at the first canvas read after the settle, which
+    // is what happened in CI (job 93089815971: card resolved and dims checked
+    // inside 2.8s, then "Failed to find element" 28s later).
+    //
+    // Gating on the steady-state face counts is false in every transient: the
+    // two OLED neighbors cannot both have painted until their faces have
+    // swapped, and once they have, the single remaining epaper-canvas is
+    // necessarily Pat. It also excludes leftover cards from the previous
+    // scenario still materializing over the shared socket, since those are
+    // e-paper on both neighbors and are wiped by this spec's own sim_reset.
+    const oledCanvases = page.locator('canvas[data-testid="oled-canvas"]');
+    const epaperCanvases = page.locator('canvas[data-testid="epaper-canvas"]');
+    await expect(oledCanvases).toHaveCount(2, { timeout: 30_000 });
+    await expect(epaperCanvases).toHaveCount(1, { timeout: 30_000 });
+
     const card = page
       .locator('[data-testid^="device-card-"]:has(canvas[data-testid="epaper-canvas"])')
       .first();
