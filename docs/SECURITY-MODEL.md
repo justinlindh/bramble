@@ -1232,14 +1232,16 @@ same PR that fixes it.
   fix of the root cause: RREQ carries no authentication on the wire (adding
   it is a wire-format change gated on a protocol-version bump), so an RREQ
   source route is treated as exactly what it is, an unauthenticated hint.
-- **The identity private key, all channel keys, the RPC auth token, and,
-  once provisioned, the network key are stored as plaintext NVS entries,
-  and message history is plaintext SPIFFS**, with flash encryption, NVS
-  encryption, and secure boot all disabled in the build
-  (`components/identity/identity.c`, `components/channel/channel_storage.c`,
-  `components/msg_store/msg_store_spiffs.c`, `components/network_key`;
-  `sdkconfig` has `CONFIG_SECURE_FLASH_ENC_ENABLED`, `CONFIG_NVS_ENCRYPTION`,
-  and `CONFIG_SECURE_BOOT` all unset).
+- **The identity private key, all channel keys, the RPC auth token, the
+  operator-set static BLE pairing passkey, and, once provisioned, the
+  network key are stored as plaintext NVS entries, and message history is
+  plaintext SPIFFS**, with flash encryption, NVS encryption, and secure boot
+  all disabled in the build (`components/identity/identity.c`,
+  `components/channel/channel_storage.c`,
+  `components/msg_store/msg_store_spiffs.c`, `components/network_key`,
+  `components/ble/ble_pairing_store.c`; `sdkconfig` has
+  `CONFIG_SECURE_FLASH_ENC_ENABLED`, `CONFIG_NVS_ENCRYPTION`, and
+  `CONFIG_SECURE_BOOT` all unset).
 - **The WebSocket transport is plaintext HTTP on port 80**, so an on-path
   LAN attacker reads all RPC traffic including the bearer token;
   credentials travel only in headers (an `Authorization` header, or for
