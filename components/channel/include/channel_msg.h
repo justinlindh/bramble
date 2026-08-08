@@ -12,6 +12,13 @@
 #define APP_TYPE_CHAT 0x01
 #define APP_TYPE_KE 0x02
 #define APP_TYPE_LOCATION 0x03 /* channel-shared location share (SEC-C1, PART 2) */
+/* Attested roll-call (components/rollcall). ROLLCALL is the broadcast
+ * announce, ROLLCALL_REPLY the unicast, identity-signed answer. Both ride
+ * the ordinary DATA envelope, so they inherit its channel-key AEAD, its
+ * network-key auth_hmac, the flood relay and the budget-gated TX path with
+ * no parallel machinery; only the inner app type distinguishes them. */
+#define APP_TYPE_ROLLCALL 0x04
+#define APP_TYPE_ROLLCALL_REPLY 0x05
 
 /*
  * APP_TYPE_CHAT messages carry an extra 4-byte big-endian sent_at (seconds,

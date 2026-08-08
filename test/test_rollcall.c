@@ -101,8 +101,8 @@ void test_announce_rejects_malformed(void) {
 
     /* text_len over the cap. */
     buf[5] = ROLLCALL_TEXT_MAX + 1;
-    TEST_ASSERT_FALSE(
-        rollcall_announce_decode(buf, ROLLCALL_ANNOUNCE_HEADER_SIZE + ROLLCALL_TEXT_MAX + 1u, &out));
+    size_t over_cap = ROLLCALL_ANNOUNCE_HEADER_SIZE + ROLLCALL_TEXT_MAX + 1u;
+    TEST_ASSERT_FALSE(rollcall_announce_decode(buf, over_cap, &out));
 }
 
 void test_announce_encode_rejects_bad_inputs(void) {
@@ -124,8 +124,8 @@ void test_announce_encode_rejects_bad_inputs(void) {
 
     /* Output buffer one byte short of the frame. */
     in.text_len = 4;
-    TEST_ASSERT_EQUAL_size_t(0, rollcall_announce_encode(&in, buf,
-                                                         ROLLCALL_ANNOUNCE_HEADER_SIZE + 3u));
+    size_t one_short = ROLLCALL_ANNOUNCE_HEADER_SIZE + 3u;
+    TEST_ASSERT_EQUAL_size_t(0, rollcall_announce_encode(&in, buf, one_short));
 }
 
 void test_response_round_trips_and_is_fixed_length(void) {
@@ -158,9 +158,8 @@ void test_response_round_trips_and_is_fixed_length(void) {
 
 void test_signed_msg_layout_is_domain_separated_and_bound(void) {
     uint8_t msg[ROLLCALL_MSG_SIZE];
-    TEST_ASSERT_EQUAL_size_t(ROLLCALL_MSG_SIZE,
-                             rollcall_signed_msg(0x11223344u, 0xAAAAAAAAu, 0xBBBBBBBBu, msg,
-                                                 sizeof(msg)));
+    size_t n = rollcall_signed_msg(0x11223344u, 0xAAAAAAAAu, 0xBBBBBBBBu, msg, sizeof(msg));
+    TEST_ASSERT_EQUAL_size_t(ROLLCALL_MSG_SIZE, n);
     TEST_ASSERT_EQUAL_MEMORY(ROLLCALL_MSG_CONTEXT, msg, ROLLCALL_MSG_CONTEXT_LEN);
     TEST_ASSERT_EQUAL_UINT8(0x11, msg[ROLLCALL_MSG_CONTEXT_LEN]);
     TEST_ASSERT_EQUAL_UINT8(0x44, msg[ROLLCALL_MSG_CONTEXT_LEN + 3]);
@@ -245,13 +244,14 @@ void test_another_members_key_cannot_forge_a_response(void) {
 
 void test_response_delay_is_bounded_by_the_slot_window(void) {
     const uint32_t rc_id = 0xCAFEBABEu;
+    const uint32_t widest = ROLLCALL_RESPONSE_BASE_MS +
+                            ROLLCALL_RESPONSE_SLOT_MS * ROLLCALL_SLOT_BUCKETS_MAX +
+                            ROLLCALL_RESPONSE_JITTER_MS;
     /* Dense mesh: the full 32-bucket window. */
     for (uint32_t i = 0; i < 64u; i++) {
         uint32_t d = rollcall_response_delay_ms(0x01000000u + i, rc_id, 40u, i * 7919u);
         TEST_ASSERT_TRUE(d >= ROLLCALL_RESPONSE_BASE_MS);
-        TEST_ASSERT_TRUE(d < ROLLCALL_RESPONSE_BASE_MS +
-                                  ROLLCALL_RESPONSE_SLOT_MS * ROLLCALL_SLOT_BUCKETS_MAX +
-                                  ROLLCALL_RESPONSE_JITTER_MS);
+        TEST_ASSERT_TRUE(d < widest);
     }
 }
 
@@ -385,16 +385,16 @@ void test_member_seen_table_recycles_the_oldest(void) {
     TEST_ASSERT_TRUE(rollcall_seen_claim(&t, 0x999u, 0xAAAAu, 5000u));
     TEST_ASSERT_FALSE(rollcall_seen_contains(&t, 0x100u, 0xAAAAu));
     TEST_ASSERT_TRUE(rollcall_seen_contains(&t, 0x999u, 0xAAAAu));
-    TEST_ASSERT_TRUE(
-        rollcall_seen_contains(&t, 0x100u + (ROLLCALL_SEEN_MAX - 1u), 0xAAAAu));
+    uint32_t newest_of_the_fill = 0x100u + (ROLLCALL_SEEN_MAX - 1u);
+    TEST_ASSERT_TRUE(rollcall_seen_contains(&t, newest_of_the_fill, 0xAAAAu));
 }
 
 /* ── Ledger ─────────────────────────────────────────────────────────── */
 
 static void start_anchored_ledger(rollcall_ledger_t* l, const uint32_t* expected, uint8_t n) {
     rollcall_ledger_init(l);
-    TEST_ASSERT_TRUE(rollcall_ledger_start(l, 0xABCDu, 0x0001u, 1000u, "muster", 6, expected, n,
-                                           true));
+    bool ok = rollcall_ledger_start(l, 0xABCDu, 0x0001u, 1000u, "muster", 6, expected, n, true);
+    TEST_ASSERT_TRUE(ok);
 }
 
 void test_ledger_start_records_the_operator_payload(void) {
@@ -412,8 +412,8 @@ void test_ledger_start_records_the_operator_payload(void) {
     rollcall_ledger_t bad;
     rollcall_ledger_init(&bad);
     TEST_ASSERT_FALSE(rollcall_ledger_start(&bad, 0u, 1u, 0u, NULL, 0, NULL, 0, false));
-    TEST_ASSERT_FALSE(
-        rollcall_ledger_start(&bad, 1u, 1u, 0u, "x", ROLLCALL_TEXT_MAX + 1, NULL, 0, false));
+    uint8_t over_cap_len = ROLLCALL_TEXT_MAX + 1;
+    TEST_ASSERT_FALSE(rollcall_ledger_start(&bad, 1u, 1u, 0u, "x", over_cap_len, NULL, 0, false));
     TEST_ASSERT_FALSE(bad.active);
 }
 
@@ -469,8 +469,9 @@ void test_ledger_reports_missing_only_on_an_anchored_mesh(void) {
      * what it observed. */
     rollcall_ledger_t open_mesh;
     rollcall_ledger_init(&open_mesh);
-    TEST_ASSERT_TRUE(
-        rollcall_ledger_start(&open_mesh, 0xABCDu, 0x0001u, 1000u, NULL, 0, expected, 4, false));
+    bool open_ok =
+        rollcall_ledger_start(&open_mesh, 0xABCDu, 0x0001u, 1000u, NULL, 0, expected, 4, false);
+    TEST_ASSERT_TRUE(open_ok);
     TEST_ASSERT_EQUAL_UINT8(0, open_mesh.expected_count);
     TEST_ASSERT_TRUE(rollcall_ledger_note_response(&open_mesh, 0xABCDu, 0x0002u, 1, 1500u));
     TEST_ASSERT_EQUAL_UINT8(0, rollcall_ledger_missing(&open_mesh, missing, 4));
@@ -481,8 +482,8 @@ void test_ledger_drops_self_and_null_from_the_expected_set(void) {
     const uint32_t expected[3] = {0x0002u, 0x0001u /* the initiator */, 0u};
     rollcall_ledger_t l;
     rollcall_ledger_init(&l);
-    TEST_ASSERT_TRUE(
-        rollcall_ledger_start(&l, 5u, 0x0001u, 1000u, NULL, 0, expected, 3, true));
+    bool ok = rollcall_ledger_start(&l, 5u, 0x0001u, 1000u, NULL, 0, expected, 3, true);
+    TEST_ASSERT_TRUE(ok);
     TEST_ASSERT_EQUAL_UINT8(1, l.expected_count);
     TEST_ASSERT_EQUAL_UINT32(0x0002u, l.expected[0]);
 }
@@ -516,8 +517,7 @@ void test_ledger_attaches_the_receipt_relay_path(void) {
     uint32_t deep[ROLLCALL_PATH_MAX + 4];
     for (int i = 0; i < ROLLCALL_PATH_MAX + 4; i++)
         deep[i] = (uint32_t)(0x8000u + i);
-    TEST_ASSERT_TRUE(
-        rollcall_ledger_note_path(&l, 9u, 0x0002u, ROLLCALL_PATH_MAX + 4, deep));
+    TEST_ASSERT_TRUE(rollcall_ledger_note_path(&l, 9u, 0x0002u, ROLLCALL_PATH_MAX + 4, deep));
     e = rollcall_ledger_find(&l, 0x0002u);
     TEST_ASSERT_EQUAL_UINT8(ROLLCALL_PATH_MAX, e->hop_count);
 }

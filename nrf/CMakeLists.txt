@@ -192,6 +192,7 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/ui/sas_format.c
   ${BRAMBLE_COMPONENTS}/ui/gnss_status.c
   ${BRAMBLE_COMPONENTS}/radio/radio_airtime.c
+  ${BRAMBLE_COMPONENTS}/rollcall/rollcall.c
   ${BRAMBLE_COMPONENTS}/radio/radio_profiles.c
   ${BRAMBLE_COMPONENTS}/radio/tx_gate.c
   ${BRAMBLE_COMPONENTS}/radio/tx_gate_esp.c
@@ -221,6 +222,7 @@ add_library(bramble_core STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_routing.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_channels.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_mailbox.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_rollcall.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/rreq_pseudonym.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/beacon_policy_calc.c
@@ -235,7 +237,7 @@ add_library(bramble_core STATIC
 target_include_directories(bramble_core PUBLIC ${cjson_SOURCE_DIR})
 foreach(comp packet routing routing_auth dedup dm_session fragment replay_window
         security timesync airtime freq_plan mailbox nonce_counter bramble_probe
-        channel identity location network_key msg_store reliability rpc
+        channel identity location network_key msg_store reliability rollcall rpc
         traffic_debug ui radio gps battery indicators crypto nvs_keys ota
         board_config timezone)
   target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/${comp}/include)

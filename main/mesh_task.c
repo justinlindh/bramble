@@ -832,6 +832,37 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
+    /* Attested roll-call (docs/rollcall.md). Both directions dispatch here,
+     * after the same replay/freshness gates every other DATA payload passes,
+     * and never reach the chat/fragment logic below: a roll-call is an
+     * operational primitive, not a message, and filing it into a
+     * conversation would make an audit request look like traffic somebody
+     * sent. */
+    if (info.app_type == APP_TYPE_ROLLCALL) {
+        mesh_rollcall_handle_announce(info.src_addr, info.channel_index, info.data, info.data_len);
+        /* Reuse the ordinary broadcast confirmation path, which is what
+         * gives the initiator's ledger a relay path when this mesh's receipt
+         * policy is emitting receipts at all (mesh_should_emit_broadcast_
+         * delivery_receipt). Where it is not, the ledger honestly shows no
+         * path rather than the roll-call growing a second telemetry channel
+         * of its own. */
+        confirm_data_delivery(MSG_DIR_BROADCAST_IN, info.src_addr, src_addr, rx_hdr.dest_addr,
+                              rx_hdr.packet_id, rx_hdr.packet_id, rssi);
+        return;
+    }
+    if (info.app_type == APP_TYPE_ROLLCALL_REPLY) {
+        mesh_rollcall_handle_response(info.src_addr, info.data, info.data_len);
+        /* ACK regardless of whether the signature attested: the ACK is a
+         * TRANSPORT confirmation that these bytes arrived, and the frame has
+         * already passed the network-key MAC and the channel AEAD to get
+         * here. Withholding it would only make a responder burn its
+         * MSG_TIER_NORMAL retries re-sending an answer we already hold, and
+         * would leak the verification outcome to whoever sent it. */
+        confirm_data_delivery(MSG_DIR_INCOMING, info.src_addr, src_addr, rx_hdr.dest_addr,
+                              rx_hdr.packet_id, rx_hdr.packet_id, rssi);
+        return;
+    }
+
     /* Extract the text message from the decrypted payload */
     if (info.data_len > 0) {
         /* Check if this is a fragment */
@@ -1644,6 +1675,13 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
 
     /* Drain due jittered channel-flood relays (Task 5) every loop iteration */
     process_flood_relay_queue(t);
+
+    /* Attested roll-call: re-announce rounds, staggered answers, ledger
+     * close. Deliberately driven from this existing tick rather than a
+     * dedicated timer, so the primitive adds no task, no timer handle and
+     * one pointer of static RAM; it returns immediately on a node that has
+     * never taken part in a roll-call. */
+    mesh_rollcall_tick(t);
 
     /* Discovery retries (check every 5s) */
     static uint32_t last_disc_check = 0;

@@ -2,7 +2,7 @@ set(main_srcs
     "main.c" "mesh_task.c"
     "mesh_beacon.c" "mesh_reliability.c" "mesh_probe.c" "mesh_dm.c"
     "mesh_routing.c" "mesh_location.c" "mesh_mailbox.c" "mesh_persist.c"
-    "mesh_channels.c"
+    "mesh_channels.c" "mesh_rollcall.c"
     "broadcast_delivery_receipt.c" "delivery_event_ring.c"
     "rpc_methods.c" "ws_server.c"
     "rpc_token.c" "ws_origin.c" "ws_auth_credential.c"
@@ -27,7 +27,7 @@ if(${target} STREQUAL "linux")
                  keyboard trackball location gps sdcard audio
                  ui_graphics traffic_debug fragment timesync mailbox timezone
                  nonce_counter replay_window dm_session network_key routing_auth
-                 null_drivers
+                 rollcall null_drivers
     )
 else()
     idf_component_register(
@@ -42,6 +42,7 @@ else()
                  keyboard trackball location gps sdcard audio
                  ui_graphics traffic_debug fragment timesync mailbox timezone
                  bootloader_support nonce_counter replay_window dm_session network_key routing_auth
+                 rollcall
 
         PRIV_REQUIRES lvgl__lvgl
     )

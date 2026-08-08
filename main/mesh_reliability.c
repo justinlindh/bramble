@@ -788,6 +788,15 @@ void handle_delivery_receipt(const uint8_t* data, uint8_t len, int16_t rssi, int
 #endif
     }
 
+    /* An attested roll-call's announce is an ordinary broadcast, so the
+     * receipts it draws are these same verified, replay-checked frames. When
+     * orig_packet_id matches one of our announce rounds the receipt's relay
+     * path lands on the responder's ledger row; otherwise this is a no-op.
+     * This is the whole of the roll-call's path reporting: there is no
+     * roll-call-specific telemetry frame. */
+    mesh_rollcall_note_receipt(receipt.src_addr, receipt.orig_packet_id, receipt.hop_count,
+                               receipt.relay_path);
+
     mesh_emit_broadcast_delivery_notification(receipt.src_addr, receipt.orig_packet_id, rssi,
                                               receipt.hop_count, receipt.relay_path);
 }
