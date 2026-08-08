@@ -31,6 +31,17 @@ bool chat_message_has_details_toggle(bool is_outgoing, uint32_t packet_id) {
     return is_outgoing && packet_id != 0;
 }
 
+bool chat_message_is_retryable(bool is_outgoing, int16_t channel_index, msg_status_t status,
+                               uint32_t uid) {
+    /* Deliberately independent of packet_id. A DM that exhausted its attempts
+     * without ever reaching the air (queued for a route or a session that
+     * never came) carries packet_id 0, and that is the failure a user is most
+     * likely to want to retry; gating on a packet id would hide the button
+     * from exactly those messages. uid is the row identity and is never 0 for
+     * a stored row, so it is what a resend reconciles against. */
+    return is_outgoing && channel_index < 0 && status == MSG_STATUS_FAILED && uid != 0;
+}
+
 bool chat_message_route_is_informative(bool is_outgoing, int16_t channel_index,
                                        uint8_t route_hop_count) {
     return is_outgoing && channel_index < 0 && route_hop_count > 2;

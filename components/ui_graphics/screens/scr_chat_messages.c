@@ -29,7 +29,7 @@ static lv_obj_t* s_msg_list = NULL;
 static lv_obj_t* s_compose_ta = NULL;
 static lv_obj_t* s_send_btn = NULL;
 static lv_obj_t* s_title = NULL;
-static uint32_t s_selected_packet_id = 0;
+static uint32_t s_selected_uid = 0;
 
 /* DM header presence: a dot beside the peer name saying whether a message sent
  * right now has anywhere to go. Both are ui_zone_track'd, so LVGL nulls them
@@ -230,7 +230,7 @@ static void back_to_list_async(void* arg) {
      * the four tracked widget handles, so the thread reads as closed. */
     s_active_channel = -1;
     s_target = chat_target_default();
-    s_selected_packet_id = 0;
+    s_selected_uid = 0;
     lv_refr_now(lv_display_get_default());
     layout_rebuild_content(layout, chat_list_builder, NULL);
 }
@@ -310,14 +310,22 @@ static void retry_async(void* arg) {
             break;
         }
     }
-    if (!found || msg.status != MSG_STATUS_FAILED || msg.direction != MSG_DIR_OUTGOING ||
-        msg.channel_index >= 0) {
-        ESP_LOGW(TAG, "retry uid=%lu: no longer a failed outgoing DM", (unsigned long)uid);
+    if (!found || !chat_message_is_retryable(msg.direction == MSG_DIR_OUTGOING, msg.channel_index,
+                                             msg.status, msg.uid)) {
+        /* The row moved on between the render and the tap (a late ACK, or the
+         * ring rotated it out). Say so rather than no-opping: a button that
+         * silently does nothing reads as broken hardware. */
+        ESP_LOGW(TAG, "retry uid=%lu: found=%d no longer a retryable DM", (unsigned long)uid,
+                 (int)found);
+        ui_toast_show("Nothing to retry");
+        render_messages_for_target(false);
         return;
     }
 
-    if (mesh_resend_message(msg.peer_addr, (const uint8_t*)msg.text, msg.text_len, uid) == 0) {
-        ESP_LOGW(TAG, "retry uid=%lu: send failed", (unsigned long)uid);
+    uint32_t pkt = mesh_resend_message(msg.peer_addr, (const uint8_t*)msg.text, msg.text_len, uid);
+    ESP_LOGI(TAG, "retry uid=%lu to %08lX: pkt=%08lX", (unsigned long)uid,
+             (unsigned long)msg.peer_addr, (unsigned long)pkt);
+    if (pkt == 0) {
         ui_toast_show("Retry failed");
     } else {
         ui_toast_show("Retrying");
@@ -333,15 +341,15 @@ static void retry_click_cb(lv_event_t* e) {
 }
 
 static void msg_bubble_click_cb(lv_event_t* e) {
-    uint32_t packet_id = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
-    if (packet_id == 0) {
+    uint32_t uid = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
+    if (uid == 0) {
         return;
     }
 
-    if (s_selected_packet_id == packet_id) {
-        s_selected_packet_id = 0;
+    if (s_selected_uid == uid) {
+        s_selected_uid = 0;
     } else {
-        s_selected_packet_id = packet_id;
+        s_selected_uid = uid;
     }
     /* The re-render cleans s_msg_list, which owns this very bubble: defer it
      * out of the bubble's own CLICKED dispatch. */
@@ -399,7 +407,12 @@ static void build_receipt_summary(char* out, size_t out_len, uint32_t packet_id,
                                   msg_status_t status) {
     uint32_t addrs[4];
     size_t total = 0;
-    size_t shown = mesh_delivery_receipts_for_message(packet_id, addrs, 4, &total);
+    /* packet_id 0 means the message never reached the air, so it has no
+     * identity in the receipt ring; querying with 0 would ask the ring a
+     * question about a packet that was never sent. Fall straight through to
+     * the status line. */
+    size_t shown =
+        (packet_id != 0) ? mesh_delivery_receipts_for_message(packet_id, addrs, 4, &total) : 0;
     if (total == 0) {
         if (status == MSG_STATUS_DELIVERED) {
             snprintf(out, out_len, "Delivered");
@@ -570,10 +583,12 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
     /* The bubble is this row's focus target for the trackball: navigating the
      * content zone walks bubbles (chat_sync_content_group adds them), a focus
-     * border shows which one is selected, and the packet id lets a re-render
-     * restore focus to the same message. */
+     * border shows which one is selected, and the row uid lets a re-render
+     * restore focus to the same message. The uid rather than the packet id,
+     * because every stored row has a uid while a message that never reached
+     * the air has packet_id 0, which reads as "no message" here. */
     ui_zone_style_content(bubble);
-    lv_obj_set_user_data(bubble, (void*)(uintptr_t)msg->packet_id);
+    lv_obj_set_user_data(bubble, (void*)(uintptr_t)msg->uid);
 
     if (is_mine) {
         lv_obj_align(bubble, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -657,9 +672,14 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         lv_style_set_text_color(meta_style, meta_color);
     }
 
-    bool can_expand = chat_message_has_details_toggle(is_mine, msg->packet_id);
-    /* can_expand guarantees packet_id != 0, so the equality alone selects. */
-    bool route_expanded = can_expand && msg->packet_id == s_selected_packet_id;
+    /* Expansion is keyed on uid, not packet_id: every stored row carries a
+     * nonzero uid, while a message that failed before it ever reached the air
+     * has packet_id 0. Keying on packet_id made those rows unselectable, which
+     * is also why a retryable message has to be able to expand on its own
+     * (chat_message_is_retryable), independent of having a packet id. */
+    bool can_retry = chat_message_is_retryable(is_mine, msg->channel_index, msg->status, msg->uid);
+    bool can_expand = chat_message_has_details_toggle(is_mine, msg->packet_id) || can_retry;
+    bool route_expanded = can_expand && msg->uid != 0 && msg->uid == s_selected_uid;
 
     /* Hug a single line that fits under the cap; wrap (and cap the bubble
      * width) otherwise. lv_spangroup_get_expand_width measures from font
@@ -712,18 +732,20 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
             lv_obj_set_style_text_color(receipt_lbl, BR_COLOR_TEXT_SEC, 0);
 
             /* A message that exhausted its delivery attempts is a dead end
-             * otherwise: the only recourse was to retype it. Offered on DMs
-             * only, which is also the only thing that can reach FAILED (a
-             * broadcast or channel send is not ACK-tracked, so it never gets a
-             * failure verdict to retry from). uid 0 means a row stored before
-             * uids existed, which has nothing to reconcile against. */
-            if (msg->status == MSG_STATUS_FAILED && msg->channel_index < 0 && msg->uid != 0) {
+             * otherwise: the only recourse was to retype it. */
+            if (can_retry) {
                 lv_obj_t* retry_btn = lv_btn_create(bubble);
                 lv_obj_set_size(retry_btn, 72, BR_TAP_TARGET_MIN);
                 lv_obj_set_style_bg_color(retry_btn, BR_COLOR_SURFACE_2, 0);
                 lv_obj_set_style_radius(retry_btn, BR_RADIUS, 0);
                 lv_obj_set_style_shadow_width(retry_btn, 0, 0);
                 lv_obj_set_style_pad_all(retry_btn, 2, 0);
+
+                /* Same focus border every other content widget carries. The
+                 * button is walked by the trackball (spliced into the content
+                 * group below), and without this the cursor lands on it
+                 * invisibly. */
+                ui_zone_style_content(retry_btn);
 
                 lv_obj_t* retry_lbl = lv_label_create(retry_btn);
                 lv_label_set_text(retry_lbl, LV_SYMBOL_REFRESH " Retry");
@@ -733,7 +755,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
                 lv_obj_add_event_cb(retry_btn, retry_click_cb, LV_EVENT_CLICKED,
                                     (void*)(uintptr_t)msg->uid);
-                /* At most one bubble is expanded at a time (s_selected_packet_id
+                /* At most one bubble is expanded at a time (s_selected_uid
                  * is a single value), so one pointer is enough for
                  * chat_sync_content_group to splice this into the trackball
                  * walk right after its own bubble. */
@@ -743,7 +765,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
         lv_obj_add_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(bubble, msg_bubble_click_cb, LV_EVENT_CLICKED,
-                            (void*)(uintptr_t)msg->packet_id);
+                            (void*)(uintptr_t)msg->uid);
     }
 }
 
@@ -751,7 +773,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
  * trackball walks bubbles top-to-bottom, then the compose box, then the send
  * button. lv_obj_clean recreates every bubble on each render, so the group is
  * torn down and reassembled each pass; focus is restored to the same widget by
- * identity (compose/send) or by packet id (a bubble), which keeps a route
+ * identity (compose/send) or by row uid (a bubble), which keeps a details
  * toggle or a fresh arrival from yanking the focus ring. */
 static void chat_sync_content_group(void) {
     lv_group_t* cg = ui_zone_content_group();
@@ -761,7 +783,7 @@ static void chat_sync_content_group(void) {
     lv_obj_t* foc = lv_group_get_focused(cg);
     bool foc_compose = (foc && foc == s_compose_ta);
     bool foc_send = (foc && foc == s_send_btn);
-    uint32_t foc_pkt =
+    uint32_t foc_uid =
         (foc && !foc_compose && !foc_send) ? (uint32_t)(uintptr_t)lv_obj_get_user_data(foc) : 0;
 
     lv_group_remove_all_objs(cg);
@@ -774,7 +796,7 @@ static void chat_sync_content_group(void) {
         if (!target)
             continue;
         lv_group_add_obj(cg, target);
-        if (foc_pkt && (uint32_t)(uintptr_t)lv_obj_get_user_data(target) == foc_pkt)
+        if (foc_uid && (uint32_t)(uintptr_t)lv_obj_get_user_data(target) == foc_uid)
             restore = target;
         /* Retry sits inside its bubble, so the row walk above would skip it and
          * leave it touch-only. Splice it in directly after its own bubble, which
@@ -1056,7 +1078,7 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
                              int clear_channel_idx) {
     s_target = target;
     s_active_channel = (s_target.kind == CHAT_TARGET_CHANNEL) ? s_target.channel_index : 0;
-    s_selected_packet_id = 0;
+    s_selected_uid = 0;
 
     if (clear_channel_idx >= 0) {
         chat_unread_clear_for_channel(clear_channel_idx);

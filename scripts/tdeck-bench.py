@@ -26,6 +26,16 @@ used; otherwise the first node whose hardware looks like a T-Deck is used.
 Ports RENUMBER whenever anything replugs, so never hardcode one; set
 TDECK_PORT or TDECK_ADDR for your own bench instead.
 
+Display sleep eats the first press. Once sleep_manager has blanked the panel
+(default idle timeout), the next injected input is consumed as the wake event
+and never reaches the focused widget, while screenshots keep returning a
+perfectly normal-looking frame. A driving script that pauses between steps
+therefore loses roughly every other press, and the symptom is "the button does
+nothing" -- this burned a whole verification round once. Lead every burst with
+one throwaway press, keep the steps close together, and if a press seems to
+vanish, check for "sleep_mgr: Waking from sleep" in the device log
+(scripts/bramble-rpc --log --linger N).
+
 The injectInput contract (a wrong field name silently no-ops -- this burned a
 whole verification round once):
     {"type":"trackball","dir":"up"|"down"|"left"|"right"|"select"}
