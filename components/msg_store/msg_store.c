@@ -408,6 +408,43 @@ int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int m
     return n;
 }
 
+bool msg_store_next_parked_peer(uint32_t after_peer_addr, uint32_t* out_peer_addr) {
+    if (!out_peer_addr) {
+        return false;
+    }
+    bool found_any = false;
+    uint32_t lowest = 0;     /* lowest parked peer overall, for the wrap */
+    uint32_t next_above = 0; /* lowest parked peer above after_peer_addr */
+    bool found_above = false;
+    MSG_LOCK();
+    if (s_msgs) {
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        for (int i = 0; i < s_count; i++) {
+            const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
+            if (m->direction != MSG_DIR_OUTGOING || m->channel_index >= 0) {
+                continue;
+            }
+            if (m->status != MSG_STATUS_QUEUED || m->uid == 0) {
+                continue;
+            }
+            if (!found_any || m->peer_addr < lowest) {
+                lowest = m->peer_addr;
+                found_any = true;
+            }
+            if (m->peer_addr > after_peer_addr && (!found_above || m->peer_addr < next_above)) {
+                next_above = m->peer_addr;
+                found_above = true;
+            }
+        }
+    }
+    MSG_UNLOCK();
+    if (!found_any) {
+        return false;
+    }
+    *out_peer_addr = found_above ? next_above : lowest;
+    return true;
+}
+
 bool msg_store_peer_for_uid(uint32_t uid, uint32_t* out_peer_addr) {
     if (!out_peer_addr || uid == 0) {
         return false;

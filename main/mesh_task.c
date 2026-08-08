@@ -104,6 +104,7 @@ static void traffic_event_notify(const traffic_event_t* evt, void* ctx);
 bramble_identity_t* s_identity;
 uint8_t s_beacon_key[BRAMBLE_KEY_SIZE]; /* shared key for beacon HMAC */
 neighbor_table_t s_neighbors;
+parked_sweep_t s_parked_sweep;
 dedup_buffer_t s_dedup;
 /* Task 5 (channel flood): a SEPARATE dedup buffer from s_dedup, keyed
  * src_addr-qualified (packet_id ^ src_addr), not just packet_id. s_dedup's
@@ -1520,6 +1521,42 @@ uint32_t s_probe_next_round_ms;
 bool s_probe_request_pending;
 uint32_t s_probe_request_id;
 
+/* Give one peer with parked messages a turn, on a timer rather than on any
+ * event. The beacon triggers can only ever reach peers this node hears
+ * directly; a peer two hops away sends this node no beacons at all, so a
+ * message parked for it has no other way out, and the user who parked it
+ * cannot tell one hop from two. The attempt itself is what makes the
+ * multi-hop case work: with no route, mesh_send_message_uid starts discovery
+ * and queues the message for it, and the existing route-established trigger
+ * finishes the send.
+ *
+ * One peer per interval, whatever the backlog, so the airtime this can add is
+ * a fixed rate rather than one that scales with how much is parked. With
+ * several parked peers each waits its turn, so a peer's own retry period is
+ * the sweep interval times the number of parked peers.
+ *
+ * Direct neighbors are passed over, not attempted: they belong to the beacon
+ * trigger, and letting both count down against one peer is how the same rows
+ * end up queued twice.
+ *
+ * Runs on the mesh task, from the maintenance tick rather than the packet RX
+ * path, and holds no lock: mesh_flush_parked_for transmits. Costs a node with
+ * nothing parked one message-store pass per interval and nothing else. */
+static void sweep_parked_messages(uint32_t t) {
+    if (!parked_retry_sweep_due(&s_parked_sweep, t))
+        return;
+    uint32_t peer = 0;
+    if (!msg_store_next_parked_peer(s_parked_sweep.last_peer, &peer))
+        return; /* nothing parked anywhere: the overwhelmingly common case */
+    if (neighbor_lookup(&s_neighbors, peer) != NULL) {
+        parked_retry_sweep_skipped(&s_parked_sweep, peer);
+        return;
+    }
+    parked_retry_swept(&s_parked_sweep, peer, t);
+    ESP_LOGI(TAG, "Parked sweep: trying %08" PRIX32, peer);
+    mesh_flush_parked_for(peer);
+}
+
 static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                                       uint32_t* beacon_interval, uint32_t* last_purge_ms) {
     /* Update adaptive beacon interval based on mesh conditions */
@@ -1573,6 +1610,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
     if (s_attestation_wait_ms != 0 && (t - s_attestation_last_ms) >= s_attestation_wait_ms) {
         attempt_identity_attestation(t);
     }
+
+    sweep_parked_messages(t);
 
     /* Periodic neighbor purge + route maintenance */
     if ((t - *last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
@@ -2456,6 +2495,15 @@ _Static_assert(PARKED_RETRY_COOLDOWN_MS > DM_QUEUE_TTL_MS + NEIGHBOR_PURGE_INTER
                "parked retry can re-queue a DM still awaiting a session");
 _Static_assert(PARKED_RETRY_COOLDOWN_MS > 60000 + NEIGHBOR_PURGE_INTERVAL,
                "parked retry can re-queue a DM still awaiting a route");
+/* Same floor for the timer-driven sweep, which re-queues the same way. It
+ * reaches one peer per interval, so the interval IS that peer's spacing; and
+ * where the two triggers could both reach one peer, the sweep holds the beacon
+ * path off for a cooldown (parked_retry_beacon_should_flush), so every pair of
+ * attempts on one peer is at least the smaller of these two apart. */
+_Static_assert(PARKED_RETRY_SWEEP_MS > DM_QUEUE_TTL_MS + NEIGHBOR_PURGE_INTERVAL,
+               "parked sweep can re-queue a DM still awaiting a session");
+_Static_assert(PARKED_RETRY_SWEEP_MS > 60000 + NEIGHBOR_PURGE_INTERVAL,
+               "parked sweep can re-queue a DM still awaiting a route");
 
 int mesh_flush_parked_for(uint32_t peer_addr) {
     /* static: mesh_flush_parked_for runs only on the mesh task, never

@@ -17,12 +17,14 @@
 #include "routing.h"
 
 static neighbor_table_t s_nb;
+static parked_sweep_t s_sweep;
 static int s_store_scans;          /* flush attempts, i.e. scans of the message store */
 static bool s_resend_succeeds;     /* whether the faked transmit lands an ACK */
 static uint32_t s_resend_fail_uid; /* one uid the faked transmit refuses, 0 for none */
 
 void setUp(void) {
     neighbor_init(&s_nb);
+    memset(&s_sweep, 0, sizeof(s_sweep));
     msg_store_init();
     s_store_scans = 0;
     s_resend_succeeds = true;
@@ -53,11 +55,40 @@ static int fake_flush_parked_for(uint32_t peer_addr) {
 static int beacon_from(uint32_t peer_addr, uint32_t now_ms) {
     int idx = neighbor_update(&s_nb, peer_addr, -60, 8, 0xABCDu, now_ms);
     bool is_new_peer = neighbor_is_newly_admitted(&s_nb, idx, now_ms);
-    if (!parked_retry_beacon_should_flush(&s_nb, peer_addr, is_new_peer, now_ms))
+    if (!parked_retry_beacon_should_flush(&s_nb, &s_sweep, peer_addr, is_new_peer, now_ms))
         return -1;
     int found = fake_flush_parked_for(peer_addr);
     parked_retry_flushed(&s_nb, peer_addr, found, now_ms);
     return found;
+}
+
+/* Mirrors the parked sweep in mesh_periodic_maintenance (mesh_task.c): once
+ * per sweep interval, take the next peer with parked messages and try it,
+ * unless it is a direct neighbor, which the beacon trigger owns. Returns the
+ * peer it attempted, or 0. */
+static uint32_t sweep_at(uint32_t now_ms) {
+    if (!parked_retry_sweep_due(&s_sweep, now_ms))
+        return 0;
+    uint32_t peer = 0;
+    if (!msg_store_next_parked_peer(s_sweep.last_peer, &peer))
+        return 0;
+    if (neighbor_lookup(&s_nb, peer) != NULL) {
+        parked_retry_sweep_skipped(&s_sweep, peer);
+        return 0;
+    }
+    parked_retry_swept(&s_sweep, peer, now_ms);
+    fake_flush_parked_for(peer);
+    return peer;
+}
+
+/* An hour of ordinary life: one in-range peer beaconing on cadence, and the
+ * maintenance tick running at the same 60s period the firmware uses. */
+static void run_an_hour_from(uint32_t start_ms, uint32_t chatty_peer) {
+    for (uint32_t t = start_ms; t <= start_ms + 3600000u; t += 60000u) {
+        if (chatty_peer != 0)
+            beacon_from(chatty_peer, t);
+        sweep_at(t);
+    }
 }
 
 /* Mirrors mesh_park_message (mesh_task.c): move a failed outgoing DM to
@@ -224,6 +255,116 @@ void test_a_peer_readmitted_into_a_full_table_still_flushes(void) {
     TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, status_of(uid));
 }
 
+/* 3f. The peer that is not a neighbour at all. A DM to a peer two hops away
+ * is an ordinary send that can fail and be parked like any other, and the user
+ * cannot tell one hop from two, so the promise is the same. But that peer
+ * sends this node no beacons, so no beacon-driven trigger can ever fire for
+ * it: neither the rejoin edge nor an armed entry, because it has no entry to
+ * arm. Only the sweep reaches it. */
+void test_a_parked_message_reaches_a_peer_that_is_not_a_neighbour(void) {
+    const uint32_t multi_hop = 0x99DD00EEu;
+    const uint32_t chatty = 0x1111FFFFu;
+
+    beacon_from(chatty, 1000);
+    uint32_t uid = park_dm_for(multi_hop, "two hops away", 2000);
+    TEST_ASSERT_FALSE(parked_retry_arm(&s_nb, multi_hop, 2000)); /* no entry to arm */
+
+    run_an_hour_from(60000, chatty);
+
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_DELIVERED, status_of(uid),
+                              "a peer reachable only over a route sends no beacons, so nothing "
+                              "ever retried it: an hour of parked message, undelivered");
+}
+
+/* 3g. The sweep obeys the same spacing as everything else. */
+void test_the_sweep_attempts_a_stuck_peer_once_per_sweep_interval(void) {
+    const uint32_t multi_hop = 0x99DD00EEu;
+    s_resend_succeeds = false;
+
+    park_dm_for(multi_hop, "still trying", 1000);
+    int before = s_store_scans;
+
+    run_an_hour_from(60000, 0);
+
+    /* One attempt at the first opportunity, then one per interval, and never
+     * one per maintenance tick (which would be 61 over this hour). */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1 + 3600000u / PARKED_RETRY_SWEEP_MS, s_store_scans - before,
+                                  "the sweep must pace itself the same way the beacon path does");
+}
+
+/* 3h. The two triggers must not both attempt the same peer inside the window
+ * where the send queue still holds the first attempt: the queue takes the
+ * first free slot without keying on uid, so that would put one written message
+ * on the air twice. */
+void test_a_peer_the_sweep_just_tried_is_not_immediately_retried_by_its_beacon(void) {
+    const uint32_t peer = 0xAB00CD00u;
+    s_resend_succeeds = false;
+
+    park_dm_for(peer, "hello?", 1000);
+    TEST_ASSERT_EQUAL_HEX32(peer, sweep_at(2000)); /* not a neighbour yet: swept */
+    int after_sweep = s_store_scans;
+
+    /* It turns up as a direct neighbour moments later, which is the rejoin
+     * edge and would otherwise flush unconditionally. */
+    TEST_ASSERT_EQUAL_INT(-1, beacon_from(peer, 3000));
+    TEST_ASSERT_EQUAL_INT(after_sweep, s_store_scans);
+
+    /* The held edge is deferred, not lost: the peer joined while held, so
+     * nothing else would ever have flushed it (the sweep passes over
+     * neighbours), and it must go out when the hold ends. */
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 2000 + PARKED_RETRY_COOLDOWN_MS));
+}
+
+/* 3i. The sweep leaves direct neighbours to the beacon trigger, so the two
+ * cannot both be counting down against the same peer. */
+void test_the_sweep_passes_over_a_direct_neighbour_and_moves_on(void) {
+    const uint32_t neighbour = 0x00000100u;
+    const uint32_t multi_hop = 0x00000200u;
+    s_resend_succeeds = false;
+
+    beacon_from(neighbour, 1000);
+    park_dm_for(neighbour, "you are close", 2000);
+    park_dm_for(multi_hop, "you are far", 2100);
+
+    /* Lowest address first, and it is a neighbour, so the sweep passes over
+     * it without attempting anything. */
+    TEST_ASSERT_EQUAL_HEX32(0, sweep_at(3000));
+    /* The rotation still advanced, so the next sweep reaches the far peer. */
+    TEST_ASSERT_EQUAL_HEX32(multi_hop, sweep_at(3000 + PARKED_RETRY_SWEEP_MS));
+    /* And the neighbour's own trigger was never held off by that pass: its
+     * one parked row still goes out on its own beacon. */
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(neighbour, 3000 + PARKED_RETRY_SWEEP_MS + 1000));
+}
+
+/* 3j. Rotation: every parked peer gets a turn, none starves. */
+void test_the_sweep_gives_each_parked_peer_a_turn(void) {
+    s_resend_succeeds = false;
+    park_dm_for(0x300u, "c", 1000);
+    park_dm_for(0x100u, "a", 1100);
+    park_dm_for(0x200u, "b", 1200);
+
+    uint32_t t = 2000;
+    TEST_ASSERT_EQUAL_HEX32(0x100u, sweep_at(t));
+    t += PARKED_RETRY_SWEEP_MS;
+    TEST_ASSERT_EQUAL_HEX32(0x200u, sweep_at(t));
+    t += PARKED_RETRY_SWEEP_MS;
+    TEST_ASSERT_EQUAL_HEX32(0x300u, sweep_at(t));
+    t += PARKED_RETRY_SWEEP_MS;
+    TEST_ASSERT_EQUAL_HEX32(0x100u, sweep_at(t)); /* wrapped, nobody starved */
+}
+
+/* 3k. Nothing parked: the sweep costs one selection pass and never a flush. */
+void test_the_sweep_does_nothing_at_all_when_nothing_is_parked(void) {
+    const uint32_t chatty = 0x1111FFFFu;
+    beacon_from(chatty, 1000);
+    int before = s_store_scans;
+
+    run_an_hour_from(60000, chatty);
+
+    TEST_ASSERT_EQUAL_INT_MESSAGE(before, s_store_scans,
+                                  "an idle node must not flush anything on the sweep");
+}
+
 /* 4. The no-parked-messages case, which is nearly all of the time. */
 void test_a_known_peer_with_nothing_parked_never_scans_the_store(void) {
     const uint32_t peer = 0xEE550055u;
@@ -325,6 +466,12 @@ int main(void) {
     RUN_TEST(test_a_failed_rejoin_flush_still_leaves_a_trigger);
     RUN_TEST(test_a_partial_flush_keeps_a_trigger_for_the_row_left_behind);
     RUN_TEST(test_a_peer_readmitted_into_a_full_table_still_flushes);
+    RUN_TEST(test_a_parked_message_reaches_a_peer_that_is_not_a_neighbour);
+    RUN_TEST(test_the_sweep_attempts_a_stuck_peer_once_per_sweep_interval);
+    RUN_TEST(test_a_peer_the_sweep_just_tried_is_not_immediately_retried_by_its_beacon);
+    RUN_TEST(test_the_sweep_passes_over_a_direct_neighbour_and_moves_on);
+    RUN_TEST(test_the_sweep_gives_each_parked_peer_a_turn);
+    RUN_TEST(test_the_sweep_does_nothing_at_all_when_nothing_is_parked);
     RUN_TEST(test_a_known_peer_with_nothing_parked_never_scans_the_store);
     RUN_TEST(test_a_flush_that_finds_nothing_disarms_the_peer);
     RUN_TEST(test_delivering_the_last_parked_message_stops_the_retries);

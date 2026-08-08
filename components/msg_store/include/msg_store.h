@@ -215,6 +215,20 @@ bool msg_store_get_copy_by_uid(uint32_t uid, stored_msg_t* out);
 bool msg_store_peer_for_uid(uint32_t uid, uint32_t* out_peer_addr);
 
 /**
+ * Rotate to the next peer that has parked messages: the lowest peer address
+ * above after_peer_addr, or the lowest of all of them if nothing sorts above
+ * it. Returns false only when nothing at all is parked.
+ *
+ * Passing back the previous answer walks every distinct parked peer in turn
+ * and then wraps, which is what lets a caller give each one a turn from a
+ * single uint32 of state. Ascending address order is arbitrary but stable,
+ * and stable is the property that matters: it cannot starve a peer or visit
+ * one twice per lap. Selects the same rows msg_store_parked_uids_for_peer
+ * does (outgoing, channel-less, MSG_STATUS_QUEUED).
+ */
+bool msg_store_next_parked_peer(uint32_t after_peer_addr, uint32_t* out_peer_addr);
+
+/**
  * Update delivery status for a message by packet_id.
  * Returns true if found and updated.
  */

@@ -258,6 +258,57 @@ void test_peer_for_uid_survives_ring_wrap(void) {
     TEST_ASSERT_EQUAL_UINT32(0xBBBB, peer);
 }
 
+void test_next_parked_peer_rotates_over_every_parked_peer_and_wraps(void) {
+    msg_store_init();
+    /* Stored out of address order on purpose: the rotation is defined by
+     * address, not by insertion. */
+    msg_store_add_dm_uid(0x300, MSG_DIR_OUTGOING, "c", 1, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    msg_store_add_dm_uid(0x100, MSG_DIR_OUTGOING, "a", 1, 0, 0, 0, MSG_STATUS_QUEUED, 2);
+    msg_store_add_dm_uid(0x200, MSG_DIR_OUTGOING, "b", 1, 0, 0, 0, MSG_STATUS_QUEUED, 3);
+    msg_store_add_dm_uid(0x200, MSG_DIR_OUTGOING, "b2", 2, 0, 0, 0, MSG_STATUS_QUEUED, 4);
+
+    uint32_t peer = 0;
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer));
+    TEST_ASSERT_EQUAL_HEX32(0x100, peer);
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer));
+    TEST_ASSERT_EQUAL_HEX32(0x200, peer); /* two rows, still one turn */
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer));
+    TEST_ASSERT_EQUAL_HEX32(0x300, peer);
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer));
+    TEST_ASSERT_EQUAL_HEX32(0x100, peer); /* wrapped */
+}
+
+void test_next_parked_peer_ignores_everything_that_is_not_a_parked_dm(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0x100, MSG_DIR_OUTGOING, "failed", 6, 0, 0, 0, MSG_STATUS_FAILED, 1);
+    msg_store_add_dm_uid(0x200, MSG_DIR_INCOMING, "in", 2, 0, 0, 0, MSG_STATUS_NONE, 2);
+    msg_store_add_channel(0x300, MSG_DIR_OUTGOING, "ch", 2, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    uint32_t peer = 0xDEAD;
+    TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, &peer));
+    TEST_ASSERT_EQUAL_HEX32(0xDEAD, peer); /* untouched when nothing is parked */
+
+    /* One real parked DM and it is found regardless of where the cursor is. */
+    msg_store_add_dm_uid(0x400, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 3);
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer));
+    TEST_ASSERT_EQUAL_HEX32(0x400, peer);
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0xFFFFFFFF, &peer));
+    TEST_ASSERT_EQUAL_HEX32(0x400, peer);
+    TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, NULL));
+}
+
+void test_next_parked_peer_survives_ring_wrap(void) {
+    msg_store_init();
+    for (int i = 0; i < 2 * MSG_STORE_MAX - 1; i++) {
+        msg_store_add(0x9999, MSG_DIR_INCOMING, "filler", 6, -70, 5);
+    }
+    msg_store_add_dm_uid(0x500, MSG_DIR_OUTGOING, "late", 4, 0, 0, 0, MSG_STATUS_QUEUED, 77);
+
+    uint32_t peer = 0;
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer));
+    TEST_ASSERT_EQUAL_HEX32(0x500, peer);
+}
+
 void test_update_by_uid_refuses_queued_to_failed(void) {
     /* Parked is sticky: a send attempt failing must never silently un-park a
      * QUEUED row, or a parked message stops flushing on the next rejoin
@@ -383,6 +434,9 @@ int main(void) {
     RUN_TEST(test_get_copy_by_uid_survives_ring_wrap);
     RUN_TEST(test_peer_for_uid_reads_the_recipient_without_a_row_copy);
     RUN_TEST(test_peer_for_uid_survives_ring_wrap);
+    RUN_TEST(test_next_parked_peer_rotates_over_every_parked_peer_and_wraps);
+    RUN_TEST(test_next_parked_peer_ignores_everything_that_is_not_a_parked_dm);
+    RUN_TEST(test_next_parked_peer_survives_ring_wrap);
     RUN_TEST(test_update_by_uid_refuses_queued_to_failed);
     RUN_TEST(test_update_by_uid_allows_queued_to_sent);
     RUN_TEST(test_update_by_uid_allows_queued_to_delivered);

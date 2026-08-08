@@ -25,6 +25,41 @@
  */
 #define PARKED_RETRY_COOLDOWN_MS 300000u
 
+/* How often the node picks one peer with parked messages and tries it,
+ * independent of any beacon. Equal to the cooldown and constrained by the same
+ * floor (the compile-time assertions next to mesh_flush_parked_for cover both),
+ * because a sweep re-queues a DM exactly as a beacon-driven retry does.
+ */
+#define PARKED_RETRY_SWEEP_MS 300000u
+
+/* The sweep's entire state, owned by the mesh task and touched only there.
+ * Zero-initialised means "sweep at the first opportunity", which is what a
+ * node wants after a reboot: parked rows persist in flash, nothing is armed
+ * yet, and a peer reachable only over a route will never send a beacon to
+ * announce itself. */
+typedef struct {
+    uint32_t next_sweep_ms; /* uptime the next sweep may run at */
+    uint32_t last_peer;     /* peer the last sweep looked at; also the rotation cursor */
+    uint32_t hold_until_ms; /* until then, a beacon must not re-attempt last_peer */
+} parked_sweep_t;
+
+/* True if a sweep may run now, and schedule the next one either way. Consumes
+ * the due-ness, so call it once per opportunity: a false keeps the caller off
+ * the message store entirely, which is what keeps a node with nothing parked
+ * paying nothing. */
+bool parked_retry_sweep_due(parked_sweep_t* s, uint32_t now_ms);
+
+/* Record that the sweep ATTEMPTED peer_addr: advances the rotation and holds
+ * the beacon path off that peer for one cooldown, so a peer that starts
+ * beaconing seconds after a sweep tried it cannot have its rows queued twice. */
+void parked_retry_swept(parked_sweep_t* s, uint32_t peer_addr, uint32_t now_ms);
+
+/* Record that the sweep passed OVER peer_addr without attempting it (it is a
+ * direct neighbor, so the beacon trigger owns it). Advances the rotation and
+ * nothing else: holding a peer the sweep did not touch would suppress the
+ * trigger that does own it. */
+void parked_retry_sweep_skipped(parked_sweep_t* s, uint32_t peer_addr);
+
 /* Arm peer_addr's neighbor entry so the peer's next beacon re-sends what was
  * just parked for it. Returns false if peer_addr has no entry, which needs no
  * arming: a peer outside the table can only come back by being admitted to it,
@@ -40,9 +75,11 @@ bool parked_retry_arm(neighbor_table_t* table, uint32_t peer_addr, uint32_t now_
  * parked messages. True on the rejoin edge (is_new_peer), exactly as before,
  * and also when the peer was armed by a park and its cooldown has elapsed.
  * An unarmed peer costs one table lookup and nothing else: no store scan.
+ * Always false while the sweep holds this peer, whichever of the two reasons
+ * would otherwise have said yes.
  */
-bool parked_retry_beacon_should_flush(neighbor_table_t* table, uint32_t peer_addr, bool is_new_peer,
-                                      uint32_t now_ms);
+bool parked_retry_beacon_should_flush(neighbor_table_t* table, const parked_sweep_t* sweep,
+                                      uint32_t peer_addr, bool is_new_peer, uint32_t now_ms);
 
 /* Record what the flush found, where found is the number of parked rows it
  * picked up. Nothing left parked disarms the peer; anything still parked

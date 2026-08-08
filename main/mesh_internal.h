@@ -203,6 +203,9 @@ typedef struct {
 extern bramble_identity_t* s_identity;
 extern uint8_t s_beacon_key[BRAMBLE_KEY_SIZE];
 extern neighbor_table_t s_neighbors;
+/* Parked-message sweep schedule. Mesh task only: the sweep writes it from the
+ * maintenance tick and the beacon handler reads it, both on that task. */
+extern parked_sweep_t s_parked_sweep;
 extern dedup_buffer_t s_dedup;
 extern dedup_buffer_t s_flood_dedup;
 extern replay_table_t s_replay;
