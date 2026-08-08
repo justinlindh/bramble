@@ -69,16 +69,27 @@ mkdir -p "$LOG_DIR"
 cleanup() {
     for pid in "${CHILD_PIDS[@]:-}"; do
         [ -n "$pid" ] || continue
-        if kill -0 "$pid" 2>/dev/null; then
-            pkill -P "$pid" 2>/dev/null || true
-            kill "$pid" 2>/dev/null || true
-        fi
+        kill -0 "$pid" 2>/dev/null || continue
+        # Reap by PROCESS GROUP, never by process name. Every scenario launches
+        # gosim under `timeout`, which puts itself in a new process group before
+        # forking, so the recorded pid leads a group containing gosim and every
+        # firmware node it spawned. One negative-pid kill reaps that whole tree,
+        # including nodes whose parent is already gone, and gosim's own SIGTERM
+        # handler (runRealtimeHeadless) reaps its nodes on the way out, so no
+        # stray can outlive this run and contaminate a later one's timing.
+        #
+        # A name pattern cannot do this safely, because it cannot tell THIS
+        # run's processes from another run's: the node's argv is the same
+        # relative binary path in every checkout. With two suites overlapping on
+        # one host (two shells, two agent sessions, two worktrees), the first to
+        # exit SIGTERMed the second's firmware nodes mid-scenario, the victim's
+        # supervisor logged "exited unexpectedly: signal: terminated",
+        # check_no_deaths read that as a node death exactly as it should, and a
+        # healthy run went red. Observed 2026-08-08 on two suites started 6s
+        # apart. Same rule, and the same reasoning, as emulator/e2e/run_e2e.sh's
+        # trap: kill the pids this run owns, nothing else.
+        kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
     done
-    pkill -f "$NODE_BIN" 2>/dev/null || true
-    # Belt and suspenders: a name-wide sweep catches any gosim left behind by an
-    # aborted run (gosim's own SIGTERM handler then reaps its nodes), so strays
-    # can never linger and contaminate a later run's real-time timing.
-    pkill -f "$GOSIM_BIN" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
