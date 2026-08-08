@@ -7,6 +7,7 @@
 #include <nrfx_nvmc.h>
 
 #include "boot_trace_scan.h"
+#include "bramble_wdt.h"
 
 static uint32_t s_next = 1; /* next free word slot */
 static uint32_t s_last_tag;
@@ -79,6 +80,15 @@ void boot_trace_mark(uint32_t tag, uint32_t aux) {
 static void reboot_to_dfu(void) __attribute__((noreturn));
 
 static void reboot_to_dfu(void) {
+    /* Defense in depth: whether the nRF52840 WDT survives this
+     * NVIC_SystemReset() (a SYSRESETREQ-class soft reset) is not confirmed
+     * against real hardware. A no-op before the watchdog is armed, and
+     * still no substitute for that confirmation once it is (a channel
+     * left unfed while the bootloader waits for a UF2 copy can only be
+     * fed by the code that isn't running anymore), but if it does survive,
+     * a full fresh window here is strictly better than whatever was left
+     * on the clock. */
+    bramble_wdt_feed_all();
     NRF_POWER->GPREGRET = 0x57;
     __DSB();
     NVIC_SystemReset();

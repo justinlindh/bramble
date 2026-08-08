@@ -20,6 +20,7 @@
 #include "rpc_auth.h"
 #include "ct_strcmp.h"
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -677,6 +678,14 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
 
 static void ble_host_task(void* param) {
     (void)param;
+#ifndef ESP_PLATFORM
+    /* nRF only: this target's WDT (nrf/shim/wdt_nrf.c) needs this as the
+     * first action, before nimble_port_run() can block, so the arm-time
+     * guarantee in that file holds. Not added on ESP32: the TWDT there
+     * subscribes only mesh_task today, and expanding that coverage is out
+     * of scope here. */
+    esp_task_wdt_add(NULL);
+#endif
     ESP_LOGI(TAG, "NimBLE host task started");
     nimble_port_run(); /* blocks until the stack is stopped */
 #ifdef ESP_PLATFORM

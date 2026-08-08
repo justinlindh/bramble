@@ -1,0 +1,37 @@
+diff --git a/porting/npl/freertos/src/npl_os_freertos.c b/porting/npl/freertos/src/npl_os_freertos.c
+index 1111111..2222222 100644
+--- a/porting/npl/freertos/src/npl_os_freertos.c
++++ b/porting/npl/freertos/src/npl_os_freertos.c
+@@ -22,6 +22,11 @@
+ #include <string.h>
+ #include "nimble/nimble_npl.h"
+
++/* Bramble: the LL and host tasks are two of this target's WDT subscribers
++ * (nrf/shim/wdt_nrf.c); see npl_freertos_eventq_get below for where they
++ * check in. */
++#include "esp_task_wdt.h"
++
+ /* Include the file that defines the SCB for your HW. */
+ #ifdef NIMBLE_NPL_OS_EXTRA_INCLUDE
+ #include NIMBLE_NPL_OS_EXTRA_INCLUDE
+@@ -47,6 +52,20 @@ npl_freertos_eventq_get(struct ble_npl_eventq *evq, ble_npl_time_t tmo)
+         assert(tmo == 0);
+         ret = xQueueReceiveFromISR(evq->q, &ev, &woken);
+         portYIELD_FROM_ISR(woken);
++    } else if (tmo == portMAX_DELAY) {
++        /* Bramble: BLE_NPL_TIME_FOREVER == portMAX_DELAY (nimble_npl_os.h).
++         * This is the LL and host tasks' idle wait, not a hang, so chop the
++         * forever-wait into a bounded poll and feed this task's WDT channel
++         * on every wakeup. xQueueReceive still wakes immediately the moment
++         * an event is posted no matter what timeout it was given, so this
++         * changes only the idle wake cadence, never event latency. Never
++         * returns NULL on this path, matching the original FOREVER
++         * contract: ble_ll_task() asserts on a NULL event and
++         * nimble_port_run() does not check for one. */
++        do {
++            ret = xQueueReceive(evq->q, &ev, pdMS_TO_TICKS(1000));
++            esp_task_wdt_reset();
++        } while (ret != pdPASS);
+     } else {
+         ret = xQueueReceive(evq->q, &ev, tmo);
+     }

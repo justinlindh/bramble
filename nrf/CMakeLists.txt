@@ -32,15 +32,19 @@ FetchContent_Declare(cjson
 )
 # Semtech LR11xx driver (Clear BSD). v3.0.0; do not pin below v2.7.0 (an
 # lr11xx_hal_read pointer-conversion fix lives there).
-# Apache NimBLE, host + controller, no SoftDevice. Two patches are required.
+# Apache NimBLE, host + controller, no SoftDevice. Three patches are required.
 # The ISR-safe critical section, because upstream's uses vPortEnterCritical,
 # which the Cortex-M FreeRTOS port asserts on when the link layer calls it
-# from its RADIO/RTC0 ISRs. And the duplicate-PDU tolerance during encryption
+# from its RADIO/RTC0 ISRs. The duplicate-PDU tolerance during encryption
 # start, without which a retransmitted plaintext control PDU makes the
 # controller terminate the link with 0x3D; see that patch for the full story.
+# And the WDT feed on the LL and host tasks' idle wait, the two NimBLE tasks
+# that otherwise have no hang-detection call site at all; see that patch for
+# why the OS porting layer is the right place for it.
 set(NIMBLE_PATCHES
   ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-isr-safe-critical.patch
-  ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-dup-pdu-during-enc-start.patch)
+  ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-dup-pdu-during-enc-start.patch
+  ${CMAKE_CURRENT_SOURCE_DIR}/patches/nimble-wdt-eventq-feed.patch)
 FetchContent_Declare(nimble
   GIT_REPOSITORY https://github.com/apache/mynewt-nimble.git
   GIT_TAG nimble_1_10_0_tag
@@ -89,6 +93,7 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_nvmc.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_saadc.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_wdt.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
 )
 target_include_directories(nrfx_lib PUBLIC
@@ -306,6 +311,9 @@ target_include_directories(nimble_lib PUBLIC
 # assert; upstream already accounts for this, the flag just has to be set.
 target_compile_definitions(nimble_lib PUBLIC NIMBLE_CFG_CONTROLLER=1 FREERTOS=1)
 target_link_libraries(nimble_lib PUBLIC nrfx_lib freertos_kernel)
+# esp_task_wdt.h only, for the WDT feed the nimble-wdt-eventq-feed.patch
+# adds to npl_os_freertos.c; no other nimble source needs it.
+target_include_directories(nimble_lib PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shim/include)
 # Third-party code is not held to this repo's warning wall.
 target_compile_options(nimble_lib PRIVATE -Wno-unused-parameter -Wno-sign-compare
                                           -Wno-implicit-fallthrough -Wno-unused-but-set-variable
@@ -377,6 +385,7 @@ add_executable(bramble-nrf
   shim/nvs_lfs.c
   shim/mbedtls_platform_freertos.c
   shim/malloc_freertos.c
+  shim/wdt_nrf.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_esp.c
 )
