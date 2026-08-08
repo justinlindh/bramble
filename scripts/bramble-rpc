@@ -13,6 +13,12 @@ Notes (hard-won):
   the request line back, which otherwise parses as a false match.
 - CP2102 ports (ttyUSB*) assert DTR/RTS on open and can reset the board into
   the bootloader; pass --cp2102 to reset it back into run mode first.
+- The device's ESP_LOG output shares this UART with the RPC framing. Non-JSON
+  lines are dropped by default; pass --log to echo them to stderr, and
+  --linger SECONDS to keep reading after the response so a log line emitted by
+  what the call triggered (a deferred UI action, a send) is not cut off. This
+  is the only way to watch a node's log while driving it, since the port
+  admits one reader.
 """
 import argparse, json, sys, time
 
@@ -30,6 +36,9 @@ p.add_argument('method')
 p.add_argument('params', nargs='?')
 p.add_argument('--timeout', type=float, default=8.0)
 p.add_argument('--cp2102', action='store_true', help='reset into run mode after open')
+p.add_argument('--log', action='store_true', help='echo the device log lines to stderr')
+p.add_argument('--linger', type=float, default=0.0,
+               help='keep reading (and logging) this many seconds after the response')
 a = p.parse_args()
 
 s = serial.Serial(a.port, 115200, timeout=0.3, exclusive=True)
@@ -42,21 +51,37 @@ if a.params:
     req["params"] = json.loads(a.params)
 s.write((json.dumps(req) + "\r\n").encode())
 buf = ''
-t0 = time.time()
-while time.time() - t0 < a.timeout:
+result = None
+deadline = time.time() + a.timeout
+# Lines are consumed as they complete, so a partial tail is never re-scanned
+# (the old whole-buffer rescan re-examined every line on every read; harmless
+# for a single response, wrong once lines are echoed as they arrive).
+while time.time() < deadline:
     buf += s.read(4096).decode('utf-8', 'replace')
-    for line in buf.splitlines():
+    while '\n' in buf:
+        line, buf = buf.split('\n', 1)
         line = line.strip()
+        if not line:
+            continue
         if not line.startswith('{'):
+            if a.log:
+                print(line, file=sys.stderr)
             continue
         try:
             msg = json.loads(line)
         except ValueError:
+            if a.log:
+                print(line, file=sys.stderr)
             continue
-        if msg.get('id') == 1 and ('result' in msg or 'error' in msg):
-            print(json.dumps(msg.get('result', msg.get('error')), indent=2))
-            s.close()
-            sys.exit(0)
+        if result is None and msg.get('id') == 1 and ('result' in msg or 'error' in msg):
+            result = msg.get('result', msg.get('error'))
+            # Stop at the response unless asked to linger for the log that
+            # whatever this call triggered is about to emit.
+            deadline = (time.time() + a.linger) if a.linger > 0 else 0
+        elif a.log:
+            print(line, file=sys.stderr)
 s.close()
-print("timeout: no response", file=sys.stderr)
-sys.exit(1)
+if result is None:
+    print("timeout: no response", file=sys.stderr)
+    sys.exit(1)
+print(json.dumps(result, indent=2))

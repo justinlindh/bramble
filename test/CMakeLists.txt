@@ -685,6 +685,36 @@ target_include_directories(test_nvs_lfs_iter PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 
+# Same flash-backed shim under a failing block device. lfs_nvmc_prog() returns
+# LFS_ERR_IO when its bounded NVMC write-completion wait expires, and this
+# suite pins down what the shim reports to its callers when that happens: the
+# nonce ceiling's durability signal rides on exactly that return value.
+add_executable(test_nvs_lfs_prog_fail
+    test_nvs_lfs_prog_fail.c
+    ../nrf/shim/nvs_lfs.c
+    stubs/lfs_nvmc_rambd.c
+    stubs/nrf_log_host_stub.c
+    ${littlefs_SOURCE_DIR}/lfs.c
+    ${littlefs_SOURCE_DIR}/lfs_util.c
+    ${littlefs_SOURCE_DIR}/bd/lfs_rambd.c
+    unity/unity.c
+)
+target_compile_definitions(test_nvs_lfs_prog_fail PRIVATE
+    BRAMBLE_TEST_NVS_LFS
+    BRAMBLE_LFS_BASE=0
+    BRAMBLE_LFS_SIZE=0x2D000
+    LFS_NO_MALLOC
+)
+target_include_directories(test_nvs_lfs_prog_fail BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src
+    ${littlefs_SOURCE_DIR}
+)
+target_include_directories(test_nvs_lfs_prog_fail PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+
 # The nRF message-store backend, run for real against littlefs's RAM block
 # device: recovery invariants (count from file size, torn-record truncation,
 # corrupt-header recreate), the streaming rollover, and clear. The ESP SPIFFS
@@ -1953,6 +1983,18 @@ add_executable(test_chat_message_ui
 target_include_directories(test_chat_message_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
+
+# Peer recency helpers shared by the Nodes list and the node detail card
+# (pure, no LVGL): age arithmetic, the live/stale classifier, and the
+# seconds-resolution age string.
+add_executable(test_node_presence
+    test_node_presence.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/node_presence.c
+)
+target_include_directories(test_node_presence PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
 )
 
 # Map zoom ladder: step/clamp arithmetic and the on-screen readout (pure, no LVGL)

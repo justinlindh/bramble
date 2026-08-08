@@ -86,7 +86,6 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/mdk/gcc_startup_nrf52840.S
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_uarte.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
-  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_nvmc.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_saadc.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
@@ -358,6 +357,8 @@ add_executable(bramble-nrf
   src/radio_lr1110.c
   src/lr11xx_hal_nrf.c
   src/lfs_nvmc.c
+  # Bounded replacements for nrfx's blocking NVMC calls; see src/nvmc_bounded.h.
+  src/nvmc_bounded.c
   src/nimble_glue.c
   src/ble_store_nvs.c
   # Replaces upstream's porting/npl/freertos/src/nimble_port_freertos.c,

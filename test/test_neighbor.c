@@ -116,6 +116,57 @@ void test_neighbor_purge_then_reappear_resets_tenure(void) {
     TEST_ASSERT_FALSE(neighbor_is_established(&tbl, 1, purge_time));
 }
 
+void test_neighbor_touch_refreshes_liveness_and_signal(void) {
+    neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 1000);
+    TEST_ASSERT_TRUE(neighbor_touch(&tbl, 0xAABB, -55, 11, 90000));
+    neighbor_entry_t* e = neighbor_lookup(&tbl, 0xAABB);
+    TEST_ASSERT_EQUAL(90000, e->last_heard);
+    TEST_ASSERT_EQUAL(-55, e->rssi);
+    TEST_ASSERT_EQUAL(11, e->snr);
+}
+
+void test_neighbor_touch_leaves_tenure_alone(void) {
+    /* Tenure (anti-Sybil) stays beacon-gated: a peer that only ever sends us
+     * data must not accrue the beacon_count that neighbor_is_established
+     * requires, and must not have its first_seen_ms tenure clock reset. */
+    neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 1000);
+    for (int i = 0; i < 10; i++) {
+        neighbor_touch(&tbl, 0xAABB, -70, 8, 2000 + (uint32_t)i);
+    }
+    neighbor_entry_t* e = neighbor_lookup(&tbl, 0xAABB);
+    TEST_ASSERT_EQUAL(1, e->beacon_count);
+    TEST_ASSERT_EQUAL(1000, e->first_seen_ms);
+    TEST_ASSERT_FALSE(neighbor_is_established(&tbl, 0xAABB, 1000 + ESTABLISHED_MIN_AGE_MS));
+}
+
+void test_neighbor_touch_ignores_unknown_addr(void) {
+    /* Only beacons admit a peer to the table. A touch never creates an entry,
+     * so a data frame claiming an unheard prev_hop cannot conjure a neighbor. */
+    TEST_ASSERT_FALSE(neighbor_touch(&tbl, 0xDEAD, -60, 9, 5000));
+    TEST_ASSERT_EQUAL(0, neighbor_count(&tbl));
+    TEST_ASSERT_NULL(neighbor_lookup(&tbl, 0xDEAD));
+}
+
+void test_neighbor_touch_keeps_an_active_peer_from_being_purged(void) {
+    /* The user-visible point of the touch: a peer we are actively exchanging
+     * data with stays listed even if its beacons are being stretched or lost. */
+    neighbor_update(&tbl, 1, -70, 8, 0, 1000);
+    uint32_t t = 1000 + NEIGHBOR_EXPIRY_MS - 1;
+    neighbor_touch(&tbl, 1, -70, 8, t);
+    neighbor_purge(&tbl, t + 1);
+    TEST_ASSERT_NOT_NULL(neighbor_lookup(&tbl, 1));
+}
+
+void test_neighbor_touch_never_moves_last_heard_backwards(void) {
+    /* Frames can be dispatched out of order relative to the sample that
+     * stamped last_heard; an older timestamp must not un-age a peer. */
+    neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 50000);
+    TEST_ASSERT_FALSE(neighbor_touch(&tbl, 0xAABB, -55, 11, 40000));
+    neighbor_entry_t* e = neighbor_lookup(&tbl, 0xAABB);
+    TEST_ASSERT_EQUAL(50000, e->last_heard);
+    TEST_ASSERT_EQUAL(-70, e->rssi);
+}
+
 void test_link_penalty_excellent(void) {
     uint8_t p = compute_link_penalty(-60, 10);
     TEST_ASSERT_LESS_OR_EQUAL(5, p);
@@ -140,6 +191,11 @@ int main(void) {
     RUN_TEST(test_neighbor_is_established_unknown_addr_false);
     RUN_TEST(test_neighbor_beacon_count_saturates);
     RUN_TEST(test_neighbor_purge_then_reappear_resets_tenure);
+    RUN_TEST(test_neighbor_touch_refreshes_liveness_and_signal);
+    RUN_TEST(test_neighbor_touch_leaves_tenure_alone);
+    RUN_TEST(test_neighbor_touch_ignores_unknown_addr);
+    RUN_TEST(test_neighbor_touch_keeps_an_active_peer_from_being_purged);
+    RUN_TEST(test_neighbor_touch_never_moves_last_heard_backwards);
     RUN_TEST(test_link_penalty_excellent);
     RUN_TEST(test_link_penalty_marginal);
     return UNITY_END();

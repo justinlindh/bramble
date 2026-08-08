@@ -20,15 +20,32 @@ static uint8_t s_read_buffer[LFS_NVMC_CACHE_SIZE];
 static uint8_t s_prog_buffer[LFS_NVMC_CACHE_SIZE];
 static uint32_t s_lookahead[32 / sizeof(uint32_t)];
 
+/* Fault injection on the program path. On the target, lfs_nvmc_prog() returns
+ * LFS_ERR_IO when the NVMC's write-completion wait expires; this switch makes
+ * the RAM disk return the same thing, so a host suite can pin down what the
+ * NVS shim reports to its callers when a flash program does not land. */
+static int s_prog_fail;
+
+void lfs_nvmc_rambd_fail_prog(int fail) { s_prog_fail = fail; }
+
+static int failing_prog(const struct lfs_config* cfg, lfs_block_t block, lfs_off_t off,
+                        const void* buffer, lfs_size_t size) {
+    if (s_prog_fail) {
+        return LFS_ERR_IO;
+    }
+    return lfs_rambd_prog(cfg, block, off, buffer, size);
+}
+
 void lfs_nvmc_config_init(struct lfs_config* cfg, uint32_t base, uint32_t size) {
     (void)base;
+    s_prog_fail = 0;
     memset(cfg, 0, sizeof(*cfg));
     memset(&s_bd, 0, sizeof(s_bd));
     memset(&s_bdcfg, 0, sizeof(s_bdcfg));
 
     cfg->context = &s_bd;
     cfg->read = lfs_rambd_read;
-    cfg->prog = lfs_rambd_prog;
+    cfg->prog = failing_prog;
     cfg->erase = lfs_rambd_erase;
     cfg->sync = lfs_rambd_sync;
 

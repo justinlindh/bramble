@@ -4,8 +4,12 @@ The network key is the symmetric key behind the control-plane HMACs on
 RREP, RERR, ACK, delivery receipt, and beacon packets (see
 `docs/bramble-protocol-spec.md` §4.25 items 5-9, and
 `docs/SECURITY-MODEL.md` §3 for what it does and does not protect). This
-guide is the operator-facing steps for setting it across a fleet. It
-assumes you already have RPC auth set up (`docs/auth.md`); provisioning a
+guide is the operator-facing reference for setting it across a fleet. For
+the guided first-mesh walkthrough with screenshots, start at
+[getting-started.md](getting-started.md); this document is the reference
+that covers every surface and the fleet-scale procedure.
+
+It assumes you already have RPC auth set up (`docs/auth.md`); provisioning a
 network key uses the same authenticated-RPC gate as `setAuthToken`.
 
 ## Before you start
@@ -36,51 +40,89 @@ See `docs/SECURITY-MODEL.md` §3 and §5 for the full picture, including
 why none of this claims a short-authentication-string comparison or
 forward secrecy for the network key.
 
-## Steps
+## The two paths: found, then join
 
-1. **Generate a key.** In the webapp, open **Config → Network Key** and
-   click **Generate key**. This creates a random 32-byte key in your
-   browser; it is not sent anywhere yet. Note the fingerprint shown next
-   to it (`SHA256(key)[0:4]`, 8 hex chars) so you can confirm convergence
-   later.
+Provisioning splits into founding a network once and joining every other
+node to it.
 
-2. **Record the key out-of-band.** Copy the hex value or save the QR code
-   somewhere durable (password manager, printed backup). The key is
-   **never recoverable from a device**: `bramble.getNetworkKeyStatus`
-   reports only whether a node is provisioned and its fingerprint, never
-   the key itself. If you lose the recorded key, you cannot retrieve it
-   from a node you already provisioned; generate and distribute a new one
-   instead.
+**Found** mints a new key. `bramble.generateNetworkKey` draws an
+entropy-gated 32-byte key **on the device**, provisions that node with it
+atomically (RAM and NVS), re-derives the beacon HMAC key live, and returns
+the raw key exactly once. That node is the founder. On entropy failure it
+provisions nothing and returns an error, leaving any previous state
+untouched.
 
-3. **Provision each node**, one at a time, while connected to that node:
-   - Scan the QR code with **Provision → Scan QR**, or
-   - Paste the `bramble://net/v1?k=...` string (or the bare 64 hex chars)
-     into the paste field and click **Provision**.
+**Join** applies an existing key. `bramble.setNetworkKey` takes the 64-hex
+key and provisions the node with it, live, no reboot.
 
-   This calls `bramble.setNetworkKey` on the connected node. It takes
-   effect live for RREP, RERR, ACK, and delivery-receipt verification
-   immediately, and also re-derives the beacon HMAC key live (no reboot
-   required).
+The key is write-only at the device boundary. Nothing reads a provisioned
+key back: `bramble.getNetworkKeyStatus` reports only whether a node is
+provisioned and the key's fingerprint. **The copy returned when you found
+the network is the only copy that will ever exist.** Record it out of band
+(password manager, printed backup) before you rely on it. If you lose it,
+you cannot recover it from a node that holds it; you can only found a new
+network and re-join every node.
 
-4. **Confirm convergence.** After provisioning, the Network Key section
-   refreshes and shows `Provisioned (fingerprint XXXXXXXX)`. Repeat this
-   check on every node in the fleet and compare fingerprints: they must
-   all match the fingerprint from step 1. **A node still reporting
-   `Unprovisioned` (the all-zero fingerprint sentinel) is not part of the
-   authenticated control plane**: it neither emits nor accepts
-   control-plane MACs, so it cannot route for the fleet until it is
-   provisioned, regardless of what the rest of the fleet is running.
+## Fingerprints, and what they prove
 
-## What a matching fingerprint proves, and what it does not
+`SHA256(key)[0:4]`, rendered as 8 lowercase hex characters, is the
+fingerprint every node reports. An unprovisioned node reports the all-zero
+sentinel `00000000`.
 
-A matching `SHA256(key)[0:4]` fingerprint across two nodes proves they
-hold the same network key, without either node ever transmitting the key
-itself over RPC a second time. It does **not** authenticate that you are
-talking to the node you think you are (it is not a short-authentication-
-string handshake), and it does not prove anything about messages already
-in flight before provisioning finished. Compare fingerprints over a
-channel you trust (in person, or the same secure channel you used to
-distribute the key), the same way you would compare any shared secret.
+A matching fingerprint across two nodes proves they hold the same network
+key, without either node ever transmitting the key again. It does **not**
+authenticate that you are talking to the node you think you are (it is not
+a short-authentication-string handshake), and it does not prove anything
+about messages already in flight before provisioning finished. Compare
+fingerprints over a channel you trust (in person, or the same secure
+channel you used to distribute the key), the same way you would compare any
+shared secret.
+
+## Provisioning surfaces
+
+Four surfaces reach the same three RPCs. Pick whichever fits; they are
+interchangeable, and a fleet can mix them.
+
+| Surface | Found | Join | Notes |
+| --- | --- | --- | --- |
+| Web app, **Config → Network Key** | yes | yes | The full surface: QR display and scan, re-key confirmation, live fingerprint. |
+| Web flasher, **Device Setup** | no | yes | Join-only, over the serial link already open from flashing. |
+| `bramble netkey` (CLI) | yes | yes | Scriptable, for provisioning a fleet without a GUI. |
+| Raw RPC | yes | yes | `bramble.generateNetworkKey`, `bramble.setNetworkKey`, `bramble.getNetworkKeyStatus`. |
+
+The web flasher does not offer founding on purpose. Minting a fleet's root
+secret belongs where the QR code, the copy-confirm, the persistent
+fingerprint readout, and the re-key guard live; a one-shot page you close
+cannot offer those, and the key is unrecoverable afterwards.
+
+## Fleet procedure
+
+1. **Found the network on one node.** In the web app, **Config → Network
+   Key → Found a new network → Generate key**, or run `bramble netkey
+   generate`. Record the key and note the fingerprint.
+
+2. **Join every other node.** Scan the QR or paste the key into **Join an
+   existing network**, paste it into the web flasher's Network Key field while
+   flashing, or run `bramble netkey provision --key-file <file>` against each
+   node.
+
+3. **Confirm convergence.** Check every node reports the founder's
+   fingerprint, on the Network Key section's Status line or with
+   `bramble netkey status`.
+   **A node still reporting `Unprovisioned` is not part of
+   the authenticated control plane**: it neither emits nor accepts
+   control-plane MACs, so it cannot route for the fleet, regardless of what
+   the rest of the fleet is running.
+
+## Re-keying
+
+Provisioning a different key on a node that already has one re-keys it and
+cuts it off from every node still on the old key. The web app makes you
+confirm before doing this, and the CLI refuses without `--force`. There is no
+fleet-wide rekey operation: re-keying
+a fleet means provisioning the new key on every node, and the fleet is
+partitioned until you finish. Nodes on the old key and nodes on the new key
+will not route for each other.
 
 ## Storage
 

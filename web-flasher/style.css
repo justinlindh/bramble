@@ -104,6 +104,16 @@ h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
     margin-bottom: 0.5rem;
 }
 
+/* The page is dark, so the user-agent default link blue is close to unreadable
+   against it. */
+a {
+    color: var(--primary);
+}
+
+a:hover {
+    text-decoration: none;
+}
+
 .advanced-panel {
     border: 1px solid var(--border);
     border-radius: 8px;

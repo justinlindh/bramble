@@ -3,10 +3,11 @@
   inset: 0;
   background: var(--bg);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   z-index: 1000;
   padding: 1rem;
+  overflow-y: auto;
 }
 
 .card {
@@ -16,8 +17,13 @@
   padding: 2rem;
   max-width: 400px;
   width: 100%;
-  max-height: calc(100dvh - 2rem);
-  overflow-y: auto;
+  /* Auto cross-axis margins absorb positive free space, so the card stays
+     vertically centred exactly as before. When free space goes negative they
+     resolve to zero, so the card pins to the top and the overlay scrolls,
+     which puts the scrollbar at the window edge instead of painting one down
+     the middle of a 400px card. */
+  margin-top: auto;
+  margin-bottom: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -114,7 +120,10 @@
   min-height: 2.6rem;
 }
 
-.transportBtn:hover:not(:disabled) {
+/* The accent hover means "this works", so unavailable transports are excluded
+   from it: they are clickable, and painting them blue under the cursor would
+   promise a connection they cannot make. */
+.transportBtn:hover:not(.unsupportedBtn) {
   border-color: var(--accent-blue);
   color: var(--text);
 }
@@ -123,11 +132,6 @@
   border-color: var(--accent-blue);
   color: var(--text);
   background: rgba(31, 111, 235, 0.1);
-}
-
-.transportBtn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .connectBtn {
@@ -221,15 +225,33 @@
   color: var(--accent-green, #3fb950);
 }
 
-.mockBtn:hover:not(:disabled) {
+/* Both class names, so this keeps winning over the transport hover rule above
+   and the mock node stays green under the cursor. */
+.transportBtn.mockBtn:hover {
   border-color: var(--accent-green, #3fb950);
   background: rgba(63, 185, 80, 0.1);
   color: var(--text);
 }
 
+/* Unavailable transports are muted but clickable: selecting one is how the
+   user gets the explanation, so the cursor must not say not-allowed. */
 .unsupportedBtn {
   opacity: 0.45;
-  cursor: not-allowed !important;
+}
+
+/* Border and colour are spelled out rather than left to opacity so hover and
+   selection cannot pick up the accent treatment from an earlier rule. */
+.unsupportedBtn:hover {
+  opacity: 0.7;
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+.unsupportedBtn.active {
+  opacity: 0.8;
+  border-color: var(--text-muted);
+  background: transparent;
+  color: var(--text-muted);
 }
 
 .unsupportedCaption {
@@ -357,4 +379,22 @@
 .flasherLink {
   color: var(--accent-blue);
   text-decoration: underline;
+}
+
+/* Short laptop viewports: the explainer panel makes the card taller, and
+   trimming the chrome keeps it from needing to scroll at all. */
+@media (max-height: 700px) {
+  .card {
+    padding: 1.25rem;
+    gap: 0.75rem;
+  }
+
+  .logoImg {
+    width: 40px;
+    height: 40px;
+  }
+
+  .title {
+    font-size: 1.4rem;
+  }
 }

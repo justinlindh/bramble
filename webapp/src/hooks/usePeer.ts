@@ -7,7 +7,10 @@ import { formatAge } from './useAgeTick';
 
 export type PeerStatus = 'online' | 'reachable' | 'unknown';
 
-const ONLINE_THRESHOLD_MS = 90_000;   // 3x beacon interval (30s)
+// 1.5x the 60s beacon interval, so one lost beacon does not flip a live peer.
+// Kept in step with NODE_ONLINE_AGE_S in components/ui_graphics/include/node_presence.h,
+// which drives the same dot in the device's DM header.
+const ONLINE_THRESHOLD_MS = 90_000;
 
 /** Resolve a peer address to a display name + presence status */
 export function usePeerInfo(addr: number) {
