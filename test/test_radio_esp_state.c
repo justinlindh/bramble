@@ -142,8 +142,15 @@ static void arm_failure(const char* call, int code) {
     s_fail_code = code;
 }
 
+/* Wall-clock a failing command burns before returning, so a test can model a
+ * wedged chip: the real driver spends BUSY_STUCK_THRESHOLD command waits of
+ * 2000ms (5000ms for calibration) before a reconfigure gives up, which can
+ * exceed the reinit backoff itself. */
+static uint32_t s_fail_delay_ms;
+
 static int fake_rc(const char* call) {
     if (s_fail_call && strcmp(s_fail_call, call) == 0) {
+        advance_ms(s_fail_delay_ms);
         return s_fail_code;
     }
     return 0;
@@ -461,6 +468,7 @@ void setUp(void) {
     s_fake_needs_reinit = false;
     s_reinit_requests = 0;
     s_fake_now_us = 0;
+    s_fail_delay_ms = 0;
     s_reinit_policy = (radio_reinit_policy_t){0};
 }
 
@@ -788,6 +796,26 @@ static void test_failed_reinit_retries_after_the_backoff(void) {
     TEST_ASSERT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
 }
 
+/* A failing recovery against a wedged chip can take longer than the backoff.
+ * The deadline must therefore be measured from when the attempt finished: a
+ * caller that samples the clock once up front produces a deadline already in
+ * the past, and the mesh loop, which calls this every 10ms, re-attempts back
+ * to back forever with no gap. That is worse than the busy-loop the backoff
+ * exists to prevent, because each iteration also hard-resets the chip. */
+static void test_a_slow_failing_reinit_still_backs_off(void) {
+    arm_failure("write_register", -1);
+    s_fail_delay_ms = BRAMBLE_RADIO_REINIT_RETRY_MS + 4000u; /* wedged chip */
+    sx1262_request_reinit();
+
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+    TEST_ASSERT_TRUE(sx1262_needs_reinit());
+    /* The attempt outlasted the backoff, so a start-sampled deadline is now
+     * in the past and the next pass would re-attempt immediately. */
+    int requests = s_reinit_requests;
+    TEST_ASSERT_FALSE(radio_check_and_clear_reinit());
+    TEST_ASSERT_EQUAL_INT(requests, s_reinit_requests);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -825,6 +853,7 @@ int main(void) {
     RUN_TEST(test_successful_reinit_clears_the_request);
     RUN_TEST(test_failed_reinit_leaves_the_request_standing);
     RUN_TEST(test_failed_reinit_retries_after_the_backoff);
+    RUN_TEST(test_a_slow_failing_reinit_still_backs_off);
 
     return UNITY_END();
 }

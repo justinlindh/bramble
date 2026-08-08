@@ -74,6 +74,10 @@ static cad_timeout_policy_t s_cad_timeout_policy;
 /* Retry state for radio_check_and_clear_reinit(); mesh-task-only. */
 static radio_reinit_policy_t s_reinit_policy;
 
+/* Millisecond clock for the reinit backoff. Sampled separately before and
+ * after an attempt: a failing recovery can take longer than the backoff. */
+static inline uint32_t reinit_now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -788,8 +792,7 @@ bool radio_check_and_clear_reinit(void) {
     if (!sx1262_needs_reinit())
         return false;
 
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    if (!radio_reinit_policy_should_attempt(&s_reinit_policy, now)) {
+    if (!radio_reinit_policy_should_attempt(&s_reinit_policy, reinit_now_ms())) {
         /* An earlier attempt failed and its backoff is still running; the
          * latch stays raised so the next pass picks it up. */
         return false;
@@ -808,7 +811,13 @@ bool radio_check_and_clear_reinit(void) {
          * radiates, and the node looks healthy from every other angle. */
         sx1262_request_reinit();
     }
-    radio_reinit_policy_on_result(&s_reinit_policy, rc == 0, now);
+    /* Clock re-read, not the one sampled above: the backoff has to run from
+     * when the attempt FINISHED. A reconfigure against a wedged SX1262 can
+     * burn more than the backoff itself before returning (BUSY_STUCK_THRESHOLD
+     * is 3 consecutive timeouts and the command waits are 2000ms, 5000ms for
+     * calibration), which would leave the deadline already in the past and put
+     * the mesh task in a back-to-back reconfigure loop with no gap at all. */
+    radio_reinit_policy_on_result(&s_reinit_policy, rc == 0, reinit_now_ms());
     return true;
 }
 

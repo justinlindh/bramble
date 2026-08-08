@@ -83,6 +83,10 @@ static cad_timeout_policy_t s_cad_timeout_policy;
 /* Retry state for radio_check_and_clear_reinit(); mesh-task-only. */
 static radio_reinit_policy_t s_reinit_policy;
 
+/* Millisecond clock for the reinit backoff. Sampled separately before and
+ * after an attempt: a failing recovery can take longer than the backoff. */
+static inline uint32_t reinit_now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
 /* ------------------------------------------------------------------ */
 /*  LR1110 parameter mapping                                           */
 /* ------------------------------------------------------------------ */
@@ -793,8 +797,7 @@ bool radio_check_and_clear_reinit(void) {
     if (!lr11xx_hal_nrf_needs_reinit())
         return false;
 
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    if (!radio_reinit_policy_should_attempt(&s_reinit_policy, now)) {
+    if (!radio_reinit_policy_should_attempt(&s_reinit_policy, reinit_now_ms())) {
         /* An earlier attempt failed and its backoff is still running. The
          * latch stays raised, so tx_abort() keeps deferring recovery to this
          * function rather than restarting RX on a chip at power-on defaults,
@@ -810,8 +813,23 @@ bool radio_check_and_clear_reinit(void) {
     ESP_LOGW(TAG, "Radio reinit after hard reset, reconfiguring");
 
     /* The hard reset lost the system settings too; redo the full bring-up
-     * before the parameter reconfigure. */
+     * before the parameter reconfigure.
+     *
+     * Held under the same two locks radio_reconfigure takes, and in the same
+     * order, because this sequence hard-resets the chip and rewrites the RF
+     * switch table, TCXO and calibration. The HAL's bus lock makes each command
+     * atomic but not the sequence, so without these a reset can still land in
+     * the middle of radio_task's RX-done read (which holds rx_seq across
+     * get_rx_buffer_status, read_buffer8 and get_lora_pkt_status) and hand back
+     * a torn frame. Released before radio_reconfigure rather than wrapping it:
+     * both mutexes are non-recursive, so nesting would deadlock this task
+     * against itself. */
+    tx_gate_radio_lock();
+    rx_seq_lock();
     bool ok = lr1110_system_init() == 0;
+    rx_seq_unlock();
+    tx_gate_radio_unlock();
+
     if (!ok) {
         ESP_LOGE(TAG, "LR1110 system re-init failed after hard reset");
     } else {
@@ -822,7 +840,13 @@ bool radio_check_and_clear_reinit(void) {
         }
     }
 
-    radio_reinit_policy_on_result(&s_reinit_policy, ok, now);
+    /* Clock re-read, not the one sampled above: the backoff has to run from
+     * when the attempt FINISHED. A bring-up against a wedged chip spends
+     * LR_RESET_BOOT_MS plus up to LR_BUSY_STUCK_THRESHOLD BUSY timeouts before
+     * returning, and if that exceeds the backoff the deadline would already be
+     * in the past, putting the mesh task in a back-to-back recovery loop with
+     * no gap at all. */
+    radio_reinit_policy_on_result(&s_reinit_policy, ok, reinit_now_ms());
     if (!ok) {
         /* Without this the request is gone for good and the radio never
          * recovers, while the node stays alive and looks healthy. */

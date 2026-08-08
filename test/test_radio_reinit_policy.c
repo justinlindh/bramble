@@ -69,6 +69,29 @@ static void test_repeated_failure_keeps_retrying(void) {
     TEST_ASSERT_TRUE(radio_reinit_policy_should_attempt(&p, t));
 }
 
+/* The backoff must run from when the attempt FINISHED, not when it started.
+ * A recovery against a wedged chip can take longer than the backoff itself, so
+ * a caller that samples the clock once and reuses it produces a deadline
+ * already in the past and retries back to back forever, which is the exact
+ * busy-loop the policy exists to prevent. The policy cannot enforce that on
+ * its own; what it must do is behave correctly when handed the completion
+ * time, which is what this pins. */
+static void test_backoff_runs_from_completion_not_start(void) {
+    radio_reinit_policy_t p = {0};
+    uint32_t started = 10000u;
+    uint32_t finished = started + 9000u; /* a long, failing attempt */
+    TEST_ASSERT_TRUE(radio_reinit_policy_should_attempt(&p, started));
+    radio_reinit_policy_on_result(&p, false, finished);
+
+    /* Had the caller passed `started`, the deadline would be 15000, already
+     * 4000ms in the past at this point, and this would be true. */
+    TEST_ASSERT_FALSE(radio_reinit_policy_should_attempt(&p, finished));
+    TEST_ASSERT_FALSE(
+        radio_reinit_policy_should_attempt(&p, finished + BRAMBLE_RADIO_REINIT_RETRY_MS - 1u));
+    TEST_ASSERT_TRUE(
+        radio_reinit_policy_should_attempt(&p, finished + BRAMBLE_RADIO_REINIT_RETRY_MS));
+}
+
 /* The deadline is compared as a wrap-safe unsigned difference, so a failure
  * recorded just before the millisecond clock's 49.7-day rollover still retries
  * on time instead of stalling for another 49.7 days. */
@@ -92,6 +115,7 @@ int main(void) {
     RUN_TEST(test_success_leaves_no_backoff);
     RUN_TEST(test_failure_retries_after_backoff);
     RUN_TEST(test_repeated_failure_keeps_retrying);
+    RUN_TEST(test_backoff_runs_from_completion_not_start);
     RUN_TEST(test_backoff_survives_clock_wrap);
     return UNITY_END();
 }
