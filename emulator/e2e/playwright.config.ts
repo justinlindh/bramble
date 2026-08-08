@@ -30,7 +30,13 @@ export default defineConfig({
   // full send schedule on a CPU-contended CI pod); the old 60s/4min pair sat
   // below it and turned pod slowness into spurious failures.
   timeout: 240_000,
-  globalTimeout: 15 * 60_000,
+  // Whole-suite ceiling. The playground tour spec raises its own per-test
+  // timeout (it boots three firmware processes and waits on real key exchange,
+  // flooding and receipt slots, and every one of its waits is event-driven),
+  // so the suite's ceiling has to sit above the sum of the per-test ceilings
+  // rather than below it. A healthy box finishes the whole suite in a few
+  // minutes; this only ever fires when something is genuinely stuck.
+  globalTimeout: 45 * 60_000,
   globalSetup: require.resolve('./globalSetup'),
   globalTeardown: require.resolve('./globalTeardown'),
   reporter: [['list']],
