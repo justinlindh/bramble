@@ -20,6 +20,41 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 const MOCK_ED25519_PUB = '8f500a6dbab3786da3eb56d5146157fa26577a361f2e3b52907f2acdc344fefa';
 let mockAnchorPub = null; // 64-hex anchor public key, or null when unanchored
 let mockEndorsed = false; // whether a well-formed cert has been applied
+
+// ─── Network-key mock state ──────────────────────────────────────────────────
+// The control-plane network key, 64 hex, or null while UNPROVISIONED. The mock
+// boots unprovisioned exactly like real firmware, so the UNPROVISIONED banner
+// and the found/join flow in Config -> Network Key are reachable without
+// hardware. The key is write-only at the RPC boundary here too: nothing reads
+// it back, only the one-way fingerprint.
+let mockNetworkKey = null;
+// The all-zero sentinel the firmware reports while unprovisioned.
+const UNPROVISIONED_FINGERPRINT = '00000000';
+
+// ─── Timezone mock state ─────────────────────────────────────────────────────
+// The stored POSIX TZ spec, or null when nothing is stored and the compiled-in
+// default applies. The preset list mirrors the firmware's k_presets table in
+// components/timezone/bramble_tz.c: a short curated list, not a tzdata port.
+let mockTimezone = null;
+const TZ_DEFAULT = 'UTC0';
+const TZ_PRESETS = [
+  { label: 'UTC', spec: 'UTC0' },
+  { label: 'US Pacific', spec: 'PST8PDT,M3.2.0,M11.1.0' },
+  { label: 'US Mountain', spec: 'MST7MDT,M3.2.0,M11.1.0' },
+  { label: 'US Arizona', spec: 'MST7' },
+  { label: 'US Central', spec: 'CST6CDT,M3.2.0,M11.1.0' },
+  { label: 'US Eastern', spec: 'EST5EDT,M3.2.0,M11.1.0' },
+  { label: 'US Alaska', spec: 'AKST9AKDT,M3.2.0,M11.1.0' },
+  { label: 'US Hawaii', spec: 'HST10' },
+  { label: 'UK', spec: 'GMT0BST,M3.5.0/1,M10.5.0/2' },
+  { label: 'Central Europe', spec: 'CET-1CEST,M3.5.0,M10.5.0/3' },
+  { label: 'Eastern Europe', spec: 'EET-2EEST,M3.5.0/3,M10.5.0/4' },
+  { label: 'India', spec: 'IST-5:30' },
+  { label: 'China', spec: 'CST-8' },
+  { label: 'Japan', spec: 'JST-9' },
+  { label: 'Australia Eastern', spec: 'AEST-10AEDT,M10.1.0,M4.1.0/3' },
+  { label: 'New Zealand', spec: 'NZST-12NZDT,M9.5.0,M4.1.0/3' },
+];
 // NOTE: this mock tracks anchor/endorsement STATE and validates cert shape,
 // but does not cryptographically verify the endorsement signature (the real
 // firmware and the webapp's own anchor.ts tests cover the crypto). It exists
@@ -27,8 +62,10 @@ let mockEndorsed = false; // whether a well-formed cert has been applied
 // @noble/hashes is pure JS (no node:crypto), so this works unmodified whether
 // handler.mjs runs under node (mock/server.mjs, server/unified-server.mjs) or
 // gets bundled straight into the webapp for the in-page MockTransport.
-const anchorFingerprint = (pubHex) =>
-  bytesToHex(sha256(hexToBytes(pubHex))).slice(0, 8);
+// SHA256(key)[0:4] as 8 lowercase hex. The firmware derives the anchor and
+// network-key fingerprints the same way, so one helper serves both.
+const fingerprint8 = (keyHex) =>
+  bytesToHex(sha256(hexToBytes(keyHex))).slice(0, 8);
 const isHex = (s, len) => typeof s === 'string' && s.length === len && /^[0-9a-fA-F]+$/.test(s);
 
 // ─── Node identities ─────────────────────────────────────────────────────────
@@ -316,6 +353,51 @@ export const handlers = {
     };
   },
 
+  'bramble.getTimezone'(_params) {
+    return {
+      ok: true,
+      timezone: mockTimezone ?? TZ_DEFAULT,
+      default_timezone: TZ_DEFAULT,
+      configured: mockTimezone !== null,
+      presets: TZ_PRESETS,
+    };
+  },
+
+  'bramble.setTimezone'(params) {
+    const tz = params?.timezone;
+    if (typeof tz !== 'string' || !tz || tz.length > 63) {
+      throw { code: -32602, message: 'timezone must be a POSIX TZ spec of 1 to 63 chars' };
+    }
+    mockTimezone = tz;
+    return { ok: true };
+  },
+
+  'bramble.setNetworkKey'(params) {
+    const key = params?.key;
+    if (!isHex(key, 64)) {
+      throw { code: -32602, message: 'key must be 64 hex chars' };
+    }
+    mockNetworkKey = key.toLowerCase();
+    return { ok: true };
+  },
+
+  'bramble.getNetworkKeyStatus'(_params) {
+    if (!mockNetworkKey) {
+      return { provisioned: false, fingerprint: UNPROVISIONED_FINGERPRINT };
+    }
+    return { provisioned: true, fingerprint: fingerprint8(mockNetworkKey) };
+  },
+
+  // Mints a key on the "device" and provisions it atomically, matching the
+  // firmware's network_key_generate_provision: the key is returned exactly
+  // once and never read back afterwards.
+  'bramble.generateNetworkKey'(_params) {
+    const key = new Uint8Array(32);
+    globalThis.crypto.getRandomValues(key);
+    mockNetworkKey = bytesToHex(key);
+    return { key: mockNetworkKey, fingerprint: fingerprint8(mockNetworkKey) };
+  },
+
   'bramble.setAnchor'(params) {
     const pub = params?.anchor_pubkey;
     if (!isHex(pub, 64)) {
@@ -334,7 +416,7 @@ export const handlers = {
     }
     return {
       anchored: true,
-      anchor_fingerprint: anchorFingerprint(mockAnchorPub),
+      anchor_fingerprint: fingerprint8(mockAnchorPub),
       endorsed: mockEndorsed,
     };
   },
