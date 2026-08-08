@@ -756,11 +756,33 @@ int sx1262_init(void) {
         ESP_LOGD(TAG, "Using crystal oscillator (no TCXO)");
     }
 
+    /* Clear the latched device errors before calibrating. Out of reset the
+     * chip runs from the crystal, and on a TCXO board there is no crystal to
+     * start, so XOSC_START latches in the window before SetDIO3AsTcxoCtrl runs
+     * above. The flags stay latched until explicitly cleared, so that startup
+     * artifact would otherwise be reported forever and make a genuine
+     * oscillator fault indistinguishable from normal boot. Clearing here means
+     * anything read back after this point was raised by the calibration that
+     * follows, running against the oscillator the board actually uses. */
+    if (sx1262_clear_device_errors() != 0)
+        return -1;
+
     /* --- Calibrate all blocks --- */
     /* sx1262_calibrate() has its own extended BUSY wait (up to 5000ms) to
      * cover TCXO boards where all-block calibration can take ~140ms+. */
     if (sx1262_calibrate(0x7F) != 0)
         return -1;
+
+    /* Anything latched now is real: it came from calibrating against the
+     * configured oscillator. Surfaced here as well as in the radio health
+     * report because a failed calibration costs link budget silently, without
+     * failing any subsequent command. */
+    uint16_t cal_errors = 0;
+    if (sx1262_get_device_errors(&cal_errors) == 0 && (cal_errors & SX1262_DEVERR_ALL)) {
+        char errbuf[96];
+        ESP_LOGE(TAG, "Post-calibration device errors [%s]",
+                 sx1262_device_errors_str(cal_errors, errbuf, sizeof(errbuf)));
+    }
 
     /* Leave in STDBY_RC after init. The SX1262 automatically re-enables the
      * TCXO (via DIO3) when entering TX or RX, so there is no need to stay
