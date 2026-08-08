@@ -2600,3 +2600,23 @@ add_executable(test_sas_format
 target_include_directories(test_sas_format PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
 )
+
+# Attested roll-call core (components/rollcall): wire codecs, the canonical
+# signed message, the response stagger, the round schedule, the initiation
+# rate limit, and the ledger. Links the host crypto backend because the
+# signature binding is part of the primitive's contract, not an integration
+# detail: the test signs with one identity and verifies with another's view
+# of it, which is what proves a network-key insider cannot answer on a
+# victim's behalf.
+add_executable(test_rollcall
+    test_rollcall.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_rollcall PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_rollcall ssl crypto)
