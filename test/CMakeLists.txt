@@ -2214,6 +2214,19 @@ target_include_directories(test_ble_pairing_policy PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
 
+# Static BLE passkey persistence (displayless boards)
+add_executable(test_ble_pairing_store
+    test_ble_pairing_store.c
+    unity/unity.c
+    stubs/nvs_fake.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_store.c
+)
+target_include_directories(test_ble_pairing_store PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+)
+
 # WS credential parser: header-only auth, no query string (NEW-SEC-6)
 add_executable(test_ws_auth_credential
     test_ws_auth_credential.c

@@ -38,6 +38,7 @@
 #define NVS_KEY_OLED_ROT "oled_rot"
 #define NVS_KEY_GPS_EN "gps_en"
 #define NVS_KEY_TZ "tz"
+#define NVS_KEY_BLE_PASSKEY "ble_passkey" /**< Static SMP passkey, u32 0..999999 (displayless boards) */
 
 /* ── NVS_NS_OTA keys ─────────────────────────────────────────────────────── */
 #define NVS_KEY_OTA_ORIGIN "origin"
