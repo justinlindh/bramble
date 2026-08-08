@@ -44,6 +44,16 @@ static TaskHandle_t ll_task_h;
 #endif
 static TaskHandle_t host_task_h;
 
+/* Neither the LL nor the host task holds a WDT channel (nrf/shim/wdt_nrf.c):
+ * both block forever on the vendored NimBLE OS porting layer's single
+ * blocking primitive (porting/npl/freertos/src/npl_os_freertos.c), which has
+ * no per-iteration hook to feed from without patching link-layer-owned
+ * upstream code, and this port already carries two patches against that
+ * area for correctness fixes that needed real bench time to trust. Mesh and
+ * radio, which this build does cover, catch the cross-cutting hangs the
+ * field evidence actually shows (BLE and mesh going dark together); a
+ * BLE-only hang that leaves mesh healthy is the residual, explicitly
+ * accepted gap. */
 void nimble_port_freertos_init(TaskFunction_t host_task_fn) {
 #if NIMBLE_CFG_CONTROLLER
     /* The link layer has its own event queue and must outrank everything

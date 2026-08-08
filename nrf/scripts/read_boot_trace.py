@@ -28,19 +28,22 @@ TAGS = {
     0x10: "ADV(rc)", 0x11: "MESH_STARTED",
     0x12: "BATTERY_INIT(probe)", 0x13: "BATTERY_MV(mv)",
     0x14: "BOOT_BEGIN(resetreas)", 0x15: "BOOT_CARRY(failed)",
+    0x16: "BOOT_CARRY_DOG(dog)",
     0xDD: "BOOT_DONE(heap)",
     0xE1: "FAIL_ASSERT(line)", 0xE2: "FAIL_STACK_OVERFLOW",
     0xE3: "FAIL_MALLOC", 0xE4: "FAIL_SENTINEL(last)",
     0xE5: "FAIL_NRFX(line)", 0xE6: "FAIL_BOOTLOOP(failed)",
+    0xE7: "FAIL_DOGLOOP(dog)",
     0xEF: "FAIL_HARDFAULT(pc)",
 }
 
 BT_BOOT_BEGIN = 0x14
 BT_BOOT_DONE = 0xDD
-# The rescue stamps and reboots without writing its own BOOT_BEGIN first, so it
-# starts a group of its own here; otherwise it prints under the previous failed
-# boot and reads as part of it.
+# Both rescues stamp and reboot without writing their own BOOT_BEGIN first,
+# so each starts a group of its own here; otherwise it prints under the
+# previous failed boot and reads as part of it.
 BT_FAIL_BOOTLOOP = 0xE6
+BT_FAIL_DOGLOOP = 0xE7
 BT_TOKEN_SEED = 0x09
 
 # nrf_seed_auth_token_from_build's return codes (nrf/src/nrf_provision.h).
@@ -118,7 +121,7 @@ def main(path):
 
     boots = []
     for tag, aux in records(blob):
-        if tag in (BT_BOOT_BEGIN, BT_FAIL_BOOTLOOP) or not boots:
+        if tag in (BT_BOOT_BEGIN, BT_FAIL_BOOTLOOP, BT_FAIL_DOGLOOP) or not boots:
             boots.append([])
         boots[-1].append((tag, aux))
 

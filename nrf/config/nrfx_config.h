@@ -23,6 +23,14 @@
 // Battery voltage on boards with a cell divider (T1000-E); the driver is
 // linked per board via BRAMBLE_NRF_BATTERY_SRCS in CMakeLists.txt.
 #define NRFX_SAADC_ENABLED 1
+// Runtime hang recovery (nrf/shim/wdt_nrf.c backs esp_task_wdt.h). One
+// instance on this part. No interrupt handling: nothing useful can run in
+// the two LFCLK ticks before the timeout resets the device, and the
+// evidence is recovered after the fact from RESETREAS on the next boot
+// (nrf/src/boot_trace.c), not from an ISR.
+#define NRFX_WDT_ENABLED 1
+#define NRFX_WDT0_ENABLED 1
+#define NRFX_WDT_CONFIG_NO_IRQ 1
 
 #include "nrfx_config_nrf52840.h"
 

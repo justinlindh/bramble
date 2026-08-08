@@ -30,6 +30,15 @@ typedef struct {
     /* Boots recorded since the last one that finished, or since the last
      * boot-loop rescue. Zero on a page whose most recent boot completed. */
     uint32_t failed_boots;
+    /* Consecutive boots, most recent first, whose BT_BOOT_BEGIN aux
+     * (RESETREAS) had the DOG bit set, i.e. were reset by the watchdog. Set
+     * per BT_BOOT_BEGIN from that boot's own reset reason, not from whether
+     * the boot itself later reached BT_BOOT_DONE (every DOG-reset boot
+     * does, or the watchdog would not have helped, so tracking that instead
+     * would never accumulate past one); cleared by any BT_BOOT_BEGIN whose
+     * aux does NOT have the DOG bit set, and by a rescue
+     * (BT_FAIL_BOOTLOOP or BT_FAIL_DOGLOOP). See BT_DOG_LOOP_LIMIT. */
+    uint32_t dog_boots;
     /* False when slot 0 does not hold the magic, i.e. the page is virgin,
      * corrupt, or holds something that is not a trace. The caller must
      * erase before writing anything. */

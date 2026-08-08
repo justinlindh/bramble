@@ -6,6 +6,7 @@
 #include "app_init.h"
 
 #include "boot_trace.h"
+#include "bramble_wdt.h"
 #include "nrf_provision.h"
 
 #include <FreeRTOS.h>
@@ -131,5 +132,23 @@ void app_init_stack(void) {
     /* Boot is over: allow rail-gated battery reads from here on. Kept
      * strictly after BT_BOOT_DONE, see the battery stanza above. */
     battery_runtime_arm();
+
+    /* Arms the runtime watchdog: after this call, every registered task
+     * (mesh, radio) must keep feeding its channel or the device resets.
+     * Deliberately here, after BT_BOOT_DONE, not at main() entry: the
+     * nRF52840 WDT cannot be stopped once started (bramble_wdt.h), so
+     * arming it any earlier would put it in the way of the boot-time
+     * recovery path (boot_trace_init's bootloop counter and the sentinel
+     * task in main_nrf.c, both of which handle boot failure today with no
+     * watchdog involved) and risk it running through an in-progress UF2
+     * reflash. That also sets the 60s window (wdt_nrf.c): a DFU session
+     * this watchdog might now be running alongside must fit inside one
+     * period. mesh_task_start() above has already returned by the time
+     * control reaches this line, and both tasks it creates outrank this
+     * one (task_boot, priority 3) and call esp_task_wdt_add() as their
+     * first action, so FreeRTOS's preemptive scheduler guarantees both
+     * subscribers have already registered; see wdt_nrf.c for the full
+     * argument. */
+    bramble_wdt_arm();
     ESP_LOGI(TAG, "mesh_task_start returned; free heap %u bytes", (unsigned)xPortGetFreeHeapSize());
 }

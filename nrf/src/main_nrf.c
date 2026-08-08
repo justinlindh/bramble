@@ -11,6 +11,7 @@
 
 #include "app_init.h"
 #include "boot_trace.h"
+#include "bramble_wdt.h"
 #include "console.h"
 #include "crypto.h"
 #include "esp_log.h"
@@ -205,6 +206,14 @@ int main(void) {
     esp_random_nrf_init();
     bramble_mbedtls_platform_init();
     ESP_LOGI(TAG, "Bramble nRF52840 P0 %s booted", BRAMBLE_GIT_DESCRIBE);
+
+    /* Initializes the WDT driver only; does not start the countdown (see
+     * bramble_wdt.h). Must run before any task exists: every subscriber's
+     * esp_task_wdt_add() requires the driver already initialized, and this
+     * is the one place that can guarantee it runs first. The countdown
+     * itself is armed later, from app_init_stack() after boot reaches
+     * steady state; see that call site for why. */
+    bramble_wdt_init();
 
     // Crypto runs in a task (2KB stack): mbedtls ECP wants more stack than
     // the pre-scheduler main stack guarantees once P1 shrinks it.

@@ -75,18 +75,28 @@ FetchContent_Declare(nimble
   GIT_REPOSITORY https://github.com/apache/mynewt-nimble.git
   GIT_TAG nimble_1_10_0_tag
   GIT_SHALLOW TRUE
-  # Idempotent but not silent: if the patch is already applied (CMake re-runs
-  # this step on every reconfigure) the reverse-check short-circuits;
-  # otherwise it must apply cleanly or the build fails. Never `|| true`: a
-  # patch that quietly fails to apply produces a build that asserts inside
-  # the link layer's first interrupt, which is miserable to debug.
-  #
-  # One list, used for both the check and the apply: git apply is
-  # all-or-nothing across the files it is given, so the set must be identical
-  # on both sides. Naming it once is what keeps them that way; adding a patch
-  # to only one list would give a reverse-check that never short-circuits and
-  # therefore a re-apply failure on every reconfigure.
-  PATCH_COMMAND git apply --reverse --check --ignore-whitespace ${NIMBLE_PATCHES} ||
+  # Reset to the pristine tag before applying, every time, rather than
+  # reverse-checking whether the patches are already applied and only
+  # forward-applying if not. That reverse-check approach (the previous
+  # version of this command) breaks the moment the source tree is not in
+  # one of the two states it assumes (virgin, or fully patched by exactly
+  # this patch set): CI's dependency cache
+  # (.github/workflows/quality.yml's nrf-deps- cache) can restore a NimBLE
+  # tree already patched by an OLDER version of NIMBLE_PATCHES, and a
+  # reverse-check across the CURRENT set then fails (some patches are
+  # present, some are not), falls through to a forward apply, and that
+  # apply fails too (the already-present patches no longer match their own
+  # "before" context). Observed in bramble#514: adding a third patch to
+  # this list broke CI while every local from-scratch build passed,
+  # because a from-scratch build never exercises a warm, differently-
+  # patched cache. `git reset --hard` first makes the forward apply
+  # unconditional and therefore correct regardless of whatever state the
+  # working tree was actually in, cache-warm or not, so this needs no
+  # further attention the next time a patch is added to the list. Never
+  # `|| true` on the apply itself: a patch that quietly fails to apply
+  # produces a build that asserts inside the link layer's first interrupt,
+  # which is miserable to debug.
+  PATCH_COMMAND git reset --hard HEAD &&
                 git apply --ignore-whitespace ${NIMBLE_PATCHES}
 )
 FetchContent_Declare(littlefs
@@ -118,6 +128,7 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_saadc.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_wdt.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
 )
 target_include_directories(nrfx_lib PUBLIC
@@ -413,6 +424,7 @@ add_executable(bramble-nrf
   shim/nvs_lfs.c
   shim/mbedtls_platform_freertos.c
   shim/malloc_freertos.c
+  shim/wdt_nrf.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_esp.c
 )

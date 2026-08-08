@@ -428,6 +428,40 @@ target_include_directories(test_boot_trace PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src
 )
 
+# nRF watchdog state machine (nrf/shim/wdt_nrf.c): the nrfx_wdt_* peripheral
+# calls are stubbed with recording fakes (stubs/wdt_nrf/nrfx_wdt.h) and
+# FreeRTOS task identity is faked (stubs/wdt_nrf/task.h), so the real
+# add/delete/arm/reset bookkeeping runs on the host. wdt_nrf.c has no reset
+# hook, so each executable is its own process for a fresh set of statics;
+# test_wdt_nrf.c covers the boot-order scenario (delete after arm), the
+# second covers a task deleting itself before arm ever runs. BEFORE is
+# required, not stylistic: the global include_directories() above already
+# adds stubs/ (for every other host test's esp_task_wdt.h, a plain
+# void*-based no-op stub with none of TaskHandle_t/ESP_OK/nrfx_wdt.h this
+# target needs), and BEFORE is what makes stubs/wdt_nrf/ and the real
+# nrf/shim/include/esp_task_wdt.h win the `#include "esp_task_wdt.h"` and
+# `#include <FreeRTOS.h>`/`<task.h>` lookups in both wdt_nrf.c and this
+# test's own sources instead.
+add_executable(test_wdt_nrf
+    test_wdt_nrf.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/wdt_nrf.c
+    unity/unity.c
+)
+target_include_directories(test_wdt_nrf BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs/wdt_nrf
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+)
+
+add_executable(test_wdt_nrf_delete_before_arm
+    test_wdt_nrf_delete_before_arm.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/wdt_nrf.c
+    unity/unity.c
+)
+target_include_directories(test_wdt_nrf_delete_before_arm BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs/wdt_nrf
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
+)
+
 # Battery percentage curve (shared by the device and virtual drivers)
 add_executable(test_battery
     test_battery.c

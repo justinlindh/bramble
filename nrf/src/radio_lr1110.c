@@ -338,8 +338,29 @@ static void radio_task(void* arg) {
     (void)arg;
     uint8_t buf[256];
 
+    /* First action, before any blocking call: nrf/shim/wdt_nrf.c's arm
+     * sequencing (see nrf/src/app_init.c) depends on every subscriber
+     * having already registered by the time it runs, which FreeRTOS's
+     * fixed-priority preemption only guarantees if this happens before the
+     * task can be preempted back out. */
+    esp_task_wdt_add(NULL);
+
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        uint32_t notified;
+        do {
+            /* Bounded, not portMAX_DELAY: a radio with nothing pending can
+             * legitimately sit here far longer than the WDT window, and
+             * that is not a hang. Feed on every wakeup, timeout or real
+             * notification alike, so idle waiting here is never mistaken
+             * for one; xTaskNotifyTake still wakes immediately on a real
+             * notification regardless of the timeout given here, so this
+             * changes nothing about IRQ latency. A hang inside the IRQ
+             * processing below (an SPI transaction that never completes,
+             * for example) still trips the watchdog, because this loop
+             * never gets back here to feed again until that call returns. */
+            notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+            esp_task_wdt_reset();
+        } while (!notified);
 
         lr11xx_system_irq_mask_t irq = 0;
         if (lr11xx_system_get_and_clear_irq_status(s_lr, &irq) != LR11XX_STATUS_OK) {
