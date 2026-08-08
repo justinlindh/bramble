@@ -492,6 +492,8 @@ const rollcall_ledger_t* bridge_rollcall_ledger(node_array_t* nodes, const char*
 
 /* Answers a node could not queue because its pending-answer queue was full. */
 uint32_t bridge_rollcall_pending_dropped(node_array_t* nodes, const char* node_id);
+
+/*
  * bridge_export_topology (mesh digital twin, ../../docs/digital-twin.md):
  *   Serializes one simulated node's observed mesh state into the same
  *   bramble.exportTopology document a real device returns, by calling the
