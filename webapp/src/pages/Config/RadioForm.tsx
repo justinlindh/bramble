@@ -98,7 +98,7 @@ export function RadioForm({ radio }: RadioFormProps) {
           className={styles.slider}
           type="range"
           min={2}
-          max={20}
+          max={22}
           step={1}
           value={form.txPowerDbm}
           onChange={(e) => setForm((f) => ({ ...f, txPowerDbm: Number(e.target.value) }))}

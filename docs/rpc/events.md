@@ -559,10 +559,19 @@ Real-time packet telemetry event for traffic debug stream.
 | `packet_len` | integer | Packet length in bytes. |
 | `rssi` | integer | RX RSSI (or 0 for TX events). |
 | `is_tx` | boolean | `true` for TX, `false` for RX. |
+| `src_addr` | string | Claimed origin address of an RX frame, 8 uppercase hex digits. Optional. |
 
 **Semantics notes**
 
 - Stream behavior depends on traffic debug configuration and sampling.
+- `src_addr` is present only when the frame's packet type carries an origin
+  address, and never on TX events. It is absent rather than zero when unknown,
+  so a consumer plotting signal strength per peer cannot mistake "not carried"
+  for a real address. Pairing it with `rssi` is what makes per-link RF
+  measurement possible: neighbour RSSI in `bramble.getNeighbors` refreshes only
+  on beacon reception, so it is a per-beacon snapshot, not a per-packet sample.
+- The address is read from the unauthenticated wire prefix, so it is a claim,
+  not a verified identity. Use it for telemetry, never for a trust decision.
 
 **JSON-RPC example**
 
@@ -578,7 +587,8 @@ Real-time packet telemetry event for traffic debug stream.
     "airtime_tier": "normal",
     "packet_len": 48,
     "rssi": -91,
-    "is_tx": false
+    "is_tx": false,
+    "src_addr": "10B76F29"
   }
 }
 ```

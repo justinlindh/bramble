@@ -136,6 +136,27 @@ static uint8_t cad_det_peak_for(uint8_t sf, uint32_t bw_hz) {
     return peaks_4symb[row][sf - 5];
 }
 
+/* Output-power range the LR1110 accepts across both PA paths: the low-power
+ * PA reaches down to -17 dBm, the high-power PA tops out at +22. Distinct from
+ * the frequency plan's regulatory ceiling, which is higher than either. */
+#define LR1110_TX_POWER_MIN_DBM (-17)
+#define LR1110_TX_POWER_MAX_DBM 22
+
+/* Clamp a requested power to what the part accepts and say so. Applied to the
+ * value stored in s_config, not just the one written to the chip: callers
+ * persist and report radio_get_config(), so clamping only on the way to the
+ * hardware would leave NVS, the RPC echo and radio_health claiming a power the
+ * radio was never programmed with. */
+static int8_t clamp_and_log_tx_power(int8_t requested) {
+    int8_t clamped =
+        radio_clamp_tx_power(requested, LR1110_TX_POWER_MIN_DBM, LR1110_TX_POWER_MAX_DBM);
+    if (clamped != requested) {
+        ESP_LOGW(TAG, "TX power %d dBm outside LR1110 range %d..%d, using %d dBm", requested,
+                 LR1110_TX_POWER_MIN_DBM, LR1110_TX_POWER_MAX_DBM, clamped);
+    }
+    return clamped;
+}
+
 /* PA selection per the Seeed shield table: low-power PA/VREG up to +14dBm,
  * high-power PA/VBAT above, one authoritative copy for boot config and
  * runtime power changes alike (the SX1262 backend has the same shape in
@@ -143,6 +164,10 @@ static uint8_t cad_det_peak_for(uint8_t sf, uint32_t bw_hz) {
 static int set_pa(int8_t power) {
     lr11xx_radio_pa_cfg_t pa;
     int8_t chip_power;
+    /* Last line of defence before the value reaches the chip. The low-power
+     * branch previously passed its argument straight through, so a power below
+     * the part's -17 dBm floor went out unclamped. */
+    power = radio_clamp_tx_power(power, LR1110_TX_POWER_MIN_DBM, LR1110_TX_POWER_MAX_DBM);
     if (power <= 14) {
         pa = (lr11xx_radio_pa_cfg_t){
             .pa_sel = LR11XX_RADIO_PA_SEL_LP,
@@ -158,7 +183,7 @@ static int set_pa(int8_t power) {
             .pa_duty_cycle = 0x04,
             .pa_hp_sel = 0x07,
         };
-        chip_power = power > 22 ? 22 : power;
+        chip_power = power;
     }
     if (lr11xx_radio_set_pa_cfg(s_lr, &pa) != LR11XX_STATUS_OK)
         return -1;
@@ -368,6 +393,10 @@ int radio_reconfigure(const radio_config_t* config) {
     }
     vTaskDelay(pdMS_TO_TICKS(10));
 
+    radio_config_t applied = *config;
+    applied.tx_power = clamp_and_log_tx_power(applied.tx_power);
+    config = &applied;
+
     memcpy(&s_config, config, sizeof(s_config));
 
     int rc = configure_radio(config);
@@ -445,6 +474,10 @@ static int lr1110_system_init(void) {
 }
 
 int radio_init(const radio_config_t* config) {
+    radio_config_t applied = *config;
+    applied.tx_power = clamp_and_log_tx_power(applied.tx_power);
+    config = &applied;
+
     memcpy(&s_config, config, sizeof(s_config));
 
     s_lr = lr11xx_hal_nrf_init();
@@ -688,11 +721,29 @@ bool radio_cad_check(void) {
 }
 
 void radio_set_tx_power(int8_t power) {
+    power = clamp_and_log_tx_power(power);
     s_config.tx_power = power;
     if (set_pa(power) != 0) {
         ESP_LOGE(TAG, "radio_set_tx_power(%d) failed, power unchanged on chip", power);
     }
 }
+
+/* The LR1110 has its own error word (lr11xx_system_get_errors, already read
+ * around calibration below) and could report these verdicts. Wiring that up
+ * needs bench time on a T1000-E to confirm which flags mean what on this part,
+ * so until then this reports the programmed power with supported=false rather
+ * than guessing at a mapping that would read as verified evidence. */
+int radio_get_health(radio_health_t* health) {
+    if (!health)
+        return -1;
+    memset(health, 0, sizeof(*health));
+    health->supported = false;
+    health->tx_power_dbm = s_config.tx_power;
+    return 0;
+}
+
+int8_t radio_tx_power_min_dbm(void) { return LR1110_TX_POWER_MIN_DBM; }
+int8_t radio_tx_power_max_dbm(void) { return LR1110_TX_POWER_MAX_DBM; }
 
 radio_state_t radio_get_state(void) { return (radio_state_t)atomic_load(&s_state); }
 

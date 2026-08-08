@@ -255,8 +255,13 @@ target_include_directories(bramble_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../ma
 # delivery history for the UI rather than any protocol state, so depth here
 # costs only how far back the timeline goes. 128 keeps a useful window and
 # returns 21KB to the heap that pairing needs for its P-256 keypair.
+# The traffic debug ring is sized here for the same reason: it is one of the
+# largest static allocations on this part, it holds telemetry rather than
+# protocol state, and the static RAM budget gate below leaves under a kilobyte
+# of headroom. 256 events keeps a useful window at a quarter of the cost.
 target_compile_definitions(bramble_core PUBLIC BRAMBLE_PLATFORM_NRF
-                                               DELIVERY_EVENT_RING_CAPACITY=128u)
+                                               DELIVERY_EVENT_RING_CAPACITY=128u
+                                               TRAFFIC_DEBUG_CAPACITY=256)
 target_link_libraries(bramble_core PUBLIC freertos_kernel littlefs_lib)
 
 add_library(littlefs_lib STATIC

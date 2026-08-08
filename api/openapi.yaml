@@ -2538,6 +2538,8 @@ components:
             $ref: '#/components/schemas/TaskStackHighWaterMark'
         backpressure:
           $ref: '#/components/schemas/BackpressureDiagnostics'
+        radio_health:
+          $ref: '#/components/schemas/RadioHealthDiagnostics'
         gps_rx_bytes:
           type: number
           description: >
@@ -2607,6 +2609,68 @@ components:
             instead of transmitting it un-jittered.
         probe_ingress:
           $ref: '#/components/schemas/ProbeIngressDiagnostics'
+
+    RadioHealthDiagnostics:
+      type: object
+      description: >
+        What the radio reports about its own transmit path. No supported part
+        can read back its commanded or radiated output power: the SX1262's
+        SetTxParams and SetPaConfig are write-only op-codes and no register
+        reports output power. So this pairs the level the driver programmed
+        with the faults the chip will admit to, which is enough to catch a dead
+        PA, an unlocked synthesizer, a failed calibration, or config writes
+        that never landed. Confirming the level actually radiated needs
+        external instrumentation.
+
+        The verdicts are deliberately generic rather than one part's register
+        layout, so they stay meaningful as other radios learn to answer. The
+        chip-specific raw values ride along in `detail` as human-readable text.
+      required: [supported, tx_power_dbm]
+      properties:
+        supported:
+          type: boolean
+          description: >
+            False when the driver cannot interrogate its transmit path: the
+            emulator's virtual radio, or a part whose mapping is not
+            implemented. Only tx_power_dbm is populated then.
+        tx_power_dbm:
+          type: integer
+          description: >
+            Output power the driver programmed, after clamping to the radio's
+            own range. This is intent, not measurement.
+        chip:
+          type: string
+          description: Radio part that answered, for example "SX1262".
+        pa_fault:
+          type: boolean
+          description: >
+            The power amplifier did not ramp for a transmit, so nothing usable
+            went on air. The strongest evidence a chip can give that the
+            commanded power is not being produced.
+        pll_fault:
+          type: boolean
+          description: The frequency synthesizer did not lock.
+        oscillator_fault:
+          type: boolean
+          description: The reference oscillator did not start.
+        calibration_fault:
+          type: boolean
+          description: >
+            A calibration block failed. Costs link budget silently, without
+            failing any later command.
+        config_verified:
+          type: boolean
+          description: >
+            Configuration written to the chip reads back as programmed. False
+            means config writes are not landing, which caps output well below
+            the commanded level.
+        detail:
+          type: string
+          description: >
+            Chip-specific supporting values as human-readable text, for example
+            decoded error flag names, chip mode and PA settings. Intended for
+            display and logs; do not parse it, the format is the driver's to
+            choose and may change with the part.
 
     ProbeIngressDiagnostics:
       type: object
@@ -3569,6 +3633,17 @@ components:
         is_tx:
           type: boolean
           description: true if this is a TX event, false for RX.
+        src_addr:
+          type: string
+          pattern: '^[0-9A-F]{8}$'
+          description: >
+            Claimed origin address of an RX frame, as 8 uppercase hex digits.
+            Present only when the frame's packet type carries an origin address;
+            absent for TX events and for types that carry none, so that
+            "unknown" is never confused with a real address. Read from the
+            unauthenticated wire prefix, so it is telemetry, not a verified
+            identity. Pairing it with rssi is what makes per-peer signal
+            strength measurable, since neighbour RSSI only refreshes on beacons.
 
     MonitorEventStreamNotification:
       type: object

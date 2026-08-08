@@ -455,6 +455,66 @@ void test_get_config_round_trips(void) {
 /*  Profile table parity with the SX1262 authoritative values              */
 /* ---------------------------------------------------------------------- */
 
+/* The virtual radio advertises an accepted power range through
+ * radio_tx_power_min_dbm/max_dbm, and must enforce it on the value it stores,
+ * not merely advertise it. Callers persist and report radio_get_config(), so a
+ * backend that clamps only on the way to the "chip" leaves NVS, the RPC echo
+ * and radio_health claiming a power that was never programmed. Review of the
+ * original change caught this backend advertising -9..22 while accepting
+ * anything, which let the emulator and simulator run at powers no real node
+ * could reach. */
+void test_init_clamps_tx_power_above_chip_max(void) {
+    radio_config_t cfg = default_cfg();
+    cfg.tx_power = 30; /* the US915 regulatory ceiling, above any part */
+    attach_and_init("pager-clamp1", &cfg);
+    radio_config_t got;
+    radio_get_config(&got);
+    TEST_ASSERT_EQUAL_INT(radio_tx_power_max_dbm(), got.tx_power);
+}
+
+void test_reconfigure_clamps_tx_power(void) {
+    radio_config_t cfg = default_cfg();
+    attach_and_init("pager-clamp2", &cfg);
+    cfg.tx_power = 30;
+    radio_reconfigure(&cfg);
+    radio_config_t got;
+    radio_get_config(&got);
+    TEST_ASSERT_EQUAL_INT(radio_tx_power_max_dbm(), got.tx_power);
+
+    cfg.tx_power = -100;
+    radio_reconfigure(&cfg);
+    radio_get_config(&got);
+    TEST_ASSERT_EQUAL_INT(radio_tx_power_min_dbm(), got.tx_power);
+}
+
+void test_set_tx_power_clamps(void) {
+    radio_config_t cfg = default_cfg();
+    attach_and_init("pager-clamp3", &cfg);
+    radio_config_t got;
+
+    radio_set_tx_power(127);
+    radio_get_config(&got);
+    TEST_ASSERT_EQUAL_INT(radio_tx_power_max_dbm(), got.tx_power);
+
+    radio_set_tx_power(-128);
+    radio_get_config(&got);
+    TEST_ASSERT_EQUAL_INT(radio_tx_power_min_dbm(), got.tx_power);
+}
+
+/* Whatever a caller asks for, the reported power must be one the backend says
+ * it accepts, so the value that gets persisted and echoed is always real. */
+void test_reported_power_always_within_advertised_range(void) {
+    radio_config_t cfg = default_cfg();
+    attach_and_init("pager-clamp4", &cfg);
+    radio_config_t got;
+    for (int p = -128; p <= 127; p += 7) {
+        radio_set_tx_power((int8_t)p);
+        radio_get_config(&got);
+        TEST_ASSERT_TRUE(got.tx_power >= radio_tx_power_min_dbm());
+        TEST_ASSERT_TRUE(got.tx_power <= radio_tx_power_max_dbm());
+    }
+}
+
 void test_profile_long_range_values(void) {
     radio_config_t c;
     radio_get_profile_config(RADIO_PROFILE_LONG_RANGE, &c);
@@ -490,6 +550,10 @@ int main(void) {
     RUN_TEST(test_init_ends_in_rx);
     RUN_TEST(test_sleep_then_start_rx);
     RUN_TEST(test_get_config_round_trips);
+    RUN_TEST(test_init_clamps_tx_power_above_chip_max);
+    RUN_TEST(test_reconfigure_clamps_tx_power);
+    RUN_TEST(test_set_tx_power_clamps);
+    RUN_TEST(test_reported_power_always_within_advertised_range);
     RUN_TEST(test_profile_long_range_values);
     RUN_TEST(test_profile_medium_range_values);
     return UNITY_END();

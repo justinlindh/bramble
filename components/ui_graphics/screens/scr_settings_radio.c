@@ -67,6 +67,11 @@ static void radio_save_and_apply(void) {
         return;
     }
 
+    /* Persist what the driver actually programmed, not what the slider asked
+     * for: the driver clamps to the radio's own range, and storing the request
+     * would leave NVS and this screen's summary disagreeing with the chip. */
+    radio_get_config(&cfg);
+
     /* Persist to NVS (mirrors rpc_methods.c) */
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_RADIO, NVS_READWRITE, &nvs) == ESP_OK) {

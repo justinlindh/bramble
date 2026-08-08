@@ -285,6 +285,34 @@ int sx1262_clear_irq_status(uint16_t mask) {
 
 uint16_t sx1262_get_irq_status(void) { return 0; }
 
+/* Transmit-path readback fakes. Defaults describe a healthy chip: no latched
+ * device errors, standby with the last command done, and the OCP value the
+ * driver programs, so radio_get_health's "everything is fine" path is what the
+ * existing state tests see unless a case overrides these. */
+uint16_t g_fake_device_errors = 0;
+uint8_t g_fake_status = (uint8_t)((SX1262_MODE_STBY_RC << 4) | (SX1262_CMD_STATUS_TX_DONE << 1));
+uint8_t g_fake_ocp = SX1262_OCP_140MA;
+
+int sx1262_get_status(uint8_t* status) {
+    if (status)
+        *status = g_fake_status;
+    return fake_rc("get_status");
+}
+
+int sx1262_get_device_errors(uint16_t* errors) {
+    if (errors)
+        *errors = g_fake_device_errors;
+    return fake_rc("get_device_errors");
+}
+
+int sx1262_clear_device_errors(void) { return fake_rc("clear_device_errors"); }
+
+int sx1262_read_register(uint16_t addr, uint8_t* data, size_t len) {
+    if (data && len >= 1 && addr == SX1262_REG_OCP)
+        data[0] = g_fake_ocp;
+    return fake_rc("read_register");
+}
+
 int sx1262_set_tx(uint32_t timeout_ms) {
     (void)timeout_ms;
     s_calls_set_tx++;

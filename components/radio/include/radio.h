@@ -32,6 +32,85 @@ typedef struct {
     bool explicit_header;
 } radio_config_t;
 
+/** Longest chip-specific detail string a driver may report. Sized so the
+ *  SX1262 driver's line, whose worst case is every device-error flag named in
+ *  full plus the chip mode, command status and PA settings, cannot truncate. */
+#define RADIO_HEALTH_DETAIL_MAX 192
+
+/**
+ * What the radio will tell us about its own transmit path.
+ *
+ * On no supported part can the commanded or the radiated output power be read
+ * back: the SX1262's SetTxParams and SetPaConfig are write-only op-codes and
+ * no register reports output power. So this reports the next best evidence,
+ * as verdicts rather than one chip's register layout, because every LoRa part
+ * this firmware drives has its own error word and its own PA configuration.
+ * Confirming the level actually radiated needs external instrumentation.
+ *
+ * The verdicts are deliberately generic so the RPC layer can serialize them
+ * without knowing which radio answered. Each driver maps its own registers
+ * onto them and puts the raw values in `detail` for a human to read.
+ */
+typedef struct {
+    bool supported;      /* false where there is no real chip to ask */
+    const char* chip;    /* part name, NULL when unsupported */
+    int8_t tx_power_dbm; /* level the driver programmed, not a measurement */
+
+    /* The power amplifier did not ramp for a transmit, so nothing usable went
+     * on air. The strongest evidence a chip can give that the commanded power
+     * is not being produced. */
+    bool pa_fault;
+    bool pll_fault;         /* synthesizer did not lock */
+    bool oscillator_fault;  /* reference oscillator did not start */
+    bool calibration_fault; /* a calibration block failed */
+
+    /* Configuration written to the chip reads back as programmed. False means
+     * config writes are not landing, which caps output well below the
+     * commanded level. */
+    bool config_verified;
+
+    /* Chip-specific supporting values, human readable, never parsed. */
+    char detail[RADIO_HEALTH_DETAIL_MAX];
+} radio_health_t;
+
+/**
+ * Read the transmit-path evidence above off the chip.
+ * Returns 0 on success. On drivers with no real radio behind them, fills in
+ * supported=false and returns 0.
+ */
+int radio_get_health(radio_health_t* health);
+
+/**
+ * Output-power range the radio actually accepts, in dBm.
+ *
+ * This is a hardware limit and is distinct from the frequency plan's
+ * regulatory ceiling, which is higher than any part's capability in US915 and
+ * AU915. Callers that persist or report a requested power must respect both,
+ * or they will store and echo a number the chip was never programmed with.
+ */
+int8_t radio_tx_power_min_dbm(void);
+int8_t radio_tx_power_max_dbm(void);
+
+/**
+ * Clamp a requested output power into a driver's accepted range.
+ *
+ * Every backend must apply this to the value it stores in its own config
+ * before configuring the chip, not just to the value it writes to the chip.
+ * Callers persist and report what radio_get_config() returns, so a driver that
+ * clamps only on the way to the hardware leaves NVS, the RPC echo, the UI and
+ * radio_health all claiming a power the radio was never programmed with.
+ *
+ * Pure and inline so every backend shares one implementation and one test,
+ * including the bare-metal targets that carry no host test suite of their own.
+ */
+static inline int8_t radio_clamp_tx_power(int8_t power_dbm, int8_t min_dbm, int8_t max_dbm) {
+    if (power_dbm > max_dbm)
+        return max_dbm;
+    if (power_dbm < min_dbm)
+        return min_dbm;
+    return power_dbm;
+}
+
 typedef void (*radio_rx_callback_t)(const uint8_t* data, uint8_t len, const radio_rx_info_t* info);
 typedef void (*radio_tx_done_callback_t)(void);
 typedef void (*radio_cad_done_callback_t)(bool detected);

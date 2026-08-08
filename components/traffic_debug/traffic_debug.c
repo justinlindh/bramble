@@ -99,7 +99,7 @@ const char* traffic_debug_airtime_tier_name(uint8_t tier) {
 }
 
 static void record_event(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, int8_t rssi,
-                         bool is_tx, uint8_t tier) {
+                         bool is_tx, uint8_t tier, uint32_t src_addr) {
     if (!td->enabled) {
         return;
     }
@@ -131,6 +131,7 @@ static void record_event(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, in
     evt->packet_len = len;
     evt->rssi = rssi;
     evt->is_tx = is_tx;
+    evt->src_addr = src_addr;
 
     /* Advance head (circular) */
     td->head = (td->head + 1) % td->capacity;
@@ -142,11 +143,12 @@ static void record_event(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, in
 }
 
 void traffic_debug_record_tx(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, uint8_t tier) {
-    record_event(td, pkt_type, len, 0, true, tier);
+    record_event(td, pkt_type, len, 0, true, tier, 0);
 }
 
-void traffic_debug_record_rx(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, int8_t rssi) {
-    record_event(td, pkt_type, len, rssi, false, AIRTIME_TIER_NORMAL);
+void traffic_debug_record_rx(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, int8_t rssi,
+                             uint32_t src_addr) {
+    record_event(td, pkt_type, len, rssi, false, AIRTIME_TIER_NORMAL, src_addr);
 }
 
 uint16_t traffic_debug_get_count(traffic_debug_t* td) { return td->count; }

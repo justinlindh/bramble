@@ -282,8 +282,8 @@ pending_rreq_fwd_t s_rreq_fwd_queue[RREQ_FWD_QUEUE_CAPACITY];
 /* Reliability: ACK tracking for outgoing unicast messages */
 pending_ack_table_t s_pending_acks;
 
-/* Traffic debug telemetry */
-#define TRAFFIC_DEBUG_CAPACITY 512
+/* Traffic debug telemetry. Depth comes from TRAFFIC_DEBUG_CAPACITY in
+ * traffic_debug.h, which each platform's build may override. */
 static traffic_event_t s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
 static traffic_debug_t s_traffic_debug;
 timesync_state_t s_timesync;
@@ -1131,8 +1131,13 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
         return;
     }
 
-    /* Record raw RX event */
-    traffic_debug_record_rx(&s_traffic_debug, header.type, pkt->len, pkt->rssi);
+    /* Record raw RX event. The claimed origin rides along so an RSSI sample
+     * can be attributed to a peer: neighbor-table RSSI only refreshes on
+     * beacon reception, so without this the event stream carries signal
+     * strength that belongs to nobody in particular. Unknown stays 0. */
+    uint32_t traffic_src = 0;
+    bramble_packet_origin_addr(header.type, pkt->data, pkt->len, &traffic_src);
+    traffic_debug_record_rx(&s_traffic_debug, header.type, pkt->len, pkt->rssi, traffic_src);
 
     /* Dedup check:
      * - include packet type to avoid PROBE vs PROBE_ACK collisions
@@ -2978,21 +2983,10 @@ static void traffic_event_notify(const traffic_event_t* evt, void* ctx) {
         return;
     }
 
-    /* Build notification payload */
+    /* Build notification payload. Shared serializer so this and the
+     * getTrafficEvents reply cannot drift apart. */
     cJSON* params = cJSON_CreateObject();
-    cJSON_AddNumberToObject(params, "seq", evt->seq);
-    cJSON_AddNumberToObject(params, "timestamp_ms", evt->timestamp_ms);
-    cJSON_AddNumberToObject(params, "pkt_type", evt->pkt_type);
-
-    /* Category and airtime tier as canonical strings (shared with the
-     * traffic_debug_get RPC serializer via the traffic_debug component). */
-    cJSON_AddStringToObject(params, "category", traffic_debug_category_name(evt->category));
-    cJSON_AddStringToObject(params, "airtime_tier",
-                            traffic_debug_airtime_tier_name(evt->airtime_tier));
-
-    cJSON_AddNumberToObject(params, "packet_len", evt->packet_len);
-    cJSON_AddNumberToObject(params, "rssi", evt->rssi);
-    cJSON_AddBoolToObject(params, "is_tx", evt->is_tx);
+    traffic_event_add_json(params, evt);
 
     /* Send notification via RPC notify system (which forwards to WebSocket) */
     rpc_notify("bramble.onTrafficEvent", params);

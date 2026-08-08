@@ -1805,6 +1805,7 @@ export interface components {
             heap: components["schemas"]["HeapDiagnostics"];
             task_stack_hwm: components["schemas"]["TaskStackHighWaterMark"][];
             backpressure?: components["schemas"]["BackpressureDiagnostics"];
+            radio_health?: components["schemas"]["RadioHealthDiagnostics"];
             /** @description Total bytes received on the GNSS UART since the driver last started. Present only on boards with GPS capability. Zero rx bytes with the driver running means the UART link is dead. */
             gps_rx_bytes?: number;
             /** @description Total complete NMEA-ish lines parsed out of the GNSS byte stream since the driver last started. Present only on boards with GPS capability. Nonzero rx bytes with zero rx lines means data is flowing but not framing as lines. */
@@ -1825,6 +1826,30 @@ export interface components {
             /** @description Flood rebroadcasts dropped because the jittered relay queue was full. The node was already holding a full queue of pending relays, which is local congestion, so it dropped the copy instead of transmitting it un-jittered. */
             flood_relay_drops: number;
             probe_ingress: components["schemas"]["ProbeIngressDiagnostics"];
+        };
+        /**
+         * @description What the radio reports about its own transmit path. No supported part can read back its commanded or radiated output power: the SX1262's SetTxParams and SetPaConfig are write-only op-codes and no register reports output power. So this pairs the level the driver programmed with the faults the chip will admit to, which is enough to catch a dead PA, an unlocked synthesizer, a failed calibration, or config writes that never landed. Confirming the level actually radiated needs external instrumentation.
+         *     The verdicts are deliberately generic rather than one part's register layout, so they stay meaningful as other radios learn to answer. The chip-specific raw values ride along in `detail` as human-readable text.
+         */
+        RadioHealthDiagnostics: {
+            /** @description False when the driver cannot interrogate its transmit path: the emulator's virtual radio, or a part whose mapping is not implemented. Only tx_power_dbm is populated then. */
+            supported: boolean;
+            /** @description Output power the driver programmed, after clamping to the radio's own range. This is intent, not measurement. */
+            tx_power_dbm: number;
+            /** @description Radio part that answered, for example "SX1262". */
+            chip?: string;
+            /** @description The power amplifier did not ramp for a transmit, so nothing usable went on air. The strongest evidence a chip can give that the commanded power is not being produced. */
+            pa_fault?: boolean;
+            /** @description The frequency synthesizer did not lock. */
+            pll_fault?: boolean;
+            /** @description The reference oscillator did not start. */
+            oscillator_fault?: boolean;
+            /** @description A calibration block failed. Costs link budget silently, without failing any later command. */
+            calibration_fault?: boolean;
+            /** @description Configuration written to the chip reads back as programmed. False means config writes are not landing, which caps output well below the commanded level. */
+            config_verified?: boolean;
+            /** @description Chip-specific supporting values as human-readable text, for example decoded error flag names, chip mode and PA settings. Intended for display and logs; do not parse it, the format is the driver's to choose and may change with the part. */
+            detail?: string;
         };
         /** @description Inbound PROBE token-bucket accounting. PROBE is unauthenticated by design, so these buckets bound how much transmission an inbound probe can buy rather than who may send one. The buckets are node-global and never per-sender, because the only sender signal on a PROBE is an unauthenticated address field. */
         ProbeIngressDiagnostics: {
@@ -2334,6 +2359,8 @@ export interface components {
             rssi: number;
             /** @description true if this is a TX event, false for RX. */
             is_tx: boolean;
+            /** @description Claimed origin address of an RX frame, as 8 uppercase hex digits. Present only when the frame's packet type carries an origin address; absent for TX events and for types that carry none, so that "unknown" is never confused with a real address. Read from the unauthenticated wire prefix, so it is telemetry, not a verified identity. Pairing it with rssi is what makes per-peer signal strength measurable, since neighbour RSSI only refreshes on beacons. */
+            src_addr?: string;
         };
         /** @description Canonical JSON-RPC notification envelope for monitor/event-stream events. */
         MonitorEventStreamNotification: {

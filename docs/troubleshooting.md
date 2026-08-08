@@ -108,6 +108,55 @@ Flash real hardware only through `scripts/flash.sh` or `scripts/flash-all.py`.
 They apply the right board defaults, build directory, and sdkconfig. Raw
 `esptool` invocations skip that and have bricked devices in the past.
 
+## Short range, and checking transmit power
+
+`bramble config get` reports the power the node was told to use. That is
+intent, not evidence. Neither the commanded nor the radiated output power can
+be read back from an SX1262: SetTxParams and SetPaConfig are write-only
+op-codes, and no register reports output power. Confirming the level actually
+radiated needs external instrumentation such as an SDR or a power meter.
+
+What the chip does report is in `bramble.getDiagnostics` under `radio_health`,
+and in the boot trace as `Radio health (init)` lines:
+
+- `pa_fault` true means the power amplifier did not ramp for a transmit, so
+  nothing usable went on air. This is the strongest on-chip signal that
+  commanded power is not being produced.
+- `pll_fault`, `oscillator_fault` and `calibration_fault` cost real link budget
+  without failing a transmit outright.
+- `config_verified` false means configuration writes are not reaching the chip
+  at all, which caps output well below the commanded level.
+- `detail` carries the chip-specific values behind those verdicts, such as the
+  decoded error flag names and the PA settings in use. It is for reading, not
+  parsing.
+
+### Comparing nodes on the bench
+
+Reciprocal RSSI isolates a transmit or receive fault without needing to know
+distances. For a pair of nodes, path loss and antenna gains are the same in
+both directions, so they cancel: read the RSSI each node reports for the other
+and subtract. A balanced pair differs by a few dB. A large asymmetry points at
+one node's transmit or receive path, usually an antenna or connector.
+
+The method is blind to a fault common to every unit, because a shared fault
+cancels out of every pairwise comparison. Only absolute measurement catches
+that case.
+
+### Two traps when measuring signal strength
+
+- Neighbour RSSI from `bramble peers` refreshes **only** on beacon reception,
+  not on probes or data traffic. Re-reading it in a loop returns the same
+  cached value, which looks like a convincingly flat measurement. Gate every
+  reading on `last_seen_ms` proving the beacon arrived after whatever you
+  changed. Traffic events (`bramble.onTrafficEvent`) carry a per-packet `rssi`
+  with the origin in `src_addr`, which is the per-packet alternative.
+- Probe-response RSSI belongs to whoever transmitted the frame that arrived. A
+  response relayed through another node (`hops` greater than 1) carries the
+  relay's signal, not the peer's. Filter on `hops`.
+
+Changing power with `bramble config set-radio --txpower` persists to NVS, so a
+sweep leaves the node on its last value. Restore it explicitly.
+
 ## Firmware updates over the air
 
 The full journey, including every state the web client shows, is

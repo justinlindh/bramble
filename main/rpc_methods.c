@@ -284,6 +284,28 @@ static int handle_get_diagnostics(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(probe, "dropped_reply", (double)probe_drop_reply);
     cJSON_AddNumberToObject(probe, "dropped_forward", (double)probe_drop_fwd);
 
+    /* Transmit-path evidence. No supported radio can report its commanded or
+     * radiated output power, so this pairs the level the driver programmed
+     * with the faults the chip will admit to. Serialized from the generic
+     * verdicts in radio_health_t rather than one part's registers, so this
+     * stays correct when a second radio learns to answer; the chip-specific
+     * values ride along in `detail` as text for a human to read. */
+    radio_health_t rh;
+    if (radio_get_health(&rh) == 0) {
+        cJSON* health = cJSON_AddObjectToObject(result, "radio_health");
+        cJSON_AddBoolToObject(health, "supported", rh.supported);
+        cJSON_AddNumberToObject(health, "tx_power_dbm", rh.tx_power_dbm);
+        if (rh.supported) {
+            cJSON_AddStringToObject(health, "chip", rh.chip ? rh.chip : "unknown");
+            cJSON_AddBoolToObject(health, "pa_fault", rh.pa_fault);
+            cJSON_AddBoolToObject(health, "pll_fault", rh.pll_fault);
+            cJSON_AddBoolToObject(health, "oscillator_fault", rh.oscillator_fault);
+            cJSON_AddBoolToObject(health, "calibration_fault", rh.calibration_fault);
+            cJSON_AddBoolToObject(health, "config_verified", rh.config_verified);
+            cJSON_AddStringToObject(health, "detail", rh.detail);
+        }
+    }
+
     /* GNSS raw-feed diagnostics: byte/line counters and chip banner tell
      * "UART dead" from "flowing but unparseable" on a console-less board. */
     if (board_has_cap(BOARD_CAP_GPS)) {
@@ -986,6 +1008,16 @@ static int handle_set_radio(const cJSON* params, cJSON* result) {
         cJSON_AddStringToObject(result, "error", "radio reconfigure failed");
         return 0;
     }
+
+    /* Take back what the driver actually programmed before persisting or
+     * echoing it. The plan clamp above is regulatory (30 dBm in US915/AU915)
+     * and sits well above what any radio accepts, so the driver clamps again
+     * to the hardware range. Reporting the requested value here would persist
+     * a power to NVS, echo it to the caller and show it in the UI while the
+     * chip ran at a different one, and this same response also carries
+     * radio_health's programmed level, so the two would contradict each
+     * other. */
+    radio_get_config(&cfg);
 
     /* Persist to NVS */
     nvs_handle_t nvs;
@@ -3370,21 +3402,10 @@ static int handle_get_traffic_events(const cJSON* params, cJSON* result) {
         if (since_seq > 0 && evt->seq <= since_seq)
             continue;
 
+        /* Shared serializer so this and the onTrafficEvent notification
+         * cannot drift apart. */
         cJSON* obj = cJSON_CreateObject();
-        cJSON_AddNumberToObject(obj, "seq", evt->seq);
-        cJSON_AddNumberToObject(obj, "timestamp_ms", evt->timestamp_ms);
-        cJSON_AddNumberToObject(obj, "pkt_type", evt->pkt_type);
-
-        /* Category and airtime tier as canonical strings (shared with the
-         * traffic_event notification serializer via the traffic_debug
-         * component). */
-        cJSON_AddStringToObject(obj, "category", traffic_debug_category_name(evt->category));
-        cJSON_AddStringToObject(obj, "airtime_tier",
-                                traffic_debug_airtime_tier_name(evt->airtime_tier));
-
-        cJSON_AddNumberToObject(obj, "packet_len", evt->packet_len);
-        cJSON_AddNumberToObject(obj, "rssi", evt->rssi);
-        cJSON_AddBoolToObject(obj, "is_tx", evt->is_tx);
+        traffic_event_add_json(obj, evt);
 
         cJSON_AddItemToArray(events, obj);
         returned++;

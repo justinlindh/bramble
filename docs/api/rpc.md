@@ -172,9 +172,9 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 #### `bramble.getDiagnostics`
 
-- Description: Returns heap, task-stack and backpressure diagnostics, plus raw GPS feed counters on a board with a receiver.
+- Description: Returns heap, task-stack and backpressure diagnostics, radio transmit-path health, plus raw GPS feed counters on a board with a receiver.
 - Params: optional `include_heap_dump` (bool); when true the node also writes a heap dump to its own console, which the response does not carry.
-- Response fields: `uptime_s` (number), `free_heap` (number), `heap` (object: `internal_free`, `internal_largest_free_block`, `internal_min_ever_free`, `dma_free`, `dma_largest_free_block`, `psram_free`, `psram_min_ever_free`), `task_stack_hwm` (array of `{task, hwm_words, hwm_bytes}`), `backpressure` (object: `flood_relay_drops`, `probe_ingress`), and on a GPS-capable board `gps_rx_bytes`, `gps_rx_lines`, `gps_chip`, `gps_rx_overruns`, `gps_rx_errors`, `gps_rx_disabled`, `gps_rx_rearm_fail`.
+- Response fields: `uptime_s` (number), `free_heap` (number), `heap` (object: `internal_free`, `internal_largest_free_block`, `internal_min_ever_free`, `dma_free`, `dma_largest_free_block`, `psram_free`, `psram_min_ever_free`), `task_stack_hwm` (array of `{task, hwm_words, hwm_bytes}`), `backpressure` (object: `flood_relay_drops`, `probe_ingress`), `radio_health` (object: `supported`, `tx_power_dbm`, and when supported `chip`, `pa_fault`, `pll_fault`, `oscillator_fault`, `calibration_fault`, `config_verified`, `detail`), and on a GPS-capable board `gps_rx_bytes`, `gps_rx_lines`, `gps_chip`, `gps_rx_overruns`, `gps_rx_errors`, `gps_rx_disabled`, `gps_rx_rearm_fail`.
 - Example:
 
 ```json

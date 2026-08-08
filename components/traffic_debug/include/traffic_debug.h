@@ -17,15 +17,39 @@ typedef enum {
     TRAFFIC_CAT_OTHER
 } traffic_category_t;
 
+/* Depth of the traffic event ring, overridable per platform at compile time,
+ * the same way DELIVERY_EVENT_RING_CAPACITY is. The ring is one of the largest
+ * static allocations on the nRF52840, where RAM is the binding constraint and
+ * the budget gate leaves under a kilobyte of headroom, so that target defines a
+ * smaller value in its own CMakeLists rather than this header carrying a
+ * platform ifdef. It holds debug telemetry, not anything the mesh needs to
+ * function, so a shorter history is the right thing to give up there. */
+#ifndef TRAFFIC_DEBUG_CAPACITY
+#define TRAFFIC_DEBUG_CAPACITY 512
+#endif
+
 /**
  * Traffic event structure
  * Captures essential metadata for TX/RX telemetry
- */
+ *
+ * Field order is deliberate: the four-byte members lead, then the small ones
+ * pack into the tail. This struct is the element type of a ring buffer sized
+ * in the hundreds, so a member landing after a bool costs four bytes of
+ * padding per event, and on the nRF52840 that is enough to breach the static
+ * RAM budget. Reorder only with the resulting sizeof in mind; nothing here is
+ * a wire layout, so the order itself carries no compatibility meaning. */
 typedef struct {
-    uint32_t seq;                /* Monotonic sequence number */
-    uint32_t timestamp_ms;       /* Event timestamp */
-    uint8_t pkt_type;            /* Packet type from packet.h */
+    uint32_t seq;          /* Monotonic sequence number */
+    uint32_t timestamp_ms; /* Event timestamp */
+    /* Claimed origin of an RX frame, 0 when unknown or for TX. Without it an
+     * RSSI sample cannot be tied to a peer, which makes the event stream
+     * useless for per-link RF work: neighbor-table RSSI only refreshes on
+     * beacons, so this is the only per-packet signal-strength record. Read off
+     * the unauthenticated wire prefix (see bramble_packet_origin_addr), so it
+     * is telemetry, never a trust input. */
+    uint32_t src_addr;
     traffic_category_t category; /* Classified category */
+    uint8_t pkt_type;            /* Packet type from packet.h */
     uint8_t airtime_tier;        /* Airtime tier (broadcast/normal/critical) */
     uint16_t packet_len;         /* Packet length in bytes */
     int8_t rssi;                 /* RSSI for RX, 0 for TX */
@@ -124,8 +148,11 @@ void traffic_debug_record_tx(traffic_debug_t* td, uint8_t pkt_type, uint16_t len
  * @param pkt_type Packet type
  * @param len Packet length
  * @param rssi RSSI value
+ * @param src_addr Claimed origin address, or 0 when the frame's type carries
+ *                 none (see bramble_packet_origin_addr). Telemetry only.
  */
-void traffic_debug_record_rx(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, int8_t rssi);
+void traffic_debug_record_rx(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, int8_t rssi,
+                             uint32_t src_addr);
 
 /**
  * Get number of events currently in buffer

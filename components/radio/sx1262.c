@@ -266,6 +266,33 @@ int sx1262_write_buffer(uint8_t offset, const uint8_t* data, size_t len) {
     return rc;
 }
 
+int sx1262_read_register(uint16_t addr, uint8_t* data, size_t len) {
+    spi_mutex_take();
+    int busy_rc = sx1262_wait_busy(2000);
+    if (busy_rc != 0) {
+        spi_mutex_give();
+        return busy_rc;
+    }
+
+    /* cmd + addr_hi + addr_lo + 1 NOP + len data */
+    size_t total = 4 + len;
+    uint8_t tx[total];
+    uint8_t rx[total];
+    memset(tx, 0x00, total);
+    tx[0] = SX1262_CMD_READ_REGISTER;
+    tx[1] = (uint8_t)(addr >> 8);
+    tx[2] = (uint8_t)(addr & 0xFF);
+
+    nss_low();
+    int rc = spi_transfer(tx, rx, total);
+    nss_high();
+    spi_mutex_give();
+
+    if (rc == 0 && data)
+        memcpy(data, rx + 4, len);
+    return rc;
+}
+
 int sx1262_read_buffer(uint8_t offset, uint8_t* data, size_t len) {
     spi_mutex_take();
     int busy_rc = sx1262_wait_busy(2000);
@@ -295,6 +322,29 @@ int sx1262_read_buffer(uint8_t offset, uint8_t* data, size_t len) {
 /* ------------------------------------------------------------------ */
 /*  Status                                                             */
 /* ------------------------------------------------------------------ */
+
+/* The SX1262 returns its status byte on MISO for every byte clocked after an
+ * op-code, so the NOP that sx1262_read_command already sends carries it. */
+int sx1262_get_status(uint8_t* status) {
+    uint8_t st = 0;
+    int rc = sx1262_read_command(SX1262_CMD_GET_STATUS, &st, 1);
+    if (rc == 0 && status)
+        *status = st;
+    return rc;
+}
+
+int sx1262_get_device_errors(uint16_t* errors) {
+    uint8_t buf[2] = {0, 0};
+    int rc = sx1262_read_command(SX1262_CMD_GET_DEVICE_ERRORS, buf, 2);
+    if (rc == 0 && errors)
+        *errors = (uint16_t)((buf[0] << 8) | buf[1]);
+    return rc;
+}
+
+int sx1262_clear_device_errors(void) {
+    uint8_t data[2] = {0x00, 0x00};
+    return sx1262_write_command(SX1262_CMD_CLR_DEVICE_ERRORS, data, 2);
+}
 
 /* ------------------------------------------------------------------ */
 /*  Reset                                                              */
@@ -333,20 +383,32 @@ int sx1262_set_rf_frequency(float freq_mhz) {
     return sx1262_write_command(SX1262_CMD_SET_RF_FREQ, data, 4);
 }
 
+/* Bias the high-power PA for the level about to be requested. deviceSel=0x00
+ * selects the SX1262 high-power PA, paLut=0x01 is the only defined value.
+ * The (paDutyCycle, hpMax) pair comes from sx1262_pa_op_point_for(), which
+ * holds the datasheet's characterized operating points; passing the same
+ * +22 dBm pair at every level transmits, but at full PA current regardless
+ * of the level actually asked for. */
 int sx1262_set_pa_config(int8_t power_dbm) {
-    /* SX1262: paDutyCycle=0x04, hpMax=0x07, deviceSel=0x00, paLut=0x01 */
-    uint8_t data[4] = {0x04, 0x07, 0x00, 0x01};
+    sx1262_pa_op_point_t op = sx1262_pa_op_point_for(power_dbm);
+    uint8_t data[4] = {op.pa_duty_cycle, op.hp_max, 0x00, 0x01};
+    ESP_LOGD(TAG, "SetPaConfig: %d dBm -> duty 0x%02x hpMax 0x%02x (rated %d dBm)", power_dbm,
+             op.pa_duty_cycle, op.hp_max, op.rated_dbm);
     int rc = sx1262_write_command(SX1262_CMD_SET_PA_CONFIG, data, 4);
     if (rc != 0)
         return rc;
 
-    /* Set OCP to 140 mA (register 0x08E7 = 0x38) */
-    uint8_t ocp = 0x38;
-    return sx1262_write_register(0x08E7, &ocp, 1);
+    uint8_t ocp = SX1262_OCP_140MA;
+    return sx1262_write_register(SX1262_REG_OCP, &ocp, 1);
 }
 
+/* Out-of-range power is not defined by the part, so clamp here as well as at
+ * the callers: this is the last point before the value becomes a raw byte on
+ * the wire. Silent, because every in-tree path already clamps and warns before
+ * reaching this depth; a second warning for one condition would only make the
+ * log ambiguous about which layer let it through. */
 int sx1262_set_tx_params(int8_t power_dbm, uint8_t ramp_time) {
-    uint8_t data[2] = {(uint8_t)power_dbm, ramp_time};
+    uint8_t data[2] = {(uint8_t)sx1262_clamp_tx_power(power_dbm), ramp_time};
     return sx1262_write_command(SX1262_CMD_SET_TX_PARAMS, data, 2);
 }
 
@@ -692,11 +754,33 @@ int sx1262_init(void) {
         ESP_LOGD(TAG, "Using crystal oscillator (no TCXO)");
     }
 
+    /* Clear the latched device errors before calibrating. Out of reset the
+     * chip runs from the crystal, and on a TCXO board there is no crystal to
+     * start, so XOSC_START latches in the window before SetDIO3AsTcxoCtrl runs
+     * above. The flags stay latched until explicitly cleared, so that startup
+     * artifact would otherwise be reported forever and make a genuine
+     * oscillator fault indistinguishable from normal boot. Clearing here means
+     * anything read back after this point was raised by the calibration that
+     * follows, running against the oscillator the board actually uses. */
+    if (sx1262_clear_device_errors() != 0)
+        return -1;
+
     /* --- Calibrate all blocks --- */
     /* sx1262_calibrate() has its own extended BUSY wait (up to 5000ms) to
      * cover TCXO boards where all-block calibration can take ~140ms+. */
     if (sx1262_calibrate(0x7F) != 0)
         return -1;
+
+    /* Anything latched now is real: it came from calibrating against the
+     * configured oscillator. Surfaced here as well as in the radio health
+     * report because a failed calibration costs link budget silently, without
+     * failing any subsequent command. */
+    uint16_t cal_errors = 0;
+    if (sx1262_get_device_errors(&cal_errors) == 0 && (cal_errors & SX1262_DEVERR_ALL)) {
+        char errbuf[SX1262_DEVERR_STR_MAX];
+        ESP_LOGE(TAG, "Post-calibration device errors [%s]",
+                 sx1262_device_errors_str(cal_errors, errbuf, sizeof(errbuf)));
+    }
 
     /* Leave in STDBY_RC after init. The SX1262 automatically re-enables the
      * TCXO (via DIO3) when entering TX or RX, so there is no need to stay
