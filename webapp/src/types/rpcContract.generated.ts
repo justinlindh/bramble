@@ -444,6 +444,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.getBleSecurity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the BLE pairing security posture
+         * @description Returns the SMP pairing mode: passkey-display (board shows a random code per pairing), static-passkey (operator-set code on displayless boards), or just-works (bootstrap, no code set). The static passkey value is write-only and never returned.
+         */
+        post: operations["getBleSecurity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rpc/bramble.setBlePasskey": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set or clear the static BLE pairing passkey
+         * @description Sets the 6-digit SMP passkey used for BLE pairing on boards without a display path; null or an empty string clears it, returning the board to Just Works. Rejected on boards that display a random code. Any change wipes stored BLE bonds, so every client re-pairs with the current code.
+         */
+        post: operations["setBlePasskey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.getTimezone": {
         parameters: {
             query?: never;
@@ -1583,9 +1623,9 @@ export interface components {
             /** @description Override update interval in seconds. */
             interval_s?: number;
         };
-        /** @description Per-channel location sharing rule. The node broadcasts its position under this channel's key, so every holder of that key receives it and no route, DM session or prior traffic is required. The tier is the resolution the whole channel receives. A receiver additionally requires a valid network-key origin MAC before it believes the position, so a node outside the network cannot originate one. */
+        /** @description Per-channel location sharing rule. The node broadcasts its position under this channel's key, so every holder of that key receives it and no route, DM session or prior traffic is required. The tier is the resolution the whole channel receives. A receiver additionally requires a valid network-key origin MAC before it believes the position, so a node outside the network cannot originate one. The channel must be a keyed one: a keyed channel gives location both confidentiality and the full per-sender replay window. */
         LocationChannelTarget: {
-            /** @description Channel index. Outside this range names no channel the node can share to, and setLocationConfig rejects the whole request. Channel 0 is the public channel, whose PSK is well known: targeting it makes the position readable by anyone in radio range, not only by the network. Pick a private channel to keep a group's positions within that group. */
+            /** @description Channel index, 1 to 15. Outside that range names no channel the node can share to, and setLocationConfig rejects the whole request without applying any part of it. Channel 0 is the public channel and is rejected: its PSK is well known, so a target on it would broadcast exact coordinates readable by anyone in radio range, and the shared replay window is deliberately skipped there. Create a channel with a PSK and target the index addChannel returns. A public-channel rule left in storage by an earlier build does not resolve to a target, so an upgrade stops it transmitting. */
             channel: number;
             /** @description Whether rule is enabled. */
             enabled?: boolean;
@@ -2021,6 +2061,21 @@ export interface components {
             ok: boolean;
             /** @description The applied node name. */
             name: string;
+        };
+        GetBleSecurityResponse: {
+            /** @enum {string} */
+            mode: "passkey-display" | "static-passkey" | "just-works";
+            staticPasskeySet: boolean;
+        };
+        SetBlePasskeyParams: {
+            /** @description 6-digit passkey to set; explicit null or an empty string clears it. The member itself is required: omitting it entirely is a bad-request error, not a clear, so a caller cannot silently wipe a configured passkey by forgetting the parameter. */
+            passkey: string | null;
+        };
+        SetBlePasskeyResponse: {
+            ok: boolean;
+            /** @enum {string} */
+            mode?: "passkey-display" | "static-passkey" | "just-works";
+            error?: string;
         };
         /** @description A named zone offered by the on-device picker. */
         TimezonePreset: {
@@ -3426,6 +3481,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SetNodeNameResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getBleSecurity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description Current BLE security posture */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GetBleSecurityResponse"];
+                };
+            };
+        };
+    };
+    setBlePasskey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SetBlePasskeyParams"];
+            };
+        };
+        responses: {
+            /** @description Passkey updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetBlePasskeyResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */

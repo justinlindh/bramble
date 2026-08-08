@@ -16,18 +16,18 @@ endif()
 idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "linux")
     idf_component_register(
-        SRCS "ble_server_stub.c"
+        SRCS "ble_server_stub.c" "ble_pairing_policy.c" "ble_pairing_store.c"
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "../rpc/include"
         REQUIRES nvs_keys nvs_flash freertos
-        PRIV_REQUIRES rpc security main
+        PRIV_REQUIRES rpc security main crypto
     )
 else()
     idf_component_register(
-        SRCS ${ble_srcs}
+        SRCS ${ble_srcs} "ble_pairing_policy.c" "ble_pairing_store.c"
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "../rpc/include"
         REQUIRES nvs_keys bt nvs_flash freertos
-        PRIV_REQUIRES rpc security main
+        PRIV_REQUIRES rpc security main crypto
     )
 endif()
