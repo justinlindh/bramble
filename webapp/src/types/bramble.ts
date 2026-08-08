@@ -318,6 +318,12 @@ export interface AppState {
   connectionError?: string;
   transport: Transport | null;
   connectionCapabilities: ConnectionCapabilities;
+  /**
+   * False until the capabilities fetch resolves. Until then
+   * connectionCapabilities holds the hosted defaults, which are a placeholder,
+   * not a verdict: the UI must not state a restriction from them.
+   */
+  capabilitiesLoaded: boolean;
   config: BrambleConfig | null;
   status: NodeStatus | null;
   airtime: AirtimeStatus | null;

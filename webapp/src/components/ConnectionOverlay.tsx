@@ -5,7 +5,12 @@ import { useStore } from '../store/index';
 import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
 import { isAuthError } from '../lib/errors';
 import { isEmbeddedShell, describePlatform } from '../utils/platform';
-import { describeTransports, type GatedTransport, type TransportUnavailable } from '../lib/transportAvailability';
+import {
+  describeTransports,
+  type GatedTransport,
+  type TransportAvailability,
+  type TransportUnavailable,
+} from '../lib/transportAvailability';
 import type { TransportType } from '../types/bramble';
 import { IconUsb, IconBluetooth, IconMonitor, IconWifi, IconWarning } from './Icons';
 import { DeviceList } from './DeviceList';
@@ -99,9 +104,24 @@ const TRANSPORT_CHOICES: Array<{
   { id: 'wifi', label: 'WiFi', Icon: IconWifi, title: 'Connect directly to your Bramble node over LAN WiFi' },
 ];
 
+// Nothing is declared unavailable before the capabilities fetch resolves.
+// WiFi's verdict comes straight from that response, and every explainer's
+// "what does work here" sentence is derived from the whole set, so an earlier
+// paint would state a restriction the app has not determined yet.
+const UNDETERMINED: Record<GatedTransport, TransportAvailability> = {
+  serial: { available: true },
+  ble: { available: true },
+  wifi: { available: true },
+};
+
+/** Ties an unavailable transport's button to the caption naming the reason. */
+function captionId(id: GatedTransport): string {
+  return `transport-${id}-caption`;
+}
+
 export function ConnectionOverlay() {
   const savedIp = loadSavedIp();
-  const [transportType, setTransportType] = useState<TransportType>('serial');
+  const [transportType, setTransportType] = useState<TransportType>(savedIp ? 'wifi' : 'serial');
   const [wifiIp, setWifiIp] = useState(savedIp);
   const [wifiToken, setWifiToken] = useState('');
   const [wifiRemember, setWifiRemember] = useState(false);
@@ -115,6 +135,7 @@ export function ConnectionOverlay() {
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
   const connectionCapabilities = useStore(s => s.connectionCapabilities);
+  const capabilitiesLoaded = useStore(s => s.capabilitiesLoaded);
 
   const isConnecting = connectionState === 'connecting';
   const authError = isAuthError(connectionError);
@@ -185,13 +206,15 @@ export function ConnectionOverlay() {
 
   const availability = useMemo(
     () =>
-      describeTransports({
-        capabilities: connectionCapabilities,
-        hasSerial: 'serial' in navigator,
-        hasBluetooth: 'bluetooth' in navigator,
-        platform: describePlatform(),
-      }),
-    [connectionCapabilities],
+      capabilitiesLoaded
+        ? describeTransports({
+            capabilities: connectionCapabilities,
+            hasSerial: 'serial' in navigator,
+            hasBluetooth: 'bluetooth' in navigator,
+            platform: describePlatform(),
+          })
+        : UNDETERMINED,
+    [connectionCapabilities, capabilitiesLoaded],
   );
 
   const runtimeBadge = connectionCapabilities.mode === 'local' ? 'Local LAN' : 'Hosted';
@@ -203,12 +226,15 @@ export function ConnectionOverlay() {
   // connected over WiFi before, so prefer it when WiFi is allowed. When
   // nothing works, which is the iOS hosted case, fall back to USB so its
   // explainer is on screen immediately: the mock node is never auto-selected.
+  // Until capabilities resolve there is nothing to pick against, and moving the
+  // selection off the user's saved preference on a guess is what made the card
+  // flip mid-paint.
   const [userPicked, setUserPicked] = useState(false);
   useEffect(() => {
-    if (userPicked) return;
+    if (userPicked || !capabilitiesLoaded) return;
     const order: GatedTransport[] = savedIp ? ['wifi', 'serial', 'ble'] : ['serial', 'ble', 'wifi'];
     setTransportType(order.find(t => availability[t].available) ?? 'serial');
-  }, [availability, userPicked, savedIp]);
+  }, [availability, capabilitiesLoaded, userPicked, savedIp]);
 
   const pickTransport = (t: TransportType) => {
     setUserPicked(true);
@@ -248,16 +274,24 @@ export function ConnectionOverlay() {
             const unavailable = entry.available ? null : entry;
             return (
               <div className={styles.transportOption} key={id}>
+                {/* Not aria-disabled: the button IS operable, and pressing it
+                    is the only way to reach the explanation. Declaring it
+                    disabled tells a screen reader to skip the one control
+                    carrying the reason. The caption is the description
+                    instead, which also supersedes a title attribute. */}
                 <button
                   type="button"
                   className={`${styles.transportBtn} ${transportType === id ? styles.active : ''} ${unavailable ? styles.unsupportedBtn : ''}`}
                   onClick={() => pickTransport(id)}
-                  aria-disabled={unavailable ? true : undefined}
-                  title={unavailable ? unavailable.heading : title}
+                  aria-pressed={transportType === id}
+                  aria-describedby={unavailable ? captionId(id) : undefined}
+                  title={unavailable ? undefined : title}
                 >
                   <Icon size={16} /> {label}
                 </button>
-                {unavailable && <span className={styles.unsupportedCaption}>{unavailable.caption}</span>}
+                {unavailable && (
+                  <span id={captionId(id)} className={styles.unsupportedCaption}>{unavailable.caption}</span>
+                )}
               </div>
             );
           })}
@@ -267,6 +301,7 @@ export function ConnectionOverlay() {
         <button
           className={`${styles.transportBtn} ${styles.mockBtn} ${transportType === 'websocket' ? styles.active : ''}`}
           onClick={() => pickTransport('websocket')}
+          aria-pressed={transportType === 'websocket'}
         >
           <IconMonitor size={16} /> Mock Node (WebSocket)
         </button>
