@@ -581,6 +581,11 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             ESP_LOGW(TAG, "Encryption change: status=%d (conn lookup failed)",
                      event->enc_change.status);
         }
+        /* Stalled-attempt clear: a peer that never finishes SM (holds the
+         * link up without completing pairing) still gets its code hidden
+         * here once NimBLE's own SM procedure timeout (about 30s) fires and
+         * emits a failed ENC_CHANGE. There is no separate UI timer by
+         * design; this event is the only clear path for that case. */
         if (s_passkey_display_cb != NULL) {
             s_passkey_display_cb(0, false); /* pairing attempt over, hide code */
         }
@@ -588,6 +593,20 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             s_pairing_fail_count = 0;
         } else {
             s_pairing_fail_count++;
+            /* The pairing-failure backoff (BLE_GAP_EVENT_DISCONNECT above)
+             * only applies once the link actually drops. A peer that keeps
+             * the link up after a failed pairing attempt could otherwise
+             * retry immediately and indefinitely, bypassing that mitigation
+             * entirely; force every failed attempt through the disconnect
+             * path by terminating here. BLE_HS_ENOTCONN means the link
+             * already dropped mid-pairing (the failure and the disconnect
+             * raced), so the disconnect event is already on its way and
+             * terminating again would be a double-terminate; tolerate it. */
+            int term_rc =
+                ble_gap_terminate(event->enc_change.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            if (term_rc != 0 && term_rc != BLE_HS_ENOTCONN) {
+                ESP_LOGW(TAG, "ble_gap_terminate after failed pairing: %d", term_rc);
+            }
         }
         break;
     }
@@ -729,15 +748,27 @@ static void apply_pairing_policy(void) {
     ESP_LOGI(TAG, "BLE pairing mode: %s", ble_pairing_mode_name(mode));
 }
 
-void ble_server_pairing_config_changed(void) {
-    apply_pairing_policy();
-    /* Bonds created under the previous policy are not trustworthy under the
-     * new one; force every peer to re-pair with the current code. */
+/* Wipes every stored BLE bond. Bonds created under the previous pairing
+ * policy are not trustworthy under a new one (a bonded peer would skip SM
+ * entirely and re-key from its old LTK, making a freshly set passkey theater
+ * for it), so a policy change must invalidate them all. Returns 0 on
+ * success, -1 if the store could not be cleared; callers must not claim the
+ * policy change succeeded on a -1 return. */
+int ble_server_wipe_bonds(void) {
     int rc = ble_store_clear();
     if (rc != 0) {
         ESP_LOGW(TAG, "ble_store_clear failed: %d", rc);
+        return -1;
     }
+    return 0;
 }
+
+/* Re-applies the SM policy (IO capability / MITM) from the current passkey
+ * display registration and static-passkey store state. Callers that changed
+ * the static passkey must call ble_server_wipe_bonds() first and only reach
+ * this on success, so this never runs while the on-flash bonds still trust
+ * the previous policy. */
+void ble_server_pairing_config_changed(void) { apply_pairing_policy(); }
 
 int ble_server_init(void) {
     /* Read node name for BLE device name */

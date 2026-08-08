@@ -2068,8 +2068,8 @@ export interface components {
             staticPasskeySet: boolean;
         };
         SetBlePasskeyParams: {
-            /** @description 6-digit passkey; null or empty clears. */
-            passkey?: string | null;
+            /** @description 6-digit passkey to set; explicit null or an empty string clears it. The member itself is required: omitting it entirely is a bad-request error, not a clear, so a caller cannot silently wipe a configured passkey by forgetting the parameter. */
+            passkey: string | null;
         };
         SetBlePasskeyResponse: {
             ok: boolean;

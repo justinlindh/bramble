@@ -3088,12 +3088,17 @@ components:
           type: boolean
     SetBlePasskeyParams:
       type: object
+      required: [passkey]
       properties:
         passkey:
           type: string
           nullable: true
           pattern: '^[0-9]{6}$'
-          description: 6-digit passkey; null or empty clears.
+          description: >
+            6-digit passkey to set; explicit null or an empty string clears
+            it. The member itself is required: omitting it entirely is a
+            bad-request error, not a clear, so a caller cannot silently wipe
+            a configured passkey by forgetting the parameter.
     SetBlePasskeyResponse:
       type: object
       required: [ok]

@@ -1662,22 +1662,33 @@ void app_main(void) {
     }
 #endif
 
+    /* Passkey display registration: unconditional on every boot, regardless
+     * of connectivity mode. This is a plain pointer store, inert until
+     * ble_server_init() actually starts NimBLE, so it is safe to do before
+     * BLE is (or ever is) selected. It has to be: ble_server_has_passkey_display()
+     * is what bramble.getBleSecurity / bramble.setBlePasskey use to tell a
+     * display board from a displayless one, and both RPCs are reachable over
+     * the Wi-Fi transport too. A Wi-Fi-mode boot that skipped this would have
+     * a display board misreport "just-works" and wrongly accept a static
+     * passkey it can never use, so the registration must not be gated on
+     * boot_mode == CONN_MODE_BLE. Must run before the ble_server_init() call
+     * below, the only place BLE actually starts. */
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+    /* T-Deck: random pairing code rendered by the LVGL modal. ui_pairing
+     * only latches the request until the LVGL task is up, so registering
+     * this early (before that task exists) is safe. */
+    ble_server_set_passkey_display_cb(ui_pairing_passkey_cb);
+#else
+    if (board_has_display_for_pairing()) {
+        ble_server_set_passkey_display_cb(main_ble_passkey_cb);
+    }
+#endif
+
     /* Start BLE GATT server if selected */
     if (boot_mode == CONN_MODE_BLE) {
         ESP_LOGI(TAG, "=== BOOT STAGE: ble_init ===");
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
         show_boot_status("BLE: starting...");
-#endif
-#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
-        /* T-Deck: random pairing code rendered by the LVGL modal. Registered
-         * before init so the SM policy resolves to passkey-display from the
-         * first pairing attempt. ui_pairing only latches the request until
-         * the LVGL task is up, so the early registration is safe. */
-        ble_server_set_passkey_display_cb(ui_pairing_passkey_cb);
-#else
-        if (board_has_display_for_pairing()) {
-            ble_server_set_passkey_display_cb(main_ble_passkey_cb);
-        }
 #endif
         if (ble_server_init() == 0) {
             /* RF subsystem up: esp_random() now reseeds from the RF entropy source. */

@@ -57,10 +57,18 @@ void ble_server_set_passkey_display_cb(ble_passkey_display_cb_t cb);
 bool ble_server_has_passkey_display(void);
 
 /**
- * Static passkey was set, changed, or cleared: re-apply the SM policy for
- * subsequent pairing attempts and wipe all stored bonds (bonds created
- * under the previous policy stay trusted otherwise, which would make the
- * new passkey theater for already-bonded peers).
+ * Wipe every stored BLE bond. Callers changing the static passkey must call
+ * this first and check the result: bonds created under the previous policy
+ * stay trusted otherwise, which would make a freshly set passkey theater for
+ * already-bonded peers. Returns 0 on success, -1 on failure; on failure the
+ * caller must not persist the passkey change or claim it succeeded.
+ */
+int ble_server_wipe_bonds(void);
+
+/**
+ * Static passkey was set, changed, or cleared and the bond wipe already
+ * succeeded (see ble_server_wipe_bonds): re-apply the SM policy (IO
+ * capability / MITM) for subsequent pairing attempts.
  */
 void ble_server_pairing_config_changed(void);
 

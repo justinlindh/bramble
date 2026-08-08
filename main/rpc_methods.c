@@ -1035,10 +1035,17 @@ static int handle_get_ble_security(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.setBlePasskey: {"passkey":"123456"} sets, null or "" clears.
+/* bramble.setBlePasskey: {"passkey":"123456"} sets, explicit null or "" clears.
+ * The "passkey" member itself must be present: an omitted parameter is a
+ * distinct error, not a clear, so a caller that forgets it cannot silently
+ * wipe a configured passkey.
  * Displayless boards only; display boards generate a random code per
- * pairing and reject static configuration. Any change wipes stored bonds
- * (ble_server_pairing_config_changed). */
+ * pairing and reject static configuration.
+ * Any change must wipe stored bonds first (bonds created under the previous
+ * policy would otherwise stay trusted, making a freshly set passkey theater
+ * for already-bonded peers): ble_server_wipe_bonds() runs before the store
+ * is touched, and this handler only persists the change and reports ok:true
+ * if that wipe actually succeeded. */
 static int handle_set_ble_passkey(const cJSON* params, cJSON* result) {
     if (ble_server_has_passkey_display()) {
         cJSON_AddBoolToObject(result, "ok", false);
@@ -1046,9 +1053,33 @@ static int handle_set_ble_passkey(const cJSON* params, cJSON* result) {
                                 "board shows a random pairing code; static passkey unsupported");
         return 0;
     }
-    const cJSON* pk = params ? cJSON_GetObjectItem(params, "passkey") : NULL;
-    bool clearing = (pk == NULL) || cJSON_IsNull(pk) ||
-                    (cJSON_IsString(pk) && pk->valuestring[0] == '\0');
+    if (!params || !cJSON_HasObjectItem(params, "passkey")) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "missing passkey parameter");
+        return 0;
+    }
+    const cJSON* pk = cJSON_GetObjectItem(params, "passkey");
+    bool clearing = cJSON_IsNull(pk) || (cJSON_IsString(pk) && pk->valuestring[0] == '\0');
+    uint32_t value = 0;
+    if (!clearing && (!cJSON_IsString(pk) || !ble_pairing_passkey_parse(pk->valuestring, &value))) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "passkey must be exactly 6 digits");
+        return 0;
+    }
+
+    /* Wipe first, before persisting anything. This RPC is only reachable
+     * here on displayless boards (the passkey-display check above already
+     * rejected display boards): on the nRF target the BLE host is always up
+     * by the time RPCs run, and the linux emulator's stub has no bonds to
+     * begin with, so there is no boot window where a pending wipe could be
+     * lost and no cross-boot pending-wipe machinery is needed. */
+    if (ble_server_wipe_bonds() != 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error",
+                                "failed to invalidate existing pairings; passkey unchanged");
+        return 0;
+    }
+
     if (clearing) {
         if (ble_pairing_store_clear() != 0) {
             cJSON_AddBoolToObject(result, "ok", false);
@@ -1056,12 +1087,6 @@ static int handle_set_ble_passkey(const cJSON* params, cJSON* result) {
             return 0;
         }
     } else {
-        uint32_t value;
-        if (!cJSON_IsString(pk) || !ble_pairing_passkey_parse(pk->valuestring, &value)) {
-            cJSON_AddBoolToObject(result, "ok", false);
-            cJSON_AddStringToObject(result, "error", "passkey must be exactly 6 digits");
-            return 0;
-        }
         if (ble_pairing_store_set(value) != 0) {
             cJSON_AddBoolToObject(result, "ok", false);
             cJSON_AddStringToObject(result, "error", "failed to persist passkey");
