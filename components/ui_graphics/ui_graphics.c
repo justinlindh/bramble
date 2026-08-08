@@ -292,20 +292,21 @@ static void composite_top_layer(uint8_t* base) {
         return;
     }
 
-    /* ARGB8888 is byte order B,G,R,A (lv_color32_t on little-endian). */
+    /* Blend with lv_color_16_16_mix, the same helper LVGL's own RGB565
+     * renderer uses, so the capture rounds overlay edges exactly the way the
+     * panel does rather than by a second, slightly different rule. ARGB8888
+     * is byte order B,G,R,A (lv_color32_t on little-endian); the base frame
+     * is read and written bytewise because its start carries the snapshot's
+     * alignment slack. */
     const uint8_t* src = tdsc.data;
     for (int i = 0; i < UI_SCREENSHOT_WIDTH * UI_SCREENSHOT_HEIGHT; i++) {
         uint8_t a = src[i * 4 + 3];
         if (a == 0)
             continue;
-        uint16_t px = (uint16_t)(base[i * 2] | (base[i * 2 + 1] << 8));
-        uint8_t dr = (uint8_t)(((px >> 11) & 0x1F) << 3);
-        uint8_t dg = (uint8_t)(((px >> 5) & 0x3F) << 2);
-        uint8_t db = (uint8_t)((px & 0x1F) << 3);
-        uint8_t r = (uint8_t)((src[i * 4 + 2] * a + dr * (255 - a)) / 255);
-        uint8_t g = (uint8_t)((src[i * 4 + 1] * a + dg * (255 - a)) / 255);
-        uint8_t b = (uint8_t)((src[i * 4 + 0] * a + db * (255 - a)) / 255);
-        uint16_t out = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+        uint16_t dst16 = (uint16_t)(base[i * 2] | (base[i * 2 + 1] << 8));
+        uint16_t src16 =
+            lv_color_to_u16(lv_color_make(src[i * 4 + 2], src[i * 4 + 1], src[i * 4 + 0]));
+        uint16_t out = lv_color_16_16_mix(src16, dst16, a);
         base[i * 2] = (uint8_t)(out & 0xFF);
         base[i * 2 + 1] = (uint8_t)(out >> 8);
     }
