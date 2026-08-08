@@ -18,6 +18,7 @@ This index separates **operator/developer reference docs** from **historical pla
 - [network-key-provisioning.md](network-key-provisioning.md): generating, distributing, and verifying the control-plane network key across a fleet
 - [trust-anchor.md](trust-anchor.md): optional per-fleet trust anchor: enrollment ceremony, endorsed-only pinning, and what Sybil scarcity it does and does not close
 - [api/rpc.md](api/rpc.md): RPC method reference and wire-format notes
+- [digital-twin.md](digital-twin.md): import a deployment's observed topology into the simulator and ask capacity and node-loss questions about that mesh
 - [COMPARISON.md](COMPARISON.md): comparison with Meshtastic and MeshCore
 - [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md): current measured scale results (supersedes [results/simulation-2026-06.md](results/simulation-2026-06.md))
 
