@@ -361,6 +361,22 @@ location_manager_t s_location_mgr;
 
 uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000ULL); }
 
+void mesh_publish_neighbors(void) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_shared.neighbors = s_neighbors;
+    xSemaphoreGive(s_state_mutex);
+}
+
+void mesh_note_peer_heard(uint32_t addr, int16_t rssi, int8_t snr) {
+    if (addr == 0 || !s_identity || addr == s_identity->address)
+        return;
+    /* Only refreshes an address a beacon already admitted (neighbor_touch
+     * never creates entries), and only ever called with an address the frame's
+     * own MAC covers, so this widens liveness without widening trust. */
+    if (neighbor_touch(&s_neighbors, addr, (int8_t)rssi, snr, now_ms()))
+        mesh_publish_neighbors();
+}
+
 uint32_t next_packet_id(void) {
     static uint32_t counter = 0;
     if (counter == 0) {
@@ -1357,6 +1373,18 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
             break;
         }
 
+        /* Liveness from traffic, not just beacons. prev_hop == src_addr means
+         * the originator put this frame on the air itself, and src_addr is
+         * MAC-covered by the data_auth_verify above, so this is an
+         * authenticated "that peer is alive right now" without leaning on the
+         * relay-mutable prev_hop hint (a relayed frame teaches us nothing
+         * authenticated about who transmitted it, so it is skipped). Beacon
+         * cadence alone left a peer we were actively talking to reading as
+         * minutes stale, and eventually purged mid-conversation. */
+        if (data_prev_hop == data_src_addr) {
+            mesh_note_peer_heard(data_src_addr, pkt->rssi, pkt->snr);
+        }
+
         /* Metric mirrors handle_rrep's pattern (metric_apply_link_penalty
          * computed by the caller, then passed into the pure decide
          * function): DATA carries no accumulated path metric of its own,
@@ -1549,9 +1577,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
             mailbox_expire(t);
 
         /* Update shared state */
-        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_shared.neighbors = s_neighbors;
-        xSemaphoreGive(s_state_mutex);
+        mesh_publish_neighbors();
 
         /* Expire queued messages. Route-awaiting entries keep the original
          * flat 60s/log-only behavior (route discovery timing, unrelated to

@@ -3,33 +3,28 @@
 #include "scr_chat_messages.h"
 #include "scr_map.h"
 #include "ui_zone.h"
+#include "ui_shared_state.h"
+#include "node_presence.h"
 #include "theme/bramble_theme.h"
 #include "ui_toast.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <stdio.h>
 
 static const char* TAG = "scr_node_detail";
 
 /* Detail-card line formatters. Only this screen renders them, so they live
- * here as file-local helpers rather than in a shared header. */
+ * here as file-local helpers rather than in a shared header; the age
+ * arithmetic and the age string come from node_presence, shared with the
+ * Nodes list so both surfaces read the same and are host-tested once. */
 static void node_detail_format_last_seen(char* out, size_t out_len, uint32_t last_seen_ms,
                                          uint32_t now_ms) {
     if (!out || out_len == 0)
         return;
 
-    if (now_ms <= last_seen_ms) {
-        snprintf(out, out_len, "Last seen now");
-        return;
-    }
-
-    uint32_t age_s = (now_ms - last_seen_ms) / 1000U;
-    if (age_s < 60U) {
-        snprintf(out, out_len, "Last seen %lus ago", (unsigned long)age_s);
-    } else if (age_s < 3600U) {
-        snprintf(out, out_len, "Last seen %lum ago", (unsigned long)(age_s / 60U));
-    } else {
-        snprintf(out, out_len, "Last seen %luh ago", (unsigned long)(age_s / 3600U));
-    }
+    char age_buf[16];
+    node_format_age(node_age_seconds(now_ms, last_seen_ms), age_buf, sizeof(age_buf));
+    snprintf(out, out_len, "Last seen %s ago", age_buf);
 }
 
 static void node_detail_format_location(char* out, size_t out_len, bool has_location,
@@ -53,14 +48,9 @@ static void node_detail_format_location(char* out, size_t out_len, bool has_loca
         snprintf(out, out_len, "%.6f, %.6f (last known)", lat, lon);
         return;
     }
-    uint32_t age_s = (now_ms > received_ms) ? (now_ms - received_ms) / 1000U : 0U;
-    if (age_s < 60U) {
-        snprintf(out, out_len, "%.6f, %.6f (now)", lat, lon);
-    } else if (age_s < 3600U) {
-        snprintf(out, out_len, "%.6f, %.6f (%lum ago)", lat, lon, (unsigned long)(age_s / 60U));
-    } else {
-        snprintf(out, out_len, "%.6f, %.6f (%luh ago)", lat, lon, (unsigned long)(age_s / 3600U));
-    }
+    char age_buf[16];
+    node_format_age(node_age_seconds(now_ms, received_ms), age_buf, sizeof(age_buf));
+    snprintf(out, out_len, "%.6f, %.6f (%s ago)", lat, lon, age_buf);
 }
 
 extern uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t* pos,
@@ -72,6 +62,80 @@ static neighbor_entry_t s_neighbor;
 static bool s_has_location = false;
 static location_cache_entry_t s_location;
 static uint32_t s_now_ms = 0;
+
+/* Live-refresh handles, valid only while the card exists (cleared when it is
+ * deleted). Everything on this card is a snapshot of a moving target: without
+ * the tick below, the age lines and the signal readout froze at the value they
+ * had when the card was opened and stayed there for as long as it was on
+ * screen. */
+static lv_obj_t* s_signal_lbl = NULL;
+static lv_obj_t* s_sig_bar = NULL;
+static lv_obj_t* s_seen_lbl = NULL;
+static lv_obj_t* s_loc_lbl = NULL;
+
+static int signal_pct(int8_t rssi) {
+    int pct = (rssi + 120) * 100 / 70;
+    if (pct < 0)
+        pct = 0;
+    if (pct > 100)
+        pct = 100;
+    return pct;
+}
+
+static void refresh_peer_snapshot(void) {
+    /* Re-read the peer from live mesh state. A peer purged out of the neighbor
+     * table while its card is open keeps its last known signal values, and its
+     * age simply keeps growing off the last_heard we already hold. */
+    const ui_mesh_state_t* state = ui_shared_mesh_state();
+    for (int i = 0; i < state->neighbors.count && i < MAX_NEIGHBORS; i++) {
+        if (state->neighbors.entries[i].addr == s_neighbor.addr) {
+            s_neighbor = state->neighbors.entries[i];
+            break;
+        }
+    }
+
+    static location_manager_t loc;
+    mesh_get_location_state(&loc);
+    for (int i = 0; i < loc.cache_count && i < LOCATION_MAX_CONTACTS; i++) {
+        if (loc.cache[i].active && loc.cache[i].peer_addr == s_neighbor.addr) {
+            s_has_location = true;
+            s_location = loc.cache[i];
+            break;
+        }
+    }
+}
+
+static void node_detail_refresh_cb(lv_timer_t* timer) {
+    (void)timer;
+    if (!s_seen_lbl)
+        return;
+
+    s_now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    refresh_peer_snapshot();
+
+    char seen_line[48];
+    node_detail_format_last_seen(seen_line, sizeof(seen_line), s_neighbor.last_heard, s_now_ms);
+    lv_label_set_text(s_seen_lbl, seen_line);
+
+    lv_label_set_text_fmt(s_signal_lbl, "RSSI %ddBm   SNR %d", s_neighbor.rssi, s_neighbor.snr);
+    lv_bar_set_value(s_sig_bar, signal_pct(s_neighbor.rssi), LV_ANIM_OFF);
+
+    char loc_line[72];
+    node_detail_format_location(loc_line, sizeof(loc_line), s_has_location,
+                                s_location.pos.latitude_e7, s_location.pos.longitude_e7,
+                                s_location.received_ms, s_now_ms, s_location.age_known);
+    lv_label_set_text(s_loc_lbl, loc_line);
+}
+
+static void node_detail_delete_cb(lv_event_t* e) {
+    lv_timer_t* timer = (lv_timer_t*)lv_event_get_user_data(e);
+    if (timer)
+        lv_timer_delete(timer);
+    s_signal_lbl = NULL;
+    s_sig_bar = NULL;
+    s_seen_lbl = NULL;
+    s_loc_lbl = NULL;
+}
 
 /* This screen's action buttons live in the content area that each destination
  * cleans, so every one of them defers out of its own click. See ui_defer.
@@ -219,12 +283,7 @@ void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neig
     lv_obj_set_style_bg_color(sig_bar, BR_COLOR_SURFACE_2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(sig_bar, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
     lv_bar_set_range(sig_bar, 0, 100);
-    int pct = (s_neighbor.rssi + 120) * 100 / 70;
-    if (pct < 0)
-        pct = 0;
-    if (pct > 100)
-        pct = 100;
-    lv_bar_set_value(sig_bar, pct, LV_ANIM_OFF);
+    lv_bar_set_value(sig_bar, signal_pct(s_neighbor.rssi), LV_ANIM_OFF);
 
     char signal_line[64];
     snprintf(signal_line, sizeof(signal_line), "RSSI %ddBm   SNR %d", s_neighbor.rssi,
@@ -234,14 +293,14 @@ void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neig
     lv_obj_set_style_text_font(signal_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(signal_lbl, BR_COLOR_TEXT_SEC, 0);
 
-    char seen_line[40];
+    char seen_line[48];
     node_detail_format_last_seen(seen_line, sizeof(seen_line), s_neighbor.last_heard, s_now_ms);
     lv_obj_t* seen_lbl = lv_label_create(card);
     lv_label_set_text(seen_lbl, seen_line);
     lv_obj_set_style_text_font(seen_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(seen_lbl, BR_COLOR_TEXT_SEC, 0);
 
-    char loc_line[64];
+    char loc_line[72];
     node_detail_format_location(loc_line, sizeof(loc_line), s_has_location,
                                 s_location.pos.latitude_e7, s_location.pos.longitude_e7,
                                 s_location.received_ms, s_now_ms, s_location.age_known);
@@ -251,6 +310,17 @@ void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neig
     lv_label_set_long_mode(loc_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(loc_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(loc_lbl, BR_COLOR_TEXT_SEC, 0);
+
+    /* Live refresh every second, matching the Nodes list: the ages count up
+     * and the signal readout follows the peer instead of showing whatever was
+     * true at the moment the card was opened. The timer is owned by the card,
+     * so it stops the moment this screen is navigated away from. */
+    s_signal_lbl = signal_lbl;
+    s_sig_bar = sig_bar;
+    s_seen_lbl = seen_lbl;
+    s_loc_lbl = loc_lbl;
+    lv_timer_t* refresh = lv_timer_create(node_detail_refresh_cb, 1000, NULL);
+    lv_obj_add_event_cb(card, node_detail_delete_cb, LV_EVENT_DELETE, refresh);
 
     /* Actions: ONE horizontal row instead of the old column of four
      * screen-wide buttons. The stack forced this screen to scroll (and put

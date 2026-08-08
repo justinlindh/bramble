@@ -1859,6 +1859,18 @@ target_include_directories(test_chat_message_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
 
+# Peer recency helpers shared by the Nodes list and the node detail card
+# (pure, no LVGL): age arithmetic, the live/stale classifier, and the
+# seconds-resolution age string.
+add_executable(test_node_presence
+    test_node_presence.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/node_presence.c
+)
+target_include_directories(test_node_presence PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
+)
+
 # Map zoom ladder: step/clamp arithmetic and the on-screen readout (pure, no LVGL)
 add_executable(test_map_zoom
     test_map_zoom.c

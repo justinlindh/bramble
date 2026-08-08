@@ -2,6 +2,7 @@
 #include "scr_node_detail.h"
 #include "ui_zone.h"
 #include "ui_shared_state.h"
+#include "node_presence.h"
 #include "theme/bramble_theme.h"
 #include "location.h"
 #include "esp_log.h"
@@ -9,11 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* A peer heard longer ago than this reads as "stale": its row is dimmed so
- * live nodes stand out. Distinct from NEIGHBOR_EXPIRY_MS (10 min), the point
- * at which routing actually evicts the entry. */
-#define NODE_STALE_AGE_S 300
 
 extern void mesh_get_location_state(location_manager_t* out);
 
@@ -49,15 +45,6 @@ static uint32_t neighbor_signature(const ui_mesh_state_t* state) {
         sig = sig * 31u + state->neighbors.entries[i].addr;
     }
     return sig;
-}
-
-static void format_node_age(char* buf, size_t len, uint32_t age_s) {
-    if (age_s < 60)
-        snprintf(buf, len, "%lus", (unsigned long)age_s);
-    else if (age_s < 3600)
-        snprintf(buf, len, "%lum", (unsigned long)(age_s / 60));
-    else
-        snprintf(buf, len, "%luh", (unsigned long)(age_s / 3600));
 }
 
 /* Fade a row that has gone stale: dim the name and mute the signal bar and
@@ -185,9 +172,9 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
 
     /* Info line */
     char info[48];
-    uint32_t age_s = (now_ms - n->last_heard) / 1000;
-    char age_buf[12];
-    format_node_age(age_buf, sizeof(age_buf), age_s);
+    uint32_t age_s = node_age_seconds(now_ms, n->last_heard);
+    char age_buf[16];
+    node_format_age(age_s, age_buf, sizeof(age_buf));
     snprintf(info, sizeof(info), "%ddBm  SNR:%d  %s", n->rssi, n->snr, age_buf);
     lv_obj_t* info_lbl = lv_label_create(card);
     lv_label_set_text(info_lbl, info);
@@ -218,7 +205,8 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
     lv_obj_set_style_border_width(dot, 0, 0);
 
     /* Recency styling for name, bar and dot: fresh peers pop, stale ones fade. */
-    apply_node_recency_style(name_lbl, bar, dot, age_s >= NODE_STALE_AGE_S);
+    apply_node_recency_style(name_lbl, bar, dot,
+                             node_presence_for_age(age_s) == NODE_PRESENCE_STALE);
 
     if (ctx) {
         ctx->name_lbl = name_lbl;
@@ -253,9 +241,9 @@ static void nodes_refresh_cb(lv_timer_t* timer) {
                 continue;
             ctx->neighbor = *n;
             ctx->now_ms = now_ms;
-            uint32_t age_s = (now_ms - n->last_heard) / 1000;
-            char age_buf[12];
-            format_node_age(age_buf, sizeof(age_buf), age_s);
+            uint32_t age_s = node_age_seconds(now_ms, n->last_heard);
+            char age_buf[16];
+            node_format_age(age_s, age_buf, sizeof(age_buf));
             lv_label_set_text_fmt(ctx->info_lbl, "%ddBm  SNR:%d  %s", n->rssi, n->snr, age_buf);
             int pct = (n->rssi + 120) * 100 / 70;
             if (pct < 0)
@@ -263,7 +251,8 @@ static void nodes_refresh_cb(lv_timer_t* timer) {
             if (pct > 100)
                 pct = 100;
             lv_bar_set_value(ctx->bar, pct, LV_ANIM_OFF);
-            apply_node_recency_style(ctx->name_lbl, ctx->bar, ctx->dot, age_s >= NODE_STALE_AGE_S);
+            apply_node_recency_style(ctx->name_lbl, ctx->bar, ctx->dot,
+                                     node_presence_for_age(age_s) == NODE_PRESENCE_STALE);
             break;
         }
     }
@@ -346,10 +335,14 @@ void scr_nodes_create(bramble_layout_t* layout) {
     s_node_sig = neighbor_signature(ui_shared_mesh_state());
     populate_node_list();
 
-    /* Live refresh every 3 s: ages tick in place; a membership change
-     * (new or evicted peer) rebuilds the card list. The timer dies with the
-     * list (layout_set_tab cleans the content area). */
-    lv_timer_t* refresh = lv_timer_create(nodes_refresh_cb, 3000, NULL);
+    /* Live refresh every second: ages tick in place at the seconds resolution
+     * node_format_age prints, so the row visibly counts up instead of looking
+     * frozen; a membership change (new or evicted peer) rebuilds the card
+     * list. The timer dies with the list (layout_set_tab cleans the content
+     * area), so this costs nothing while any other tab is open, and while it
+     * is open it is a handful of label repaints on a display that is already
+     * lit: no radio work, so no measurable draw next to the backlight. */
+    lv_timer_t* refresh = lv_timer_create(nodes_refresh_cb, 1000, NULL);
     lv_obj_add_event_cb(list, nodes_list_delete_cb, LV_EVENT_DELETE, refresh);
 
     /* No ui_zone_reset_to_content() here: this builder runs only through

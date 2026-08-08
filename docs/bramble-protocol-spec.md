@@ -1440,7 +1440,7 @@ struct neighbor_entry {
     int8_t   snr;             // 1 byte  - last SNR
     uint8_t  success_rate;    // 1 byte  - % of recent transmissions ACK'd (0–100)
     uint8_t  congestion;      // 1 byte  - last reported congestion level (0–3)
-    uint32_t last_heard;      // 4 bytes - timestamp of last reception from this neighbor
+    uint32_t last_heard;      // 4 bytes - timestamp of the last frame heard directly from this neighbor
     uint32_t pubkey_hash;     // 4 bytes - for key lookup
     uint16_t tx_count;        // 2 bytes - total transmissions to this neighbor
     uint16_t tx_success;      // 2 bytes - successful transmissions
@@ -1449,6 +1449,18 @@ struct neighbor_entry {
 // Max entries: 32
 // Total: 640 bytes
 ```
+
+Beacons admit a peer to the table and are the only thing that advances its
+tenure (`beacon_count`, `first_seen_ms`), which is what
+`neighbor_is_established` gates the anti-Sybil corroboration quorum on. Frames
+other than beacons refresh `last_heard`, `rssi` and `snr` for an address the
+table already holds, and only when the sending address is covered by the
+frame's own authentication: a DATA frame whose `prev_hop` equals its MAC-bound
+`src_addr` (the originator transmitted it itself), or an ACK still at
+`hop_count` zero. A relayed frame teaches nothing authenticated about who put
+it on the air and is ignored for liveness. Without this, `last_heard` tracks
+only beacon cadence, so a peer in an active exchange reads as minutes stale and
+can be evicted mid-conversation.
 
 #### Pending Route Discovery Table
 
