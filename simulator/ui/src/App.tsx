@@ -8,11 +8,17 @@ import { NodeHealthCard } from './components/NodeHealthCard';
 import { ScenarioLoader } from './components/ScenarioLoader';
 import { useSimulation } from './hooks/useSimulation';
 import DeviceView from './device/DeviceView';
+import TourOverlay from './tour/TourOverlay';
+import { useTourEnabled } from './tour/config';
 import type { NeighborRSSI } from './types';
 import './App.css';
 
 export default function App() {
   const { state, ws, selectNode, sendButton } = useSimulation();
+  // The guided tour (simulator/ui/src/tour) is an overlay on top of the app:
+  // it reads the same simulation state the views render and points at their
+  // elements from outside, so nothing below changes shape when it is off.
+  const tourEnabled = useTourEnabled();
   const [bottomTab, setBottomTab] = useState<'events' | 'paths'>('events');
   const [mainView, setMainView] = useState<'mesh' | 'devices'>('mesh');
   const deviceCount = state.devices.size;
@@ -164,6 +170,16 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {tourEnabled && (
+        <TourOverlay
+          devices={state.devices}
+          nodes={state.nodes}
+          ws={ws.current}
+          view={mainView}
+          onView={setMainView}
+        />
+      )}
     </div>
   );
 }
