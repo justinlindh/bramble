@@ -2689,6 +2689,8 @@ add_executable(test_rpc_rollcall
     stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
