@@ -38,6 +38,9 @@
 #include "location.h"
 #include "wifi_manager.h"
 #include "ws_server.h"
+#include "ble_server.h"
+#include "ble_pairing_policy.h"
+#include "ble_pairing_store.h"
 #include "network_key.h"
 /* Deep sleep, GPIO wake, esp_wifi and mDNS exist only on the ESP32 targets:
  * not on the POSIX/Linux simulator, and not on the nRF52840 (which has no
@@ -1017,6 +1020,58 @@ static int handle_set_radio(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(result, "bw_hz", cfg.bw_hz);
     cJSON_AddNumberToObject(result, "tx_power_dbm", cfg.tx_power);
     cJSON_AddNumberToObject(result, "coding_rate", cfg.coding_rate);
+    return 0;
+}
+
+/* bramble.getBleSecurity: current SMP pairing posture. The passkey value is
+ * write-only and never reported. */
+static int handle_get_ble_security(const cJSON* params, cJSON* result) {
+    (void)params;
+    bool static_set = ble_pairing_store_is_set();
+    ble_pairing_mode_t mode =
+        ble_pairing_mode_resolve(ble_server_has_passkey_display(), static_set);
+    cJSON_AddStringToObject(result, "mode", ble_pairing_mode_name(mode));
+    cJSON_AddBoolToObject(result, "staticPasskeySet", static_set);
+    return 0;
+}
+
+/* bramble.setBlePasskey: {"passkey":"123456"} sets, null or "" clears.
+ * Displayless boards only; display boards generate a random code per
+ * pairing and reject static configuration. Any change wipes stored bonds
+ * (ble_server_pairing_config_changed). */
+static int handle_set_ble_passkey(const cJSON* params, cJSON* result) {
+    if (ble_server_has_passkey_display()) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error",
+                                "board shows a random pairing code; static passkey unsupported");
+        return 0;
+    }
+    const cJSON* pk = params ? cJSON_GetObjectItem(params, "passkey") : NULL;
+    bool clearing = (pk == NULL) || cJSON_IsNull(pk) ||
+                    (cJSON_IsString(pk) && pk->valuestring[0] == '\0');
+    if (clearing) {
+        if (ble_pairing_store_clear() != 0) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error", "failed to clear passkey");
+            return 0;
+        }
+    } else {
+        uint32_t value;
+        if (!cJSON_IsString(pk) || !ble_pairing_passkey_parse(pk->valuestring, &value)) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error", "passkey must be exactly 6 digits");
+            return 0;
+        }
+        if (ble_pairing_store_set(value) != 0) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error", "failed to persist passkey");
+            return 0;
+        }
+    }
+    ble_server_pairing_config_changed();
+    ble_pairing_mode_t mode = ble_pairing_mode_resolve(false, ble_pairing_store_is_set());
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "mode", ble_pairing_mode_name(mode));
     return 0;
 }
 
@@ -3593,6 +3648,8 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.sendProbe", handle_send_probe);
     rpc_register("bramble.setRadio", handle_set_radio);
     rpc_register("bramble.setNodeName", handle_set_node_name);
+    rpc_register("bramble.getBleSecurity", handle_get_ble_security);
+    rpc_register("bramble.setBlePasskey", handle_set_ble_passkey);
     rpc_register("bramble.getTimezone", handle_get_timezone);
     rpc_register("bramble.setTimezone", handle_set_timezone);
     rpc_register("bramble.setPeerVerified", handle_set_peer_verified);
