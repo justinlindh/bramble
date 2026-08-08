@@ -168,9 +168,6 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 		extConns:               make(map[uint32]*extConn),
 	}
 
-	// Initialize bridge-level state
-	C.bridge_init()
-
 	// Firmware-default beacon policy until a scenario overrides it (cmdLoad)
 	C.sim_beacon_policy_init(&s.beacon)
 
@@ -195,6 +192,12 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 		w.Close()
 		return nil, fmt.Errorf("dup2: %w", err)
 	}
+
+	// Bridge-level state, initialized only once fd 1 points at the capture
+	// pipe: bridge_init emits a public_channel_init event of its own, and
+	// before this ordering that one line went straight to the process's real
+	// stdout, so it reached neither a WebSocket client nor a captured run.
+	C.bridge_init()
 
 	return s, nil
 }
