@@ -1297,6 +1297,7 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
@@ -1323,6 +1324,7 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
@@ -1349,6 +1351,7 @@ add_executable(test_rpc_ble_security
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
@@ -1375,6 +1378,7 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
@@ -1401,6 +1405,7 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
@@ -1552,6 +1557,7 @@ add_executable(test_rpc_anchor_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
@@ -1865,6 +1871,7 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
@@ -1933,6 +1940,7 @@ add_executable(test_rpc_scratch_isolation
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
@@ -2209,6 +2217,7 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
