@@ -2,9 +2,7 @@
 #include "ble_pairing_store.h"
 #include "nvs_fake.h"
 
-void setUp(void) {
-    nvs_fake_reset();
-}
+void setUp(void) { nvs_fake_reset(); }
 void tearDown(void) {}
 
 void test_unset_by_default(void) {
@@ -27,9 +25,7 @@ void test_clear_removes(void) {
     TEST_ASSERT_FALSE(ble_pairing_store_is_set());
 }
 
-void test_clear_when_unset_is_success(void) {
-    TEST_ASSERT_EQUAL_INT(0, ble_pairing_store_clear());
-}
+void test_clear_when_unset_is_success(void) { TEST_ASSERT_EQUAL_INT(0, ble_pairing_store_clear()); }
 
 void test_nvs_unavailable_fails_closed(void) {
     nvs_fake_set_open_fails(true);

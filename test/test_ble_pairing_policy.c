@@ -61,6 +61,41 @@ void test_mode_names_match_rpc_contract(void) {
     TEST_ASSERT_EQUAL_STRING("passkey-display", ble_pairing_mode_name(BLE_PAIRING_DISPLAY_PASSKEY));
 }
 
+/* Shared cross-task handoff word: main.c and ui_pairing.c both pack/unpack
+ * this instead of hand-rolling their own bit layout. */
+void test_pending_pack_unpack_roundtrip(void) {
+    uint32_t passkey;
+    bool show;
+
+    TEST_ASSERT_TRUE(
+        ble_pairing_pending_unpack(ble_pairing_pending_pack(42u, true), &passkey, &show));
+    TEST_ASSERT_EQUAL_UINT32(42u, passkey);
+    TEST_ASSERT_TRUE(show);
+
+    TEST_ASSERT_TRUE(
+        ble_pairing_pending_unpack(ble_pairing_pending_pack(999999u, false), &passkey, &show));
+    TEST_ASSERT_EQUAL_UINT32(999999u, passkey);
+    TEST_ASSERT_FALSE(show);
+}
+
+void test_pending_unpack_of_zero_is_invalid(void) {
+    uint32_t passkey;
+    bool show;
+    TEST_ASSERT_FALSE(ble_pairing_pending_unpack(0u, &passkey, &show));
+}
+
+void test_format_code_groups_with_leading_zeros(void) {
+    char buf[16];
+    ble_pairing_format_code(42u, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("000 042", buf);
+
+    ble_pairing_format_code(999999u, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("999 999", buf);
+
+    ble_pairing_format_code(0u, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("000 000", buf);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mode_display_cb_wins_over_static);
@@ -70,5 +105,8 @@ int main(void) {
     RUN_TEST(test_passkey_parse_preserves_leading_zeros);
     RUN_TEST(test_backoff_schedule);
     RUN_TEST(test_mode_names_match_rpc_contract);
+    RUN_TEST(test_pending_pack_unpack_roundtrip);
+    RUN_TEST(test_pending_unpack_of_zero_is_invalid);
+    RUN_TEST(test_format_code_groups_with_leading_zeros);
     return UNITY_END();
 }

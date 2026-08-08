@@ -1094,7 +1094,11 @@ static int handle_set_ble_passkey(const cJSON* params, cJSON* result) {
         }
     }
     ble_server_pairing_config_changed();
-    ble_pairing_mode_t mode = ble_pairing_mode_resolve(false, ble_pairing_store_is_set());
+    /* clearing already says whether the store now holds a passkey; no need
+     * to reopen NVS via ble_pairing_store_is_set() to rederive it. This
+     * handler is only reachable without a passkey-display cb registered
+     * (checked above), so the resolve table collapses to these two modes. */
+    ble_pairing_mode_t mode = clearing ? BLE_PAIRING_JUST_WORKS : BLE_PAIRING_STATIC_PASSKEY;
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "mode", ble_pairing_mode_name(mode));
     return 0;
