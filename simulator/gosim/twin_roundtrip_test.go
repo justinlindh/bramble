@@ -261,3 +261,84 @@ func TestTwinExportedDocumentsMatchTheRPCSchema(t *testing.T) {
 			radio["sf"], radio["bw_hz"])
 	}
 }
+
+// twinDocKeys lists an object's keys, dropping the ones the schema marks
+// optional, so two documents are comparable whether or not a node or a
+// neighbour happened to have a name.
+func twinDocKeys(t *testing.T, obj any, where string) []string {
+	t.Helper()
+	m, ok := obj.(map[string]any)
+	if !ok {
+		t.Fatalf("%s is not an object", where)
+	}
+	var out []string
+	for k := range m {
+		if k == "name" {
+			continue
+		}
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// firstDocWithRoutes returns a decoded export that carries at least one route,
+// so the route object's shape can be compared.
+func firstDocWithRoutes(t *testing.T, docs []twinObservedExport) map[string]any {
+	t.Helper()
+	for _, d := range docs {
+		var m map[string]any
+		if json.Unmarshal(d.JSON, &m) != nil {
+			continue
+		}
+		if routes, ok := m["routes"].([]any); ok && len(routes) > 0 {
+			if nb, ok := m["neighbors"].([]any); ok && len(nb) > 0 {
+				return m
+			}
+		}
+	}
+	t.Fatal("no captured export carried both a neighbour and a route")
+	return nil
+}
+
+// The committed fixtures are what docs/digital-twin.md works through and what
+// the importer tests read, so they have to be the shape a device really
+// returns rather than a plausible imitation of it. Comparing them field for
+// field against a document the firmware's own builder wrote is what keeps them
+// honest: a schema change that misses the fixtures fails here.
+func TestTwinFixturesMatchAFirmwareWrittenExport(t *testing.T) {
+	run := runTwinScenarioFile(t, twinRoundTripScenario(400000))
+	real := firstDocWithRoutes(t, run.TwinExports())
+
+	for _, name := range []string{"basecamp", "creek", "ridge", "tower"} {
+		t.Run(name, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("testdata", "twin", name+".json"))
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			var fixture map[string]any
+			if err := json.Unmarshal(data, &fixture); err != nil {
+				t.Fatalf("fixture is not JSON: %v", err)
+			}
+
+			cases := []struct {
+				where string
+				got   any
+				want  any
+			}{
+				{"document", fixture, real},
+				{"node", fixture["node"], real["node"]},
+				{"radio", fixture["radio"], real["radio"]},
+				{"neighbor", fixture["neighbors"].([]any)[0], real["neighbors"].([]any)[0]},
+				{"route", fixture["routes"].([]any)[0], real["routes"].([]any)[0]},
+			}
+			for _, c := range cases {
+				got := twinDocKeys(t, c.got, "fixture "+c.where)
+				want := twinDocKeys(t, c.want, "exported "+c.where)
+				if !equalStrings(got, want) {
+					t.Fatalf("%s keys\n got %v\nwant %v", c.where, got, want)
+				}
+			}
+		})
+	}
+}
