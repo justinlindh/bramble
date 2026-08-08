@@ -514,6 +514,34 @@ static void render_main_screen(const ui_state_t* ui) {
     display_flush();
 }
 
+/* BLE pairing overlay: drawn on top of whatever screen render_screen() just
+ * finished, so a pairing request interrupts without any per-screen case
+ * needing to know about it. Framed by two hlines like the header divider
+ * every other screen already draws; there is no filled-rect primitive in
+ * display.h, so the "panel" is this bordered text block, not an opaque box.
+ * The passkey itself is never logged, only rendered. */
+static void render_ble_passkey_overlay(const ui_state_t* ui) {
+    int y = (DISPLAY_HEIGHT - (LINE_H * 3)) / 2;
+    display_hline(0, y - 2, DISPLAY_WIDTH);
+
+    const char* title = "BLE PAIRING";
+    display_draw_text((DISPLAY_WIDTH - (int)strlen(title) * FONT_W) / 2, y, title);
+    y += LINE_H;
+
+    char code[16];
+    snprintf(code, sizeof(code), "%03u %03u", (unsigned)(ui->ble_passkey / 1000),
+             (unsigned)(ui->ble_passkey % 1000));
+    display_draw_text((DISPLAY_WIDTH - (int)strlen(code) * FONT_W) / 2, y, code);
+    y += LINE_H;
+
+    const char* hint = "Enter code on client";
+    display_draw_text((DISPLAY_WIDTH - (int)strlen(hint) * FONT_W) / 2, y, hint);
+    y += LINE_H;
+
+    display_hline(0, y, DISPLAY_WIDTH);
+    display_flush();
+}
+
 static void render_screen(ui_state_t* ui) {
     /* E-paper ghosting cleanup (bramble#196): the screen ring's full-refresh
      * policy (ui.h, UI_FULL_REFRESH_EVERY_N_SCREENS) decides WHEN to clear
@@ -1064,6 +1092,10 @@ static void render_screen(ui_state_t* ui) {
         display_draw_text(0, 28, "Unknown screen");
         display_flush();
         break;
+    }
+
+    if (ui->ble_passkey_active) {
+        render_ble_passkey_overlay(ui);
     }
 }
 
@@ -1877,7 +1909,12 @@ void app_main(void) {
          * its status screen on real events (messages, neighbors), not a
          * live-ticking clock. */
         const uint32_t uptime_refresh_ms = board_has_cap(BOARD_CAP_DISPLAY_EPAPER) ? 60000u : 1000u;
-        if (ui_get_screen(&ui) == SCREEN_MAIN && (now_ms % uptime_refresh_ms) < 50) {
+        if (ui_get_screen(&ui) == SCREEN_MAIN && !ui.ble_passkey_active &&
+            (now_ms % uptime_refresh_ms) < 50) {
+            /* render_main_screen() draws straight to the display, bypassing
+             * render_screen() and the pairing overlay it draws on top; skip
+             * this tick while the overlay is up so it is not erased a second
+             * after appearing. */
             render_main_screen(&ui);
         }
 
