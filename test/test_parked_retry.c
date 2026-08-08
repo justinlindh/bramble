@@ -64,6 +64,16 @@ static pending_ack_table_t s_acks;
  * twice. */
 static int s_frames_on_air[FAKE_MAX_UID];
 
+/* How old the parked rows should look to msg_store's park TTL, in seconds.
+ *
+ * On the host, msg_store's get_uptime_s has no clock and stamps every row
+ * timestamp_s = 0, so the now_s handed to the selectors IS the row's age. That
+ * makes this a direct age dial rather than a wall clock, and it is why it does
+ * not track the now_ms these tests step: the two are unrelated here, and tying
+ * them would make the uptime-wrap test's huge timestamps read as a row parked
+ * seven weeks ago. Left at 0 (freshly parked) unless a test is about the TTL. */
+static uint32_t s_parked_age_s;
+
 void setUp(void) {
     neighbor_init(&s_nb);
     memset(&s_sweep, 0, sizeof(s_sweep));
@@ -76,6 +86,7 @@ void setUp(void) {
     s_resend_fail_uid = 0;
     s_resend_transmits_but_no_ack = false;
     s_resend_stays_in_flight = false;
+    s_parked_age_s = 0;
     pending_ack_init(&s_acks);
 }
 
@@ -188,7 +199,7 @@ static int frames_on_air(uint32_t uid) {
 static int fake_flush_parked_for(uint32_t peer_addr, uint32_t now_ms) {
     uint32_t uids[MSG_STORE_MAX];
     s_store_scans++;
-    int n = msg_store_parked_uids_for_peer(peer_addr, uids, MSG_STORE_MAX);
+    int n = msg_store_parked_uids_for_peer(peer_addr, uids, MSG_STORE_MAX, s_parked_age_s);
     for (int i = 0; i < n; i++) {
         stored_msg_t m;
         if (!msg_store_get_copy_by_uid(uids[i], &m))
@@ -226,7 +237,7 @@ static uint32_t sweep_at(uint32_t now_ms) {
     if (!parked_retry_sweep_due(&s_sweep, now_ms))
         return 0;
     uint32_t peer = 0;
-    if (!msg_store_next_parked_peer(s_sweep.last_peer, &peer))
+    if (!msg_store_next_parked_peer(s_sweep.last_peer, &peer, s_parked_age_s))
         return 0;
     if (parked_retry_sweep_defers_to_beacon(&s_nb, peer)) {
         parked_retry_sweep_skipped(&s_sweep, peer);
@@ -627,6 +638,39 @@ void test_a_flush_does_not_re_send_a_row_still_awaiting_an_ack(void) {
     TEST_ASSERT_EQUAL_INT(2, frames_on_air(uid));
 }
 
+/* 3i-sexies. The park TTL, seen from the trigger rather than from the store: a
+ * peer that keeps beaconing draws one attempt per cooldown for as long as the
+ * row is parked, and that has to stop. Without a bound the peer is shown the
+ * same message once per cooldown indefinitely, since every retry carries a
+ * fresh packet_id and their dedup window is shorter than our cooldown. */
+void test_a_parked_message_stops_drawing_attempts_once_it_expires(void) {
+    const uint32_t peer = 0x0000EE00u;
+    s_resend_succeeds = false;
+
+    beacon_from(peer, 1000);
+    park_dm_for(peer, "answer me", 2000);
+
+    /* Inside the window it keeps trying, which is the whole feature. */
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000));
+    s_parked_age_s = MSG_STORE_PARK_TTL_S;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, beacon_from(peer, 3000 + PARKED_RETRY_COOLDOWN_MS),
+                                  "the bound is too broad and stopped a message that is still "
+                                  "inside its window, which switches the feature off");
+
+    /* Past it, the trigger finds nothing left to send for this peer. */
+    s_parked_age_s = MSG_STORE_PARK_TTL_S + 1;
+    int before = s_store_scans;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, beacon_from(peer, 3000 + 2 * PARKED_RETRY_COOLDOWN_MS),
+                                  "an expired parked row was still re-sent, so the peer keeps "
+                                  "being shown one written message once per cooldown forever");
+    TEST_ASSERT_EQUAL_INT(before + 1, s_store_scans); /* one scan, which finds nothing */
+
+    /* found == 0 disarms the peer, so it goes quiet rather than scanning on. */
+    for (uint32_t t = 3000 + 3 * PARKED_RETRY_COOLDOWN_MS;
+         t <= 3000 + 3 * PARKED_RETRY_COOLDOWN_MS + 3600000u; t += 60000u)
+        TEST_ASSERT_EQUAL_INT(-1, beacon_from(peer, t));
+}
+
 /* 3j. Rotation: every parked peer gets a turn, none starves. */
 void test_the_sweep_gives_each_parked_peer_a_turn(void) {
     s_resend_succeeds = false;
@@ -803,6 +847,7 @@ int main(void) {
     RUN_TEST(test_the_sweep_rescues_a_neighbour_whose_arming_was_lost);
     RUN_TEST(test_an_unacknowledged_attempt_leaves_the_message_parked);
     RUN_TEST(test_a_flush_does_not_re_send_a_row_still_awaiting_an_ack);
+    RUN_TEST(test_a_parked_message_stops_drawing_attempts_once_it_expires);
     RUN_TEST(test_the_sweep_gives_each_parked_peer_a_turn);
     RUN_TEST(test_the_sweep_never_flushes_when_nothing_is_parked);
     RUN_TEST(test_a_known_peer_with_nothing_parked_never_scans_the_store);

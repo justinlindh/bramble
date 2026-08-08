@@ -378,7 +378,74 @@ bool msg_store_unpark(uint32_t uid) {
     return found;
 }
 
-int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int max_out) {
+/* An outgoing DM currently parked for a peer. The shared half of what all three
+ * parked-row walks below select on. */
+static bool is_parked_dm(const stored_msg_t* m) {
+    return m->direction == MSG_DIR_OUTGOING && m->channel_index < 0 &&
+           m->status == MSG_STATUS_QUEUED && m->uid != 0;
+}
+
+/* Has this parked row been waiting longer than the node is willing to keep
+ * retrying it (MSG_STORE_PARK_TTL_S)?
+ *
+ * Exactly at the TTL is still inside it, so the window means what it says.
+ *
+ * A row stamped ahead of now_s is treated as NOT expired rather than as
+ * enormously old. Unsigned subtraction would turn that into a huge age and
+ * expire a message the user just parked, which is the worse direction to be
+ * wrong in by far. It should not arise (restored rows are zeroed on load and a
+ * fresh stamp cannot exceed a later read of the same clock), so this is a guard
+ * against a future clock change, not a live case. */
+static bool parked_row_expired(const stored_msg_t* m, uint32_t now_s) {
+    if (now_s < m->timestamp_s)
+        return false;
+    return (now_s - m->timestamp_s) > MSG_STORE_PARK_TTL_S;
+}
+
+int msg_store_expire_parked(uint32_t now_s) {
+    msg_store_ensure_alloc();
+    if (!s_msgs)
+        return 0;
+    int expired = 0;
+    /* One row per lock cycle, the same shape every other status write in this
+     * file uses: take the lock, change one row, release, then persist outside
+     * it, because persistence is flash I/O and this lock is a spinlock on the
+     * ESP target. Repeating until a pass finds nothing needs no buffer of
+     * pending indices, which matters because this can be reached from the mesh
+     * task and MSG_STORE_MAX rows' worth of scratch does not belong on that
+     * stack. Normally the first pass finds nothing at all. */
+    for (;;) {
+        bool found = false;
+        int found_idx = 0;
+        int from_end = 0;
+        MSG_LOCK();
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        for (int i = 0; i < s_count; i++) {
+            int idx = (start + i) % MSG_STORE_MAX;
+            stored_msg_t* m = &s_msgs[idx];
+            if (!is_parked_dm(m) || !parked_row_expired(m, now_s)) {
+                continue;
+            }
+            /* The same door msg_store_unpark uses, and for the same reason:
+             * the sticky rule refuses QUEUED -> FAILED from a send path, which
+             * is right, and giving up on age is not a send failing. */
+            m->status = MSG_STATUS_FAILED;
+            found = true;
+            found_idx = idx;
+            from_end = s_count - 1 - i;
+            break;
+        }
+        MSG_UNLOCK();
+        if (!found)
+            break;
+        persist_row_update(found_idx, from_end);
+        expired++;
+    }
+    return expired;
+}
+
+int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int max_out,
+                                   uint32_t now_s) {
     if (!out_uids || max_out <= 0) {
         return 0;
     }
@@ -392,10 +459,18 @@ int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int m
         int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
         for (int i = 0; i < s_count && n < max_out; i++) {
             const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
-            if (m->direction != MSG_DIR_OUTGOING || m->channel_index >= 0) {
+            if (!is_parked_dm(m) || m->peer_addr != peer_addr) {
                 continue;
             }
-            if (m->status != MSG_STATUS_QUEUED || m->peer_addr != peer_addr || m->uid == 0) {
+            /* Skipped, not rewritten: this is a read. msg_store_expire_parked
+             * is what makes an overdue row visibly failed. Skipping here too
+             * means the beacon path cannot re-send one in the window between
+             * its TTL passing and the next expiry pass. */
+            /* Skipped, not rewritten: this is a read. msg_store_expire_parked
+             * is what makes an overdue row visibly failed. Skipping here too
+             * means the beacon path cannot re-send one in the window between
+             * its TTL passing and the next expiry pass. */
+            if (parked_row_expired(m, now_s)) {
                 continue;
             }
             out_uids[n++] = m->uid;
@@ -405,7 +480,8 @@ int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int m
     return n;
 }
 
-bool msg_store_next_parked_peer(uint32_t after_peer_addr, uint32_t* out_peer_addr) {
+bool msg_store_next_parked_peer(uint32_t after_peer_addr, uint32_t* out_peer_addr, uint32_t now_s) {
+    (void)now_s;
     if (!out_peer_addr) {
         return false;
     }
@@ -418,10 +494,7 @@ bool msg_store_next_parked_peer(uint32_t after_peer_addr, uint32_t* out_peer_add
         int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
         for (int i = 0; i < s_count; i++) {
             const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
-            if (m->direction != MSG_DIR_OUTGOING || m->channel_index >= 0) {
-                continue;
-            }
-            if (m->status != MSG_STATUS_QUEUED || m->uid == 0) {
+            if (!is_parked_dm(m) || parked_row_expired(m, now_s)) {
                 continue;
             }
             if (!found_any || m->peer_addr < lowest) {

@@ -151,7 +151,7 @@ void test_parked_uids_selects_only_this_peers_parked_outgoing_dms(void) {
     msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "two", 3, 0, 0, 0, MSG_STATUS_QUEUED, 5);
 
     uint32_t uids[8];
-    int n = msg_store_parked_uids_for_peer(0xAAAA, uids, 8);
+    int n = msg_store_parked_uids_for_peer(0xAAAA, uids, 8, 0);
     TEST_ASSERT_EQUAL_INT(2, n);
     TEST_ASSERT_EQUAL_UINT32(1, uids[0]);
     TEST_ASSERT_EQUAL_UINT32(5, uids[1]);
@@ -163,7 +163,7 @@ void test_parked_uids_respects_the_output_bound(void) {
     msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "b", 1, 0, 0, 0, MSG_STATUS_QUEUED, 2);
 
     uint32_t uids[1];
-    TEST_ASSERT_EQUAL_INT(1, msg_store_parked_uids_for_peer(0xAAAA, uids, 1));
+    TEST_ASSERT_EQUAL_INT(1, msg_store_parked_uids_for_peer(0xAAAA, uids, 1, 0));
     TEST_ASSERT_EQUAL_UINT32(1, uids[0]);
 }
 
@@ -171,9 +171,9 @@ void test_parked_uids_empty_when_nothing_is_parked(void) {
     msg_store_init();
     msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "sent", 4, 0, 0, 0, MSG_STATUS_SENT, 1);
     uint32_t uids[4];
-    TEST_ASSERT_EQUAL_INT(0, msg_store_parked_uids_for_peer(0xAAAA, uids, 4));
-    TEST_ASSERT_EQUAL_INT(0, msg_store_parked_uids_for_peer(0xAAAA, NULL, 4));
-    TEST_ASSERT_EQUAL_INT(0, msg_store_parked_uids_for_peer(0xAAAA, uids, 0));
+    TEST_ASSERT_EQUAL_INT(0, msg_store_parked_uids_for_peer(0xAAAA, uids, 4, 0));
+    TEST_ASSERT_EQUAL_INT(0, msg_store_parked_uids_for_peer(0xAAAA, NULL, 4, 0));
+    TEST_ASSERT_EQUAL_INT(0, msg_store_parked_uids_for_peer(0xAAAA, uids, 0, 0));
 }
 
 void test_parked_uids_survive_ring_wrap(void) {
@@ -191,7 +191,7 @@ void test_parked_uids_survive_ring_wrap(void) {
     msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "wrap-new", 8, 0, 0, 0, MSG_STATUS_QUEUED, 200);
 
     uint32_t uids[4];
-    int n = msg_store_parked_uids_for_peer(0xAAAA, uids, 4);
+    int n = msg_store_parked_uids_for_peer(0xAAAA, uids, 4, 0);
     TEST_ASSERT_EQUAL_INT(2, n);
     TEST_ASSERT_EQUAL_UINT32(100, uids[0]);
     TEST_ASSERT_EQUAL_UINT32(200, uids[1]);
@@ -268,13 +268,13 @@ void test_next_parked_peer_rotates_over_every_parked_peer_and_wraps(void) {
     msg_store_add_dm_uid(0x200, MSG_DIR_OUTGOING, "b2", 2, 0, 0, 0, MSG_STATUS_QUEUED, 4);
 
     uint32_t peer = 0;
-    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer));
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer, 0));
     TEST_ASSERT_EQUAL_HEX32(0x100, peer);
-    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer));
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer, 0));
     TEST_ASSERT_EQUAL_HEX32(0x200, peer); /* two rows, still one turn */
-    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer));
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer, 0));
     TEST_ASSERT_EQUAL_HEX32(0x300, peer);
-    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer));
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer, 0));
     TEST_ASSERT_EQUAL_HEX32(0x100, peer); /* wrapped */
 }
 
@@ -290,16 +290,116 @@ void test_next_parked_peer_ignores_everything_that_is_not_a_parked_dm(void) {
     msg_store_add_channel(0x350, MSG_DIR_OUTGOING, "ch0", 3, 0, 0, 0, MSG_STATUS_QUEUED, 0);
 
     uint32_t peer = 0xDEAD;
-    TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, &peer));
+    TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, &peer, 0));
     TEST_ASSERT_EQUAL_HEX32(0xDEAD, peer); /* untouched when nothing is parked */
 
     /* One real parked DM and it is found regardless of where the cursor is. */
     msg_store_add_dm_uid(0x400, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 3);
-    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer));
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer, 0));
     TEST_ASSERT_EQUAL_HEX32(0x400, peer);
-    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0xFFFFFFFF, &peer));
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0xFFFFFFFF, &peer, 0));
     TEST_ASSERT_EQUAL_HEX32(0x400, peer);
-    TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, NULL));
+    TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, NULL, 0));
+}
+
+/* The park TTL bounds how long a message keeps retrying. Without it a parked
+ * row is re-sent once per cooldown forever, and on an asymmetric link every one
+ * of those renders at the peer, so one written message becomes an unbounded
+ * number of copies in their thread. */
+void test_parked_row_past_the_ttl_is_not_selected(void) {
+    uint32_t uids[4];
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "old", 3, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    /* One second past the TTL: no longer offered to the flush. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        0, msg_store_parked_uids_for_peer(0xAAAA, uids, 4, MSG_STORE_PARK_TTL_S + 1),
+        "a parked row past the TTL was still selected, so it keeps being re-sent and keeps "
+        "rendering at the peer with nothing ending it");
+
+    /* The rotation must not spend a turn on a peer whose rows have all expired. */
+    uint32_t peer = 0xDEAD;
+    TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, &peer, MSG_STORE_PARK_TTL_S + 1));
+}
+
+/* The failure mode that would look like success everywhere else: a bound so
+ * broad it switches the feature off. A row inside the window must still be
+ * selected, at both ends of it. */
+void test_parked_row_inside_the_ttl_is_still_selected(void) {
+    uint32_t uids[4];
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "fresh", 5, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    /* Just parked. */
+    TEST_ASSERT_EQUAL_INT(1, msg_store_parked_uids_for_peer(0xAAAA, uids, 4, 0));
+    /* Most of the way through the window, which is the case the feature exists
+     * for: a peer who has been out of range for a long while. */
+    TEST_ASSERT_EQUAL_INT(
+        1, msg_store_parked_uids_for_peer(0xAAAA, uids, 4, MSG_STORE_PARK_TTL_S - 1));
+    /* Exactly at the TTL is still inside it: the row expires once it is OLDER
+     * than the window, not on the boundary. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        1, msg_store_parked_uids_for_peer(0xAAAA, uids, 4, MSG_STORE_PARK_TTL_S),
+        "the TTL comparison is off by one and drops a row that is exactly at the boundary");
+
+    uint32_t peer = 0;
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer, MSG_STORE_PARK_TTL_S));
+    TEST_ASSERT_EQUAL_HEX32(0xAAAA, peer);
+}
+
+/* Expiry has to be VISIBLE. The user was told the message would go when the
+ * peer came back; when the node stops trying, the thread must stop saying that.
+ * FAILED is the right end state because it is still retryable and still
+ * re-parkable by hand. */
+void test_expire_parked_makes_an_overdue_row_visibly_failed(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "old", 3, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    msg_store_add_dm_uid(0xBBBB, MSG_DIR_OUTGOING, "also old", 8, 0, 0, 0, MSG_STATUS_QUEUED, 2);
+
+    TEST_ASSERT_EQUAL_INT(0, msg_store_expire_parked(MSG_STORE_PARK_TTL_S)); /* inside: untouched */
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, out.status);
+
+    /* Past it: both rows give up, and the count says how many. */
+    TEST_ASSERT_EQUAL_INT(2, msg_store_expire_parked(MSG_STORE_PARK_TTL_S + 1));
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_FAILED, out.status,
+                              "an expired parked row must read FAILED, not stay QUEUED under a "
+                              "promise the node has stopped keeping, and not vanish");
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(2, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_FAILED, out.status);
+
+    /* Idempotent: a second pass finds nothing left to give up on. */
+    TEST_ASSERT_EQUAL_INT(0, msg_store_expire_parked(MSG_STORE_PARK_TTL_S + 1));
+}
+
+/* Expiry must not become a back door through the sticky rule for anything
+ * except age, and must leave the user's own Cancel working. */
+void test_expire_parked_leaves_everything_that_is_not_an_overdue_park_alone(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "sent", 4, 0, 0, 42, MSG_STATUS_SENT, 1);
+    msg_store_add_dm_uid(0xBBBB, MSG_DIR_INCOMING, "theirs", 6, 0, 0, 0, MSG_STATUS_NONE, 2);
+    msg_store_add_channel(0xCCCC, MSG_DIR_OUTGOING, "ch", 2, 0, 0, 0, MSG_STATUS_QUEUED, 0);
+    msg_store_add_dm_uid(0xDDDD, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 4);
+
+    /* Only the outgoing parked DM is a candidate, and only for its age. */
+    TEST_ASSERT_EQUAL_INT(1, msg_store_expire_parked(MSG_STORE_PARK_TTL_S + 1));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_SENT, out.status);
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(2, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_NONE, out.status);
+
+    /* Cancel still works on a fresh park, and expiry did not race it. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "mine", 4, 0, 0, 0, MSG_STATUS_QUEUED, 9);
+    TEST_ASSERT_TRUE(msg_store_unpark(9));
+    TEST_ASSERT_EQUAL_INT(0, msg_store_expire_parked(MSG_STORE_PARK_TTL_S + 1));
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(9, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_FAILED, out.status);
 }
 
 void test_next_parked_peer_survives_ring_wrap(void) {
@@ -310,7 +410,7 @@ void test_next_parked_peer_survives_ring_wrap(void) {
     msg_store_add_dm_uid(0x500, MSG_DIR_OUTGOING, "late", 4, 0, 0, 0, MSG_STATUS_QUEUED, 77);
 
     uint32_t peer = 0;
-    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer));
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer, 0));
     TEST_ASSERT_EQUAL_HEX32(0x500, peer);
 }
 
@@ -495,6 +595,10 @@ int main(void) {
     RUN_TEST(test_peer_for_uid_survives_ring_wrap);
     RUN_TEST(test_next_parked_peer_rotates_over_every_parked_peer_and_wraps);
     RUN_TEST(test_next_parked_peer_ignores_everything_that_is_not_a_parked_dm);
+    RUN_TEST(test_parked_row_past_the_ttl_is_not_selected);
+    RUN_TEST(test_parked_row_inside_the_ttl_is_still_selected);
+    RUN_TEST(test_expire_parked_makes_an_overdue_row_visibly_failed);
+    RUN_TEST(test_expire_parked_leaves_everything_that_is_not_an_overdue_park_alone);
     RUN_TEST(test_next_parked_peer_survives_ring_wrap);
     RUN_TEST(test_update_by_uid_refuses_queued_to_failed);
     RUN_TEST(test_update_by_uid_refuses_queued_to_sent_but_still_stamps_the_packet_id);

@@ -363,6 +363,15 @@ location_manager_t s_location_mgr;
 
 uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000ULL); }
 
+/* Uptime in SECONDS, the clock msg_store stamps rows with (its get_uptime_s).
+ *
+ * Deliberately not now_ms() / 1000. now_ms truncates to 32 bits before the
+ * caller sees it, so it wraps every 49.7 days; this divides the 64 bit timer
+ * first and wraps in 136 years. Past the first now_ms wrap the two disagree
+ * completely, and anything comparing a row's timestamp_s against now_ms()/1000
+ * would read every row as either brand new or impossibly old. */
+static uint32_t now_uptime_s(void) { return (uint32_t)(esp_timer_get_time() / 1000000ULL); }
+
 /* Copy the live neighbor table into the mutex-guarded snapshot the UI and RPC
  * read. Anything that mutates s_neighbors outside the periodic maintenance
  * tick publishes it, or the change stays invisible for up to a purge interval.
@@ -1638,8 +1647,19 @@ uint32_t s_probe_request_id;
 static void sweep_parked_messages(uint32_t t) {
     if (!parked_retry_sweep_due(&s_parked_sweep, t))
         return;
+    /* Give up on anything that has been parked too long, before choosing who to
+     * try. Here rather than on the raw tick because it walks the ring, and the
+     * sweep's own gate is already the once-per-interval schedule this wants;
+     * the cost is that a row becomes visibly failed up to one sweep interval
+     * after its TTL, while the selectors stop offering it the moment it
+     * expires. */
+    uint32_t now_s = now_uptime_s();
+    int expired = msg_store_expire_parked(now_s);
+    if (expired > 0)
+        ESP_LOGI(TAG, "Parked sweep: gave up on %d message(s) past the park TTL", expired);
+
     uint32_t peer = 0;
-    if (!msg_store_next_parked_peer(s_parked_sweep.last_peer, &peer))
+    if (!msg_store_next_parked_peer(s_parked_sweep.last_peer, &peer, now_s))
         return; /* nothing parked anywhere: the overwhelmingly common case */
     if (parked_retry_sweep_defers_to_beacon(&s_neighbors, peer)) {
         parked_retry_sweep_skipped(&s_parked_sweep, peer);
@@ -2629,7 +2649,7 @@ int mesh_flush_parked_for(uint32_t peer_addr) {
      * cap), which is worth keeping off the packet RX call path's stack. */
     static uint32_t uids[MSG_STORE_MAX];
     static stored_msg_t msg;
-    int n = msg_store_parked_uids_for_peer(peer_addr, uids, MSG_STORE_MAX);
+    int n = msg_store_parked_uids_for_peer(peer_addr, uids, MSG_STORE_MAX, now_uptime_s());
     if (n <= 0)
         return 0;
 
