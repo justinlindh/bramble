@@ -96,6 +96,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          # main at its current tip, not the SHA that triggered this run.
+          # semantic-release refuses to publish unless the checkout is at the
+          # branch tip ("The local branch main is behind the remote one,
+          # therefore a new version won't be published") and exits 0 when it
+          # declines, so a run pinned to its triggering SHA can report success
+          # while publishing nothing.
+          #
+          # The exposure is bursts, not quiet periods: a merge that lands alone
+          # IS main's tip and publishes normally, but when several land close
+          # together every run except the last starts behind and no-ops, which
+          # leaves correctness resting entirely on that last run firing. If it
+          # is missing, delayed or flaky, the work sits on main unreleased with
+          # a green board. This job's publish detection cannot cover for that,
+          # because it reports published=false for a stale checkout and for an
+          # ordinary no-releasable-commits merge alike, and the second is the
+          # common case. Checking out the tip makes the two distinguishable
+          # again: published=false then genuinely means nothing to release.
+          #
+          # Only this job wants the tip. The asset-build jobs below pin
+          # inputs.*_tag || github.sha on purpose, because they build the
+          # tagged commit rather than whatever main has moved on to.
+          ref: main
           fetch-depth: 0
 
       - name: Setup Node.js
