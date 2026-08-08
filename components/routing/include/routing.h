@@ -67,6 +67,19 @@ int neighbor_count(const neighbor_table_t* table);
  * entry. */
 bool neighbor_is_established(const neighbor_table_t* table, uint32_t addr, uint32_t now_ms);
 
+/* True iff the entry at idx was CREATED by a neighbor_update at now_ms, which
+ * is the "this peer just joined" edge. Pass the index neighbor_update returned
+ * and the timestamp it was given.
+ *
+ * Not the same question as "did the table grow": at MAX_NEIGHBORS a new
+ * address is admitted by evicting the oldest entry, so count is unchanged and
+ * a count comparison reports a full mesh's new peers as familiar ones,
+ * silently and only once the table is full. neighbor_update stamps a created
+ * entry with beacon_count 1 and first_seen_ms == now_ms, and bumps
+ * beacon_count on every refresh, so that pair identifies an admission exactly
+ * whether or not a slot had to be reclaimed for it. */
+bool neighbor_is_newly_admitted(const neighbor_table_t* table, int idx, uint32_t now_ms);
+
 #define MAX_ROUTES 64
 #define ROUTE_ACTIVE_TIMEOUT_MS 300000
 #define ROUTE_STALE_TIMEOUT_MS 600000

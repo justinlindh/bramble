@@ -17,6 +17,11 @@
  * NEIGHBOR_EXPIRY_MS (600s), so a peer that goes quiet still gets a second
  * attempt before it ages out of the table and hands the job back to the rejoin
  * edge, and the two triggers never stack up on the same peer.
+ *
+ * A third constraint pins the floor and is asserted at compile time next to
+ * mesh_flush_parked_for: the cooldown must outlast the send queue's TTLs, or a
+ * retry could enqueue a row that is still sitting in the queue from the
+ * previous attempt and the peer would receive the message twice.
  */
 #define PARKED_RETRY_COOLDOWN_MS 300000u
 

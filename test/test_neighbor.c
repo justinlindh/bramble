@@ -48,6 +48,33 @@ void test_neighbor_full_evicts_oldest(void) {
     TEST_ASSERT_NOT_NULL(neighbor_lookup(&tbl, 0xFF));
 }
 
+void test_newly_admitted_is_true_only_for_the_beacon_that_created_the_entry(void) {
+    int idx = neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 1000);
+    TEST_ASSERT_TRUE(neighbor_is_newly_admitted(&tbl, idx, 1000));
+
+    /* The same peer beaconing again is a refresh, not an admission. */
+    idx = neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 2000);
+    TEST_ASSERT_FALSE(neighbor_is_newly_admitted(&tbl, idx, 2000));
+
+    TEST_ASSERT_FALSE(neighbor_is_newly_admitted(&tbl, -1, 1000));
+    TEST_ASSERT_FALSE(neighbor_is_newly_admitted(&tbl, MAX_NEIGHBORS, 1000));
+    TEST_ASSERT_FALSE(neighbor_is_newly_admitted(NULL, 0, 1000));
+}
+
+void test_newly_admitted_sees_an_admission_that_had_to_evict(void) {
+    /* The case a count comparison cannot see: the table is full, so admitting
+     * an address reclaims another one's slot and the count never moves. */
+    for (uint32_t i = 0; i < MAX_NEIGHBORS; i++) {
+        neighbor_update(&tbl, i + 1, -70, 8, 0, 1000 + i);
+    }
+    int before = neighbor_count(&tbl);
+
+    int idx = neighbor_update(&tbl, 0xFF, -60, 10, 0, 5000);
+
+    TEST_ASSERT_EQUAL(before, neighbor_count(&tbl)); /* the table did not grow */
+    TEST_ASSERT_TRUE(neighbor_is_newly_admitted(&tbl, idx, 5000));
+}
+
 void test_neighbor_new_has_fresh_tenure(void) {
     neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 1000);
     neighbor_entry_t* e = neighbor_lookup(&tbl, 0xAABB);
@@ -184,6 +211,8 @@ int main(void) {
     RUN_TEST(test_neighbor_update_existing);
     RUN_TEST(test_neighbor_purge_expired);
     RUN_TEST(test_neighbor_full_evicts_oldest);
+    RUN_TEST(test_newly_admitted_is_true_only_for_the_beacon_that_created_the_entry);
+    RUN_TEST(test_newly_admitted_sees_an_admission_that_had_to_evict);
     RUN_TEST(test_neighbor_new_has_fresh_tenure);
     RUN_TEST(test_neighbor_becomes_established_after_beacons_and_age);
     RUN_TEST(test_neighbor_established_false_before_min_beacons);

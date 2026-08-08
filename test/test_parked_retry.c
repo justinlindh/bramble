@@ -17,14 +17,16 @@
 #include "routing.h"
 
 static neighbor_table_t s_nb;
-static int s_store_scans;      /* flush attempts, i.e. scans of the message store */
-static bool s_resend_succeeds; /* whether the faked transmit lands an ACK */
+static int s_store_scans;          /* flush attempts, i.e. scans of the message store */
+static bool s_resend_succeeds;     /* whether the faked transmit lands an ACK */
+static uint32_t s_resend_fail_uid; /* one uid the faked transmit refuses, 0 for none */
 
 void setUp(void) {
     neighbor_init(&s_nb);
     msg_store_init();
     s_store_scans = 0;
     s_resend_succeeds = true;
+    s_resend_fail_uid = 0;
 }
 
 void tearDown(void) {}
@@ -38,8 +40,9 @@ static int fake_flush_parked_for(uint32_t peer_addr) {
     s_store_scans++;
     int n = msg_store_parked_uids_for_peer(peer_addr, uids, MSG_STORE_MAX);
     for (int i = 0; i < n; i++) {
+        bool ok = s_resend_succeeds && uids[i] != s_resend_fail_uid;
         msg_store_update_by_uid(uids[i], (uint32_t)(0x1000 + i),
-                                s_resend_succeeds ? MSG_STATUS_DELIVERED : MSG_STATUS_FAILED);
+                                ok ? MSG_STATUS_DELIVERED : MSG_STATUS_FAILED);
     }
     return n;
 }
@@ -48,9 +51,8 @@ static int fake_flush_parked_for(uint32_t peer_addr) {
  * the parked-flush block against the resulting is_new_peer. Returns the number
  * of parked rows the flush found, or -1 when the beacon did not flush at all. */
 static int beacon_from(uint32_t peer_addr, uint32_t now_ms) {
-    int before = neighbor_count(&s_nb);
-    neighbor_update(&s_nb, peer_addr, -60, 8, 0xABCDu, now_ms);
-    bool is_new_peer = neighbor_count(&s_nb) > before;
+    int idx = neighbor_update(&s_nb, peer_addr, -60, 8, 0xABCDu, now_ms);
+    bool is_new_peer = neighbor_is_newly_admitted(&s_nb, idx, now_ms);
     if (!parked_retry_beacon_should_flush(&s_nb, peer_addr, is_new_peer, now_ms))
         return -1;
     int found = fake_flush_parked_for(peer_addr);
@@ -147,6 +149,81 @@ void test_rejoin_edge_still_flushes_a_peer_that_left_and_returned(void) {
     TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, status_of(uid));
 }
 
+/* 3c. The rejoin edge gets ONE shot, and the moment it fires is the moment
+ * most likely to fail: a peer that has just come back into range is on a
+ * marginal link, and everything else that just became reachable is competing
+ * for the airtime budget. A rejoin flush that fails must not strand the
+ * message, which it would if the rejoin edge were the only trigger and the
+ * peer then stayed in the table for good. */
+void test_a_failed_rejoin_flush_still_leaves_a_trigger(void) {
+    const uint32_t peer = 0x66AA00BBu;
+    s_resend_succeeds = false;
+
+    /* Parked while the peer is absent, so there is no entry to arm: the rejoin
+     * edge is the only thing that can deliver this. */
+    uint32_t uid = park_dm_for(peer, "sent while you were out", 2000);
+    TEST_ASSERT_EQUAL_INT(0, neighbor_count(&s_nb));
+
+    /* It comes back, the rejoin edge fires, and the re-send fails. */
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 100000));
+    TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, status_of(uid));
+
+    /* It now stays in the table, so no second rejoin edge is possible ever
+     * again. The message must still have a future. */
+    s_resend_succeeds = true;
+    beacon_from(peer, 100000 + PARKED_RETRY_COOLDOWN_MS);
+
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_DELIVERED, status_of(uid),
+                              "the rejoin edge fired once, missed, and stranded the message: a "
+                              "failed flush must leave the peer armed for another attempt");
+}
+
+/* 3d. Partially successful flush: whatever is left behind keeps a trigger. */
+void test_a_partial_flush_keeps_a_trigger_for_the_row_left_behind(void) {
+    const uint32_t peer = 0x77BB00CCu;
+
+    beacon_from(peer, 1000);
+    uint32_t went = park_dm_for(peer, "this one goes", 2000);
+    uint32_t stuck = park_dm_for(peer, "this one does not", 2100);
+    s_resend_fail_uid = stuck;
+
+    TEST_ASSERT_EQUAL_INT(2, beacon_from(peer, 3000));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, status_of(went));
+    TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, status_of(stuck));
+
+    /* The half that failed is still parked, so the peer stays armed and the
+     * next attempt picks up that row alone. */
+    s_resend_fail_uid = 0;
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000 + PARKED_RETRY_COOLDOWN_MS));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, status_of(stuck));
+}
+
+/* 3e. A full neighbor table admits a peer by EVICTING one, so the table's
+ * count does not change and "the count grew" stops recognising a new peer at
+ * all. On a mesh with MAX_NEIGHBORS neighbors that silently removes the rejoin
+ * edge, which is the only trigger a message parked for an absent peer has. */
+void test_a_peer_readmitted_into_a_full_table_still_flushes(void) {
+    const uint32_t peer = 0x88CC00DDu;
+
+    /* Fill the table. Distinct addresses, ascending times, so the first one is
+     * the eviction victim. */
+    for (int i = 0; i < MAX_NEIGHBORS; i++)
+        beacon_from(0x1000u + (uint32_t)i, 1000 + (uint32_t)i * 10);
+    TEST_ASSERT_EQUAL_INT(MAX_NEIGHBORS, neighbor_count(&s_nb));
+
+    uint32_t uid = park_dm_for(peer, "no room at the inn", 5000);
+    TEST_ASSERT_FALSE(parked_retry_arm(&s_nb, peer, 5000)); /* absent: nothing to arm */
+
+    /* It arrives and takes the oldest entry's slot. The count is unchanged. */
+    int found = beacon_from(peer, 10000);
+    TEST_ASSERT_EQUAL_INT(MAX_NEIGHBORS, neighbor_count(&s_nb));
+
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, found,
+                                  "a peer admitted into a full table is a new peer, but the "
+                                  "table count cannot grow to say so");
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, status_of(uid));
+}
+
 /* 4. The no-parked-messages case, which is nearly all of the time. */
 void test_a_known_peer_with_nothing_parked_never_scans_the_store(void) {
     const uint32_t peer = 0xEE550055u;
@@ -205,7 +282,7 @@ void test_parking_another_message_does_not_wait_out_the_cooldown(void) {
 
     beacon_from(peer, 1000);
     park_dm_for(peer, "first", 2000);
-    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000)); /* attempt, stays parked */
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000));  /* attempt, stays parked */
     TEST_ASSERT_EQUAL_INT(-1, beacon_from(peer, 4000)); /* cooling down */
 
     s_resend_succeeds = true;
@@ -245,6 +322,9 @@ int main(void) {
     RUN_TEST(test_a_stuck_peer_gets_one_attempt_per_cooldown);
     RUN_TEST(test_rejoin_edge_still_flushes_a_peer_that_was_never_in_the_table);
     RUN_TEST(test_rejoin_edge_still_flushes_a_peer_that_left_and_returned);
+    RUN_TEST(test_a_failed_rejoin_flush_still_leaves_a_trigger);
+    RUN_TEST(test_a_partial_flush_keeps_a_trigger_for_the_row_left_behind);
+    RUN_TEST(test_a_peer_readmitted_into_a_full_table_still_flushes);
     RUN_TEST(test_a_known_peer_with_nothing_parked_never_scans_the_store);
     RUN_TEST(test_a_flush_that_finds_nothing_disarms_the_peer);
     RUN_TEST(test_delivering_the_last_parked_message_stops_the_retries);

@@ -34,8 +34,7 @@ bool parked_retry_beacon_should_flush(neighbor_table_t* table, uint32_t peer_add
     return (int32_t)(now_ms - e->parked_retry_after_ms) >= 0;
 }
 
-void parked_retry_flushed(neighbor_table_t* table, uint32_t peer_addr, int found,
-                          uint32_t now_ms) {
+void parked_retry_flushed(neighbor_table_t* table, uint32_t peer_addr, int found, uint32_t now_ms) {
     neighbor_entry_t* e = neighbor_lookup(table, peer_addr);
     if (!e)
         return;

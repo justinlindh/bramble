@@ -356,13 +356,18 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         return;
     }
 
-    /* Update neighbor table: track if this is a new neighbor */
+    /* Update neighbor table: track if this is a new neighbor.
+     *
+     * "New" is asked of the entry, not of the table's size. Once the table
+     * holds MAX_NEIGHBORS a new address is admitted by evicting the oldest, so
+     * the count never changes and a count comparison stops reporting new peers
+     * at all: on a full mesh that would silently take away the join tone and,
+     * worse, the rejoin flush, which is the only trigger a message parked for
+     * an absent peer has. */
     uint32_t t = now_ms();
-    int old_count = neighbor_count(&s_neighbors);
     int idx =
         neighbor_update(&s_neighbors, beacon.src_addr, (int8_t)rssi, snr, beacon.pubkey_hash, t);
-    int new_count = neighbor_count(&s_neighbors);
-    bool is_new_peer = (new_count > old_count);
+    bool is_new_peer = neighbor_is_newly_admitted(&s_neighbors, idx, t);
 
     /* Store peer name if present */
     if (idx >= 0 && beacon.name_len > 0) {

@@ -2445,6 +2445,18 @@ bool mesh_cancel_parked_message(uint32_t uid) {
     return msg_store_unpark(uid);
 }
 
+/* A retry must never land while the previous attempt's queue entry is still
+ * alive. queue_message and queue_session_message both take the first FREE
+ * slot and neither keys on uid, so one parked row could occupy two slots and
+ * go out twice: one message written, two delivered. What makes that
+ * impossible is the retry cooldown outlasting both queue TTLs, including the
+ * purge cadence they are checked on (an entry is not reclaimed the instant it
+ * expires, only at the next purge tick). Keep it that way. */
+_Static_assert(PARKED_RETRY_COOLDOWN_MS > DM_QUEUE_TTL_MS + NEIGHBOR_PURGE_INTERVAL,
+               "parked retry can re-queue a DM still awaiting a session");
+_Static_assert(PARKED_RETRY_COOLDOWN_MS > 60000 + NEIGHBOR_PURGE_INTERVAL,
+               "parked retry can re-queue a DM still awaiting a route");
+
 int mesh_flush_parked_for(uint32_t peer_addr) {
     /* static: mesh_flush_parked_for runs only on the mesh task, never
      * reentrantly, so these are safe off the stack. uids alone is up to
