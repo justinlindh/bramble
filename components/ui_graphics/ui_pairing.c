@@ -1,5 +1,6 @@
 #include "ui_pairing.h"
 #include "sleep_manager.h"
+#include "ui_focus.h"
 #include "theme/bramble_theme.h"
 #include "lvgl.h"
 #include <stdio.h>
@@ -38,6 +39,10 @@ static void hide_modal(void) {
     if (s_modal != NULL) {
         lv_obj_delete(s_modal);
         s_modal = NULL;
+        /* Matches the ui_focus_push_modal in show_modal below: pop exactly
+         * once per widget we actually put up, restoring keypad/trackball
+         * input to the content zone. */
+        ui_focus_pop_modal();
     }
 }
 
@@ -48,13 +53,30 @@ static void show_modal(uint32_t code) {
     sleep_manager_activity();
 
     /* Full-screen dim backdrop + centered panel, matching ui_confirm.c.
-     * No buttons here, so unlike ui_confirm this never calls
-     * ui_focus_push_modal: there is nothing on the modal for a
-     * keypad/encoder group to focus, and dismissal is only ever driven by
-     * the show=false callback, never by user input, so trapping focus
-     * would only strand navigation with no way out. The overlay stays
-     * default-clickable (like ui_confirm's), so a stray tap during
-     * pairing is absorbed here instead of reaching whatever is behind it. */
+     * This modal has no buttons, so unlike ui_confirm it adds nothing to
+     * the modal group ui_focus_push_modal creates: ui_zone_bind_indevs
+     * rebinds every KEYPAD indev (trackball, keyboard, see
+     * lv_port_trackball.c / lv_port_keyboard.c) onto that empty group, so
+     * navigation and SELECT stop reaching the hidden screen behind this
+     * overlay while it is up, without this module needing to build any
+     * focusable widgets of its own. Confirmed safe on an empty group by
+     * reading the vendored LVGL sources this build compiles against:
+     * lv_group_create() (lv_group.c) sets obj_focus = NULL, and
+     * lv_group_get_focused() returns NULL whenever obj_focus is NULL.
+     * indev_keypad_proc() (lv_indev.c) is the single entry point every
+     * keypad key event funnels through, and it does
+     * `indev_obj_act = lv_group_get_focused(g); if (indev_obj_act == NULL)
+     * return;` before any of the LV_KEY_NEXT/PREV/ENTER/ESC handling, so
+     * every key on an empty group is dropped right there: no crash, no
+     * event delivered anywhere, not even to whatever used to be focused
+     * (that group is not even bound to any indev anymore). Dismissal is
+     * still only ever driven by the show=false callback, never by user
+     * input, so there is nothing for the user to do here regardless. The
+     * overlay itself stays default-clickable (like ui_confirm's), so a
+     * stray tap during pairing is absorbed here instead of reaching
+     * whatever is behind it. */
+    ui_focus_push_modal();
+
     s_modal = lv_obj_create(lv_layer_top());
     lv_obj_set_size(s_modal, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_color(s_modal, BR_COLOR_BG, 0);
