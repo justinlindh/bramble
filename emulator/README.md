@@ -8,6 +8,19 @@ original Phase 1 implementation plan is archived at
 
 ## Quick start
 
+### The playground (start here if you have no hardware)
+
+```bash
+cd emulator
+make playground          # or: docker compose --profile playground up playground
+```
+
+Open the URL it prints (port 3005 under Docker). It boots a three-pager fleet
+of real firmware on a simulated ether and runs a guided tour through
+provisioning, a relayed channel message, a direct message with its 7-digit
+safety number, and a delivery receipt with the route it came home by. Full
+walkthrough and the honest framing: [../docs/playground.md](../docs/playground.md).
+
 ### Docker (recommended, zero prerequisites)
 
 ```bash
@@ -41,6 +54,10 @@ then load a scenario from the dropdown:
 - `emulator-3-pagers`: three unprovisioned pagers (attach/persistence only,
   no traffic).
 - `emu-dm-desync`: the DM session desync repro and its self-heal.
+- `emu-playground`: three unprovisioned pagers in a line, two of them out of
+  range of each other, driven entirely by hand. This is what `make playground`
+  loads; add `?tour=1` to the URL to get the guided tour on a stack started
+  with `make run`.
 
 Individual targets, each a thin wrapper documented inline in `Makefile`:
 
@@ -51,6 +68,7 @@ Individual targets, each a thin wrapper documented inline in `Makefile`:
 | `make broker` | `go build` in `simulator/gosim` |
 | `make ui` | `npm ci && npm run build` in `simulator/ui` |
 | `make run` (alias `make serve`) | check + build all, then launch gosim serving the UI and scenarios on `0.0.0.0` |
+| `make playground` | check + build all, then launch gosim on the `emu-playground` scenario with the guided tour (`--playground`) |
 | `make headless` | the CI scenario suite (`ci/run_scenarios.sh`) |
 | `make clean` | remove build artifacts (node build dir/sdkconfig, gosim binary, UI dist) |
 

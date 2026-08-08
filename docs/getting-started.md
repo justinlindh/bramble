@@ -15,6 +15,12 @@ back.
 is required for browser flashing and USB connections; Firefox and Safari do
 not implement it).
 
+**No boards yet?** [playground.md](playground.md) is the try-before-hardware
+path: one command boots three pagers of real firmware on a simulated ether in
+your browser and walks the same ground this page does (provisioning, a relayed
+message, safety-number verification, delivery confirmation). The radio is a
+model, so it is a way to learn the product, not a substitute for a bench.
+
 ## 1. Flash the firmware
 
 Two ways to get firmware onto a device:
