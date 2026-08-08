@@ -11,6 +11,8 @@ import { FirmwareUpdateCard } from './FirmwareUpdateCard';
 import styles from './DeviceManagementSection.module.css';
 
 const REPAIR_NOTICE = 'Saved. All paired devices were unpaired and must pair again with the new code.';
+const CLEARED_NOTICE =
+  'Cleared. All paired devices were unpaired and must pair again, and this node no longer asks for a code.';
 
 // BLE pairing security: how new clients pair over Bluetooth. Some boards
 // display a random code on their own screen (nothing to configure here);
@@ -43,7 +45,7 @@ export function BleSecurityCard() {
       const r = await setBlePasskey(next);
       if (!r.ok) { setError(r.error ?? 'Could not set passkey.'); return; }
       await load();
-      setNotice(REPAIR_NOTICE);
+      setNotice(next === null ? CLEARED_NOTICE : REPAIR_NOTICE);
       setPasskeyDraft('');
     } catch (e) {
       setError(friendlyErrorFrom(e));

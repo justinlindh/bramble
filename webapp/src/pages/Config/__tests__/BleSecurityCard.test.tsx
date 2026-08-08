@@ -38,7 +38,7 @@ describe('BleSecurityCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save passkey' }));
 
     await waitFor(() => expect(setBlePasskey).toHaveBeenCalledWith('123456'));
-    expect(await screen.findByText(/paired devices were unpaired and must pair again/)).toBeInTheDocument();
+    expect(await screen.findByText(/must pair again with the new code/)).toBeInTheDocument();
   });
 
   it('shows a passkey-set state with a Clear button in static-passkey mode, and clears it', async () => {
@@ -49,7 +49,10 @@ describe('BleSecurityCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
 
     await waitFor(() => expect(setBlePasskey).toHaveBeenCalledWith(null));
-    expect(await screen.findByText(/paired devices were unpaired and must pair again/)).toBeInTheDocument();
+    /* Clearing returns the node to Just Works, so the notice must not promise
+     * a code that no longer exists. */
+    expect(await screen.findByText(/no longer asks for a code/)).toBeInTheDocument();
+    expect(screen.queryByText(/with the new code/)).not.toBeInTheDocument();
   });
 
   it('disables save when the passkey is not exactly 6 digits', async () => {
