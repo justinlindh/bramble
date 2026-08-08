@@ -2649,10 +2649,15 @@ components:
             commanded power is not being produced.
         pll_fault:
           type: boolean
-          description: The frequency synthesizer did not lock.
+          description: >
+            The frequency synthesizer did not lock. Stops transmission rather
+            than degrading it, and is rarer than a PA fault rather than milder:
+            with no lock there is no frequency to sit on.
         oscillator_fault:
           type: boolean
-          description: The reference oscillator did not start.
+          description: >
+            The reference oscillator did not start. Also stops transmission,
+            for the same reason: with no reference there is no clock at all.
         calibration_fault:
           type: boolean
           description: >
