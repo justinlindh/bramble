@@ -8,8 +8,15 @@ uint32_t node_age_seconds(uint32_t now_ms, uint32_t last_heard_ms) {
     return (now_ms - last_heard_ms) / 1000U;
 }
 
-node_presence_t node_presence_for_age(uint32_t age_s) {
-    return (age_s >= NODE_STALE_AGE_S) ? NODE_PRESENCE_STALE : NODE_PRESENCE_LIVE;
+bool node_is_stale(uint32_t age_s) { return age_s >= NODE_STALE_AGE_S; }
+
+int node_signal_pct(int8_t rssi) {
+    int pct = ((int)rssi + 120) * 100 / 70;
+    if (pct < 0)
+        pct = 0;
+    if (pct > 100)
+        pct = 100;
+    return pct;
 }
 
 int node_format_age(uint32_t age_s, char* buf, size_t buf_len) {

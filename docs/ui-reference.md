@@ -181,7 +181,9 @@ Inactive tabs: transparent background.
 | Timer | Period | Behavior |
 |-------|--------|----------|
 | Status refresh | 2s | Updates battery %, neighbor count in status bar; processes pending events (new messages) |
-| Tab refresh | 5s | Rebuilds content area if active tab is Stats or Nodes (live data refresh) |
+| Sleep drive | 0.5s | Runs the sleep manager's blocking display power-down off the esp_timer task, and polls the BLE pairing overlay |
+
+There is no global tab-content timer. A screen that needs live data owns its own; see Live Data Refresh under User Flows.
 
 ---
 
@@ -361,7 +363,7 @@ Keyboard focus is placed on the textarea immediately on open; physical keyboard 
 | Name/addr   | `n->name` if set, else `%08lX` hex addr; Montserrat 14, TEXT         |
 | Info row    | `"{rssi}dBm  SNR:{snr}  {age}"`, Montserrat 12, TEXT_SEC             |
 | Age         | `node_format_age()`: `"12s"`, `"4m 12s"`, `"2h 14m"`, `"3d 4h"`. Seconds resolution below an hour, which is every age the 10 min neighbor expiry can actually hold, so the row visibly counts up between refreshes |
-| Signal bar  | `lv_bar`, 40×8 px, top-right; value = `(rssi + 120) * 100 / 70`, clamped 0–100; fill = SUCCESS green |
+| Signal bar  | `lv_bar`, 40×8 px, top-right; value = `node_signal_pct()`, which maps -120..-50 dBm onto 0-100 and clamps; fill = SUCCESS green. Shared with the detail card so the two screens cannot disagree |
 | Status dot  | 8×8 circle, top-right +0,-6; SUCCESS green while age < `NODE_STALE_AGE_S` (300s), TEXT_SEC gray at or past it. The name and signal bar dim on the same threshold |
 
 Rows are ordered most-recently-heard first, ties broken by address so the order is total and a row keeps its slot across rebuilds.

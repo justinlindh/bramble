@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
+#include <string.h>
 
 static const char* TAG = "scr_node_detail";
 
@@ -56,85 +57,85 @@ static void node_detail_format_location(char* out, size_t out_len, bool has_loca
 extern uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t* pos,
                                           uint8_t tier);
 extern void mesh_get_location_state(location_manager_t* out);
+extern bool mesh_get_neighbor(uint32_t addr, neighbor_entry_t* out);
 
 static bramble_layout_t* s_layout = NULL;
 static neighbor_entry_t s_neighbor;
 static bool s_has_location = false;
 static location_cache_entry_t s_location;
-static uint32_t s_now_ms = 0;
 
-/* Live-refresh handles, valid only while the card exists (cleared when it is
- * deleted). Everything on this card is a snapshot of a moving target: without
- * the tick below, the age lines and the signal readout froze at the value they
- * had when the card was opened and stayed there for as long as it was on
- * screen. */
-static lv_obj_t* s_signal_lbl = NULL;
-static lv_obj_t* s_sig_bar = NULL;
-static lv_obj_t* s_seen_lbl = NULL;
-static lv_obj_t* s_loc_lbl = NULL;
+/* Live-refresh state, valid only while the card exists. Everything on this card
+ * is a view of a moving target: without the tick below, the age lines and the
+ * signal readout froze at the values they had when the card was opened and
+ * stayed there for as long as it was on screen. The widgets are created and
+ * cleared together, so they live in one struct rather than four statics whose
+ * lockstep a reader would have to prove.
+ *
+ * last_* hold what was last written to each label. LVGL's label setters do no
+ * value comparison: every call frees and reallocates the string and invalidates
+ * the area twice, whether or not the text changed. RSSI and SNR only move when
+ * a frame is actually heard from the peer, which absent traffic is bounded by
+ * the 60 s beacon interval, so at 1 Hz roughly 59 of every 60 writes would be
+ * byte-identical repaints. */
+static struct {
+    lv_obj_t* signal_lbl;
+    lv_obj_t* sig_bar;
+    lv_obj_t* seen_lbl;
+    lv_obj_t* loc_lbl;
+    char last_seen[48];
+    char last_loc[72];
+    char last_signal[48];
+} s_card;
 
-static int signal_pct(int8_t rssi) {
-    int pct = (rssi + 120) * 100 / 70;
-    if (pct < 0)
-        pct = 0;
-    if (pct > 100)
-        pct = 100;
-    return pct;
+static void set_label_if_changed(lv_obj_t* lbl, char* last, size_t last_len, const char* text) {
+    if (strncmp(last, text, last_len) == 0)
+        return;
+    snprintf(last, last_len, "%s", text);
+    lv_label_set_text(lbl, text);
 }
 
-static void refresh_peer_snapshot(void) {
-    /* Re-read the peer from live mesh state. A peer purged out of the neighbor
-     * table while its card is open keeps its last known signal values, and its
-     * age simply keeps growing off the last_heard we already hold. */
-    const ui_mesh_state_t* state = ui_shared_mesh_state();
-    for (int i = 0; i < state->neighbors.count && i < MAX_NEIGHBORS; i++) {
-        if (state->neighbors.entries[i].addr == s_neighbor.addr) {
-            s_neighbor = state->neighbors.entries[i];
-            break;
-        }
-    }
+/* Pull the peer and its shared location from live state, then repaint whatever
+ * actually changed. Also the first-frame renderer, so the card cannot drift
+ * from what the tick produces a second later. A peer purged out of the neighbor
+ * table while its card is open keeps its last known signal values, and its age
+ * simply keeps growing off the last_heard already held. */
+static void node_detail_render(void) {
+    if (!s_card.seen_lbl)
+        return;
 
-    static location_manager_t loc;
-    mesh_get_location_state(&loc);
-    for (int i = 0; i < loc.cache_count && i < LOCATION_MAX_CONTACTS; i++) {
-        if (loc.cache[i].active && loc.cache[i].peer_addr == s_neighbor.addr) {
-            s_has_location = true;
-            s_location = loc.cache[i];
-            break;
-        }
-    }
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    mesh_get_neighbor(s_neighbor.addr, &s_neighbor);
+
+    const location_manager_t* loc = ui_shared_location_state();
+    const location_cache_entry_t* entry = location_cache_get(loc, s_neighbor.addr);
+    s_has_location = (entry != NULL);
+    if (entry)
+        s_location = *entry;
+
+    char line[72];
+    node_detail_format_last_seen(line, sizeof(line), s_neighbor.last_heard, now_ms);
+    set_label_if_changed(s_card.seen_lbl, s_card.last_seen, sizeof(s_card.last_seen), line);
+
+    snprintf(line, sizeof(line), "RSSI %ddBm   SNR %d", s_neighbor.rssi, s_neighbor.snr);
+    set_label_if_changed(s_card.signal_lbl, s_card.last_signal, sizeof(s_card.last_signal), line);
+    lv_bar_set_value(s_card.sig_bar, node_signal_pct(s_neighbor.rssi), LV_ANIM_OFF);
+
+    node_detail_format_location(line, sizeof(line), s_has_location, s_location.pos.latitude_e7,
+                                s_location.pos.longitude_e7, s_location.received_ms, now_ms,
+                                s_location.age_known);
+    set_label_if_changed(s_card.loc_lbl, s_card.last_loc, sizeof(s_card.last_loc), line);
 }
 
 static void node_detail_refresh_cb(lv_timer_t* timer) {
     (void)timer;
-    if (!s_seen_lbl)
-        return;
-
-    s_now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    refresh_peer_snapshot();
-
-    char seen_line[48];
-    node_detail_format_last_seen(seen_line, sizeof(seen_line), s_neighbor.last_heard, s_now_ms);
-    lv_label_set_text(s_seen_lbl, seen_line);
-
-    lv_label_set_text_fmt(s_signal_lbl, "RSSI %ddBm   SNR %d", s_neighbor.rssi, s_neighbor.snr);
-    lv_bar_set_value(s_sig_bar, signal_pct(s_neighbor.rssi), LV_ANIM_OFF);
-
-    char loc_line[72];
-    node_detail_format_location(loc_line, sizeof(loc_line), s_has_location,
-                                s_location.pos.latitude_e7, s_location.pos.longitude_e7,
-                                s_location.received_ms, s_now_ms, s_location.age_known);
-    lv_label_set_text(s_loc_lbl, loc_line);
+    node_detail_render();
 }
 
 static void node_detail_delete_cb(lv_event_t* e) {
     lv_timer_t* timer = (lv_timer_t*)lv_event_get_user_data(e);
     if (timer)
         lv_timer_delete(timer);
-    s_signal_lbl = NULL;
-    s_sig_bar = NULL;
-    s_seen_lbl = NULL;
-    s_loc_lbl = NULL;
+    memset(&s_card, 0, sizeof(s_card));
 }
 
 /* This screen's action buttons live in the content area that each destination
@@ -241,17 +242,15 @@ static void add_action_btn(lv_obj_t* parent, const char* text, lv_event_cb_t cb,
     }
 }
 
-void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neighbor,
-                          bool has_location, const location_cache_entry_t* location,
-                          uint32_t now_ms) {
+void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neighbor) {
     if (!layout || !neighbor)
         return;
 
     s_layout = layout;
     s_neighbor = *neighbor;
-    s_has_location = has_location;
-    s_location = location ? *location : (location_cache_entry_t){0};
-    s_now_ms = now_ms;
+    s_has_location = false;
+    s_location = (location_cache_entry_t){0};
+    memset(&s_card, 0, sizeof(s_card));
 
     /* Builder: runs through layout_rebuild_content (from node_open_async and the
      * Back button), which owns the content-area clean and the trailing zone
@@ -278,47 +277,35 @@ void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neig
     lv_obj_set_style_text_font(title_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(title_lbl, BR_COLOR_TEXT, 0);
 
-    lv_obj_t* sig_bar = lv_bar_create(card);
-    lv_obj_set_size(sig_bar, 220, 8);
-    lv_obj_set_style_bg_color(sig_bar, BR_COLOR_SURFACE_2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(sig_bar, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
-    lv_bar_set_range(sig_bar, 0, 100);
-    lv_bar_set_value(sig_bar, signal_pct(s_neighbor.rssi), LV_ANIM_OFF);
+    /* The four live widgets are created empty and filled by node_detail_render
+     * below, so the first frame and every tick after it come from one piece of
+     * code and cannot drift apart. */
+    s_card.sig_bar = lv_bar_create(card);
+    lv_obj_set_size(s_card.sig_bar, 220, 8);
+    lv_obj_set_style_bg_color(s_card.sig_bar, BR_COLOR_SURFACE_2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_card.sig_bar, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+    lv_bar_set_range(s_card.sig_bar, 0, 100);
 
-    char signal_line[64];
-    snprintf(signal_line, sizeof(signal_line), "RSSI %ddBm   SNR %d", s_neighbor.rssi,
-             s_neighbor.snr);
-    lv_obj_t* signal_lbl = lv_label_create(card);
-    lv_label_set_text(signal_lbl, signal_line);
-    lv_obj_set_style_text_font(signal_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(signal_lbl, BR_COLOR_TEXT_SEC, 0);
+    s_card.signal_lbl = lv_label_create(card);
+    lv_obj_set_style_text_font(s_card.signal_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_card.signal_lbl, BR_COLOR_TEXT_SEC, 0);
 
-    char seen_line[48];
-    node_detail_format_last_seen(seen_line, sizeof(seen_line), s_neighbor.last_heard, s_now_ms);
-    lv_obj_t* seen_lbl = lv_label_create(card);
-    lv_label_set_text(seen_lbl, seen_line);
-    lv_obj_set_style_text_font(seen_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(seen_lbl, BR_COLOR_TEXT_SEC, 0);
+    s_card.seen_lbl = lv_label_create(card);
+    lv_obj_set_style_text_font(s_card.seen_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_card.seen_lbl, BR_COLOR_TEXT_SEC, 0);
 
-    char loc_line[72];
-    node_detail_format_location(loc_line, sizeof(loc_line), s_has_location,
-                                s_location.pos.latitude_e7, s_location.pos.longitude_e7,
-                                s_location.received_ms, s_now_ms, s_location.age_known);
-    lv_obj_t* loc_lbl = lv_label_create(card);
-    lv_label_set_text(loc_lbl, loc_line);
-    lv_obj_set_width(loc_lbl, lv_pct(100));
-    lv_label_set_long_mode(loc_lbl, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(loc_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(loc_lbl, BR_COLOR_TEXT_SEC, 0);
+    s_card.loc_lbl = lv_label_create(card);
+    lv_obj_set_width(s_card.loc_lbl, lv_pct(100));
+    lv_label_set_long_mode(s_card.loc_lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(s_card.loc_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_card.loc_lbl, BR_COLOR_TEXT_SEC, 0);
+
+    node_detail_render();
 
     /* Live refresh every second, matching the Nodes list: the ages count up
      * and the signal readout follows the peer instead of showing whatever was
      * true at the moment the card was opened. The timer is owned by the card,
      * so it stops the moment this screen is navigated away from. */
-    s_signal_lbl = signal_lbl;
-    s_sig_bar = sig_bar;
-    s_seen_lbl = seen_lbl;
-    s_loc_lbl = loc_lbl;
     lv_timer_t* refresh = lv_timer_create(node_detail_refresh_cb, 1000, NULL);
     lv_obj_add_event_cb(card, node_detail_delete_cb, LV_EVENT_DELETE, refresh);
 

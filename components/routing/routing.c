@@ -47,22 +47,18 @@ int neighbor_update(neighbor_table_t* table, uint32_t addr, int8_t rssi, int8_t 
 
 bool neighbor_touch(neighbor_table_t* table, uint32_t addr, int8_t rssi, int8_t snr,
                     uint32_t now_ms) {
-    for (int i = 0; i < table->count; i++) {
-        if (table->entries[i].addr != addr)
-            continue;
-        /* Monotonic only: a frame dispatched out of order relative to the
-         * sample that stamped last_heard must not un-age the peer. */
-        if (now_ms <= table->entries[i].last_heard)
-            return false;
-        table->entries[i].last_heard = now_ms;
-        table->entries[i].rssi = rssi;
-        table->entries[i].snr = snr;
-        /* beacon_count and first_seen_ms are deliberately untouched: tenure
-         * (neighbor_is_established) is the anti-Sybil lever and stays gated on
-         * sustained beaconing, not on traffic a peer chooses to send us. */
-        return true;
-    }
-    return false;
+    neighbor_entry_t* e = neighbor_lookup(table, addr);
+    /* Monotonic only: a frame dispatched out of order relative to the sample
+     * that stamped last_heard must not un-age the peer. */
+    if (!e || now_ms <= e->last_heard)
+        return false;
+    e->last_heard = now_ms;
+    e->rssi = rssi;
+    e->snr = snr;
+    /* beacon_count and first_seen_ms are deliberately untouched: tenure
+     * (neighbor_is_established) is the anti-Sybil lever and stays gated on
+     * sustained beaconing, not on traffic a peer chooses to send us. */
+    return true;
 }
 
 neighbor_entry_t* neighbor_lookup(neighbor_table_t* table, uint32_t addr) {
