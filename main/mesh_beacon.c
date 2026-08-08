@@ -455,10 +455,9 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
          * it. What it costs is repeated attempts, never a repeated delivery:
          * an attempt landing while the last one is still queued is refused by
          * the send queue, which holds at most one entry per uid. */
-        if (parked_retry_beacon_decide_flush(&s_neighbors, &s_parked_sweep, beacon.src_addr,
-                                             is_new_peer, t)) {
+        if (mesh_parked_retry_decide_flush_locked(beacon.src_addr, is_new_peer, t)) {
             int found = mesh_flush_parked_for(beacon.src_addr);
-            parked_retry_flushed(&s_neighbors, beacon.src_addr, found, t);
+            mesh_parked_retry_flushed_locked(beacon.src_addr, found, t);
         }
     }
 

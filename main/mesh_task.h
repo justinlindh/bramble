@@ -119,11 +119,13 @@ bool mesh_cancel_parked_message(uint32_t uid);
  * Re-send every message parked for peer_addr, oldest first, and return how
  * many parked rows it found (0 if there was nothing to send).
  *
- * Called from the beacon handler, never on every beacon: a peer that is
- * present but unreachable beacons every 60s, and flushing on each of those
- * would be a retry loop. parked_retry.h owns which beacons qualify, and takes
+ * Two callers, both on the mesh task: the beacon handler, and the parked
+ * sweep on the maintenance tick. Never on every beacon, because a peer that is
+ * present but unreachable beacons every 60s and flushing on each of those
+ * would be a retry loop; parked_retry.h owns which beacons qualify, and takes
  * the returned count as its signal for whether the peer still has anything
- * waiting. Transmits, so it must be called with no lock held.
+ * waiting. The sweep covers what no beacon can reach, a peer that is not a
+ * neighbor. Transmits, so it must be called with no lock held.
  *
  * A send that fails leaves the row parked for the next attempt: the resend
  * pipeline's failure paths all report MSG_STATUS_FAILED through

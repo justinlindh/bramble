@@ -25,9 +25,16 @@
 #define PARKED_RETRY_COOLDOWN_MS 300000u
 
 /* How often the node picks one peer with parked messages and tries it,
- * independent of any beacon. Equal to the cooldown and constrained by the same
- * floor (the compile-time assertions next to mesh_flush_parked_for cover both),
- * because a sweep re-queues a DM exactly as a beacon-driven retry does.
+ * independent of any beacon. An airtime knob on the same terms as the cooldown
+ * above, and for the same reason: a sweep re-queues a DM exactly as a
+ * beacon-driven retry does, and the send queue refuses a uid it already holds
+ * however the second attempt got there.
+ *
+ * Set equal to the cooldown because the two pace the same thing, not because
+ * anything requires it. Nothing reads the difference: the sweep's hold is
+ * cleared when the rotation moves off the peer that earned it
+ * (parked_retry_sweep_skipped), so tuning these apart cannot leak one peer's
+ * hold onto another.
  */
 #define PARKED_RETRY_SWEEP_MS 300000u
 
@@ -91,9 +98,11 @@ bool parked_retry_arm(neighbor_table_t* table, uint32_t peer_addr, uint32_t now_
  * MESH TASK ONLY, and it WRITES the table. Not a query despite the question it
  * answers: when the sweep holds this peer, the decision is to defer rather
  * than to drop, and deferring means arming the entry for when the hold ends.
- * Calling it from an RPC or UI task would be the cross-task write into
- * s_neighbors that everything else in this file goes out of its way to funnel
- * through a lock. The name says decide, not ask, for exactly that reason.
+ * The name says decide, not ask, for exactly that reason.
+ *
+ * Because it writes, its caller holds the lock that guards writes to
+ * s_neighbors: in the firmware it is reached only through
+ * mesh_parked_retry_decide_flush_locked (mesh_internal.h), never directly.
  *
  * Flushes on the rejoin edge (is_new_peer), and when the peer was armed by a
  * park and its cooldown has elapsed. An unarmed peer costs one table lookup
@@ -103,7 +112,10 @@ bool parked_retry_beacon_decide_flush(neighbor_table_t* table, const parked_swee
                                       uint32_t peer_addr, bool is_new_peer, uint32_t now_ms);
 
 /* Record what the flush found, where found is the number of parked rows it
- * picked up. Nothing left parked disarms the peer; anything still parked
+ * picked up. Writes the table, on the same terms as the decision above: mesh
+ * task only, reached through mesh_parked_retry_flushed_locked.
+ *
+ * Nothing left parked disarms the peer; anything still parked
  * rearms it one cooldown out. Disarming here rather than at every point a row
  * can leave the parked state (delivery, cancel, eviction) keeps this to one
  * site: the cost of learning lazily is a single store scan, once, and the

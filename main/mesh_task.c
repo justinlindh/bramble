@@ -377,20 +377,28 @@ static void mesh_publish_neighbors(void) {
 }
 
 /* s_state_mutex guards EVERY write to s_neighbors, including the mesh task's
- * own, which is why these three wrappers exist. The mutex used to be taken
- * only by the cross-task readers and writers (mesh_get_peer_name, and the park
- * that arms a peer), while the mesh task mutated the table beside them without
- * it, so it was not mutual exclusion at all: a reader could copy a name being
+ * own, which is why these wrappers exist. The mutex used to be taken only by
+ * the cross-task readers and writers (mesh_get_peer_name, and the park that
+ * arms a peer), while the mesh task mutated the table beside them without it,
+ * so it was not mutual exclusion at all: a reader could copy a name being
  * memcpy'd into, and an arming write could land in a slot a purge was
  * compacting. A lock that holds off only some of its writers is worse than no
  * lock, because everything that touches the table reads the take as safety.
  *
+ * WRITES, precisely. The mesh task still READS the table unlocked all over
+ * (neighbor_count, neighbor_is_established, the Sybil RSSI walk), which is
+ * sound because it is the only thing that can change the table's shape: the
+ * one cross-task writer, the park below, only ever stores a single aligned
+ * 32-bit field into an existing entry. Do not read this comment as a promise
+ * that an unlocked read of a whole entry from another task would be safe.
+ *
  * Safe to take here, and the check is not "no other lock appears nearby": each
- * section below contains ONLY leaf calls into components/routing (which takes
- * no locks and calls nothing that does) plus a memcpy, and every caller of
- * these three reaches them from the mesh task's RX dispatch or maintenance
- * tick with no lock held. So nothing can nest, in either order. They stay
- * short for the same reason the publish is short: this is the packet RX path.
+ * section below contains ONLY leaf calls into components/routing or
+ * parked_retry.c (neither takes a lock, and neither calls anything that does)
+ * plus a memcpy, and every caller reaches them from the mesh task's RX
+ * dispatch or maintenance tick with no lock held. So nothing can nest, in
+ * either order. They stay short for the same reason the publish is short: this
+ * is the packet RX path.
  */
 static bool mesh_neighbor_touch_locked(uint32_t addr, int16_t rssi, int8_t snr, uint32_t t) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -422,6 +430,31 @@ int mesh_neighbor_update_locked(uint32_t addr, int8_t rssi, int8_t snr, uint32_t
     }
     xSemaphoreGive(s_state_mutex);
     return idx;
+}
+
+/* The parked-retry deadline is a write into s_neighbors like any other, so the
+ * two beacon-path calls that move it take the mutex the same way. Both of them
+ * write: parked_retry_flushed always does, and the decision call arms the entry
+ * when it defers a held peer's edge rather than dropping it (see
+ * parked_retry.h, which says so at the top of its contract).
+ *
+ * TWO wrappers rather than one spanning the pair, because what runs between
+ * them is mesh_flush_parked_for, which transmits and takes MSG_LOCK. Holding
+ * s_state_mutex across that would put a radio transmit inside a critical
+ * section the UI reads through, and would nest the two locks in an order
+ * nothing else uses. */
+bool mesh_parked_retry_decide_flush_locked(uint32_t peer_addr, bool is_new_peer, uint32_t t) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool flush =
+        parked_retry_beacon_decide_flush(&s_neighbors, &s_parked_sweep, peer_addr, is_new_peer, t);
+    xSemaphoreGive(s_state_mutex);
+    return flush;
+}
+
+void mesh_parked_retry_flushed_locked(uint32_t peer_addr, int found, uint32_t t) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    parked_retry_flushed(&s_neighbors, peer_addr, found, t);
+    xSemaphoreGive(s_state_mutex);
 }
 
 void mesh_note_peer_heard(uint32_t addr, int16_t rssi, int8_t snr) {
