@@ -6,31 +6,31 @@
 // BY CONSTRUCTION, and the UI must present the ledger as observed responders
 // rather than as a complete fleet answer.
 import { requireClient } from './client';
-import { parseAddr } from '../../lib/addr';
+import { tryParseAddr } from '../../lib/addr';
 import type { RollCallLedger, RollCallResponder, RollCallStart } from '../../types/bramble';
 import type { RpcSchemas, WirePartial } from '../../types/rpc';
 
 type StartWire = WirePartial<RpcSchemas['StartRollCallResponse']>;
 type LedgerWire = WirePartial<RpcSchemas['RollCallLedger']>;
 
-// Address 0 is the reserved "no node" value the firmware ledger rejects on
-// both sides, so parseAddr's 0 fallback for an unparseable string is safely
-// indistinguishable from a real address here: either way the entry is dropped
-// rather than shown as node 0x00000000.
+// tryParseAddr, not parseAddr: a ledger address the firmware could not have
+// sent is dropped rather than truncated to whatever leading hex digits it
+// happened to start with, which would put a node that does not exist in an
+// operator's missing list.
 function toAddrs(hexes: (string | undefined)[] | undefined): number[] {
   if (!hexes) return [];
   const out: number[] = [];
   for (const h of hexes) {
     if (typeof h !== 'string') continue;
-    const addr = parseAddr(h);
-    if (addr !== 0) out.push(addr);
+    const addr = tryParseAddr(h);
+    if (addr !== null) out.push(addr);
   }
   return out;
 }
 
 function normalizeResponder(raw: NonNullable<LedgerWire['responders']>[number]): RollCallResponder | null {
-  const addr = parseAddr(raw.address);
-  if (addr === 0) return null;
+  const addr = typeof raw.address === 'string' ? tryParseAddr(raw.address) : null;
+  if (addr === null) return null;
   const path = toAddrs(raw.path as (string | undefined)[] | undefined);
   return {
     addr,
