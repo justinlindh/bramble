@@ -551,6 +551,15 @@ void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         return;
     }
 
+    /* Liveness from traffic (see the DATA case in mesh_process_rx_packet).
+     * hop_count 0 means no relay has appended itself yet, so the ACK's signer
+     * is also its transmitter, and ack.src_addr is MAC-covered by the
+     * ack_verify above. Placed before the forward branch on purpose: hearing a
+     * neighbor's own ACK proves it is alive whether or not the ACK is for us. */
+    if (ack.hop_count == 0) {
+        mesh_note_peer_heard(ack.src_addr, rssi, snr);
+    }
+
     /* Not for us, forward it */
     if (ack.header.dest_addr != s_identity->address) {
         if (s_flood_transport) {

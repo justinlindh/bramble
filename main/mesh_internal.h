@@ -271,6 +271,13 @@ extern uint32_t s_probe_request_id;
 /* ── Orchestration core (mesh_task.c) ───────────────────────────────── */
 
 uint32_t now_ms(void);
+
+/* Record that we heard addr transmit directly, on a frame that is not a
+ * beacon. Refreshes last_heard/rssi/snr for an existing neighbor (see
+ * neighbor_touch) and republishes the snapshot the UI and RPC read. Callers
+ * must pass an address the frame's own authentication covers, never a
+ * relay-mutable hint. */
+void mesh_note_peer_heard(uint32_t addr, int16_t rssi, int8_t snr);
 uint32_t next_packet_id(void);
 int mesh_tx(const uint8_t* buf, uint8_t len, tx_kind_t kind);
 uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, size_t payload_len,

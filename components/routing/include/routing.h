@@ -35,6 +35,16 @@ typedef struct {
 void neighbor_init(neighbor_table_t* table);
 int neighbor_update(neighbor_table_t* table, uint32_t addr, int8_t rssi, int8_t snr,
                     uint32_t pubkey_hash, uint32_t now_ms);
+/* Refresh liveness for a peer we just heard a non-beacon frame from directly.
+ * Only an address already in the table is refreshed (a touch never admits a
+ * new neighbor: beacons alone do that), and tenure is left alone, so the
+ * anti-Sybil establishment rule stays beacon-gated. Returns true if an entry
+ * was refreshed. Without this, last_heard tracks only beacon cadence, so a
+ * peer we are actively exchanging data with reads as minutes stale and can be
+ * purged out of the table mid-conversation. */
+bool neighbor_touch(neighbor_table_t* table, uint32_t addr, int8_t rssi, int8_t snr,
+                    uint32_t now_ms);
+
 neighbor_entry_t* neighbor_lookup(neighbor_table_t* table, uint32_t addr);
 void neighbor_purge(neighbor_table_t* table, uint32_t now_ms);
 int neighbor_count(const neighbor_table_t* table);
