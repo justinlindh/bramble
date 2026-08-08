@@ -56,21 +56,6 @@ interface Box {
   height: number;
 }
 
-// Milestone lists only ever grow (latchMilestones unions them), so comparing
-// lengths is a complete equality test and keeps the scan effect from looping.
-function sameMilestones(a: Milestones, b: Milestones): boolean {
-  return (
-    a.inert.length === b.inert.length &&
-    a.controlReady.length === b.controlReady.length &&
-    a.provisioned.length === b.provisioned.length &&
-    a.channelHeardBy.length === b.channelHeardBy.length &&
-    a.dmHeardBy.length === b.dmHeardBy.length &&
-    a.verified.length === b.verified.length &&
-    a.receiptTextHeardBy.length === b.receiptTextHeardBy.length &&
-    a.receipts.length === b.receipts.length
-  );
-}
-
 function sameBox(a: Box | null, b: Box | null): boolean {
   if (a === null || b === null) return a === b;
   return a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
@@ -137,10 +122,10 @@ export default function TourOverlay({ devices, nodes, ws, view, onView }: TourOv
     const scan = scanConsoles(
       [...devices.entries()].map(([id, d]) => [id, d.console] as const),
     );
-    setMilestones((prev) => {
-      const merged = latchMilestones(prev, scan);
-      return sameMilestones(prev, merged) ? prev : merged;
-    });
+    // latchMilestones hands `prev` back unchanged when the scan carried
+    // nothing new, so storing its result unconditionally is not a re-render
+    // on every console frame: React bails out on the identical reference.
+    setMilestones((prev) => latchMilestones(prev, scan));
   }, [devices]);
 
   const tour = useTour(milestones, fleet);

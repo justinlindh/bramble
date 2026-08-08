@@ -96,6 +96,40 @@ describe('latchMilestones', () => {
     const twice = latchMilestones(once, scan);
     expect(twice.receipts).toHaveLength(1);
   });
+
+  // The overlay stores the fold in React state, so "nothing new" has to be
+  // the identical object or the panel re-renders on every console frame, and
+  // "something new" has to be a fresh one or the fact is thrown away. Both
+  // directions are asserted here for EVERY milestone list, including the ones
+  // that carry a record rather than a node id: a pin arriving on its own,
+  // with no message in the same scan, is exactly the case the DM step's
+  // safety-number hint depends on.
+  it('returns the same object when a scan carries nothing new', () => {
+    const latched = latchMilestones(EMPTY_MILESTONES, scanConsoles([['alpha-0', [CONTROL]]]));
+    expect(latchMilestones(latched, scanConsoles([['alpha-0', [CONTROL]]]))).toBe(latched);
+  });
+
+  it('returns a new object for any list a scan grew', () => {
+    const scans: Record<string, string> = {
+      inert: INERT,
+      controlReady: CONTROL,
+      provisioned: PROVISIONED,
+      channelHeardBy: `I (1) mesh: >>> ${CHANNEL_TEXT}`,
+      dmHeardBy: `I (1) mesh: >>> ${DM_TEXT}`,
+      pins: PINNED,
+      verified: VERIFIED,
+      receiptTextHeardBy: `I (1) mesh: >>> ${RECEIPT_TEXT}`,
+      receipts: RECEIPT_2HOP,
+    };
+    // Every field of the shape is covered, so a milestone added later cannot
+    // quietly go unlatched.
+    expect(Object.keys(scans).sort()).toEqual(Object.keys(EMPTY_MILESTONES).sort());
+    for (const [field, line] of Object.entries(scans)) {
+      const grown = latchMilestones(EMPTY_MILESTONES, scanConsoles([['bravo-0', [line]]]));
+      expect(grown, `${field} must not be discarded`).not.toBe(EMPTY_MILESTONES);
+      expect(grown[field as keyof typeof grown].length, `${field} latched`).toBe(1);
+    }
+  });
 });
 
 describe('multiHopReceipt', () => {

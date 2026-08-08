@@ -149,11 +149,28 @@ function union(a: readonly string[], b: readonly string[]): string[] {
   return out;
 }
 
+// Every milestone field is a grow-only list, so a merge that changed no list's
+// length learned nothing and the fold can hand `prev` straight back. Keyed off
+// Object.keys rather than a hand-written field list: a milestone added to the
+// shape later is covered without anyone remembering to extend this.
+function grew(prev: Milestones, merged: Milestones): boolean {
+  return (Object.keys(merged) as (keyof Milestones)[]).some(
+    (k) => merged[k].length !== prev[k].length,
+  );
+}
+
 // latchMilestones folds a fresh scan into what has already been seen. Console
 // buffers are bounded rings, so a marker can scroll out of view; a completed
 // step must stay completed, which is exactly what this union guarantees.
 // Receipts are keyed by (originator, confirming node, broadcast id) so the
 // same receipt seen in two consecutive scans is not counted twice.
+//
+// A scan that taught it nothing returns `prev` ITSELF, not an equal copy. That
+// is what lets a caller holding this in React state store the result
+// unconditionally and still not re-render on every poll: the identity check is
+// here, once, over the whole shape, rather than in a field-by-field equality
+// test at the call site that would silently discard a scan whose only new fact
+// lived in a field the test forgot.
 export function latchMilestones(prev: Milestones, next: Milestones): Milestones {
   const pins = [...prev.pins];
   for (const p of next.pins) {
@@ -166,7 +183,7 @@ export function latchMilestones(prev: Milestones, next: Milestones): Milestones 
     );
     if (!dup) receipts.push(r);
   }
-  return {
+  const merged: Milestones = {
     inert: union(prev.inert, next.inert),
     controlReady: union(prev.controlReady, next.controlReady),
     provisioned: union(prev.provisioned, next.provisioned),
@@ -177,6 +194,7 @@ export function latchMilestones(prev: Milestones, next: Milestones): Milestones 
     receiptTextHeardBy: union(prev.receiptTextHeardBy, next.receiptTextHeardBy),
     receipts,
   };
+  return grew(prev, merged) ? merged : prev;
 }
 
 // hasPinned reports whether `at` has pinned `peer`'s identity, which is what
