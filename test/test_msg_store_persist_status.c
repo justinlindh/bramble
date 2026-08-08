@@ -258,6 +258,20 @@ void test_uid_allocator_resumes_past_restored_rows(void) {
     TEST_ASSERT_TRUE(msg_store_next_uid() > highest);
 }
 
+/* The entire persistence argument for "send when online" is that parking
+ * is just a status change and msg_store already pushes those to flash.
+ * If this fails, a parked message silently evaporates on reboot, which is
+ * exactly the class of loss the feature exists to remove. */
+void test_parked_status_reaches_the_persisted_record(void) {
+    msg_store_add_dm_uid(0xAABBCCDD, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_FAILED, 42);
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(42, 0, MSG_STATUS_QUEUED));
+
+    /* The newest persisted record is the one that was just rewritten. */
+    TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, s_records[s_record_count - 1].status);
+    TEST_ASSERT_EQUAL_UINT32(42, s_records[s_record_count - 1].uid);
+    TEST_ASSERT_EQUAL_STRING("parked", s_records[s_record_count - 1].text);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_delivered_status_reaches_the_persisted_record);
@@ -268,5 +282,6 @@ int main(void) {
     RUN_TEST(test_skewed_mapping_is_rejected_not_corrupted);
     RUN_TEST(test_status_survives_a_reload);
     RUN_TEST(test_uid_allocator_resumes_past_restored_rows);
+    RUN_TEST(test_parked_status_reaches_the_persisted_record);
     return UNITY_END();
 }
