@@ -148,6 +148,9 @@ void ui_set_message_total(ui_state_t* state, int total);
  * handler can clamp/wrap the nodes cursor without a mesh dependency. */
 void ui_set_node_total(ui_state_t* state, int total);
 
+/* Applies a passkey display/hide request latched from the NimBLE host task.
+ * Must only be called from the task that owns ui_state (the main loop);
+ * calling from any other task races the main loop's own reads/writes of it. */
 void ui_show_ble_passkey(ui_state_t* state, uint32_t passkey);
 void ui_clear_ble_passkey(ui_state_t* state);
 

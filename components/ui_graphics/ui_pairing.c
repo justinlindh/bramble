@@ -25,7 +25,7 @@
 static uint32_t s_pending;
 
 static lv_obj_t* s_modal; /* NULL when hidden */
-static lv_timer_t* s_timer;
+static bool s_pushed_focus; /* true if show_modal pushed the modal focus group itself */
 
 void ui_pairing_passkey_cb(uint32_t passkey, bool show) {
     uint32_t req = PAIRING_VALID_BIT | (passkey & PAIRING_CODE_MASK);
@@ -40,9 +40,14 @@ static void hide_modal(void) {
         lv_obj_delete(s_modal);
         s_modal = NULL;
         /* Matches the ui_focus_push_modal in show_modal below: pop exactly
-         * once per widget we actually put up, restoring keypad/trackball
-         * input to the content zone. */
-        ui_focus_pop_modal();
+         * once per group we actually pushed, restoring keypad/trackball
+         * input to the content zone. If show_modal found another modal
+         * already active (see there) it left that group alone, and there is
+         * nothing here to pop. */
+        if (s_pushed_focus) {
+            ui_focus_pop_modal();
+            s_pushed_focus = false;
+        }
     }
 }
 
@@ -74,8 +79,20 @@ static void show_modal(uint32_t code) {
      * input, so there is nothing for the user to do here regardless. The
      * overlay itself stays default-clickable (like ui_confirm's), so a
      * stray tap during pairing is absorbed here instead of reaching
-     * whatever is behind it. */
-    ui_focus_push_modal();
+     * whatever is behind it.
+     *
+     * ui_focus_push_modal is single-level: pushing while another modal
+     * (e.g. a ui_confirm dialog) is already up would silently replace that
+     * modal's focus group, leaving its widgets on screen but unreachable by
+     * keypad/trackball while input actually lands on the content zone
+     * behind everything. Skip the push in that case and leave the existing
+     * modal's group untouched; hide_modal below only pops the group if this
+     * function actually pushed one. The overlay below still renders on
+     * lv_layer_top and still absorbs touch either way. */
+    if (!ui_focus_modal_active()) {
+        ui_focus_push_modal();
+        s_pushed_focus = true;
+    }
 
     s_modal = lv_obj_create(lv_layer_top());
     lv_obj_set_size(s_modal, LV_PCT(100), LV_PCT(100));
@@ -149,5 +166,6 @@ static void pairing_timer_cb(lv_timer_t* t) {
 }
 
 void ui_pairing_init(void) {
-    s_timer = lv_timer_create(pairing_timer_cb, 100, NULL);
+    /* Runs for the app's lifetime; no need to keep the handle around. */
+    lv_timer_create(pairing_timer_cb, 100, NULL);
 }
