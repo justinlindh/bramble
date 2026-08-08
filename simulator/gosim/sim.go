@@ -623,7 +623,7 @@ func (s *Sim) handleNodeLeave(evt *C.sim_event_t) {
 		"type": "node_left", "timestamp_us": ts, "node": nodeID,
 	})
 
-	anomalyCheckPartition(&s.nodes, float32(s.radio._range), ts)
+	anomalyCheckPartition(&s.nodes, &s.radio, ts)
 }
 
 func (s *Sim) handleNodeMove(evt *C.sim_event_t) {
@@ -1050,7 +1050,7 @@ func (s *Sim) cmdRemoveNode(cmd Command) {
 		"type": "node_left", "timestamp_us": s.simTime, "node": cmd.NodeID,
 	})
 
-	anomalyCheckPartition(&s.nodes, float32(s.radio._range), s.simTime)
+	anomalyCheckPartition(&s.nodes, &s.radio, s.simTime)
 }
 
 // cmdButton forwards a face-button edge from a device card (PagerDevice.tsx)

@@ -221,15 +221,56 @@ int8_t radio_compute_rssi(const radio_config_t* config, float distance) {
     return (int8_t)path_rssi_dbm(config, distance);
 }
 
+/* ── Link-graph mode ──────────────────────────────────────────────────── */
+
+/* Raw table read, bounds-checked. Zero means "no link" (see radio_config_t). */
+static int8_t link_rssi_at(const radio_config_t* config, int from, int to) {
+    if (from < 0 || to < 0 || from >= MAX_NODES || to >= MAX_NODES)
+        return 0;
+    return config->link_rssi[from][to];
+}
+
+bool radio_link_set(radio_config_t* config, int from, int to, int8_t rssi, int8_t snr) {
+    if (from < 0 || to < 0 || from >= MAX_NODES || to >= MAX_NODES || from == to)
+        return false;
+    if (rssi == 0)
+        return false; /* zero is the absent marker; an observed link cannot use it */
+    config->link_mode = true;
+    config->link_rssi[from][to] = rssi;
+    config->link_snr[from][to] = snr;
+    return true;
+}
+
+/* Audibility of one logged transmission at `node`. The channel log carries the
+ * transmitter's index alongside its position so both modes can answer from the
+ * same entry. */
+static bool audible_from_log(const radio_config_t* config, const channel_tx_t* e,
+                             const sim_node_t* node) {
+    if (config->link_mode)
+        return link_rssi_at(config, e->tx_index, node->index) != 0;
+    float dx = node->x - e->tx_x;
+    float dy = node->y - e->tx_y;
+    return sqrtf(dx * dx + dy * dy) <= config->range;
+}
+
+bool radio_audible(const radio_config_t* config, const sim_node_t* tx, const sim_node_t* rx) {
+    if (config->link_mode)
+        return link_rssi_at(config, tx->index, rx->index) != 0;
+    return radio_distance(tx, rx) <= config->range;
+}
+
+bool radio_nodes_connected(const radio_config_t* config, const sim_node_t* a, const sim_node_t* b) {
+    return radio_audible(config, a, b) && radio_audible(config, b, a);
+}
+
 bool radio_can_receive(const radio_config_t* config, const sim_node_t* tx, const sim_node_t* rx,
                        pcg32_state_t* rng) {
     /* Both must be active */
     if (!tx->active || !rx->active)
         return false;
 
-    /* Check distance */
-    float dist = radio_distance(tx, rx);
-    if (dist > config->range)
+    /* Reachable at all: range disk, or the imported link table */
+    if (!radio_audible(config, tx, rx))
         return false;
 
     /* Check interference */
@@ -319,7 +360,7 @@ static void channel_log_prune(channel_log_t* log, uint64_t now_us) {
     log->count = w;
 }
 
-static void channel_log_add(channel_log_t* log, uint32_t tx_addr, float x, float y,
+static void channel_log_add(channel_log_t* log, uint32_t tx_addr, int tx_index, float x, float y,
                             uint64_t start_us, uint64_t end_us, uint64_t now_us) {
     channel_log_prune(log, now_us);
     if (log->count >= MAX_CHANNEL_TX) {
@@ -331,6 +372,7 @@ static void channel_log_add(channel_log_t* log, uint32_t tx_addr, float x, float
     }
     channel_tx_t* e = &log->entries[log->count++];
     e->tx_addr = tx_addr;
+    e->tx_index = tx_index;
     e->tx_x = x;
     e->tx_y = y;
     e->start_us = start_us;
@@ -338,9 +380,9 @@ static void channel_log_add(channel_log_t* log, uint32_t tx_addr, float x, float
 }
 
 /* Carrier sense: is any other audible transmission on the air at time t?
- * Models the SX126x CAD check as deterministic energy detection within the
- * range disk (documented simplification: real CAD is preamble-biased and
- * probabilistic). */
+ * Models the SX126x CAD check as deterministic energy detection over whatever
+ * defines audibility (the range disk, or the imported link table in link mode;
+ * documented simplification: real CAD is preamble-biased and probabilistic). */
 static bool channel_busy_at(const radio_config_t* config, const sim_node_t* node, uint64_t t) {
     const channel_log_t* log = &config->channel;
     for (int i = 0; i < log->count; i++) {
@@ -349,9 +391,7 @@ static bool channel_busy_at(const radio_config_t* config, const sim_node_t* node
             continue;
         if (t < e->start_us || t >= e->end_us)
             continue;
-        float dx = node->x - e->tx_x;
-        float dy = node->y - e->tx_y;
-        if (sqrtf(dx * dx + dy * dy) > config->range)
+        if (!audible_from_log(config, e, node))
             continue;
         return true;
     }
@@ -369,9 +409,17 @@ radio_rx_outcome_t radio_check_reception(const radio_config_t* config, const sim
     uint64_t preamble = radio_preamble_us(config);
     bool overlapped = false;
 
-    float dxp = rx->x - pkt->tx_x;
-    float dyp = rx->y - pkt->tx_y;
-    float our_rssi = path_rssi_dbm(config, sqrtf(dxp * dxp + dyp * dyp));
+    /* Wanted-signal strength at this receiver. In link mode the packet already
+     * carries the observed link's RSSI (sim_radio_broadcast read it out of the
+     * link table); in position mode it is the path-loss gradient. */
+    float our_rssi;
+    if (config->link_mode) {
+        our_rssi = (float)pkt->rssi;
+    } else {
+        float dxp = rx->x - pkt->tx_x;
+        float dyp = rx->y - pkt->tx_y;
+        our_rssi = path_rssi_dbm(config, sqrtf(dxp * dxp + dyp * dyp));
+    }
 
     for (int i = 0; i < log->count; i++) {
         const channel_tx_t* e = &log->entries[i];
@@ -383,14 +431,18 @@ radio_rx_outcome_t radio_check_reception(const radio_config_t* config, const sim
             return RADIO_RX_HALF_DUPLEX; /* receiver was transmitting */
 
         /* Interferer audible at the receiver? */
-        float dx = rx->x - e->tx_x;
-        float dy = rx->y - e->tx_y;
-        float dist = sqrtf(dx * dx + dy * dy);
-        if (dist > config->range)
+        if (!audible_from_log(config, e, rx))
             continue;
 
         overlapped = true;
-        float their_rssi = path_rssi_dbm(config, dist);
+        float their_rssi;
+        if (config->link_mode) {
+            their_rssi = (float)link_rssi_at(config, e->tx_index, rx->index);
+        } else {
+            float dx = rx->x - e->tx_x;
+            float dy = rx->y - e->tx_y;
+            their_rssi = path_rssi_dbm(config, sqrtf(dx * dx + dy * dy));
+        }
 
         /* Capture effect: we survive an overlap only if we are at least
          * capture_db stronger AND we started first or within the interferer's
@@ -476,8 +528,8 @@ sim_tx_outcome_t sim_radio_broadcast_lbt(sim_node_t* tx_node, const outbound_pac
     metrics_record_tx_airtime(metrics, pkt->pkt_type, toa_us);
 
     if (radio->collisions_enabled) {
-        channel_log_add(&radio->channel, tx_node->addr, tx_node->x, tx_node->y, air_start, air_end,
-                        now_us);
+        channel_log_add(&radio->channel, tx_node->addr, tx_node->index, tx_node->x, tx_node->y,
+                        air_start, air_end, now_us);
     }
 
     /* Emit packet_sent for visualization */
@@ -506,34 +558,47 @@ sim_tx_outcome_t sim_radio_broadcast_lbt(sim_node_t* tx_node, const outbound_pac
             continue;
 
         if (!radio_can_receive(radio, tx_node, rx, rng)) {
-            /* Only emit drop for unicast targets and in-range nodes
-             * (for broadcast we silently skip out-of-range neighbors) */
-            float dist = radio_distance(tx_node, rx);
+            /* Only emit drop for unicast targets and audible nodes
+             * (for broadcast we silently skip nodes that cannot hear us) */
             if (!pkt->is_broadcast && pkt->dest_addr == rx->addr) {
                 emit_packet_dropped(stdout, now_us, rx->id, "radio_loss");
                 metrics_record_packet_dropped(metrics);
-            } else if (pkt->is_broadcast && dist <= radio->range) {
-                /* In-range but dropped due to loss_pct or interference */
+            } else if (pkt->is_broadcast && radio_audible(radio, tx_node, rx)) {
+                /* Audible but dropped due to loss_pct or interference */
                 metrics_record_packet_dropped(metrics);
             }
             continue;
         }
 
-        float dist = radio_distance(tx_node, rx);
-        uint64_t delay = radio_propagation_delay_us(radio, dist);
-        int8_t rssi = radio_compute_rssi(radio, dist);
+        /* Received signal quality, and how long the frame takes to arrive.
+         * Link mode reads both out of the imported table and charges no
+         * propagation delay: there is no distance to derive one from, and at
+         * LoRa scales it is microseconds against hundreds of milliseconds of
+         * time-on-air (the same reason the collision model ignores it). */
+        int8_t rssi;
+        int8_t snr;
+        uint64_t delay;
+        if (radio->link_mode) {
+            rssi = link_rssi_at(radio, tx_node->index, rx->index);
+            snr = radio->link_snr[tx_node->index][rx->index];
+            delay = 0;
+        } else {
+            float dist = radio_distance(tx_node, rx);
+            delay = radio_propagation_delay_us(radio, dist);
+            rssi = radio_compute_rssi(radio, dist);
 
 /* SNR = RSSI - noise_floor; noise_floor = -120 dBm (typical LoRa) */
 #define NOISE_FLOOR_DBM (-120)
-        int snr_raw = (int)rssi - NOISE_FLOOR_DBM;
-        /* Add ±2 dB random jitter for realism */
-        float jitter = (pcg32_float(rng) - 0.5f) * 4.0f; /* -2.0 to +2.0 */
-        int snr_jittered = snr_raw + (int)jitter;
-        if (snr_jittered < 0)
-            snr_jittered = 0;
-        if (snr_jittered > 127)
-            snr_jittered = 127;
-        int8_t snr = (int8_t)snr_jittered;
+            int snr_raw = (int)rssi - NOISE_FLOOR_DBM;
+            /* Add ±2 dB random jitter for realism */
+            float jitter = (pcg32_float(rng) - 0.5f) * 4.0f; /* -2.0 to +2.0 */
+            int snr_jittered = snr_raw + (int)jitter;
+            if (snr_jittered < 0)
+                snr_jittered = 0;
+            if (snr_jittered > 127)
+                snr_jittered = 127;
+            snr = (int8_t)snr_jittered;
+        }
 
         /* Schedule EVT_RECEIVE_PACKET at end-of-packet + propagation delay */
         sim_event_t recv_evt;

@@ -1,5 +1,6 @@
 #include "sim_anomaly.h"
 #include "sim_emitter.h"
+#include "sim_radio.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -199,7 +200,42 @@ bool anomaly_check_rreq_retx(rreq_retx_tracker_t* t, uint32_t dest_addr, uint64_
 
 /* ── Mesh partition ──────────────────────────────────────────────────── */
 
-void anomaly_check_partition(node_array_t* nodes, float radio_range, uint64_t now_us,
+int anomaly_partition_components(const node_array_t* nodes, const radio_config_t* radio,
+                                 int* comp_out) {
+    for (int i = 0; i < MAX_NODES; i++)
+        comp_out[i] = -1;
+
+    int n = nodes->count;
+    int components = 0;
+    int queue[MAX_NODES];
+
+    for (int seed = 0; seed < n; seed++) {
+        if (!nodes->nodes[seed].active || comp_out[seed] >= 0)
+            continue;
+
+        int head = 0, tail = 0;
+        comp_out[seed] = components;
+        queue[tail++] = seed;
+
+        while (head < tail) {
+            int cur = queue[head++];
+            const sim_node_t* a = &nodes->nodes[cur];
+            for (int j = 0; j < n; j++) {
+                if (!nodes->nodes[j].active || comp_out[j] >= 0)
+                    continue;
+                if (radio_nodes_connected(radio, a, &nodes->nodes[j])) {
+                    comp_out[j] = components;
+                    queue[tail++] = j;
+                }
+            }
+        }
+        components++;
+    }
+
+    return components;
+}
+
+void anomaly_check_partition(node_array_t* nodes, const radio_config_t* radio, uint64_t now_us,
                              FILE* emit_out) {
     int n = nodes->count;
     if (n == 0)
@@ -215,38 +251,16 @@ void anomaly_check_partition(node_array_t* nodes, float radio_range, uint64_t no
     if (active_count <= 1)
         return; /* 0 or 1 nodes: nothing to partition */
 
-    /* BFS from first active node */
-    bool visited[MAX_NODES] = {false};
-    int queue[MAX_NODES];
-    int head = 0, tail = 0;
+    /* Anything outside the first active node's component is unreachable from
+     * it, which is exactly what this detector has always reported. */
+    int comp[MAX_NODES];
+    anomaly_partition_components(nodes, radio, comp);
+    int home = comp[active[0]];
 
-    visited[active[0]] = true;
-    queue[tail++] = active[0];
-
-    while (head < tail) {
-        int cur = queue[head++];
-        sim_node_t* a = &nodes->nodes[cur];
-
-        for (int j = 0; j < active_count; j++) {
-            int nb = active[j];
-            if (visited[nb])
-                continue;
-            sim_node_t* b = &nodes->nodes[nb];
-            float dx = a->x - b->x;
-            float dy = a->y - b->y;
-            float dist2 = dx * dx + dy * dy;
-            if (dist2 <= radio_range * radio_range) {
-                visited[nb] = true;
-                queue[tail++] = nb;
-            }
-        }
-    }
-
-    /* Find unreachable nodes */
     char unreachable_list[256] = "";
     int unreachable = 0;
     for (int j = 0; j < active_count; j++) {
-        if (!visited[active[j]]) {
+        if (comp[active[j]] != home) {
             unreachable++;
             if (strlen(unreachable_list) + 4 < sizeof(unreachable_list)) {
                 if (unreachable > 1)

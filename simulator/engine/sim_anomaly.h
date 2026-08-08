@@ -100,12 +100,30 @@ bool anomaly_check_forward_loop(loop_tracker_t* t, uint32_t packet_id, uint8_t h
 bool anomaly_check_rreq_retx(rreq_retx_tracker_t* t, uint32_t dest_addr, uint64_t now_us,
                              FILE* emit_out, const char* node_id);
 
-/* Mesh partition: call after any topology change.
- * Performs BFS and emits anomaly if graph is disconnected.
- * nodes / node_count: the active node list.
- * radio_range: used to determine adjacency (Euclidean distance).
+/* Connected components of the active mesh.
+ *
+ * Labels every node in `nodes` with the index of the connected component it
+ * belongs to, writing into comp_out (which must hold MAX_NODES entries).
+ * Inactive nodes and unused slots get -1. Adjacency is radio_nodes_connected:
+ * the range disk in position mode, the imported link graph in link mode.
+ * Components are numbered in ascending node order, so component 0 always
+ * contains the first active node. Returns the number of components (0 when no
+ * node is active).
+ *
+ * Two callers share this one traversal: the partition detector below, and the
+ * digital twin's node-criticality sweep (simulator/gosim), so "what counts as
+ * still connected" has a single definition.
  */
-void anomaly_check_partition(node_array_t* nodes, float radio_range, uint64_t now_us,
+int anomaly_partition_components(const node_array_t* nodes, const radio_config_t* radio,
+                                 int* comp_out);
+
+/* Mesh partition: call after any topology change.
+ * Emits an anomaly when the active graph is disconnected, listing the nodes
+ * that cannot be reached from the first active one.
+ * nodes: the node array, active flags and all.
+ * radio: supplies the adjacency test (see anomaly_partition_components).
+ */
+void anomaly_check_partition(node_array_t* nodes, const radio_config_t* radio, uint64_t now_us,
                              FILE* emit_out);
 
 #endif /* SIM_ANOMALY_H */

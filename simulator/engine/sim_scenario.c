@@ -124,6 +124,61 @@ static bool load_radio(cJSON* radio_json, radio_config_t* radio) {
 }
 
 /*
+ * Explicit link graph (mesh digital twin, ../../docs/digital-twin.md).
+ *
+ * A scenario that carries a top-level "links" array is reconstructed from
+ * observed reachability instead of geometry: each entry declares that frames
+ * from node "from" are heard at node "to" at "rssi" dBm and "snr" dB, and the
+ * presence of the array is what switches the radio into link mode. Node
+ * coordinates then carry no physical meaning, so a twin scenario is free to
+ * lay them out for display alone.
+ *
+ * Strict by construction: an unknown node id, a self-link, a zero RSSI (the
+ * table's absent-link marker) or an empty array fails the load. A twin built
+ * from a partly-misspelled export would answer capacity questions about a mesh
+ * that does not exist, which is worse than refusing to load.
+ */
+static bool load_links(cJSON* links_json, node_array_t* nodes, radio_config_t* radio) {
+    if (!links_json)
+        return true; /* no link graph: positions decide reachability */
+
+    if (!cJSON_IsArray(links_json) || cJSON_GetArraySize(links_json) == 0) {
+        fprintf(stderr, "Error: \"links\" must be a non-empty array\n");
+        return false;
+    }
+
+    cJSON* link_json = NULL;
+    cJSON_ArrayForEach(link_json, links_json) {
+        cJSON* from_json = cJSON_GetObjectItem(link_json, "from");
+        cJSON* to_json = cJSON_GetObjectItem(link_json, "to");
+        cJSON* rssi_json = cJSON_GetObjectItem(link_json, "rssi");
+        cJSON* snr_json = cJSON_GetObjectItem(link_json, "snr");
+
+        if (!cJSON_IsString(from_json) || !cJSON_IsString(to_json) || !cJSON_IsNumber(rssi_json)) {
+            fprintf(stderr, "Error: link needs string \"from\"/\"to\" and numeric \"rssi\"\n");
+            return false;
+        }
+
+        sim_node_t* from = node_array_find_by_id(nodes, from_json->valuestring);
+        sim_node_t* to = node_array_find_by_id(nodes, to_json->valuestring);
+        if (!from || !to) {
+            fprintf(stderr, "Error: link references unknown node '%s' or '%s'\n",
+                    from_json->valuestring, to_json->valuestring);
+            return false;
+        }
+
+        int8_t snr = cJSON_IsNumber(snr_json) ? (int8_t)snr_json->valuedouble : 0;
+        if (!radio_link_set(radio, from->index, to->index, (int8_t)rssi_json->valuedouble, snr)) {
+            fprintf(stderr, "Error: rejected link %s -> %s (self-link or zero rssi)\n",
+                    from_json->valuestring, to_json->valuestring);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/*
  * Beacon interval policy (sim_node.h sim_beacon_policy_t), one shared
  * instance for the whole scenario, consumed by beacon_interval_decide()
  * (main/beacon_policy_calc.c) every node_tick. Defaults mirror firmware's
@@ -750,6 +805,12 @@ bool scenario_load_file(const char* path, scenario_t* scenario) {
         if (ok) {
             cJSON* radio_json = cJSON_GetObjectItem(root, "radio");
             ok = load_radio(radio_json, scenario->radio);
+        }
+        if (ok) {
+            /* After load_radio: radio_config_init clears the link table, so
+             * the links have to be written on top of an initialized config. */
+            cJSON* links_json = cJSON_GetObjectItem(root, "links");
+            ok = load_links(links_json, scenario->nodes, scenario->radio);
         }
         if (ok) {
             cJSON* events_json = cJSON_GetObjectItem(root, "events");
