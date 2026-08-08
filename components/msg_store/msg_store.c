@@ -329,6 +329,54 @@ bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t stat
     return found;
 }
 
+int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int max_out) {
+    if (!out_uids || max_out <= 0) {
+        return 0;
+    }
+    int n = 0;
+    MSG_LOCK();
+    if (s_msgs) {
+        /* The ring is circular: index 0 is the OLDEST row and lives at
+         * s_head - s_count, not at s_msgs[0]. Same walk msg_store_get_copy
+         * does. Oldest first, because a parked conversation should arrive in
+         * the order it was written. */
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        for (int i = 0; i < s_count && n < max_out; i++) {
+            const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
+            if (m->direction != MSG_DIR_OUTGOING || m->channel_index >= 0) {
+                continue;
+            }
+            if (m->status != MSG_STATUS_QUEUED || m->peer_addr != peer_addr || m->uid == 0) {
+                continue;
+            }
+            out_uids[n++] = m->uid;
+        }
+    }
+    MSG_UNLOCK();
+    return n;
+}
+
+bool msg_store_get_copy_by_uid(uint32_t uid, stored_msg_t* out) {
+    if (!out || uid == 0) {
+        return false;
+    }
+    bool ok = false;
+    MSG_LOCK();
+    if (s_msgs) {
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        for (int i = 0; i < s_count; i++) {
+            const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
+            if (m->uid == uid) {
+                *out = *m;
+                ok = true;
+                break;
+            }
+        }
+    }
+    MSG_UNLOCK();
+    return ok;
+}
+
 int msg_store_count(void) {
     MSG_LOCK();
     int c = s_count;

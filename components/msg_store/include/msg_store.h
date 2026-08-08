@@ -161,6 +161,26 @@ void msg_store_add_dm_uid(uint32_t peer_addr, msg_direction_t dir, const char* t
 bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t status);
 
 /**
+ * Collect the uids of messages parked for a peer, oldest first.
+ *
+ * Selects outgoing DMs (channel_index < 0) to peer_addr whose status is
+ * MSG_STATUS_QUEUED. Returns the number of uids written, never more than
+ * max_out. Returns 0 for a NULL out_uids or a non-positive max_out.
+ *
+ * The selection rule lives here, not in the mesh task, so it is host-testable
+ * and so the flush path stays a loop over uids.
+ */
+int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int max_out);
+
+/**
+ * Copy the row carrying this uid. Returns false for uid 0 or an unknown uid.
+ * The flush path needs a row's text and recipient from its uid; without this
+ * every caller would open-code a ring walk, and the ring is circular, so an
+ * open-coded walk is a bug waiting to happen.
+ */
+bool msg_store_get_copy_by_uid(uint32_t uid, stored_msg_t* out);
+
+/**
  * Update delivery status for a message by packet_id.
  * Returns true if found and updated.
  */
