@@ -67,7 +67,9 @@ describe('describeTransports copy', () => {
     const usb = unavailable(r, 'serial');
     expect(usb.caption).toBe('Not in this browser');
     expect(usb.body).toContain('Web Serial');
-    expect(usb.body).toContain('Chrome or Edge 120 or newer');
+    // No version floor: Web Serial has shipped in Chrome since 89, so naming a
+    // recent release would understate the browsers that work.
+    expect(usb.body).toContain('Chrome or Edge works, as does the desktop app.');
     expect(usb.cta).toEqual({ label: 'Get the desktop app', href: DESKTOP_APP_URL });
   });
 

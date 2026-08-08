@@ -74,7 +74,7 @@ function wifiBody(capabilities: ConnectionCapabilities, platform: Platform): str
 
 function serialBody(platform: Platform): string {
   if (platform === 'desktop') {
-    return 'Web Serial is how a browser talks to a USB device, and this browser does not implement it. Chrome or Edge 120 or newer works, as does the desktop app.';
+    return 'Web Serial is how a browser talks to a USB device, and this browser does not implement it. Chrome or Edge works, as does the desktop app.';
   }
   return 'Browsers on phones and tablets cannot talk to USB devices. Connecting over USB needs a computer.';
 }

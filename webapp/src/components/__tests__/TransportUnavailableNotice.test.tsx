@@ -14,11 +14,16 @@ const BASE: TransportUnavailable = {
 afterEach(cleanup);
 
 describe('TransportUnavailableNotice', () => {
-  it('renders the heading, body, and alternatives', () => {
-    render(<TransportUnavailableNotice info={BASE} />);
-    expect(screen.getByText('WiFi needs a direct connection to your node')).toBeInTheDocument();
-    expect(screen.getByText('Browsers block this.')).toBeInTheDocument();
-    expect(screen.getByText('USB and Bluetooth work here.')).toBeInTheDocument();
+  it('renders the heading, body, and alternatives in that order', () => {
+    const { container } = render(<TransportUnavailableNotice info={BASE} />);
+    // Checked by element and position, not just presence: the body and the
+    // alternatives sentence are both paragraphs, and swapping them would
+    // still satisfy a bare text lookup.
+    expect(screen.getByRole('heading')).toHaveTextContent('WiFi needs a direct connection to your node');
+    const paragraphs = container.querySelectorAll('p');
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs[0]).toHaveTextContent('Browsers block this.');
+    expect(paragraphs[1]).toHaveTextContent('USB and Bluetooth work here.');
   });
 
   it('renders no link when there is no cta', () => {
