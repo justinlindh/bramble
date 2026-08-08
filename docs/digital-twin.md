@@ -183,7 +183,7 @@ With every node present the mesh is one connected piece.
 
 Removing each node in turn:
 
-  address    name                links  pieces  cut off from the rest
+  address    name                links  pieces  newly cut off
   3D4E5F60   tower                   3       3  0A1B2C3D, 2C3D4E5F
   1B2C3D4E   ridge                   2       2  4E5F6071
   0A1B2C3D   basecamp                1       1  nothing
@@ -217,8 +217,13 @@ than an observation.
 - **Criticality is connectivity, not capacity.** A node whose removal strands
   nothing may still carry most of the traffic. Read the criticality table with
   the link counts beside it.
-- **A partitioned import is reported before anything is removed**, so every
-  removal row is read against a mesh that was already in pieces.
+- **A partitioned import is reported before anything is removed**, and every
+  removal row is measured against that baseline: a node counts as cut off only
+  when it loses reach it had while the removed node was present, never for
+  sitting in a piece it was already in.
+- **A one-way link is not a path.** Where both ends exported and only one of
+  them reports hearing the other, the twin carries the link in the one
+  direction the exports evidence, and the two ends count as unconnected.
 
 ## Machine-readable output
 

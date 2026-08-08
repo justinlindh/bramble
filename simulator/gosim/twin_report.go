@@ -212,14 +212,16 @@ func writeTwinCriticality(b *strings.Builder, c *twinConnectivity) {
 		for i, grp := range c.BaselineComponents {
 			fmt.Fprintf(b, "  piece %d (%d nodes): %s\n", i+1, len(grp), strings.Join(grp, ", "))
 		}
-		fmt.Fprintf(b, "Read every row below against that starting point.\n\n")
+		fmt.Fprintf(b, "Every row below is measured against that starting point: a node is\n")
+		fmt.Fprintf(b, "counted as cut off only when it loses reach it had while the removed\n")
+		fmt.Fprintf(b, "node was present, never for sitting in a piece it was already in.\n\n")
 	} else {
 		fmt.Fprintf(b, "With every node present the mesh is one connected piece.\n\n")
 	}
 
 	fmt.Fprintf(b, "Removing each node in turn:\n\n")
 	fmt.Fprintf(b, "  %-10s %-18s %6s %7s  %s\n", "address", "name", "links", "pieces",
-		"cut off from the rest")
+		"newly cut off")
 	rows := make([]twinNodeCriticality, len(c.Nodes))
 	copy(rows, c.Nodes)
 	// Worst first: the nodes whose loss strands the most, then by degree, so

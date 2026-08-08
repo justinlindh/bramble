@@ -46,8 +46,12 @@ type twinNodeCriticality struct {
 	// Components is how many connected pieces the mesh falls into once this
 	// node is gone (its own removal is not counted as a piece).
 	Components int `json:"components"`
-	// Isolated lists every remaining node cut off from the largest surviving
-	// piece. Empty means removing this node costs reach but not connectivity.
+	// Isolated lists every remaining node that this removal newly strands: a
+	// node that could reach the rest of its own baseline piece with this node
+	// present and cannot without it. Measured against the baseline, so a mesh
+	// imported in several pieces does not report every node as a cut node
+	// merely for sitting outside the biggest piece. Empty means removing this
+	// node costs reach but not connectivity.
 	Isolated []string `json:"isolated,omitempty"`
 }
 
@@ -139,7 +143,14 @@ func twinAnalyzeConnectivity(scenarioPath string, g *twinGraph) (*twinConnectivi
 	}
 	defer t.free()
 
-	out := &twinConnectivity{BaselineComponents: t.groups()}
+	baseline := t.groups()
+	out := &twinConnectivity{BaselineComponents: baseline}
+	baseOf := map[string]int{}
+	for gi, grp := range baseline {
+		for _, id := range grp {
+			baseOf[id] = gi
+		}
+	}
 
 	for i, id := range t.ids {
 		t.setActive(i, false)
@@ -150,19 +161,46 @@ func twinAnalyzeConnectivity(scenarioPath string, g *twinGraph) (*twinConnectivi
 			Address:    id,
 			Degree:     g.Degree(id),
 			Components: len(groups),
+			Isolated:   twinNewlyStranded(baseOf, groups),
 		}
 		if n := g.NodeByAddress(id); n != nil {
 			row.Name = n.Name
 		}
-		// Everything outside the largest surviving piece is cut off. With one
-		// piece (or none, for a two-node mesh reduced to one) nothing is.
-		for gi := 1; gi < len(groups); gi++ {
-			row.Isolated = append(row.Isolated, groups[gi]...)
-		}
-		sort.Strings(row.Isolated)
 		out.Nodes = append(out.Nodes, row)
 	}
 	return out, nil
+}
+
+// twinNewlyStranded reports which nodes a removal actually cut off, given the
+// baseline component every node started in and the components that remain.
+//
+// Deactivating one node can only split a component, never merge two, so every
+// surviving component sits entirely inside one baseline component. A baseline
+// piece that survives as a single component lost nothing; one that survives as
+// several lost everything outside its largest surviving piece. Anything that
+// was already in a different baseline piece is not stranded by this removal: it
+// was never reachable to begin with, and counting it is what turns an
+// already-partitioned import into a table where every node reads as a single
+// point of failure.
+//
+// groups arrives largest-piece-first (twinTopology.groups), so the first
+// surviving piece seen for a baseline component is that component's largest.
+func twinNewlyStranded(baseOf map[string]int, groups [][]string) []string {
+	kept := map[int]bool{}
+	var out []string
+	for _, grp := range groups {
+		if len(grp) == 0 {
+			continue
+		}
+		base := baseOf[grp[0]]
+		if !kept[base] {
+			kept[base] = true
+			continue
+		}
+		out = append(out, grp...)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ── Capacity probe ───────────────────────────────────────────────────────

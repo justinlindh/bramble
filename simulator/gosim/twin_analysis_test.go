@@ -130,15 +130,71 @@ func TestTwinCriticalityReportsAnAlreadyPartitionedImport(t *testing.T) {
 		t.Fatalf("baseline components %v, want two pieces", conn.BaselineComponents)
 	}
 	// Removing one member of a pair leaves the other alone, which is a piece of
-	// its own but not a NEW break relative to a mesh that was already split.
-	row := criticalityRow(t, conn, "0A1B2C3D")
-	if row.Components != 2 {
-		t.Fatalf("removing a pair member leaves %d pieces, want 2", row.Components)
+	// its own but not a NEW break relative to a mesh that was already split:
+	// the survivor could not reach the other pair before the removal either.
+	for _, addr := range []string{"0A1B2C3D", "1B2C3D4E", "2C3D4E5F", "3D4E5F60"} {
+		row := criticalityRow(t, conn, addr)
+		if row.Components != 2 {
+			t.Fatalf("removing %s leaves %d pieces, want 2", addr, row.Components)
+		}
+		if len(row.Isolated) != 0 {
+			t.Fatalf("removing %s is reported as stranding %v, yet it strands nothing that "+
+				"could reach anything before", addr, row.Isolated)
+		}
 	}
 
 	report := twinReport(g, conn, nil, []string{"a", "b", "c", "d"})
 	if !strings.Contains(report, "ALREADY in 2 disconnected pieces") {
 		t.Fatalf("report does not lead with the existing partition:\n%s", report)
+	}
+	if !strings.Contains(report, "No single node's loss partitions this mesh.") {
+		t.Fatalf("report calls an already-split mesh's nodes single points of failure:\n%s",
+			report)
+	}
+}
+
+func TestTwinCriticalityFindsACutNodeInsideAPartitionedImport(t *testing.T) {
+	// Two pieces: a three-node line (0A - 1B - 2C) and an unrelated pair
+	// (3D - 4E). Only 1B2C3D4E is a cut node, and it strands exactly one node,
+	// not everything outside the surviving piece it happens to be measured
+	// against.
+	pairs := [][2]string{
+		{"0A1B2C3D", "1B2C3D4E"}, {"1B2C3D4E", "2C3D4E5F"}, {"3D4E5F60", "4E5F6071"},
+	}
+	byNode := map[string][]map[string]any{}
+	for _, p := range pairs {
+		byNode[p[0]] = append(byNode[p[0]], twinNeighborEntry(p[1], -95, 7))
+		byNode[p[1]] = append(byNode[p[1]], twinNeighborEntry(p[0], -95, 7))
+	}
+	var exports []*twinExport
+	for _, addr := range []string{"0A1B2C3D", "1B2C3D4E", "2C3D4E5F", "3D4E5F60", "4E5F6071"} {
+		exports = append(exports, twinExportWith(t, addr, byNode[addr]))
+	}
+	g, err := buildTwinGraph(exports)
+	if err != nil {
+		t.Fatalf("buildTwinGraph: %v", err)
+	}
+	conn, err := twinAnalyzeConnectivity(writeTwinScenarioFile(t, g, 120000, nil), g)
+	if err != nil {
+		t.Fatalf("twinAnalyzeConnectivity: %v", err)
+	}
+	if len(conn.BaselineComponents) != 2 {
+		t.Fatalf("baseline components %v, want two", conn.BaselineComponents)
+	}
+
+	middle := criticalityRow(t, conn, "1B2C3D4E")
+	if !equalStrings(middle.Isolated, []string{"2C3D4E5F"}) {
+		t.Fatalf("the cut node strands %v, want just the node behind it", middle.Isolated)
+	}
+	for _, addr := range []string{"0A1B2C3D", "2C3D4E5F", "3D4E5F60", "4E5F6071"} {
+		if row := criticalityRow(t, conn, addr); len(row.Isolated) != 0 {
+			t.Fatalf("leaf %s is reported as stranding %v", addr, row.Isolated)
+		}
+	}
+
+	report := twinReport(g, conn, nil, []string{"a"})
+	if !strings.Contains(report, "1 node(s) are single points of failure") {
+		t.Fatalf("report does not count exactly one cut node:\n%s", report)
 	}
 }
 
