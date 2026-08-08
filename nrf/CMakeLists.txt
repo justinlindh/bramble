@@ -403,6 +403,7 @@ add_executable(bramble-nrf
   ${BRAMBLE_COMPONENTS}/ble/ble_pairing_store.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_token.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
   src/nrf_provision.c
   shim/console_uart.c
   shim/esp_timer_freertos.c
