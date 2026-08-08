@@ -51,11 +51,33 @@ only the token layer is affected.
   clear); rejected on boards with a passkey-display callback. Any change
   wipes stored BLE bonds, so every client must re-pair.
 
+On a passkey-display board, the code appears on the device itself for as
+long as the pairing attempt is live, and clears when it completes, fails,
+or the client disconnects:
+
+<p align="center"><img src="images/ble-pairing/tdeck-pairing-modal.png" alt="T-Deck Plus showing a 6-digit BLE pairing code" width="266"></p>
+
+That capture is the live framebuffer of a T-Deck Plus mid-pairing, pulled
+over serial with the `bramble.screenshot` RPC, cropped to the dialog.
+
 The web app exposes this under **Config -> Device Management ->
 Bluetooth Pairing**. On a passkey-display board the card is
 informational, since there is nothing to set; on a displayless board it
 shows whether a static passkey is set and offers controls to set or
-clear one.
+clear one, and reports that changing it unpairs existing clients.
+
+<table>
+<tr>
+<td align="center" width="33%"><img src="images/ble-pairing/webapp-card-display-board.png" alt="Bluetooth Pairing card on a board that shows its own code" width="320"></td>
+<td align="center" width="33%"><img src="images/ble-pairing/webapp-card-no-passkey.png" alt="Bluetooth Pairing card with no passkey set" width="320"></td>
+<td align="center" width="33%"><img src="images/ble-pairing/webapp-card-passkey-set.png" alt="Bluetooth Pairing card with a passkey set" width="320"></td>
+</tr>
+<tr>
+<td align="center">Board that shows its own code: nothing to configure.</td>
+<td align="center">Board with no display and no passkey set.</td>
+<td align="center">Passkey set, with the re-pair warning.</td>
+</tr>
+</table>
 
 ## Pairing: Getting the Token
 
