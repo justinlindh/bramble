@@ -118,7 +118,9 @@ typedef struct {
      * gosim's broadcast receipts do not travel past their first hop under
      * reactive routing (see bridge_send_broadcast_delivery_receipt's "known
      * gap"). Keeping the table would only feed a column nothing can fill. */
+    rollcall_answer_budget_t rollcall_answer_budget;
     uint32_t rollcall_pending_dropped; /* answers refused for a full queue */
+    uint32_t rollcall_answer_limited;  /* answers refused for a spent budget */
     struct {
         bool used;
         uint32_t rollcall_id;
