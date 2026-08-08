@@ -113,8 +113,15 @@ static void show_modal(uint32_t code) {
     /* code is 0..999999 (see ble_server.h); grouped as "NNN NNN" for
      * readability, same digit-grouping idea as scr_sas_verify.c's SAS
      * code. Digits and spaces are plain ASCII, so the glyph check has
-     * nothing to flag regardless of font size. */
-    char grouped[8];
+     * nothing to flag regardless of font size.
+     *
+     * The buffer is sized for GCC's -Wformat-truncation worst case, not
+     * the real one: it does not track that code/1000u and code%1000u are
+     * both well under 1000, so it assumes each %03u could print a full
+     * unsigned int (10 digits). Worst case is 10 + 1 (space) + 10 + 1
+     * (nul) = 22; 24 leaves a little slack rather than sizing to the
+     * exact byte. */
+    char grouped[24];
     snprintf(grouped, sizeof(grouped), "%03u %03u", (unsigned)(code / 1000u),
               (unsigned)(code % 1000u));
     lv_obj_t* code_lbl = lv_label_create(panel);
