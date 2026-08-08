@@ -52,11 +52,30 @@ static int s_bubble_btn_count = 0;
  * on a failed DM, or Cancel alone on a parked one, never more than two,
  * because can_retry/can_park and is_parked are mutually exclusive on
  * msg_status_t (FAILED vs QUEUED). That invariant lives in the predicates,
- * not here, so assert against the array's own size rather than a bare
- * literal: a future status that lets more buttons coexist trips this
- * immediately instead of silently overwriting past the end of the array. */
+ * not here.
+ *
+ * The bound below is an explicit runtime check, not assert(): ESP-IDF's
+ * ASSERTIONS_DISABLE compiles assert() out entirely (see the s_dm_table
+ * allocation comment in main/mesh_task.c for the same lesson), and an
+ * overrun here would be an out-of-bounds write into whatever static follows
+ * s_bubble_btns, memory corruption rather than a clean crash. In EVERY
+ * build configuration, a bubble that somehow earns a third button has that
+ * button deleted outright rather than spliced in: a button reachable by
+ * touch but not the trackball is the exact defect this screen's other
+ * buttons are careful to avoid (see the Retry/Queue/Cancel comments below),
+ * so a button this code cannot safely track is not left on screen either.
+ * assert() is kept alongside for the debug case, where it turns the same
+ * condition into an immediate crash during development rather than waiting
+ * on the log line; every shipped sdkconfig has ASSERTIONS_ENABLE=y today,
+ * so that is the path actually exercised right now. */
 static void bubble_btn_add(lv_obj_t* btn) {
-    assert(s_bubble_btn_count < (int)(sizeof(s_bubble_btns) / sizeof(s_bubble_btns[0])));
+    if (s_bubble_btn_count >= (int)(sizeof(s_bubble_btns) / sizeof(s_bubble_btns[0]))) {
+        ESP_LOGE(TAG, "bubble_btn_add: s_bubble_btns is full (%d), dropping a bubble button",
+                 s_bubble_btn_count);
+        assert(false);
+        lv_obj_delete(btn);
+        return;
+    }
     s_bubble_btns[s_bubble_btn_count++] = btn;
 }
 
