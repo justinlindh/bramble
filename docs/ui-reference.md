@@ -305,13 +305,14 @@ Each bubble is a `row` container (304px wide, transparent) containing a `bubble`
               └────────────────────────┘   SENT bg (#1A4B91), radius=8
 ```
 
-An outgoing bubble carries a delivery badge in its trailing meta: one check for sent, two for delivered, a cross in DANGER for failed.
+An outgoing bubble carries a delivery badge in its trailing meta: one check for sent, two for delivered, a cross in DANGER for failed, an envelope for a DM parked to send when the peer is back.
 
-**Expanded bubble.** Tapping an outgoing bubble expands it; tapping again collapses it. One is expanded at a time, tracked by `s_selected_uid`: the row uid rather than the packet id, because a DM that failed before it ever reached the air carries `packet_id` 0 and would otherwise be unselectable. A bubble expands if it has a packet id, or if it is a retryable failed DM. Expanded, it adds:
+**Expanded bubble.** Tapping an outgoing bubble expands it; tapping again collapses it. One is expanded at a time, tracked by `s_selected_uid`: the row uid rather than the packet id, because a DM that failed before it ever reached the air carries `packet_id` 0 and would otherwise be unselectable. A bubble expands if it has a packet id, if it is a retryable failed DM, or if it is a parked DM. Expanded, it adds:
 
 - the relay path, but only when it says something the receipt line does not, that is a single-recipient message that actually traversed a relay
-- a receipt summary from the delivery event ring, falling back to the message status when the ring has rotated past it
-- **Retry**, on a failed DM only. `mesh_resend_message()` re-sends the stored text carrying the row's uid, so the send pipeline reconciles that same row back to SENT rather than appending a second bubble with the same text. A broadcast or channel send is not ACK-tracked and so never reaches a failed status to retry from
+- a receipt summary from the delivery event ring, falling back to the message status when the ring has rotated past it; a parked DM shows "Waiting until `{peer}` is back" instead, using the same peer-name lookup as the header title
+- **Retry** and **Queue**, side by side, on a failed DM only. `mesh_resend_message()` re-sends the stored text carrying the row's uid, so the send pipeline reconciles that same row back to SENT rather than appending a second bubble with the same text. `mesh_park_message()` sets the row to `MSG_STATUS_QUEUED`; a parked row is not retransmitted here or anywhere else, it flushes only when a beacon confirms the peer is reachable again. A broadcast or channel send is not ACK-tracked and so never reaches a failed status to offer either from
+- **Cancel**, on a parked DM only, in place of Retry and Queue. `mesh_cancel_parked_message()` moves the row back to `MSG_STATUS_FAILED`, the one deliberate way out of the parked state
 
 After loading all messages, list auto-scrolls to bottom (`lv_obj_scroll_to_y(..., LV_COORD_MAX)`).
 
