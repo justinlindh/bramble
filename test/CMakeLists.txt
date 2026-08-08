@@ -2646,9 +2646,11 @@ add_executable(test_parked_retry
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/parked_retry.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/msg_store.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/reliability.c
 )
 target_include_directories(test_parked_retry PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/include
 )

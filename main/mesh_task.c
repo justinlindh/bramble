@@ -2598,18 +2598,28 @@ bool mesh_cancel_parked_message(uint32_t uid) {
     return msg_store_unpark(uid);
 }
 
-/* A retry must never put one written message on the air twice, and what
- * guarantees that is the send queue holding at most one entry per uid
- * (queue_message, queue_session_message). It is a property of the queue, so it
- * holds for every caller, however often and from wherever they ask.
+/* A retry must never put one written message on the air twice, and it takes TWO
+ * mechanisms to guarantee that, because a message can be un-sent in two
+ * different ways:
+ *
+ *   - Waiting for a route or a session, it sits in the send queue, and
+ *     queue_message and queue_session_message hold at most one entry per uid.
+ *   - Already transmitted, it holds no queue entry at all, only a pending ACK,
+ *     so the queue cannot see it. mesh_flush_parked_for asks the pending-ack
+ *     table instead, through pending_ack_is_active, and skips the row.
+ *
+ * Neither covers the other's case, and the second is the one that matters now
+ * that a parked row stays QUEUED through its own transmit. Both are properties
+ * of state the sender already keeps, so they hold for every caller, however
+ * often and from wherever they ask.
  *
  * It used to be a timing coincidence instead: the retry cooldown happened to
  * outlast both queue TTLs, so a second attempt could not land while the first
  * was still queued. That was true but fragile, since it silently depended on
  * every path into a flush respecting the cooldown, and two do not (a fresh
  * park re-arms a peer immediately, and the rejoin edge fires unconditionally).
- * With the queue keyed on uid the cooldown is free to be what it reads as: an
- * airtime knob, tunable on its own merits without a correctness argument
+ * With both mechanisms above in place the cooldown is free to be what it reads
+ * as: an airtime knob, tunable on its own merits without a correctness argument
  * hanging off the number. */
 
 int mesh_flush_parked_for(uint32_t peer_addr) {
@@ -2645,6 +2655,29 @@ int mesh_flush_parked_for(uint32_t peer_addr) {
          * resolved. Dropping it from the count would disarm the peer and
          * strand the message, which is the defect class this whole file
          * exists to close. */
+        /* Read without a lock, deliberately, and s_pending_acks has no lock to
+         * take: it never had one. The other mesh-task users (the retry tick,
+         * handle_ack) are sequential with this loop, so the only genuine
+         * concurrency is pending_ack_add on a send originated by the RPC or UI
+         * task. This read touches two aligned scalars per entry, never a
+         * pointer and never a struct copy, over a fixed static array that is
+         * never resized or moved, so it cannot fault, cannot tear into
+         * something meaningless, and cannot corrupt the table for anyone else.
+         *
+         * Both ways it can be wrong are bounded and safe. A false negative
+         * re-sends a row whose frame is outstanding, which is one extra frame
+         * and exactly the pre-guard behaviour the cooldown already bounded. A
+         * false positive skips a row that is free, which costs one cooldown of
+         * delay and nothing more, because the row is still counted below and
+         * the peer stays armed. pending_ack_add writes active LAST, after
+         * packet_id, so the likelier direction is the harmless one.
+         *
+         * NOT fixed by adding a lock here. A lock taken at one of five access
+         * sites is the "protects only some of its writers" trap this branch has
+         * already produced twice, and locking the table properly means changing
+         * the send path, the retry tick and the ACK path together, which is
+         * pre-existing scope and its own nesting analysis. Documented here so
+         * the next person sees a decision rather than an oversight. */
         if (pending_ack_is_active(&s_pending_acks, msg.packet_id)) {
             ESP_LOGI(TAG, "Parked uid=%" PRIu32 " still awaiting ACK on pkt=%08" PRIX32 ", skipped",
                      msg.uid, msg.packet_id);

@@ -19,16 +19,20 @@
  * edge, and the two triggers never stack up on the same peer.
  *
  * Purely an airtime knob: nothing about correctness rests on the number. A
- * retry cannot duplicate a message however soon it lands, because the send
- * queue holds at most one entry per uid (see mesh_flush_parked_for).
+ * retry cannot duplicate a message however soon it lands, and it takes two
+ * mechanisms to say that, because a message can be un-sent two ways: the send
+ * queue holds at most one entry per uid while it waits for a route or a
+ * session, and pending_ack_is_active covers it once it has been transmitted,
+ * when it holds no queue entry at all. See mesh_flush_parked_for.
  */
 #define PARKED_RETRY_COOLDOWN_MS 300000u
 
 /* How often the node picks one peer with parked messages and tries it,
  * independent of any beacon. An airtime knob on the same terms as the cooldown
- * above, and for the same reason: a sweep re-queues a DM exactly as a
- * beacon-driven retry does, and the send queue refuses a uid it already holds
- * however the second attempt got there.
+ * above, and for the same reason: a sweep re-sends a DM exactly as a
+ * beacon-driven retry does, so the same two mechanisms answer it, whichever
+ * trigger the second attempt came from. The queue refuses a uid it already
+ * holds, and a row whose frame is still awaiting an ACK is skipped.
  *
  * Set equal to the cooldown because the two pace the same thing, not because
  * anything requires it. Nothing reads the difference: the sweep's hold is

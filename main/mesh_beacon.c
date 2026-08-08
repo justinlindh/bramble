@@ -452,9 +452,13 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
          * 2 minutes at N=64, 88 seconds at N=100. It only bites past about 50,
          * a regime where this project's own measured delivery is already at or
          * below 10 percent. RAISING MAX_NEIGHBORS moves that threshold with
-         * it. What it costs is repeated attempts, never a repeated delivery:
-         * an attempt landing while the last one is still queued is refused by
-         * the send queue, which holds at most one entry per uid. */
+         * it. What it costs is repeated attempts, never one message put on the
+         * air twice: an attempt landing while the last one is still waiting for
+         * a route or a session is refused by the send queue, which holds at
+         * most one entry per uid, and one landing while the last one has been
+         * transmitted and is still awaiting an ACK is skipped by
+         * mesh_flush_parked_for, which asks the pending-ack table. A
+         * transmitted frame holds no queue entry, so it takes both. */
         if (mesh_parked_retry_decide_flush_locked(beacon.src_addr, is_new_peer, t)) {
             int found = mesh_flush_parked_for(beacon.src_addr);
             mesh_parked_retry_flushed_locked(beacon.src_addr, found, t);

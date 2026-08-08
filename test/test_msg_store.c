@@ -353,6 +353,27 @@ void test_update_by_uid_refuses_queued_to_sent_but_still_stamps_the_packet_id(vo
                                      "ACK for this attempt can never resolve the row");
 }
 
+void test_update_status_by_packet_id_refuses_every_non_delivered_status(void) {
+    /* The packet_id path's own rule, exercised where it actually differs from
+     * the FAILED-only rule it replaced. FAILED alone does not distinguish them:
+     * the old rule blocked that too, so reverting this site and testing only
+     * ACK exhaustion leaves the suite green. SENT is the discriminator, and it
+     * matters because the rule this function documents is "a QUEUED row accepts
+     * DELIVERED and nothing else" for BOTH entry points, not a narrower rule on
+     * one of them that happens to be enough for today's callers. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 42, MSG_STATUS_SENT)); /* stamps packet_id 42 */
+
+    TEST_ASSERT_TRUE(msg_store_update_status(42, MSG_STATUS_SENT));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_QUEUED, out.status,
+                              "the packet_id path let a parked row out of QUEUED on a status that "
+                              "is not DELIVERED, so the row is one ACK timeout from FAILED");
+}
+
 void test_update_status_by_packet_id_cannot_fail_a_parked_row(void) {
     /* The ACK retry tick's exact call: it reports FAILED against a packet_id,
      * not a uid. This is the path that stranded the message, and it has to be
@@ -477,6 +498,7 @@ int main(void) {
     RUN_TEST(test_next_parked_peer_survives_ring_wrap);
     RUN_TEST(test_update_by_uid_refuses_queued_to_failed);
     RUN_TEST(test_update_by_uid_refuses_queued_to_sent_but_still_stamps_the_packet_id);
+    RUN_TEST(test_update_status_by_packet_id_refuses_every_non_delivered_status);
     RUN_TEST(test_update_status_by_packet_id_cannot_fail_a_parked_row);
     RUN_TEST(test_update_by_uid_allows_queued_to_delivered);
     RUN_TEST(test_update_by_uid_sent_to_failed_is_not_sticky);
