@@ -49,9 +49,15 @@ const HOSTED_LAN_BODY =
  * up telling an iOS user to try Bluetooth, which is the one thing iOS cannot
  * do.
  */
-function alternativesSentence(available: GatedTransport[]): string {
+function alternativesSentence(available: GatedTransport[], platform: Platform): string {
   if (available.length === 0) {
-    return 'No transport in this browser can reach a node. Connect from a computer, or explore the app with the mock node below.';
+    // With nothing available the body already carries the fix (a different
+    // browser, or the desktop app, which the CTA repeats on desktop), so this
+    // sentence only adds the mock node. Telling a desktop user to "connect
+    // from a computer" would contradict the paragraph directly above it.
+    return platform === 'desktop'
+      ? 'No transport in this browser can reach a node. You can still explore the app with the mock node below.'
+      : 'No transport in this browser can reach a node. Connect from a computer, or explore the app with the mock node below.';
   }
   const names = available.map(t => LABELS[t]);
   const list =
@@ -99,7 +105,7 @@ export function describeTransports(input: AvailabilityInput): Record<GatedTransp
   };
 
   const order: GatedTransport[] = ['serial', 'ble', 'wifi'];
-  const alternatives = alternativesSentence(order.filter(t => isAvailable[t]));
+  const alternatives = alternativesSentence(order.filter(t => isAvailable[t]), platform);
 
   // The desktop app is only a usable answer on a desktop OS, so it is the
   // one thing gating the CTA.

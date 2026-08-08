@@ -118,6 +118,21 @@ describe('derived alternatives', () => {
     const text = unavailable(r, 'ble').alternatives;
     expect(text).toContain('No transport in this browser can reach a node');
     expect(text).toContain('mock node');
+    expect(text).toContain('Connect from a computer');
+  });
+
+  it('does not tell a desktop user to connect from a computer', () => {
+    // Firefox and Safari on a desktop OS have neither Web Serial nor Web
+    // Bluetooth, so hosted mode leaves all three unavailable. The body already
+    // points at another browser and the desktop app, and the CTA repeats it,
+    // so the mobile phrasing here would contradict the paragraph above it.
+    const r = describeTransports({ capabilities: HOSTED, hasSerial: false, hasBluetooth: false, platform: 'desktop' });
+    for (const t of ['serial', 'ble', 'wifi'] as const) {
+      const entry = unavailable(r, t);
+      expect(entry.alternatives).toContain('No transport in this browser can reach a node');
+      expect(entry.alternatives).toContain('mock node');
+      expect(entry.alternatives).not.toContain('Connect from a computer');
+    }
   });
 
   it('never names a transport it marked unavailable', () => {
