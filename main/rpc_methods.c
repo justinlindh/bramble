@@ -1014,6 +1014,8 @@ static int handle_get_rollcall(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(result, "min_interval_ms", ROLLCALL_MIN_INTERVAL_MS);
     cJSON_AddNumberToObject(result, "max_text_bytes", ROLLCALL_TEXT_MAX);
     cJSON_AddNumberToObject(result, "pending_dropped", mesh_rollcall_pending_dropped());
+    cJSON_AddNumberToObject(result, "answer_limited", mesh_rollcall_answer_limited());
+    cJSON_AddNumberToObject(result, "answer_max_per_hour", ROLLCALL_ANSWER_MAX_PER_HOUR);
 
     const rollcall_ledger_t* l = mesh_rollcall_ledger();
     if (l == NULL) {

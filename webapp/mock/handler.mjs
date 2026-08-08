@@ -108,13 +108,14 @@ const PEER_ADDRS = Object.keys(PEERS).map(Number);
 
 // ─── Attested roll-call mock state ───────────────────────────────────────────
 // Constants mirror components/rollcall (ROLLCALL_MAX_ROUNDS, the 30s-doubled
-// round schedule plus the 45s collection tail, ROLLCALL_MIN_INTERVAL_MS and
-// ROLLCALL_TEXT_MAX), so the panel's countdown and caps match what a real node
-// would report.
+// round schedule plus the 45s collection tail, ROLLCALL_MIN_INTERVAL_MS,
+// ROLLCALL_TEXT_MAX and ROLLCALL_ANSWER_MAX_PER_HOUR), so the panel's
+// countdown and caps match what a real node would report.
 const ROLLCALL_ROUNDS_TOTAL = 3;
 const ROLLCALL_WINDOW_MS = 135_000;
 const ROLLCALL_MIN_INTERVAL_MS = 300_000;
 const ROLLCALL_TEXT_MAX = 48;
+const ROLLCALL_ANSWER_MAX_PER_HOUR = 12;
 // Who answers, when, and over which relay path. Fixed rather than random: the
 // docs/rollcall.md screenshot is captured from this mock and has to be
 // reproducible. Ranger (0xAABBCC05), the mobile presence-only node, is absent
@@ -748,6 +749,8 @@ export const handlers = {
       min_interval_ms: ROLLCALL_MIN_INTERVAL_MS,
       max_text_bytes: ROLLCALL_TEXT_MAX,
       pending_dropped: 0,
+      answer_limited: 0,
+      answer_max_per_hour: ROLLCALL_ANSWER_MAX_PER_HOUR,
     };
     if (!rollcall) return { ...base, active: false };
 

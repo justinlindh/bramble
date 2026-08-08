@@ -298,6 +298,8 @@ export interface RollCallLedger {
   overflow: number;
   late: number;
   pendingDropped: number;
+  /** Answers this node refused because its hourly answer budget was spent. */
+  answerLimited: number;
   missing: number[];
   missingCount: number;
   responders: RollCallResponder[];

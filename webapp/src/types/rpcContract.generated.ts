@@ -2167,6 +2167,10 @@ export interface components {
             late?: number;
             /** @description Answers THIS node could not queue because its pending-answer queue was full, reported so a node that failed to take part says so locally. */
             pending_dropped: number;
+            /** @description Answers THIS node refused because it had already spent its answer budget. Non-zero means something on this mesh is asking for roll-calls faster than the fleet has agreed to pay for them. */
+            answer_limited: number;
+            /** @description Answers this node will emit in any rolling hour, whoever asks. The member-side bound that keeps a roll-call's fleet-wide cost independent of how fast an initiator asks for one. */
+            answer_max_per_hour: number;
             /** @description Expected members with no verified answer. Always 0 on an un-anchored mesh: absence of an authoritative expected set means nothing can honestly be called missing. */
             missing_count?: number;
             /** @description Expected members with no verified answer, as 8-char uppercase hex. */

@@ -97,12 +97,19 @@ function Ledger({ ledger }: { ledger: RollCallLedger }) {
         network key.
       </p>
 
-      {(ledger.unattested > 0 || ledger.overflow > 0 || ledger.late > 0 || ledger.pendingDropped > 0) && (
+      {(ledger.unattested > 0 ||
+        ledger.overflow > 0 ||
+        ledger.late > 0 ||
+        ledger.pendingDropped > 0 ||
+        ledger.answerLimited > 0) && (
         <div className={styles.counters}>
           {ledger.unattested > 0 && <span>{ledger.unattested} unattested</span>}
           {ledger.overflow > 0 && <span>{ledger.overflow} over ledger capacity</span>}
           {ledger.late > 0 && <span>{ledger.late} after close</span>}
           {ledger.pendingDropped > 0 && <span>{ledger.pendingDropped} answers this node could not queue</span>}
+          {ledger.answerLimited > 0 && (
+            <span>{ledger.answerLimited} answers refused by this node’s hourly answer budget</span>
+          )}
         </div>
       )}
     </>

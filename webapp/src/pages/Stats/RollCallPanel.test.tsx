@@ -26,6 +26,7 @@ const emptyLedger: RollCallLedger = {
   overflow: 0,
   late: 0,
   pendingDropped: 0,
+  answerLimited: 0,
   missing: [],
   missingCount: 0,
   responders: [],

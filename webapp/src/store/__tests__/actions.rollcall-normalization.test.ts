@@ -21,6 +21,7 @@ describe('normalizeRollCallLedger', () => {
       overflow: 0,
       late: 0,
       pending_dropped: 0,
+      answer_limited: 2,
       missing_count: 1,
       missing: ['0000000D'],
       responders: [
@@ -32,6 +33,7 @@ describe('normalizeRollCallLedger', () => {
     expect(led.roundsSent).toBe(2);
     expect(led.minIntervalMs).toBe(300_000);
     expect(led.anchored).toBe(true);
+    expect(led.answerLimited).toBe(2);
     expect(led.missing).toEqual([0x0000000d]);
     expect(led.responders).toEqual([
       { addr: 0x0000000b, responded: true, atMs: 3200, round: 1, relayPath: [0xaabbccdd, 0x0000000b] },
@@ -46,6 +48,7 @@ describe('normalizeRollCallLedger', () => {
       min_interval_ms: 300_000,
       max_text_bytes: 48,
       pending_dropped: 0,
+      answer_limited: 0,
     });
 
     expect(led.active).toBe(false);

@@ -65,6 +65,7 @@ export function normalizeRollCallLedger(raw: LedgerWire): RollCallLedger {
     overflow: raw.overflow ?? 0,
     late: raw.late ?? 0,
     pendingDropped: raw.pending_dropped ?? 0,
+    answerLimited: raw.answer_limited ?? 0,
     missing: toAddrs(raw.missing as (string | undefined)[] | undefined),
     missingCount: raw.missing_count ?? 0,
     responders,
