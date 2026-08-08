@@ -138,6 +138,37 @@
 // (the watchdog's clock source) leaves the WDT unable to fire at all.
 // Nothing in software can recover that case; it is a genuine limit of the
 // hardware, not a design choice this file makes.
+//
+// s_state is shared, mutable, and written from more than one task context:
+// bramble_wdt_arm() runs on the boot task, esp_task_wdt_delete() runs on
+// mesh_task when radio_init() fails (main/mesh_task.c). The priority
+// argument above proves boot cannot run add() concurrently with mesh or
+// radio (both outrank it and haven't blocked yet), but it says nothing
+// about mesh going blocked-to-ready and calling delete() while arm() is
+// mid-update: `s_state |= X` is a plain load-modify-store, and an
+// interleaved pair of those loses whichever update's store lands first.
+// A lost deleted-bit is not a bookkeeping curiosity here: it leaves a
+// channel enabled with nobody feeding it, and per the "every enabled
+// channel" rule above, that resets the board on its own, for reasons
+// having nothing to do with an actual hang. On a consoleless board that
+// looks exactly like the wedge this file exists to catch and recover from,
+// which would poison the one diagnostic signal (BOOT_BEGIN [DOG] vs
+// [RESETPIN]) this change gives the field investigation. esp_task_wdt_add,
+// esp_task_wdt_delete, and bramble_wdt_arm each therefore run their
+// check-then-mutate sequence inside one taskENTER_CRITICAL/EXIT_CRITICAL
+// pair (same pattern as nrf/src/ble_store_nvs.c and
+// nrf/shim/gps_t1000e.c), covering the nrfx calls too: nrfx_wdt_enable()
+// and nrfx_wdt_channel_alloc() are unsynchronized against each other in
+// nrfx itself, and add() calling alloc() after arm() has already called
+// enable() trips an NRFX_ASSERT (reboot to DFU), the same bad outcome as a
+// lost deleted-bit by a different path. Logging never happens inside a
+// critical section (it can block on a UART write on the dev kit); each
+// function decides what to log from a plain local afterward. Byte reads of
+// s_state elsewhere (esp_task_wdt_reset, bramble_wdt_feed_all) are
+// unguarded on purpose: a naturally-aligned uint8_t load is atomic on this
+// core, so a plain read can only see a fully-old or fully-new value, never
+// a torn one, and reset()/feed_all() never write it, so there is no
+// update to lose.
 #include "esp_task_wdt.h"
 #include "bramble_wdt.h"
 
@@ -190,7 +221,10 @@ static int task_id_for(TaskHandle_t task) {
 }
 
 void bramble_wdt_init(void) {
-    if (s_state & WDT_STATE_DRIVER_READY) {
+    taskENTER_CRITICAL();
+    bool already = (s_state & WDT_STATE_DRIVER_READY) != 0;
+    taskEXIT_CRITICAL();
+    if (already) {
         return;
     }
     for (int i = 0; i < WDT_TASK_COUNT; i++) {
@@ -210,17 +244,23 @@ void bramble_wdt_init(void) {
         ESP_LOGE("wdt", "nrfx_wdt_init failed: 0x%x", (unsigned)rc);
         return;
     }
+    taskENTER_CRITICAL();
     s_state |= WDT_STATE_DRIVER_READY;
+    taskEXIT_CRITICAL();
 }
 
+// esp_task_wdt_add()'s outcome, decided inside the critical section so the
+// function can log and return afterward: see the file header for why
+// logging never happens with interrupts disabled.
+typedef enum {
+    WDT_ADD_OK,
+    WDT_ADD_NOT_READY, // driver not initialized yet: no-op, matches the old shim
+    WDT_ADD_ALREADY,   // this task already has a channel
+    WDT_ADD_ARMED,     // too late: nrfx_wdt_channel_alloc can no longer run
+    WDT_ADD_ALLOC_FAILED,
+} wdt_add_result_t;
+
 esp_err_t esp_task_wdt_add(TaskHandle_t task_handle) {
-    if (!(s_state & WDT_STATE_DRIVER_READY)) {
-        // Boot has not reached bramble_wdt_init() yet (should not happen;
-        // it runs before any task exists), or WDT init itself failed.
-        // Behave like the no-op shim this file replaces rather than touch
-        // uninitialized nrfx state.
-        return ESP_OK;
-    }
     TaskHandle_t task = task_handle ? task_handle : xTaskGetCurrentTaskHandle();
     int id = task_id_for(task);
     if (id < 0) {
@@ -229,26 +269,46 @@ esp_err_t esp_task_wdt_add(TaskHandle_t task_handle) {
         // channel available for it. Matches the old shim's blanket ESP_OK.
         return ESP_OK;
     }
-    if (s_channel[id] != WDT_CHANNEL_NONE) {
-        return ESP_OK; // already subscribed
-    }
-    if (s_state & WDT_STATE_ARMED) {
+
+    wdt_add_result_t result;
+    nrfx_err_t alloc_rc = NRFX_SUCCESS;
+    taskENTER_CRITICAL();
+    if (!(s_state & WDT_STATE_DRIVER_READY)) {
+        result = WDT_ADD_NOT_READY;
+    } else if (s_channel[id] != WDT_CHANNEL_NONE) {
+        result = WDT_ADD_ALREADY;
+    } else if (s_state & WDT_STATE_ARMED) {
         // See the file header: every task this build gives a channel to
         // is guaranteed to have already called this before bramble_wdt_arm()
         // ran. Reaching here means that guarantee did not hold for this
         // caller; nrfx_wdt_channel_alloc() cannot be called anymore, so
         // refuse instead of asserting the board into a DFU reboot.
+        result = WDT_ADD_ARMED;
+    } else {
+        nrfx_wdt_channel_id ch;
+        alloc_rc = nrfx_wdt_channel_alloc(&s_wdt, &ch);
+        if (alloc_rc == NRFX_SUCCESS) {
+            s_channel[id] = (uint8_t)ch;
+            result = WDT_ADD_OK;
+        } else {
+            result = WDT_ADD_ALLOC_FAILED;
+        }
+    }
+    taskEXIT_CRITICAL();
+
+    switch (result) {
+    case WDT_ADD_NOT_READY:
+    case WDT_ADD_ALREADY:
+    case WDT_ADD_OK:
+        return ESP_OK;
+    case WDT_ADD_ARMED:
         ESP_LOGW("wdt", "WDT already armed, cannot add task id %d", id);
         return ESP_ERR_INVALID_STATE;
-    }
-    nrfx_wdt_channel_id ch;
-    nrfx_err_t rc = nrfx_wdt_channel_alloc(&s_wdt, &ch);
-    if (rc != NRFX_SUCCESS) {
-        ESP_LOGE("wdt", "nrfx_wdt_channel_alloc failed: 0x%x", (unsigned)rc);
+    case WDT_ADD_ALLOC_FAILED:
+    default:
+        ESP_LOGE("wdt", "nrfx_wdt_channel_alloc failed: 0x%x", (unsigned)alloc_rc);
         return ESP_ERR_NO_MEM;
     }
-    s_channel[id] = (uint8_t)ch;
-    return ESP_OK;
 }
 
 esp_err_t esp_task_wdt_reset(void) {
@@ -277,43 +337,65 @@ esp_err_t esp_task_wdt_reset(void) {
 esp_err_t esp_task_wdt_delete(TaskHandle_t task_handle) {
     TaskHandle_t task = task_handle ? task_handle : xTaskGetCurrentTaskHandle();
     int id = task_id_for(task);
-    if (id < 0 || s_channel[id] == WDT_CHANNEL_NONE) {
+    if (id < 0) {
         return ESP_OK; // never subscribed: matches the old shim's blanket ESP_OK
     }
-    s_state |= (uint8_t)(1u << id);
-    if (s_state & WDT_STATE_ARMED) {
-        // Immediate feed: nothing else touches this channel until some
-        // other still-live task's esp_task_wdt_reset() runs.
+
+    bool feed_now = false;
+    taskENTER_CRITICAL();
+    if (s_channel[id] != WDT_CHANNEL_NONE) {
+        s_state |= (uint8_t)(1u << id);
+        // Immediate feed once we leave the critical section: nothing else
+        // touches this channel until some other still-live task's
+        // esp_task_wdt_reset() runs.
+        feed_now = (s_state & WDT_STATE_ARMED) != 0;
+    }
+    taskEXIT_CRITICAL();
+
+    if (feed_now) {
         nrfx_wdt_channel_feed(&s_wdt, (nrfx_wdt_channel_id)s_channel[id]);
     }
     return ESP_OK;
 }
 
 void bramble_wdt_arm(void) {
-    if ((s_state & WDT_STATE_ARMED) || !(s_state & WDT_STATE_DRIVER_READY)) {
-        return;
-    }
+    bool armed_now = false;
     bool any = false;
-    for (int i = 0; i < WDT_TASK_COUNT; i++) {
-        if (s_channel[i] != WDT_CHANNEL_NONE) {
-            any = true;
-            break;
+    taskENTER_CRITICAL();
+    if (!(s_state & WDT_STATE_ARMED) && (s_state & WDT_STATE_DRIVER_READY)) {
+        for (int i = 0; i < WDT_TASK_COUNT; i++) {
+            if (s_channel[i] != WDT_CHANNEL_NONE) {
+                any = true;
+                break;
+            }
         }
+        // nrfx_wdt_enable() and the subscriber-registration side of
+        // nrfx_wdt_channel_alloc() (inside esp_task_wdt_add(), same
+        // critical section) are unsynchronized against each other in nrfx
+        // itself; running both here, atomically with the WDT_STATE_ARMED
+        // flag that gates them, is what makes esp_task_wdt_add()'s
+        // post-arm refusal actually enforceable instead of a race.
+        nrfx_wdt_enable(&s_wdt);
+        s_state |= WDT_STATE_ARMED;
+        for (int i = 0; i < WDT_TASK_COUNT; i++) {
+            // First feed for anything already deleted before arm ran (in
+            // principle: radio_init() failing before boot even finished).
+            // Everything else gets its first feed from its own owning
+            // task's ordinary post-boot cadence, which by construction is
+            // already running by this point.
+            if (s_channel[i] != WDT_CHANNEL_NONE && (s_state & (1u << i))) {
+                nrfx_wdt_channel_feed(&s_wdt, (nrfx_wdt_channel_id)s_channel[i]);
+            }
+        }
+        armed_now = true;
+    }
+    taskEXIT_CRITICAL();
+
+    if (!armed_now) {
+        return;
     }
     if (!any) {
         ESP_LOGW("wdt", "arming WDT with zero registered channels");
-    }
-    nrfx_wdt_enable(&s_wdt);
-    s_state |= WDT_STATE_ARMED;
-    for (int i = 0; i < WDT_TASK_COUNT; i++) {
-        // First feed for anything already deleted before arm ran (in
-        // principle: radio_init() failing before boot even finished).
-        // Everything else gets its first feed from its own owning task's
-        // ordinary post-boot cadence, which by construction is already
-        // running by this point.
-        if (s_channel[i] != WDT_CHANNEL_NONE && (s_state & (1u << i))) {
-            nrfx_wdt_channel_feed(&s_wdt, (nrfx_wdt_channel_id)s_channel[i]);
-        }
     }
     ESP_LOGI("wdt", "WDT armed, %u ms window", (unsigned)BRAMBLE_WDT_RELOAD_MS);
 }
