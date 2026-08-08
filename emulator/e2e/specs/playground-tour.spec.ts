@@ -16,7 +16,9 @@
 //
 // The scenario boots UNPROVISIONED on purpose, so nothing at all happens until
 // the tour provisions the fleet: there is no auto-send anywhere in this
-// scenario, and every frame on the ether below is one the tour asked for.
+// scenario, and every message on the ether below is one the tour originated.
+// The control plane a keyed node runs by itself (beacons, its own attestation
+// cadence) is the firmware's, unchanged for the playground.
 
 import { test, expect, type Page } from '@playwright/test';
 import * as fs from 'node:fs';
@@ -407,8 +409,9 @@ test.describe('emulator playground', () => {
     await page.getByTestId('tour-switch-view').click();
 
     // A safety number needs a pinned identity, and a pin only comes from an
-    // identity attestation, which nodes send on their own every fifteen
-    // minutes. Ask ALPHA to announce now rather than waiting for the cadence.
+    // identity attestation, which a keyed node sends on the firmware's own
+    // cadence (once it has a key, then every fifteen minutes). Ask ALPHA to
+    // announce now rather than waiting on that cadence.
     await page.getByTestId('tour-action-announce-identity').click();
 
     await clickUntil(
@@ -420,6 +423,20 @@ test.describe('emulator playground', () => {
         everyMs: 45_000,
         label: 'the ALPHA-BRAVO key exchange to complete and the DM to land',
       },
+    );
+
+    // A peer list can only be opened once there is a peer in it: SELECT on the
+    // Nodes screen is a no-op while the neighbour table is empty
+    // (components/ui/ui_manager.c gates nodes_selecting on node_total > 0), so
+    // pressing into it before BRAVO has heard ALPHA leaves the walk below
+    // stranded on the summary screen. Neighbours come from beacons, on this
+    // scenario's 15 s cadence and only once the hearing node is keyed, which a
+    // DM landing does not imply: a DM reaches BRAVO through the session
+    // handshake, not through the neighbour table. Wait for the neighbour line
+    // BRAVO prints itself (mesh_beacon.c) before touching its buttons.
+    await waitFor(
+      () => consoleHas(cap, fleet.bravo, `Neighbor ${fleet.alpha} RSSI`) || undefined,
+      { timeoutMs: DELIVERY_MS, label: "BRAVO to hear ALPHA's beacon and hold it as a neighbour" },
     );
 
     // Now do the verification on the device itself, the way a person would:
