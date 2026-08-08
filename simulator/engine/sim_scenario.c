@@ -363,6 +363,35 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
             event.data.location.longitude_e7 = (int32_t)(lon->valuedouble * 1e7);
             event.data.location.altitude_m = cJSON_IsNumber(alt) ? (int16_t)alt->valuedouble : 0;
 
+        } else if (strcmp(type, "start_rollcall") == 0) {
+            /* Attested roll-call: a scripted initiation, the sim analog of
+             * an operator running bramble.startRollCall. "src" is the
+             * initiator; optional "text" is the operator payload the
+             * announce floods, bounded at SIM_ROLLCALL_TEXT_MAX so a
+             * scenario cannot ask for a frame the codec would refuse. The
+             * re-announce rounds and the staggered answers are scheduled by
+             * the bridge, not by the scenario: they are the primitive's own
+             * schedule, and a scenario that could reschedule them would not
+             * be testing the shipped one. */
+            event.type = EVT_GENERATE_ROLLCALL;
+            cJSON* src = cJSON_GetObjectItem(evt_json, "src");
+            if (!cJSON_IsString(src))
+                return false;
+            if (!node_array_find_by_id(nodes, src->valuestring))
+                return false;
+            strncpy(event.data.rollcall.node_id, src->valuestring, NODE_ID_LEN - 1);
+            cJSON* text = cJSON_GetObjectItem(evt_json, "text");
+            if (cJSON_IsString(text)) {
+                if (strlen(text->valuestring) > SIM_ROLLCALL_TEXT_MAX) {
+                    fprintf(stderr,
+                            "Error: start_rollcall text is %zu bytes, over the %d-byte announce "
+                            "cap.\n",
+                            strlen(text->valuestring), SIM_ROLLCALL_TEXT_MAX);
+                    return false;
+                }
+                strncpy(event.data.rollcall.text, text->valuestring, SIM_ROLLCALL_TEXT_MAX);
+            }
+
         } else {
             /* Hard failure, deliberately. Issues #144 and #166 were both
              * scenarios whose phases never ran because an unrecognized event
@@ -375,7 +404,7 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
                     "event; fix the scenario's spelling or add support for the type. Known "
                     "types: send_message, generate_message, send_attestation, provision_anchor, "
                     "move_node, kill_node, node_leave, interference, join, node_join, "
-                    "send_location.\n",
+                    "send_location, start_rollcall.\n",
                     type, (unsigned long long)(timestamp_us / 1000));
             return false;
         }

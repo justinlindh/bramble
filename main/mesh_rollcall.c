@@ -36,15 +36,9 @@
 
 static const char* TAG = "rollcall";
 
-/*
- * One queued, not-yet-due response. A member answers at most one round of a
- * given roll-call (rollcall_seen_claim enforces that), so this queue only
- * ever holds concurrent roll-calls from DIFFERENT initiators. Two slots is
- * the honest bound for that: a third concurrent initiator is refused and
- * counted rather than silently displacing an answer already owed.
- */
-#define ROLLCALL_PENDING_MAX 2
-
+/* One queued, not-yet-due response. The queue depth is ROLLCALL_PENDING_MAX
+ * (components/rollcall/include/rollcall.h), which documents why two slots is
+ * the honest bound. */
 typedef struct {
     bool used;
     uint32_t rollcall_id;

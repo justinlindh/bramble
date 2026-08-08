@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include -I../../components/airtime/include -I../../components/airtime -I../../components/fragment/include -I../../components/fragment -I../../components/crypto/include -I../../components/crypto -I../../components/mailbox/include -I../../components/location/include -I../../components/channel/include -I../../components/nvs_keys/include -I../../components/radio/include -I../../components/freq_plan/include -I../../components/network_key/include -I../../components/security/include -I../../components/routing_auth/include -I../../components/identity/include
+#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include -I../../components/airtime/include -I../../components/airtime -I../../components/fragment/include -I../../components/fragment -I../../components/crypto/include -I../../components/crypto -I../../components/mailbox/include -I../../components/location/include -I../../components/channel/include -I../../components/nvs_keys/include -I../../components/radio/include -I../../components/freq_plan/include -I../../components/network_key/include -I../../components/security/include -I../../components/routing_auth/include -I../../components/identity/include -I../../components/rollcall/include
 #cgo LDFLAGS: -lm -lssl -lcrypto
 #include <stdlib.h>
 #include "bridge.h"
@@ -266,4 +266,90 @@ func (r *scenarioRunResult) RouteNextHop(nodeID string, destAddr uint32) (uint32
 		}
 	}
 	return 0, false
+}
+
+// rollCallRow is one responder's line in an initiator's roll-call ledger.
+type rollCallRow struct {
+	Addr      uint32
+	Responded bool
+	Round     uint8
+	AtMs      uint32 // milliseconds into the roll-call, not device uptime
+}
+
+// rollCallLedger is a Go view of one node's terminal roll-call ledger, read
+// straight from the C struct the real components/rollcall code filled.
+type rollCallLedger struct {
+	Open       bool
+	ID         uint32
+	Text       string
+	Anchored   bool
+	Expected   int
+	Responded  int
+	Unattested uint32
+	Overflow   uint32
+	Late       uint32
+	RoundsSent int
+	Missing    []uint32
+	Rows       []rollCallRow
+}
+
+// RollCall returns nodeID's roll-call ledger, or ok=false when that node
+// never started one. Reads the C state directly rather than scraping the JSON
+// stream, for the same reason RouteNextHop does.
+func (r *scenarioRunResult) RollCall(nodeID string) (rollCallLedger, bool) {
+	cid := C.CString(nodeID)
+	defer C.free(unsafe.Pointer(cid))
+	l := C.bridge_rollcall_ledger(&r.sim.nodes, cid)
+	if l == nil {
+		return rollCallLedger{}, false
+	}
+
+	out := rollCallLedger{
+		Open:       bool(l.open),
+		ID:         uint32(l.rollcall_id),
+		Text:       C.GoString(&l.text[0]),
+		Anchored:   bool(l.anchored),
+		Expected:   int(l.expected_count),
+		Responded:  int(C.rollcall_ledger_responded_count(l)),
+		Unattested: uint32(l.unattested),
+		Overflow:   uint32(l.overflow),
+		Late:       uint32(l.late),
+		RoundsSent: int(l.rounds_sent),
+	}
+	for i := 0; i < int(l.entry_count); i++ {
+		e := l.entries[i]
+		if !bool(e.used) {
+			continue
+		}
+		row := rollCallRow{Addr: uint32(e.addr), Responded: bool(e.responded), Round: uint8(e.round)}
+		if row.Responded {
+			row.AtMs = uint32(e.responded_at_ms) - uint32(l.started_ms)
+		}
+		out.Rows = append(out.Rows, row)
+	}
+
+	var missing [C.ROLLCALL_MAX_EXPECTED]C.uint32_t
+	n := int(C.rollcall_ledger_missing(l, &missing[0], C.ROLLCALL_MAX_EXPECTED))
+	for i := 0; i < n && i < len(missing); i++ {
+		out.Missing = append(out.Missing, uint32(missing[i]))
+	}
+	return out, true
+}
+
+// RollCallPendingDropped reports how many answers nodeID could not queue
+// because its pending-answer queue was full.
+func (r *scenarioRunResult) RollCallPendingDropped(nodeID string) uint32 {
+	cid := C.CString(nodeID)
+	defer C.free(unsafe.Pointer(cid))
+	return uint32(C.bridge_rollcall_pending_dropped(&r.sim.nodes, cid))
+}
+
+// NodeAddr returns nodeID's simulated node address, which derives from that
+// node's Ed25519 identity key and so is not knowable from the scenario file.
+func (r *scenarioRunResult) NodeAddr(nodeID string) (uint32, bool) {
+	node := nodeArrayFindByID(&r.sim.nodes, nodeID)
+	if node == nil {
+		return 0, false
+	}
+	return uint32(node.addr), true
 }

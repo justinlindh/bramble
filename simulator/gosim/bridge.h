@@ -31,6 +31,11 @@
 #include "../../components/channel/include/public_channel.h"
 /* Per-node identity Phase 3: verified TOFU pin store + attestation frame */
 #include "../../components/identity/include/identity_store.h"
+/* Attested roll-call: the same pure core the firmware and the host suites
+ * drive (wire codecs, signed message, stagger, round schedule, rate limit,
+ * ledger), plus the inner app types that tell the two frames apart. */
+#include "../../components/rollcall/include/rollcall.h"
+#include "../../components/channel/include/channel_msg.h"
 
 /* ─── Extended per-node state (new components) ──────────────────────────── */
 
@@ -98,6 +103,39 @@ typedef struct {
         uint8_t defers;
         uint64_t due_us;
     } receipt_queue[SIM_RECEIPT_QUEUE_CAPACITY];
+    /* Attested roll-call. Field for field the state main/mesh_rollcall.c
+     * keeps in its runtime block, driven by the SAME components/rollcall
+     * functions: the initiator's ledger and rate limiter, the member's
+     * answer-once table, and the member's queued-but-not-yet-due answers.
+     * It lives here rather than on sim_node_t for the same reason the
+     * mailbox and receipt queue do: it is app-layer state (main/, not
+     * components/). */
+    rollcall_ledger_t rollcall_ledger;
+    rollcall_rate_state_t rollcall_rate;
+    rollcall_seen_table_t rollcall_seen;
+    /* No announce-packet_id table here, unlike firmware's runtime block: the
+     * ledger's relay-path column comes from broadcast delivery receipts, and
+     * gosim's broadcast receipts do not travel past their first hop under
+     * reactive routing (see bridge_send_broadcast_delivery_receipt's "known
+     * gap"). Keeping the table would only feed a column nothing can fill. */
+    uint32_t rollcall_pending_dropped; /* answers refused for a full queue */
+    struct {
+        bool used;
+        uint32_t rollcall_id;
+        uint32_t initiator_addr;
+        uint8_t round;
+        uint64_t due_us;
+        /* When this answer stops being worth sending: the instant the
+         * initiator's ledger closes (rollcall_window_ms after the announce
+         * was heard). A member that heard a broadcast announce holds no
+         * route home from it (data_rx_decide deliberately installs no
+         * reverse route off a broadcast) and gosim's radio delivers a
+         * unicast only to the addressed next hop, so the answer waits behind
+         * ordinary reactive discovery. It keeps trying until the ledger
+         * would close, because an answer that lands after that is counted
+         * late and changes nothing. */
+        uint64_t deadline_us;
+    } rollcall_pending[ROLLCALL_PENDING_MAX];
 } bridge_node_ext_t;
 
 /* ─── Extended bridge-level metrics ────────────────────────────────────── */
@@ -402,5 +440,55 @@ void bridge_set_broadcast_receipt_tx_kind(int kind);
  */
 void bridge_handle_receipt_tx(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
                               pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics);
+
+/*
+ * bridge_handle_generate_rollcall (attested roll-call):
+ *   Fires a scripted EVT_GENERATE_ROLLCALL, the sim analog of
+ *   bramble.startRollCall. Runs the REAL rollcall_rate_check and
+ *   rollcall_ledger_start, builds the expected set from this node's
+ *   anchor-certified pins, floods round 1 as an ordinary broadcast DATA
+ *   frame on the BROADCAST airtime lane, and schedules the remaining
+ *   re-announce rounds plus the ledger close.
+ */
+void bridge_handle_generate_rollcall(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                                     pcg32_state_t* rng, event_queue_t* events,
+                                     metrics_state_t* metrics, msg_tracker_t* msg_track,
+                                     int msg_track_count);
+
+/*
+ * bridge_handle_rollcall_round (attested roll-call):
+ *   Fires one due EVT_ROLLCALL_ROUND. round >= 1 puts that announce round on
+ *   the air and schedules the next (or the close sweep after the last);
+ *   round == 0 is the close sweep, which runs rollcall_ledger_maybe_close and
+ *   emits the roll-call's completion event exactly once.
+ */
+void bridge_handle_rollcall_round(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                                  pcg32_state_t* rng, event_queue_t* events,
+                                  metrics_state_t* metrics, msg_tracker_t* msg_track,
+                                  int msg_track_count);
+
+/*
+ * bridge_handle_rollcall_tx (attested roll-call):
+ *   Fires one due EVT_ROLLCALL_TX: a member's staggered answer. Signs the
+ *   canonical roll-call message with the node's real Ed25519 identity key and
+ *   unicasts it home on the NORMAL airtime lane, waiting behind ordinary
+ *   reactive route discovery when the member holds no route to the initiator.
+ */
+void bridge_handle_rollcall_tx(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                               pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics,
+                               node_anomaly_tracker_t* anomaly, msg_tracker_t* msg_track,
+                               int msg_track_count);
+
+/*
+ * bridge_rollcall_ledger:
+ *   One node's roll-call ledger, or NULL when that node never started one.
+ *   Exists so a test reads the terminal ledger straight out of the C struct
+ *   instead of scraping the JSON stream, whose pipe-based capture is
+ *   documented to drop lines under load (see bridge.go's RouteNextHop).
+ */
+const rollcall_ledger_t* bridge_rollcall_ledger(node_array_t* nodes, const char* node_id);
+
+/* Answers a node could not queue because its pending-answer queue was full. */
+uint32_t bridge_rollcall_pending_dropped(node_array_t* nodes, const char* node_id);
 
 #endif /* BRIDGE_H */

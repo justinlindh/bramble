@@ -40,9 +40,10 @@
 #include "../../components/fragment/fragment.c"
 #include "../../components/crypto/crypto_host.c"
 #include "../../components/security/security.c"
-/* routing_auth.c + identity_store.c live in identity_unit.c, a separate
- * compilation unit: routing_auth.c's static ct_eq collides with
- * discovery.c's in this single-TU build. */
+/* routing_auth.c + identity_store.c live in identity_unit.c, and the attested
+ * roll-call core in rollcall_unit.c: both are separate compilation units
+ * because their static helpers (routing_auth.c's ct_eq, rollcall.c's
+ * put_be32/get_be32) collide with identically named ones here. */
 
 /* New components (Phase 6) */
 #include "../../components/mailbox/mailbox.c"

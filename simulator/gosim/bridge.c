@@ -1390,6 +1390,198 @@ void bridge_handle_receipt_tx(sim_event_t* event, node_array_t* nodes, radio_con
     bridge_schedule_receipt_tx(node->addr, slot, ext->receipt_queue[slot].due_us, events);
 }
 
+/* ─── Attested roll-call: framing and the receive side ─────────────────── */
+
+/*
+ * Firmware distinguishes the two roll-call frames by the inner app type of a
+ * channel DATA payload (channel_msg.h's APP_TYPE_ROLLCALL /
+ * APP_TYPE_ROLLCALL_REPLY). Gosim models no channel keys, so its DATA inner
+ * has no channel header to carry that byte (see _handle_data's orig_sender
+ * note on why the framing already diverges). A four-byte magic plus the SAME
+ * app-type byte stands in for it: same discriminator, one sim-local envelope
+ * around it, and a magic long enough that a scenario's random broadcast
+ * payload cannot be mistaken for a roll-call.
+ */
+#define SIM_ROLLCALL_MAGIC_LEN 4
+#define SIM_ROLLCALL_HDR (SIM_ROLLCALL_MAGIC_LEN + 1)
+static const uint8_t g_sim_rollcall_magic[SIM_ROLLCALL_MAGIC_LEN] = {'R', 'C', 'L', '1'};
+
+/* The engine cannot include component headers, so its scenario-side text cap
+ * is its own constant; hold the two together here rather than trusting them
+ * to stay in step by convention. */
+_Static_assert(SIM_ROLLCALL_TEXT_MAX == ROLLCALL_TEXT_MAX,
+               "sim_event.h's SIM_ROLLCALL_TEXT_MAX must match components/rollcall's "
+               "ROLLCALL_TEXT_MAX");
+
+/* Recognize a roll-call inner payload. Returns false for anything else,
+ * which is every other frame in the simulation. */
+static bool sim_rollcall_frame(const uint8_t* p, size_t len, uint8_t* app_type_out,
+                               const uint8_t** body_out, size_t* body_len_out) {
+    if (p == NULL || len <= SIM_ROLLCALL_HDR)
+        return false;
+    if (memcmp(p, g_sim_rollcall_magic, SIM_ROLLCALL_MAGIC_LEN) != 0)
+        return false;
+    *app_type_out = p[SIM_ROLLCALL_MAGIC_LEN];
+    *body_out = p + SIM_ROLLCALL_HDR;
+    *body_len_out = len - SIM_ROLLCALL_HDR;
+    return true;
+}
+
+static void bridge_schedule_rollcall_tx(uint32_t node_addr, int slot, uint64_t due_us,
+                                        event_queue_t* events) {
+    sim_event_t e;
+    memset(&e, 0, sizeof(e));
+    e.type = EVT_ROLLCALL_TX;
+    e.timestamp_us = due_us;
+    e.data.rollcall_slot.node_addr = node_addr;
+    e.data.rollcall_slot.slot = slot;
+    event_queue_push(events, &e);
+}
+
+static void bridge_schedule_rollcall_round(uint32_t node_addr, uint8_t round, uint64_t due_us,
+                                           event_queue_t* events) {
+    sim_event_t e;
+    memset(&e, 0, sizeof(e));
+    e.type = EVT_ROLLCALL_ROUND;
+    e.timestamp_us = due_us;
+    e.data.rollcall_slot.node_addr = node_addr;
+    e.data.rollcall_slot.round = round;
+    event_queue_push(events, &e);
+}
+
+/*
+ * MEMBER: a roll-call announce arrived on the ordinary broadcast DATA path.
+ * Mirrors mesh_rollcall_handle_announce: decode, claim the answer-once slot
+ * (which is what makes rounds 2 and 3 free for a member that heard round 1),
+ * then park a staggered answer through the REAL rollcall_response_delay_ms.
+ */
+static void bridge_rollcall_handle_announce(sim_node_t* rx, node_array_t* nodes,
+                                            uint32_t initiator_addr, const uint8_t* body,
+                                            size_t body_len, uint64_t now_us, pcg32_state_t* rng,
+                                            event_queue_t* events) {
+    rollcall_announce_t ann;
+    if (!rollcall_announce_decode(body, body_len, &ann))
+        return;
+
+    bridge_node_ext_t* ext = bridge_node_ext_get((int)(rx - nodes->nodes));
+    if (!ext)
+        return;
+
+    uint32_t now_ms = (uint32_t)(now_us / 1000);
+    if (!rollcall_seen_claim(&ext->rollcall_seen, ann.rollcall_id, initiator_addr, now_ms))
+        return; /* already answering this roll-call: a re-announce costs a decode */
+
+    int slot = -1;
+    for (int i = 0; i < ROLLCALL_PENDING_MAX; i++) {
+        if (!ext->rollcall_pending[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        /* Counted, not silent: a node that could not answer is exactly the
+         * gap a roll-call exists to surface. */
+        ext->rollcall_pending_dropped++;
+        fprintf(stdout,
+                "{\"type\":\"rollcall_answer_dropped\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"rollcall_id\":\"0x%08X\",\"reason\":\"pending_queue_full\"}\n",
+                (unsigned long long)now_us, rx->id, ann.rollcall_id);
+        fflush(stdout);
+        return;
+    }
+
+    uint32_t delay_ms = rollcall_response_delay_ms(
+        rx->addr, ann.rollcall_id, (uint8_t)neighbor_count(&rx->neighbors), pcg32_random(rng));
+
+    ext->rollcall_pending[slot].used = true;
+    ext->rollcall_pending[slot].rollcall_id = ann.rollcall_id;
+    ext->rollcall_pending[slot].initiator_addr = initiator_addr;
+    ext->rollcall_pending[slot].round = ann.round;
+    ext->rollcall_pending[slot].due_us = now_us + (uint64_t)delay_ms * 1000ULL;
+    ext->rollcall_pending[slot].deadline_us = now_us + (uint64_t)rollcall_window_ms() * 1000ULL;
+    bridge_schedule_rollcall_tx(rx->addr, slot, ext->rollcall_pending[slot].due_us, events);
+
+    fprintf(stdout,
+            "{\"type\":\"rollcall_heard\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"rollcall_id\":\"0x%08X\",\"from\":\"0x%08X\",\"round\":%u"
+            ",\"text\":\"%s\",\"answer_in_ms\":%u}\n",
+            (unsigned long long)now_us, rx->id, ann.rollcall_id, initiator_addr,
+            (unsigned)ann.round, ann.text, (unsigned)delay_ms);
+    fflush(stdout);
+}
+
+/*
+ * INITIATOR: a member's answer arrived on the ordinary unicast DATA path,
+ * already decrypted. Mirrors mesh_rollcall_handle_response: the responder
+ * field the SIGNATURE covers must match the envelope's sender, the responder
+ * must hold a verified pin here, and the Ed25519 signature over the canonical
+ * message must verify, before anything is recorded. Everything that fails is
+ * counted as unattested, never recorded as a responder.
+ */
+static void bridge_rollcall_handle_response(sim_node_t* rx, node_array_t* nodes, uint32_t src_addr,
+                                            const uint8_t* body, size_t body_len, uint64_t now_us) {
+    bridge_node_ext_t* ext = bridge_node_ext_get((int)(rx - nodes->nodes));
+    if (!ext || !ext->rollcall_ledger.active)
+        return;
+
+    rollcall_response_t resp;
+    if (!rollcall_response_decode(body, body_len, &resp))
+        return;
+    if (resp.rollcall_id != ext->rollcall_ledger.rollcall_id)
+        return;
+
+    if (resp.responder_addr != src_addr) {
+        /* Someone relayed another node's answer under their own envelope,
+         * which is an answer from neither of them. */
+        rollcall_ledger_note_unattested(&ext->rollcall_ledger);
+        fprintf(stdout,
+                "{\"type\":\"rollcall_unattested\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"responder\":\"0x%08X\",\"reason\":\"sender_mismatch\"}\n",
+                (unsigned long long)now_us, rx->id, resp.responder_addr);
+        fflush(stdout);
+        return;
+    }
+
+    const identity_pin_t* pin = identity_store_lookup(&ext->ident_pins, resp.responder_addr);
+    if (pin == NULL) {
+        rollcall_ledger_note_unattested(&ext->rollcall_ledger);
+        fprintf(stdout,
+                "{\"type\":\"rollcall_unattested\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"responder\":\"0x%08X\",\"reason\":\"unpinned\"}\n",
+                (unsigned long long)now_us, rx->id, resp.responder_addr);
+        fflush(stdout);
+        return;
+    }
+
+    uint8_t msg[ROLLCALL_MSG_SIZE];
+    rollcall_signed_msg(resp.rollcall_id, ext->rollcall_ledger.initiator_addr, resp.responder_addr,
+                        msg, sizeof(msg));
+    if (!crypto_ed25519_verify(pin->ed25519_pub, msg, sizeof(msg), resp.sig)) {
+        rollcall_ledger_note_unattested(&ext->rollcall_ledger);
+        fprintf(stdout,
+                "{\"type\":\"rollcall_unattested\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"responder\":\"0x%08X\",\"reason\":\"bad_signature\"}\n",
+                (unsigned long long)now_us, rx->id, resp.responder_addr);
+        fflush(stdout);
+        return;
+    }
+
+    uint32_t now_ms = (uint32_t)(now_us / 1000);
+    if (!rollcall_ledger_note_response(&ext->rollcall_ledger, resp.rollcall_id, resp.responder_addr,
+                                       resp.round, now_ms)) {
+        return;
+    }
+
+    fprintf(stdout,
+            "{\"type\":\"rollcall_attested\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"rollcall_id\":\"0x%08X\",\"responder\":\"0x%08X\",\"round\":%u"
+            ",\"responded\":%u,\"expected\":%u}\n",
+            (unsigned long long)now_us, rx->id, resp.rollcall_id, resp.responder_addr,
+            (unsigned)resp.round, (unsigned)rollcall_ledger_responded_count(&ext->rollcall_ledger),
+            (unsigned)ext->rollcall_ledger.expected_count);
+    fflush(stdout);
+}
+
 static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint32_t pkt_src_addr,
                          int8_t rssi, int8_t snr, uint64_t now_us, uint32_t now_ms,
                          node_array_t* nodes, radio_config_t* radio, pcg32_state_t* rng,
@@ -1506,6 +1698,22 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
                 bridge_send_broadcast_delivery_receipt(rx, orig_sender, hdr.packet_id, nodes, rng,
                                                        events, now_us);
             }
+
+            /* Attested roll-call: an announce IS an ordinary broadcast DATA
+             * frame, so it arrives here having already passed the same auth
+             * gate, the same dedup and the same flood relay as any other
+             * broadcast, and nothing about the flood changes for it. The
+             * member simply also queues its own signed answer. */
+            const uint8_t* rc_body = NULL;
+            size_t rc_body_len = 0;
+            uint8_t rc_app = 0;
+            if (orig_sender != 0 && len > HEADER_SIZE &&
+                sim_rollcall_frame(buf + HEADER_SIZE, (size_t)(len - HEADER_SIZE), &rc_app,
+                                   &rc_body, &rc_body_len) &&
+                rc_app == APP_TYPE_ROLLCALL) {
+                bridge_rollcall_handle_announce(rx, nodes, orig_sender, rc_body, rc_body_len,
+                                                now_us, rng, events);
+            }
         }
         return;
     }
@@ -1562,6 +1770,27 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
         if (!crypto_ok) {
             emit_packet_dropped(stdout, now_us, rx->id, "crypto_auth_fail");
             return;
+        }
+
+        /* Attested roll-call: a member's answer comes home as an ordinary
+         * unicast DATA frame, so it is already decrypted by the block above.
+         * Recording it does NOT short-circuit the rest of this branch: the
+         * delivery receipt below is the transport confirmation firmware
+         * sends whatever the signature said, and withholding it would only
+         * burn the responder's retries re-sending an answer already held. */
+        {
+            size_t rc_pt_len = (payload_len > (BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE))
+                                   ? payload_len - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE
+                                   : 0;
+            const uint8_t* rc_body = NULL;
+            size_t rc_body_len = 0;
+            uint8_t rc_app = 0;
+            if (rc_pt_len > 0 && orig_sender != 0 &&
+                sim_rollcall_frame(decrypted_payload, rc_pt_len, &rc_app, &rc_body, &rc_body_len) &&
+                rc_app == APP_TYPE_ROLLCALL_REPLY) {
+                bridge_rollcall_handle_response(rx, nodes, orig_sender, rc_body, rc_body_len,
+                                                now_us);
+            }
         }
 
         /* Fragment reassembly (Phase 4): check if payload has frag header */
@@ -2113,6 +2342,74 @@ static void sim_build_nonce(uint32_t src_addr, uint32_t counter, uint8_t* nonce)
     crypto_random(nonce + 8, 4);
 }
 
+/*
+ * Originate a reactive route discovery for dest_addr when the discovery
+ * cadence says one is due, and report whether an RREQ went out.
+ *
+ * Shared by every unicast origination that may face an unknown destination:
+ * scripted message sends and the roll-call answer a member owes its
+ * initiator. Firmware runs ONE discovery path for all of them (mesh_send_
+ * message -> initiate_discovery), so the sim must not grow a second one.
+ *
+ * Cadence mirrors firmware exactly: the first RREQ for a destination passes
+ * rreq_rate_allow, retries are throttled only by discovery_should_retry's
+ * own backoff (5s then 15s) under a fresh query_id and an expanded hop ring,
+ * and an exhausted discovery is abandoned so a later send can start a fresh
+ * one.
+ */
+static bool bridge_maybe_discover(sim_node_t* src, uint32_t dest_addr, uint32_t now_ms,
+                                  node_array_t* nodes, radio_config_t* radio, pcg32_state_t* rng,
+                                  event_queue_t* events, metrics_state_t* metrics,
+                                  node_anomaly_tracker_t* anomaly, uint64_t now_us) {
+    pending_discovery_t* pd = discovery_lookup(&src->pending_discoveries, dest_addr);
+    bool should_send_rreq = false;
+    if (!pd) {
+        /* Fresh discovery origination: same decision point and gate as
+         * firmware's initiate_discovery (main/mesh_task.c:4320-4322).
+         * Discovery retries (the branch below and node_tick's discovery
+         * retry check) are NOT rate-limited in firmware either: only the
+         * first RREQ for a dest goes through rreq_rate_allow; retries are
+         * throttled by their own discovery_should_retry backoff cadence. */
+        if (!rreq_rate_allow(&src->rreq_rate, src->addr, dest_addr, now_ms)) {
+            src->rreq_rate_denied++;
+        } else {
+            uint32_t query_id = pcg32_random(rng);
+            discovery_start(&src->pending_discoveries, dest_addr, query_id, now_ms);
+            should_send_rreq = true;
+        }
+    } else if (discovery_should_retry(pd, now_ms)) {
+        discovery_record_attempt(pd, pcg32_random(rng), now_ms);
+        should_send_rreq = true;
+    } else if (pd->attempts >= MAX_RREQ_ATTEMPTS &&
+               (now_ms - pd->timestamp) > RREQ_RETRY_INTERVAL_2_MS) {
+        /* Exhausted: abandon so a later send can start a fresh discovery */
+        discovery_remove(&src->pending_discoveries, dest_addr);
+    }
+
+    if (!should_send_rreq)
+        return false;
+
+    pd = discovery_lookup(&src->pending_discoveries, dest_addr);
+    bramble_rreq_t rreq =
+        rreq_build_originator(src->addr, dest_addr, discovery_current_query_id(pd), src->addr,
+                              discovery_hop_limit_for_attempt(pd->attempts));
+
+    outbound_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    bramble_rreq_serialize(&rreq, pkt.data, RREQ_SIZE);
+    pkt.len = RREQ_SIZE;
+    pkt.is_broadcast = true;
+    pkt.dest_addr = 0xFFFFFFFF;
+    pkt.pkt_type = PKT_TYPE_RREQ;
+
+    /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. */
+    budget_gated_send(src, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics, now_us);
+
+    int src_idx = (int)(src - nodes->nodes);
+    anomaly_check_rreq_retx(&anomaly[src_idx].rreq_retx, dest_addr, now_us, stdout, src->id);
+    return true;
+}
+
 void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
                                     pcg32_state_t* rng, event_queue_t* events,
                                     metrics_state_t* metrics, node_anomaly_tracker_t* anomaly,
@@ -2236,55 +2533,8 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
          * abandoned. The message-level retry below stands in for the
          * firmware's queued-message store and can start a fresh discovery
          * once the failed one is removed. */
-        pending_discovery_t* pd = discovery_lookup(&src->pending_discoveries, dest_addr);
-        bool should_send_rreq = false;
-        if (!pd) {
-            /* Fresh discovery origination: same decision point and gate as
-             * firmware's initiate_discovery (main/mesh_task.c:4320-4322).
-             * Discovery retries (the branch below and node_tick's discovery
-             * retry check) are NOT rate-limited in firmware either: only the
-             * first RREQ for a dest goes through rreq_rate_allow; retries are
-             * throttled by their own discovery_should_retry backoff cadence. */
-            if (!rreq_rate_allow(&src->rreq_rate, src->addr, dest_addr, now_ms)) {
-                src->rreq_rate_denied++;
-            } else {
-                uint32_t query_id = pcg32_random(rng);
-                discovery_start(&src->pending_discoveries, dest_addr, query_id, now_ms);
-                should_send_rreq = true;
-            }
-        } else if (discovery_should_retry(pd, now_ms)) {
-            discovery_record_attempt(pd, pcg32_random(rng), now_ms);
-            should_send_rreq = true;
-        } else if (pd->attempts >= MAX_RREQ_ATTEMPTS &&
-                   (now_ms - pd->timestamp) > RREQ_RETRY_INTERVAL_2_MS) {
-            /* Exhausted: abandon so a later send can start a fresh discovery */
-            discovery_remove(&src->pending_discoveries, dest_addr);
-        }
-
-        if (should_send_rreq) {
-            pd = discovery_lookup(&src->pending_discoveries, dest_addr);
-            bramble_rreq_t rreq =
-                rreq_build_originator(src->addr, dest_addr, discovery_current_query_id(pd),
-                                      src->addr, discovery_hop_limit_for_attempt(pd->attempts));
-
-            outbound_packet_t pkt;
-            memset(&pkt, 0, sizeof(pkt));
-            bramble_rreq_serialize(&rreq, pkt.data, RREQ_SIZE);
-            pkt.len = RREQ_SIZE;
-            pkt.is_broadcast = true;
-            pkt.dest_addr = 0xFFFFFFFF;
-            pkt.pkt_type = PKT_TYPE_RREQ;
-
-            /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. */
-            budget_gated_send(src, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
+        bridge_maybe_discover(src, dest_addr, now_ms, nodes, radio, rng, events, metrics, anomaly,
                               event->timestamp_us);
-
-            {
-                int src_idx = (int)(src - nodes->nodes);
-                anomaly_check_rreq_retx(&anomaly[src_idx].rreq_retx, dest_addr, event->timestamp_us,
-                                        stdout, src->id);
-            }
-        }
 
         sim_event_t retry = *event;
         retry.timestamp_us += 1500000ULL;
@@ -2963,4 +3213,439 @@ void bridge_init(void) {
                 g_pub_channels[0].channel_id, g_pub_channels[0].epoch);
         fflush(stdout);
     }
+}
+
+/* ─── Attested roll-call: origination, rounds and the staggered answer ─── */
+
+/*
+ * The expected set: the addresses this node holds ANCHOR-CERTIFIED pins for,
+ * mirroring mesh_rollcall.c's rollcall_collect_expected. On an un-anchored
+ * node this returns 0 and reports anchored=false, so the ledger describes
+ * observed responders only and names nobody missing.
+ */
+static uint8_t bridge_rollcall_expected(const bridge_node_ext_t* ext, uint32_t self_addr,
+                                        uint32_t* out, uint8_t out_cap, bool* anchored_out) {
+    *anchored_out = ext->ident_pins.has_anchor;
+    if (!ext->ident_pins.has_anchor)
+        return 0;
+
+    uint8_t n = 0;
+    for (int i = 0; i < IDENTITY_STORE_CAPACITY && n < out_cap; i++) {
+        const identity_pin_t* p = &ext->ident_pins.entries[i];
+        if (!p->used || p->address == self_addr)
+            continue;
+        out[n++] = p->address;
+    }
+    return n;
+}
+
+/*
+ * Put one announce round on the air: an ordinary broadcast DATA frame on the
+ * BROADCAST airtime lane, tracked in msg_track so every relay resolves the
+ * true originator exactly like any other flood. Returns the packet_id, or 0
+ * when the budget-gated TX refused it (a roll-call yields to airtime like
+ * all other traffic).
+ */
+static uint32_t bridge_rollcall_send_round(sim_node_t* src, bridge_node_ext_t* ext, uint8_t round,
+                                           node_array_t* nodes, radio_config_t* radio,
+                                           pcg32_state_t* rng, event_queue_t* events,
+                                           metrics_state_t* metrics, msg_tracker_t* msg_track,
+                                           int msg_track_count, uint64_t now_us) {
+    rollcall_announce_t ann;
+    memset(&ann, 0, sizeof(ann));
+    ann.rollcall_id = ext->rollcall_ledger.rollcall_id;
+    ann.round = round;
+    ann.text_len = ext->rollcall_ledger.text_len;
+    memcpy(ann.text, ext->rollcall_ledger.text, ext->rollcall_ledger.text_len);
+
+    uint8_t inner[ROLLCALL_ANNOUNCE_MAX_SIZE];
+    size_t inner_len = rollcall_announce_encode(&ann, inner, sizeof(inner));
+    if (inner_len == 0)
+        return 0;
+
+    bramble_header_t hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.version = BRAMBLE_VERSION;
+    hdr.type = PKT_TYPE_DATA;
+    hdr.flags = 0;
+    hdr.hop_limit = flood_origination_hop_limit(g_flood_transport_enabled, g_flood_hop_limit);
+    hdr.dest_addr = 0xFFFFFFFF;
+    hdr.packet_id = pcg32_random(rng);
+
+    bridge_msg_track_add(msg_track, msg_track_count, hdr.packet_id, src->addr, 0xFFFFFFFF, now_us);
+
+    outbound_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    bramble_header_serialize(&hdr, pkt.data, HEADER_SIZE);
+    memcpy(pkt.data + HEADER_SIZE, g_sim_rollcall_magic, SIM_ROLLCALL_MAGIC_LEN);
+    pkt.data[HEADER_SIZE + SIM_ROLLCALL_MAGIC_LEN] = APP_TYPE_ROLLCALL;
+    memcpy(pkt.data + HEADER_SIZE + SIM_ROLLCALL_HDR, inner, inner_len);
+    pkt.len = (uint16_t)(HEADER_SIZE + SIM_ROLLCALL_HDR + inner_len);
+    pkt.is_broadcast = true;
+    pkt.dest_addr = 0xFFFFFFFF;
+    pkt.pkt_type = PKT_TYPE_DATA;
+
+    /* tx_gate_kind_tier: TX_KIND_DATA_BROADCAST -> AIRTIME_TIER_BROADCAST. */
+    if (!budget_gated_send(src, &pkt, AIRTIME_TIER_BROADCAST, nodes, radio, rng, events, metrics,
+                           now_us)) {
+        metrics_record_packet_dropped(metrics);
+        emit_packet_dropped(stdout, now_us, src->id, "airtime_budget");
+        return 0;
+    }
+    src->packets_originated++;
+
+    fprintf(stdout,
+            "{\"type\":\"rollcall_announce\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"rollcall_id\":\"0x%08X\",\"round\":%u,\"packet_id\":\"0x%08X\"}\n",
+            (unsigned long long)now_us, src->id, ext->rollcall_ledger.rollcall_id, (unsigned)round,
+            hdr.packet_id);
+    fflush(stdout);
+    return hdr.packet_id;
+}
+
+/* Schedule whatever comes after the round just sent: the next re-announce,
+ * or the close sweep once the last round is out. Both ride the same
+ * EVT_ROLLCALL_ROUND, and both times come from the REAL schedule functions,
+ * so the sim can never run a window the firmware does not honor. */
+static void bridge_rollcall_schedule_next(sim_node_t* src, bridge_node_ext_t* ext, uint8_t round,
+                                          uint64_t now_us, event_queue_t* events) {
+    uint32_t next_delay_ms = rollcall_round_delay_ms(round);
+    if (next_delay_ms > 0) {
+        bridge_schedule_rollcall_round(src->addr, (uint8_t)(round + 1),
+                                       now_us + (uint64_t)next_delay_ms * 1000ULL, events);
+        return;
+    }
+    /* The close is an ABSOLUTE deadline the ledger already knows (start plus
+     * rollcall_window_ms), not a delay from this round, so a round the
+     * budget refused cannot stretch the collection window. The sim's
+     * millisecond clock is now_us/1000, so the ledger's ms deadline converts
+     * straight back. */
+    uint64_t close_us = (uint64_t)rollcall_ledger_close_at(&ext->rollcall_ledger) * 1000ULL;
+    if (close_us < now_us)
+        close_us = now_us;
+    bridge_schedule_rollcall_round(src->addr, 0, close_us, events);
+}
+
+void bridge_handle_generate_rollcall(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                                     pcg32_state_t* rng, event_queue_t* events,
+                                     metrics_state_t* metrics, msg_tracker_t* msg_track,
+                                     int msg_track_count) {
+    sim_node_t* src = node_array_find_by_id(nodes, event->data.rollcall.node_id);
+    if (!src || !src->active)
+        return;
+    bridge_node_ext_t* ext = bridge_node_ext_get((int)(src - nodes->nodes));
+    if (!ext)
+        return;
+
+    /* Mandatory-provisioning (Task 2): an unprovisioned node is INERT, same
+     * gate as generate_message/generate_attestation/generate_location. */
+    if (!ext->provisioned) {
+        fprintf(stdout,
+                "{\"type\":\"unprovisioned_inert\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"frame\":\"rollcall\"}\n",
+                (unsigned long long)event->timestamp_us, src->id);
+        fflush(stdout);
+        return;
+    }
+
+    uint64_t now_us = event->timestamp_us;
+    uint32_t now_ms = (uint32_t)(now_us / 1000);
+
+    /* The REAL initiation rate limit, not a sim-local one: a scenario that
+     * scripts two roll-calls five seconds apart gets the same refusal an
+     * operator would. */
+    bool ledger_open = ext->rollcall_ledger.active && ext->rollcall_ledger.open;
+    rollcall_start_check_t check = rollcall_rate_check(&ext->rollcall_rate, ledger_open, now_ms);
+    if (check != ROLLCALL_START_OK) {
+        fprintf(stdout,
+                "{\"type\":\"rollcall_refused\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"reason\":\"%s\"}\n",
+                (unsigned long long)now_us, src->id,
+                (check == ROLLCALL_START_BUSY) ? "busy" : "rate_limited");
+        fflush(stdout);
+        return;
+    }
+
+    uint32_t id = pcg32_random(rng);
+    if (id == 0)
+        id = 1; /* 0 is the reserved "no roll-call" value on the wire */
+
+    uint32_t expected[ROLLCALL_MAX_EXPECTED];
+    bool anchored = false;
+    uint8_t expected_count =
+        bridge_rollcall_expected(ext, src->addr, expected, ROLLCALL_MAX_EXPECTED, &anchored);
+
+    size_t text_len = strlen(event->data.rollcall.text);
+    if (!rollcall_ledger_start(&ext->rollcall_ledger, id, src->addr, now_ms,
+                               event->data.rollcall.text, (uint8_t)text_len, expected,
+                               expected_count, anchored)) {
+        return;
+    }
+
+    if (bridge_rollcall_send_round(src, ext, 1, nodes, radio, rng, events, metrics, msg_track,
+                                   msg_track_count, now_us) == 0) {
+        /* Nothing reached the air, so nothing is owed an answer: retire the
+         * ledger and do NOT charge the rate limiter, exactly as
+         * mesh_rollcall_start does. */
+        rollcall_ledger_init(&ext->rollcall_ledger);
+        fprintf(stdout,
+                "{\"type\":\"rollcall_refused\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"reason\":\"not_transmitted\"}\n",
+                (unsigned long long)now_us, src->id);
+        fflush(stdout);
+        return;
+    }
+
+    rollcall_rate_note_start(&ext->rollcall_rate, now_ms);
+    rollcall_ledger_note_round(&ext->rollcall_ledger, 1, now_ms);
+    bridge_rollcall_schedule_next(src, ext, 1, now_us, events);
+
+    fprintf(stdout,
+            "{\"type\":\"rollcall_started\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"rollcall_id\":\"0x%08X\",\"expected\":%u,\"anchored\":%s"
+            ",\"window_ms\":%u}\n",
+            (unsigned long long)now_us, src->id, id, (unsigned)ext->rollcall_ledger.expected_count,
+            anchored ? "true" : "false", (unsigned)rollcall_window_ms());
+    fflush(stdout);
+}
+
+void bridge_handle_rollcall_round(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                                  pcg32_state_t* rng, event_queue_t* events,
+                                  metrics_state_t* metrics, msg_tracker_t* msg_track,
+                                  int msg_track_count) {
+    sim_node_t* src = node_array_find_by_addr(nodes, event->data.rollcall_slot.node_addr);
+    if (!src || !src->active)
+        return;
+    bridge_node_ext_t* ext = bridge_node_ext_get((int)(src - nodes->nodes));
+    if (!ext || !ext->rollcall_ledger.active)
+        return;
+
+    uint64_t now_us = event->timestamp_us;
+    uint32_t now_ms = (uint32_t)(now_us / 1000);
+    uint8_t round = event->data.rollcall_slot.round;
+
+    if (round >= 1) {
+        if (!rollcall_ledger_round_due(&ext->rollcall_ledger, now_ms))
+            return;
+        /* A refused round still advances the schedule: the round count is a
+         * hard airtime bound, and retrying a round the budget refused would
+         * spend exactly the airtime the refusal protected. */
+        bridge_rollcall_send_round(src, ext, round, nodes, radio, rng, events, metrics, msg_track,
+                                   msg_track_count, now_us);
+        rollcall_ledger_note_round(&ext->rollcall_ledger, round, now_ms);
+        bridge_rollcall_schedule_next(src, ext, round, now_us, events);
+        return;
+    }
+
+    /* round == 0: the close sweep. */
+    if (!rollcall_ledger_maybe_close(&ext->rollcall_ledger, now_ms))
+        return;
+
+    uint32_t missing[ROLLCALL_MAX_EXPECTED];
+    uint8_t missing_count =
+        rollcall_ledger_missing(&ext->rollcall_ledger, missing, ROLLCALL_MAX_EXPECTED);
+
+    fprintf(stdout,
+            "{\"type\":\"rollcall_complete\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"rollcall_id\":\"0x%08X\",\"responded\":%u,\"expected\":%u"
+            ",\"anchored\":%s,\"rounds\":%u,\"unattested\":%u,\"missing_count\":%u,\"missing\":[",
+            (unsigned long long)now_us, src->id, ext->rollcall_ledger.rollcall_id,
+            (unsigned)rollcall_ledger_responded_count(&ext->rollcall_ledger),
+            (unsigned)ext->rollcall_ledger.expected_count,
+            ext->rollcall_ledger.anchored ? "true" : "false",
+            (unsigned)ext->rollcall_ledger.rounds_sent, (unsigned)ext->rollcall_ledger.unattested,
+            (unsigned)missing_count);
+    for (uint8_t i = 0; i < missing_count && i < ROLLCALL_MAX_EXPECTED; i++) {
+        fprintf(stdout, "%s\"0x%08X\"", (i > 0) ? "," : "", missing[i]);
+    }
+    fprintf(stdout, "]}\n");
+    fflush(stdout);
+}
+
+void bridge_handle_rollcall_tx(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                               pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics,
+                               node_anomaly_tracker_t* anomaly, msg_tracker_t* msg_track,
+                               int msg_track_count) {
+    sim_node_t* src = node_array_find_by_addr(nodes, event->data.rollcall_slot.node_addr);
+    if (!src || !src->active)
+        return;
+    bridge_node_ext_t* ext = bridge_node_ext_get((int)(src - nodes->nodes));
+    if (!ext)
+        return;
+
+    int slot = event->data.rollcall_slot.slot;
+    if (slot < 0 || slot >= ROLLCALL_PENDING_MAX || !ext->rollcall_pending[slot].used)
+        return;
+
+    uint64_t now_us = event->timestamp_us;
+    uint32_t now_ms = (uint32_t)(now_us / 1000);
+    uint32_t dest_addr = ext->rollcall_pending[slot].initiator_addr;
+
+    /*
+     * A member that only heard the broadcast announce holds no route home
+     * (data_rx_decide installs no reverse route off a broadcast, on purpose)
+     * and gosim's radio delivers a unicast only to the addressed next hop,
+     * so the answer waits behind the ORDINARY reactive discovery on the same
+     * 1.5s cadence a scripted message send uses. It keeps trying until the
+     * initiator's ledger would close: an answer landing after that is
+     * counted late and changes nothing, and a member that never finds a
+     * route is simply reported missing, which is the honest outcome.
+     *
+     * Firmware does not gate its answer on a route (mesh_rollcall.c hands
+     * the frame straight to send_data_packet, and the relay that hears it
+     * resolves the next hop from its OWN table). Gosim cannot express that
+     * under reactive routing: its radio model addresses a unicast to one
+     * next hop rather than letting every in-range node hear it and decide.
+     * Under flood transport there is no next hop to resolve, so the answer
+     * goes out immediately, exactly as firmware's does.
+     */
+    route_entry_t* route = g_flood_transport_enabled ? NULL : route_lookup(&src->routes, dest_addr);
+    if (!g_flood_transport_enabled &&
+        (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING)) {
+        uint64_t next_try_us = now_us + 1500000ULL;
+        if (next_try_us >= ext->rollcall_pending[slot].deadline_us) {
+            fprintf(stdout,
+                    "{\"type\":\"rollcall_answer_dropped\",\"timestamp_us\":%llu"
+                    ",\"node\":\"%s\",\"rollcall_id\":\"0x%08X\",\"reason\":\"no_route\"}\n",
+                    (unsigned long long)now_us, src->id, ext->rollcall_pending[slot].rollcall_id);
+            fflush(stdout);
+            memset(&ext->rollcall_pending[slot], 0, sizeof(ext->rollcall_pending[slot]));
+            return;
+        }
+        bridge_maybe_discover(src, dest_addr, now_ms, nodes, radio, rng, events, metrics, anomaly,
+                              now_us);
+        ext->rollcall_pending[slot].due_us = next_try_us;
+        bridge_schedule_rollcall_tx(src->addr, slot, ext->rollcall_pending[slot].due_us, events);
+        return;
+    }
+
+    rollcall_response_t resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.rollcall_id = ext->rollcall_pending[slot].rollcall_id;
+    resp.round = ext->rollcall_pending[slot].round;
+    resp.responder_addr = src->addr;
+
+    uint8_t signed_msg[ROLLCALL_MSG_SIZE];
+    if (rollcall_signed_msg(resp.rollcall_id, dest_addr, src->addr, signed_msg,
+                            sizeof(signed_msg)) == 0 ||
+        crypto_ed25519_sign(src->ident_ed_priv, signed_msg, sizeof(signed_msg), resp.sig) != 0) {
+        memset(&ext->rollcall_pending[slot], 0, sizeof(ext->rollcall_pending[slot]));
+        return;
+    }
+
+    uint8_t plain[SIM_ROLLCALL_HDR + ROLLCALL_RESPONSE_SIZE];
+    memcpy(plain, g_sim_rollcall_magic, SIM_ROLLCALL_MAGIC_LEN);
+    plain[SIM_ROLLCALL_MAGIC_LEN] = APP_TYPE_ROLLCALL_REPLY;
+    if (rollcall_response_encode(&resp, plain + SIM_ROLLCALL_HDR, ROLLCALL_RESPONSE_SIZE) == 0) {
+        memset(&ext->rollcall_pending[slot], 0, sizeof(ext->rollcall_pending[slot]));
+        return;
+    }
+
+    uint8_t hop_limit = flood_origination_hop_limit(g_flood_transport_enabled, g_flood_hop_limit);
+    forward_result_t fwd_res;
+    if (g_flood_transport_enabled) {
+        memset(&fwd_res, 0, sizeof(fwd_res));
+        fwd_res.should_send = true;
+        fwd_res.next_hop = 0xFFFFFFFF;
+    } else {
+        fwd_res = forward_data(&src->routes, dest_addr, &hop_limit, now_ms);
+    }
+    if (!fwd_res.should_send) {
+        memset(&ext->rollcall_pending[slot], 0, sizeof(ext->rollcall_pending[slot]));
+        return;
+    }
+
+    bramble_header_t hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.version = BRAMBLE_VERSION;
+    hdr.type = PKT_TYPE_DATA;
+    hdr.flags = 0;
+    hdr.hop_limit = hop_limit;
+    hdr.dest_addr = dest_addr;
+    hdr.packet_id = pcg32_random(rng);
+
+    /* Pair-key encrypted like every other unicast DATA in the sim, so the
+     * answer reaches the initiator's ledger through the same decrypt path a
+     * chat message takes rather than a roll-call-only shortcut. */
+    uint8_t frame[256];
+    bramble_header_serialize(&hdr, frame, HEADER_SIZE);
+    uint16_t total_len = HEADER_SIZE;
+
+    uint8_t key[BRAMBLE_KEY_SIZE];
+    derive_pair_key(src->addr, dest_addr, key);
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    sim_build_nonce(src->addr, src->crypto_counter++, nonce);
+    uint8_t aad[HEADER_SIZE];
+    bramble_header_build_aad(&hdr, aad, sizeof(aad));
+
+    memcpy(frame + total_len, nonce, BRAMBLE_NONCE_SIZE);
+    total_len += BRAMBLE_NONCE_SIZE;
+
+    uint8_t tag[BRAMBLE_TAG_SIZE];
+    uint8_t ciphertext[sizeof(plain)];
+    if (crypto_aes256gcm_encrypt(key, nonce, plain, sizeof(plain), aad, HEADER_SIZE, ciphertext,
+                                 tag) != 0) {
+        memset(&ext->rollcall_pending[slot], 0, sizeof(ext->rollcall_pending[slot]));
+        return;
+    }
+    memcpy(frame + total_len, tag, BRAMBLE_TAG_SIZE);
+    total_len += BRAMBLE_TAG_SIZE;
+    memcpy(frame + total_len, ciphertext, sizeof(plain));
+    total_len += (uint16_t)sizeof(plain);
+    metrics->crypto_encrypted++;
+
+    bridge_msg_track_add(msg_track, msg_track_count, hdr.packet_id, src->addr, dest_addr, now_us);
+
+    outbound_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    memcpy(pkt.data, frame, total_len);
+    pkt.len = total_len;
+    pkt.is_broadcast = g_flood_transport_enabled;
+    pkt.dest_addr = g_flood_transport_enabled ? 0xFFFFFFFF : fwd_res.next_hop;
+    pkt.pkt_type = PKT_TYPE_DATA;
+
+    /* tx_gate_kind_tier: TX_KIND_DATA -> AIRTIME_TIER_NORMAL, the same lane
+     * firmware's MSG_TIER_NORMAL unicast answer debits. */
+    if (!budget_gated_send(src, &pkt, AIRTIME_TIER_NORMAL, nodes, radio, rng, events, metrics,
+                           now_us)) {
+        metrics_record_packet_dropped(metrics);
+        emit_packet_dropped(stdout, now_us, src->id, "airtime_budget");
+        memset(&ext->rollcall_pending[slot], 0, sizeof(ext->rollcall_pending[slot]));
+        return;
+    }
+    src->packets_originated++;
+
+    /* The answer inherits the shipped retry ladder rather than growing one of
+     * its own, exactly like firmware's send_data_packet registering it in the
+     * pending-ACK table at MSG_TIER_NORMAL. */
+    pending_ack_add(&src->pending_acks, hdr.packet_id, dest_addr, MSG_TIER_NORMAL, pkt.data,
+                    pkt.len, now_ms);
+
+    fprintf(stdout,
+            "{\"type\":\"rollcall_answered\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"rollcall_id\":\"0x%08X\",\"to\":\"0x%08X\",\"round\":%u"
+            ",\"packet_id\":\"0x%08X\"}\n",
+            (unsigned long long)now_us, src->id, resp.rollcall_id, dest_addr, (unsigned)resp.round,
+            hdr.packet_id);
+    fflush(stdout);
+
+    memset(&ext->rollcall_pending[slot], 0, sizeof(ext->rollcall_pending[slot]));
+}
+
+const rollcall_ledger_t* bridge_rollcall_ledger(node_array_t* nodes, const char* node_id) {
+    sim_node_t* node = node_array_find_by_id(nodes, node_id);
+    if (!node)
+        return NULL;
+    bridge_node_ext_t* ext = bridge_node_ext_get((int)(node - nodes->nodes));
+    if (!ext || !ext->rollcall_ledger.active)
+        return NULL;
+    return &ext->rollcall_ledger;
+}
+
+uint32_t bridge_rollcall_pending_dropped(node_array_t* nodes, const char* node_id) {
+    sim_node_t* node = node_array_find_by_id(nodes, node_id);
+    if (!node)
+        return 0;
+    bridge_node_ext_t* ext = bridge_node_ext_get((int)(node - nodes->nodes));
+    return ext ? ext->rollcall_pending_dropped : 0;
 }

@@ -68,6 +68,15 @@
  * roll-calls a node might see in flight at once (in practice one). */
 #define ROLLCALL_SEEN_MAX 8
 
+/* Answers a member may owe at once, one per concurrent INITIATOR: a member
+ * answers a given roll-call at most once (rollcall_seen_claim), so this
+ * queue only ever holds roll-calls from different initiators. Two is the
+ * honest bound; a third concurrent initiator is refused and counted rather
+ * than silently displacing an answer already owed. Lives here rather than in
+ * the firmware glue so the simulator's member state is sized by the same
+ * constant. */
+#define ROLLCALL_PENDING_MAX 2
+
 /* ── Wire ────────────────────────────────────────────────────────────── */
 
 /*

@@ -443,6 +443,17 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 		// through the real firmware C path in bridge.c, same rationale as
 		// attestations above.
 		s.handleGenerateLocation(evt)
+	case C.EVT_GENERATE_ROLLCALL:
+		// Attested roll-call: a scripted initiation, driven through the
+		// real components/rollcall core in bridge.c (same rationale as
+		// attestations above: there is no Go-model equivalent).
+		s.handleGenerateRollCall(evt)
+	case C.EVT_ROLLCALL_ROUND:
+		// One re-announce round, or the close sweep after the last one.
+		s.handleRollCallRound(evt)
+	case C.EVT_ROLLCALL_TX:
+		// One member's staggered, identity-signed answer has come due.
+		s.handleRollCallTx(evt)
 	}
 }
 
@@ -509,6 +520,30 @@ func (s *Sim) handleGenerateAttestation(evt *C.sim_event_t) {
 // in-range receiver caches it via the real location_cache_update.
 func (s *Sim) handleGenerateLocation(evt *C.sim_event_t) {
 	C.bridge_handle_generate_location(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
+}
+
+// handleGenerateRollCall starts a scripted attested roll-call: the real
+// initiation rate limit, the real ledger, and round 1 flooded as an ordinary
+// broadcast DATA frame on the BROADCAST airtime lane.
+func (s *Sim) handleGenerateRollCall(evt *C.sim_event_t) {
+	C.bridge_handle_generate_rollcall(evt, &s.nodes, &s.radio, &s.rng, &s.events,
+		&s.metrics, &s.msgTrack[0], C.MAX_MSG_TRACK)
+}
+
+// handleRollCallRound fires one due re-announce round, or (round 0) the close
+// sweep that shuts the ledger and reports who answered.
+func (s *Sim) handleRollCallRound(evt *C.sim_event_t) {
+	C.bridge_handle_rollcall_round(evt, &s.nodes, &s.radio, &s.rng, &s.events,
+		&s.metrics, &s.msgTrack[0], C.MAX_MSG_TRACK)
+}
+
+// handleRollCallTx fires one member's staggered answer: signed with that
+// node's real Ed25519 identity key and unicast home on the NORMAL lane,
+// waiting behind ordinary reactive route discovery when the member holds no
+// route to the initiator.
+func (s *Sim) handleRollCallTx(evt *C.sim_event_t) {
+	C.bridge_handle_rollcall_tx(evt, &s.nodes, &s.radio, &s.rng, &s.events,
+		&s.metrics, &s.anomaly[0], &s.msgTrack[0], C.MAX_MSG_TRACK)
 }
 
 // handleProvisionAnchor (trust-anchor campaign P2 red-team): a scripted runtime
