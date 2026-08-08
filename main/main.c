@@ -83,6 +83,7 @@ int emu_node_seed_location_share_from_env(void);
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
 /* lvgl.h not directly included, use ui_graphics API */
 #include "ui_graphics.h"
+#include "ui_pairing.h"
 #endif
 
 static const char* TAG = "bramble";
@@ -1152,6 +1153,31 @@ static void ui_graphics_task(void* arg) {
         vTaskDelay(pdMS_TO_TICKS(delay));
     }
 }
+#else
+static bool board_has_display_for_pairing(void) {
+    /* SSD1306 OLED (Heltec) can show a pairing code. E-paper (Pager) has
+     * seconds-scale refresh and its boards do not enable BLE; treat it as
+     * displayless if that combination ever exists. */
+    return board_has_cap(BOARD_CAP_DISPLAY_SSD1306);
+}
+
+/* Marshals the NimBLE-task passkey callback into the text UI state machine.
+ * The UI state is owned by the main loop task; latch here, apply there.
+ * Packed into one word with atomic store/exchange (acquire/release) rather
+ * than separate volatiles, matching ui_pairing.c's s_pending / ui_graphics.c's
+ * s_pending_events cross-task handoff idiom: a plain aligned load/store
+ * cannot tear, but only the atomic ops add the ordering guarantee. */
+#define BLE_PASSKEY_PENDING_VALID_BIT (1u << 31)
+#define BLE_PASSKEY_PENDING_SHOW_BIT (1u << 30)
+#define BLE_PASSKEY_PENDING_CODE_MASK 0x000FFFFFu /* passkey is 0..999999, fits in 20 bits */
+static uint32_t s_ble_passkey_pending;
+
+static void main_ble_passkey_cb(uint32_t passkey, bool show) {
+    uint32_t packed = BLE_PASSKEY_PENDING_VALID_BIT | (passkey & BLE_PASSKEY_PENDING_CODE_MASK);
+    if (show)
+        packed |= BLE_PASSKEY_PENDING_SHOW_BIT;
+    __atomic_store_n(&s_ble_passkey_pending, packed, __ATOMIC_RELEASE);
+}
 #endif
 
 void app_main(void) {
@@ -1642,6 +1668,17 @@ void app_main(void) {
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
         show_boot_status("BLE: starting...");
 #endif
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+        /* T-Deck: random pairing code rendered by the LVGL modal. Registered
+         * before init so the SM policy resolves to passkey-display from the
+         * first pairing attempt. ui_pairing only latches the request until
+         * the LVGL task is up, so the early registration is safe. */
+        ble_server_set_passkey_display_cb(ui_pairing_passkey_cb);
+#else
+        if (board_has_display_for_pairing()) {
+            ble_server_set_passkey_display_cb(main_ble_passkey_cb);
+        }
+#endif
         if (ble_server_init() == 0) {
             /* RF subsystem up: esp_random() now reseeds from the RF entropy source. */
             crypto_entropy_set_ready(true);
@@ -1924,6 +1961,20 @@ void app_main(void) {
             ui.node_verify_confirmed = false;
             if (s_nodes_detail_valid)
                 mesh_set_peer_verified(s_nodes_detail_addr, true);
+        }
+
+        /* Drain a passkey display/hide request latched by main_ble_passkey_cb
+         * on the NimBLE host task. Applying it here (main loop task, which
+         * owns ui state) rather than in the callback keeps ui_show_ble_passkey
+         * / ui_clear_ble_passkey single-threaded. */
+        uint32_t ble_passkey_pending =
+            __atomic_exchange_n(&s_ble_passkey_pending, 0, __ATOMIC_ACQ_REL);
+        if (ble_passkey_pending & BLE_PASSKEY_PENDING_VALID_BIT) {
+            if (ble_passkey_pending & BLE_PASSKEY_PENDING_SHOW_BIT) {
+                ui_show_ble_passkey(&ui, ble_passkey_pending & BLE_PASSKEY_PENDING_CODE_MASK);
+            } else {
+                ui_clear_ble_passkey(&ui);
+            }
         }
 
         /* Check inactivity timeout */
