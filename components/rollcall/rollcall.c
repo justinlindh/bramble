@@ -256,6 +256,70 @@ bool rollcall_seen_claim(rollcall_seen_table_t* t, uint32_t rollcall_id, uint32_
     return true;
 }
 
+void rollcall_seen_release(rollcall_seen_table_t* t, uint32_t rollcall_id,
+                           uint32_t initiator_addr) {
+    if (t == NULL)
+        return;
+    for (int i = 0; i < ROLLCALL_SEEN_MAX; i++) {
+        if (t->entries[i].used && t->entries[i].rollcall_id == rollcall_id &&
+            t->entries[i].initiator_addr == initiator_addr) {
+            memset(&t->entries[i], 0, sizeof(t->entries[i]));
+            return;
+        }
+    }
+}
+
+/* ── Member side: the answer budget ─────────────────────────────────── */
+
+void rollcall_answer_budget_init(rollcall_answer_budget_t* b) {
+    if (b == NULL)
+        return;
+    memset(b, 0, sizeof(*b));
+}
+
+uint8_t rollcall_answer_budget_used(const rollcall_answer_budget_t* b, uint32_t now_ms) {
+    if (b == NULL)
+        return 0;
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < ROLLCALL_ANSWER_MAX_PER_HOUR; i++) {
+        /* Unsigned difference: wrap-safe across the millisecond rollover. */
+        if (b->used[i] && (now_ms - b->at_ms[i]) < ROLLCALL_ANSWER_WINDOW_MS)
+            n++;
+    }
+    return n;
+}
+
+bool rollcall_answer_budget_allow(const rollcall_answer_budget_t* b, uint32_t now_ms) {
+    if (b == NULL)
+        return false;
+    return rollcall_answer_budget_used(b, now_ms) < ROLLCALL_ANSWER_MAX_PER_HOUR;
+}
+
+void rollcall_answer_budget_note(rollcall_answer_budget_t* b, uint32_t now_ms) {
+    if (b == NULL)
+        return;
+    /* Prefer a free or already-expired slot; the array is exactly the cap, so
+     * one exists whenever allow() said yes. The oldest-by-age fallback keeps
+     * the function total for a caller that skipped the check rather than
+     * leaving the newest answer unrecorded. */
+    uint8_t oldest = 0;
+    uint32_t oldest_age = 0;
+    for (uint8_t i = 0; i < ROLLCALL_ANSWER_MAX_PER_HOUR; i++) {
+        uint32_t age = now_ms - b->at_ms[i];
+        if (!b->used[i] || age >= ROLLCALL_ANSWER_WINDOW_MS) {
+            b->used[i] = true;
+            b->at_ms[i] = now_ms;
+            return;
+        }
+        if (age >= oldest_age) {
+            oldest_age = age;
+            oldest = i;
+        }
+    }
+    b->used[oldest] = true;
+    b->at_ms[oldest] = now_ms;
+}
+
 /* ── Initiator side: the ledger ─────────────────────────────────────── */
 
 void rollcall_ledger_init(rollcall_ledger_t* l) {
@@ -340,21 +404,50 @@ bool rollcall_ledger_maybe_close(rollcall_ledger_t* l, uint32_t now_ms) {
     return true;
 }
 
-/* Find an existing row, or allocate one. Returns NULL when the table is
- * full; the caller decides which counter that is (overflow for a response,
- * a plain refusal for a path). */
-static rollcall_entry_t* entry_upsert(rollcall_ledger_t* l, uint32_t addr) {
+static rollcall_entry_t* entry_find(rollcall_ledger_t* l, uint32_t addr) {
     for (uint8_t i = 0; i < l->entry_count; i++) {
         if (l->entries[i].used && l->entries[i].addr == addr)
             return &l->entries[i];
     }
-    if (l->entry_count >= ROLLCALL_MAX_RESPONDERS)
+    return NULL;
+}
+
+/*
+ * Find an existing row, or allocate one. Returns NULL when the table is full
+ * and nothing may be taken for this caller; the caller decides which counter
+ * that is (overflow for a response, a plain refusal for a path).
+ *
+ * for_response is the priority switch. An attested answer is the ledger's
+ * output and a relay path is decoration, so when the table is full an answer
+ * reclaims a path-only row rather than being turned away. Without that rule
+ * the row an answer needs can already be occupied by a receipt that arrived
+ * first (receipts are due at 300ms plus a slot, answers at 400ms plus up to
+ * 19.5s of stagger), and a member that demonstrably answered would be
+ * reported missing.
+ */
+static rollcall_entry_t* entry_upsert(rollcall_ledger_t* l, uint32_t addr, bool for_response) {
+    rollcall_entry_t* e = entry_find(l, addr);
+    if (e != NULL)
+        return e;
+    if (l->entry_count < ROLLCALL_MAX_RESPONDERS) {
+        e = &l->entries[l->entry_count++];
+        memset(e, 0, sizeof(*e));
+        e->used = true;
+        e->addr = addr;
+        return e;
+    }
+    if (!for_response)
         return NULL;
-    rollcall_entry_t* e = &l->entries[l->entry_count++];
-    memset(e, 0, sizeof(*e));
-    e->used = true;
-    e->addr = addr;
-    return e;
+    for (uint8_t i = 0; i < l->entry_count; i++) {
+        if (l->entries[i].used && !l->entries[i].responded) {
+            e = &l->entries[i];
+            memset(e, 0, sizeof(*e));
+            e->used = true;
+            e->addr = addr;
+            return e;
+        }
+    }
+    return NULL;
 }
 
 bool rollcall_ledger_note_response(rollcall_ledger_t* l, uint32_t rollcall_id,
@@ -370,7 +463,7 @@ bool rollcall_ledger_note_response(rollcall_ledger_t* l, uint32_t rollcall_id,
         return false;
     }
 
-    rollcall_entry_t* e = entry_upsert(l, responder_addr);
+    rollcall_entry_t* e = entry_upsert(l, responder_addr, true);
     if (e == NULL) {
         l->overflow++;
         return false;
@@ -394,7 +487,8 @@ void rollcall_ledger_note_unattested(rollcall_ledger_t* l) {
 }
 
 bool rollcall_ledger_note_path(rollcall_ledger_t* l, uint32_t rollcall_id, uint32_t responder_addr,
-                               uint8_t hop_count, const uint32_t* relay_path) {
+                               bool responder_pinned, uint8_t hop_count,
+                               const uint32_t* relay_path) {
     if (l == NULL || !l->active || !l->open)
         return false;
     if (rollcall_id != l->rollcall_id)
@@ -402,7 +496,13 @@ bool rollcall_ledger_note_path(rollcall_ledger_t* l, uint32_t rollcall_id, uint3
     if (responder_addr == 0 || responder_addr == l->initiator_addr)
         return false;
 
-    rollcall_entry_t* e = entry_upsert(l, responder_addr);
+    /* Only a pinned address may open a row on the strength of a receipt; see
+     * this function's contract in rollcall.h for why an unpinned one may
+     * not. An existing row is written either way: a path that arrives for a
+     * member already in the ledger costs nothing and tells the operator how
+     * the frame travelled. */
+    rollcall_entry_t* e =
+        responder_pinned ? entry_upsert(l, responder_addr, false) : entry_find(l, responder_addr);
     if (e == NULL)
         return false;
 

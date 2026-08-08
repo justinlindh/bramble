@@ -26,6 +26,7 @@
 extern int g_rollcall_start_result;
 extern uint32_t g_rollcall_next_id;
 extern uint32_t g_rollcall_pending_dropped;
+extern uint32_t g_rollcall_answer_limited;
 extern uint32_t g_rollcall_retry_after_ms;
 extern bool g_rollcall_ledger_present;
 extern rollcall_ledger_t g_rollcall_ledger;
@@ -44,6 +45,7 @@ void setUp(void) {
     g_rollcall_start_result = MESH_ROLLCALL_OK;
     g_rollcall_next_id = 0x0000BEEF;
     g_rollcall_pending_dropped = 0;
+    g_rollcall_answer_limited = 0;
     g_rollcall_retry_after_ms = 0;
     g_rollcall_ledger_present = false;
     rollcall_ledger_init(&g_rollcall_ledger);
@@ -285,7 +287,8 @@ void test_get_reports_the_relay_path_when_a_receipt_supplied_one(void) {
     TEST_ASSERT_TRUE(
         rollcall_ledger_note_response(&g_rollcall_ledger, 0x0000BEEF, MEMBER_B, 1, 2000));
     const uint32_t path[] = {INITIATOR_ADDR, MEMBER_C, MEMBER_B};
-    TEST_ASSERT_TRUE(rollcall_ledger_note_path(&g_rollcall_ledger, 0x0000BEEF, MEMBER_B, 3, path));
+    TEST_ASSERT_TRUE(
+        rollcall_ledger_note_path(&g_rollcall_ledger, 0x0000BEEF, MEMBER_B, true, 3, path));
 
     char resp[4096];
     cJSON* j = call("bramble.getRollCall", "{}", resp, sizeof(resp));
@@ -305,11 +308,17 @@ void test_get_reports_answers_this_node_could_not_queue(void) {
      * fleet's coverage that no other node's ledger can show, so the count
      * has to surface locally. */
     g_rollcall_pending_dropped = 4;
+    /* Same reason for a node that refused because its answer budget was
+     * spent: it is the only place a fleet-wide over-ask is visible. */
+    g_rollcall_answer_limited = 7;
 
     char resp[1024];
     cJSON* j = call("bramble.getRollCall", "{}", resp, sizeof(resp));
     cJSON* res = result_of(j);
     TEST_ASSERT_EQUAL_INT(4, (int)cJSON_GetObjectItem(res, "pending_dropped")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(7, (int)cJSON_GetObjectItem(res, "answer_limited")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(ROLLCALL_ANSWER_MAX_PER_HOUR,
+                          (int)cJSON_GetObjectItem(res, "answer_max_per_hour")->valuedouble);
     cJSON_Delete(j);
 }
 

@@ -495,7 +495,7 @@ void test_ledger_attaches_the_receipt_relay_path(void) {
     TEST_ASSERT_TRUE(rollcall_ledger_note_response(&l, 9u, 0x0002u, 1, 1500u));
 
     const uint32_t path[3] = {0x0001u, 0x00AAu, 0x0002u};
-    TEST_ASSERT_TRUE(rollcall_ledger_note_path(&l, 9u, 0x0002u, 3, path));
+    TEST_ASSERT_TRUE(rollcall_ledger_note_path(&l, 9u, 0x0002u, true, 3, path));
 
     const rollcall_entry_t* e = rollcall_ledger_find(&l, 0x0002u);
     TEST_ASSERT_NOT_NULL(e);
@@ -506,7 +506,7 @@ void test_ledger_attaches_the_receipt_relay_path(void) {
     /* A path with no response is a row that is NOT counted as responded:
      * the receipt proves the announce arrived, the missing signature proves
      * nothing about an answer. */
-    TEST_ASSERT_TRUE(rollcall_ledger_note_path(&l, 9u, 0x0003u, 2, path));
+    TEST_ASSERT_TRUE(rollcall_ledger_note_path(&l, 9u, 0x0003u, true, 2, path));
     const rollcall_entry_t* silent = rollcall_ledger_find(&l, 0x0003u);
     TEST_ASSERT_NOT_NULL(silent);
     TEST_ASSERT_TRUE(silent->have_path);
@@ -517,7 +517,7 @@ void test_ledger_attaches_the_receipt_relay_path(void) {
     uint32_t deep[ROLLCALL_PATH_MAX + 4];
     for (int i = 0; i < ROLLCALL_PATH_MAX + 4; i++)
         deep[i] = (uint32_t)(0x8000u + i);
-    TEST_ASSERT_TRUE(rollcall_ledger_note_path(&l, 9u, 0x0002u, ROLLCALL_PATH_MAX + 4, deep));
+    TEST_ASSERT_TRUE(rollcall_ledger_note_path(&l, 9u, 0x0002u, true, ROLLCALL_PATH_MAX + 4, deep));
     e = rollcall_ledger_find(&l, 0x0002u);
     TEST_ASSERT_EQUAL_UINT8(ROLLCALL_PATH_MAX, e->hop_count);
 }
@@ -543,7 +543,7 @@ void test_ledger_closes_once_and_counts_late_responses(void) {
     TEST_ASSERT_FALSE(rollcall_ledger_note_response(&l, 3u, 0x0002u, 1, close_at + 1u));
     TEST_ASSERT_EQUAL_UINT32(1u, l.late);
     TEST_ASSERT_EQUAL_UINT8(0, rollcall_ledger_responded_count(&l));
-    TEST_ASSERT_FALSE(rollcall_ledger_note_path(&l, 3u, 0x0002u, 0, NULL));
+    TEST_ASSERT_FALSE(rollcall_ledger_note_path(&l, 3u, 0x0002u, true, 0, NULL));
 }
 
 void test_ledger_round_schedule_walks_all_rounds_then_stops(void) {
@@ -597,6 +597,141 @@ void test_ledger_counts_overflow_and_unattested(void) {
     TEST_ASSERT_EQUAL_UINT8(ROLLCALL_MAX_RESPONDERS, rollcall_ledger_responded_count(&l));
 }
 
+void test_member_releases_a_claim_it_could_not_keep(void) {
+    rollcall_seen_table_t t;
+    rollcall_seen_init(&t);
+
+    /* Round 1: claimed, but the answer never reached the air, so the claim
+     * goes back. Without the release the bounded re-announce rounds, which
+     * exist precisely to give this member another chance, would be dropped
+     * by the claim it already burned and the initiator would report a node
+     * that is alive, in range and idle as missing. */
+    TEST_ASSERT_TRUE(rollcall_seen_claim(&t, 0x1234u, 0xAAAAu, 100u));
+    rollcall_seen_release(&t, 0x1234u, 0xAAAAu);
+    TEST_ASSERT_FALSE(rollcall_seen_contains(&t, 0x1234u, 0xAAAAu));
+
+    /* Round 2 is therefore answerable. */
+    TEST_ASSERT_TRUE(rollcall_seen_claim(&t, 0x1234u, 0xAAAAu, 30100u));
+
+    /* Releasing something never claimed, or the wrong initiator, changes
+     * nothing. */
+    rollcall_seen_release(&t, 0x1234u, 0xBBBBu);
+    rollcall_seen_release(&t, 0x5555u, 0xAAAAu);
+    TEST_ASSERT_TRUE(rollcall_seen_contains(&t, 0x1234u, 0xAAAAu));
+}
+
+void test_answer_budget_bounds_what_an_initiator_can_spend_of_a_member(void) {
+    rollcall_answer_budget_t b;
+    rollcall_answer_budget_init(&b);
+
+    /* A member answers up to its hourly cap however fast it is asked. This
+     * is the bound that makes the primitive's fleet-wide cost independent of
+     * an initiator's manners: the initiation limit binds only the node
+     * running the script. */
+    uint32_t t = 10000u;
+    for (uint8_t i = 0; i < ROLLCALL_ANSWER_MAX_PER_HOUR; i++) {
+        TEST_ASSERT_TRUE(rollcall_answer_budget_allow(&b, t));
+        rollcall_answer_budget_note(&b, t);
+        TEST_ASSERT_EQUAL_UINT8(i + 1u, rollcall_answer_budget_used(&b, t));
+        t += 20000u; /* one announce every 20s, the attack cadence */
+    }
+    TEST_ASSERT_FALSE(rollcall_answer_budget_allow(&b, t));
+
+    /* The window slides: once the first answer ages out, one more fits. */
+    uint32_t after_first_expires = 10000u + ROLLCALL_ANSWER_WINDOW_MS;
+    TEST_ASSERT_EQUAL_UINT8(ROLLCALL_ANSWER_MAX_PER_HOUR - 1u,
+                            rollcall_answer_budget_used(&b, after_first_expires));
+    TEST_ASSERT_TRUE(rollcall_answer_budget_allow(&b, after_first_expires));
+
+    /* And an idle hour restores the whole budget. */
+    uint32_t idle = t + ROLLCALL_ANSWER_WINDOW_MS;
+    TEST_ASSERT_EQUAL_UINT8(0, rollcall_answer_budget_used(&b, idle));
+    TEST_ASSERT_TRUE(rollcall_answer_budget_allow(&b, idle));
+}
+
+void test_answer_budget_survives_the_millisecond_rollover(void) {
+    rollcall_answer_budget_t b;
+    rollcall_answer_budget_init(&b);
+
+    uint32_t before_wrap = 0xFFFFFFFFu - 1000u;
+    for (uint8_t i = 0; i < ROLLCALL_ANSWER_MAX_PER_HOUR; i++) {
+        rollcall_answer_budget_note(&b, before_wrap);
+    }
+    /* 2s later, having wrapped through zero: still inside the window. */
+    TEST_ASSERT_EQUAL_UINT8(ROLLCALL_ANSWER_MAX_PER_HOUR, rollcall_answer_budget_used(&b, 1000u));
+    TEST_ASSERT_FALSE(rollcall_answer_budget_allow(&b, 1000u));
+    /* An hour past the wrap: expired. */
+    TEST_ASSERT_TRUE(rollcall_answer_budget_allow(&b, 1000u + ROLLCALL_ANSWER_WINDOW_MS));
+}
+
+void test_receipt_paths_cannot_crowd_out_attested_answers(void) {
+    rollcall_ledger_t l;
+    rollcall_ledger_init(&l);
+    TEST_ASSERT_TRUE(rollcall_ledger_start(&l, 21u, 0x0001u, 1000u, NULL, 0, NULL, 0, false));
+
+    /* Broadcast delivery receipts are due at 300ms plus a slot while answers
+     * are due at 400ms plus up to 19.5s of stagger, so receipt rows land
+     * FIRST. Fill the whole table with them. */
+    const uint32_t path[2] = {0x0001u, 0x2000u};
+    for (uint32_t i = 0; i < ROLLCALL_MAX_RESPONDERS; i++) {
+        TEST_ASSERT_TRUE(rollcall_ledger_note_path(&l, 21u, 0x2000u + i, true, 2, path));
+    }
+    TEST_ASSERT_EQUAL_UINT8(ROLLCALL_MAX_RESPONDERS, l.entry_count);
+    TEST_ASSERT_EQUAL_UINT8(0, rollcall_ledger_responded_count(&l));
+
+    /* An attested answer from a member with no row of its own still lands: a
+     * path is decoration, an answer is the ledger's whole output, so the
+     * answer reclaims a path-only row rather than being turned away. */
+    TEST_ASSERT_TRUE(rollcall_ledger_note_response(&l, 21u, 0x9001u, 1, 2000u));
+    TEST_ASSERT_EQUAL_UINT32(0, l.overflow);
+    const rollcall_entry_t* e = rollcall_ledger_find(&l, 0x9001u);
+    TEST_ASSERT_NOT_NULL(e);
+    TEST_ASSERT_TRUE(e->responded);
+    TEST_ASSERT_EQUAL_UINT8(1, rollcall_ledger_responded_count(&l));
+
+    /* Answers keep displacing paths until every row is an answer, and only
+     * then does overflow start counting: overflow can therefore only ever
+     * mean "more members answered than this ledger holds". */
+    for (uint32_t i = 1; i < ROLLCALL_MAX_RESPONDERS; i++) {
+        TEST_ASSERT_TRUE(rollcall_ledger_note_response(&l, 21u, 0x9001u + i, 1, 2000u));
+    }
+    TEST_ASSERT_EQUAL_UINT8(ROLLCALL_MAX_RESPONDERS, rollcall_ledger_responded_count(&l));
+    TEST_ASSERT_EQUAL_UINT32(0, l.overflow);
+    TEST_ASSERT_FALSE(rollcall_ledger_note_response(&l, 21u, 0x9999u, 1, 2100u));
+    TEST_ASSERT_EQUAL_UINT32(1u, l.overflow);
+}
+
+void test_an_unpinned_receipt_cannot_open_a_ledger_row(void) {
+    const uint32_t expected[2] = {0x0002u, 0x0003u};
+    rollcall_ledger_t l;
+    rollcall_ledger_init(&l);
+    TEST_ASSERT_TRUE(rollcall_ledger_start(&l, 31u, 0x0001u, 1000u, NULL, 0, expected, 2, true));
+
+    /* A delivery receipt is authenticated by the SHARED network key and its
+     * source address is whatever the sender wrote, so an insider that read
+     * the announce's cleartext packet_id off the air can mint receipts under
+     * invented addresses. None of them may become a row. */
+    const uint32_t path[2] = {0x0001u, 0xDEADu};
+    for (uint32_t i = 0; i < ROLLCALL_MAX_RESPONDERS * 2u; i++) {
+        TEST_ASSERT_FALSE(rollcall_ledger_note_path(&l, 31u, 0xDEAD0000u + i, false, 2, path));
+    }
+    TEST_ASSERT_EQUAL_UINT8(0, l.entry_count);
+
+    /* The real fleet therefore answers into an empty table and reads
+     * correctly: 2 of 2, nobody missing. */
+    TEST_ASSERT_TRUE(rollcall_ledger_note_response(&l, 31u, 0x0002u, 1, 2000u));
+    TEST_ASSERT_TRUE(rollcall_ledger_note_response(&l, 31u, 0x0003u, 1, 2000u));
+    TEST_ASSERT_EQUAL_UINT8(2, rollcall_ledger_responded_count(&l));
+    TEST_ASSERT_EQUAL_UINT8(0, rollcall_ledger_missing(&l, NULL, 0));
+
+    /* An unpinned address still gets its path recorded when a row already
+     * exists: what the gate refuses is creating one. */
+    TEST_ASSERT_TRUE(rollcall_ledger_note_path(&l, 31u, 0x0002u, false, 2, path));
+    const rollcall_entry_t* e = rollcall_ledger_find(&l, 0x0002u);
+    TEST_ASSERT_NOT_NULL(e);
+    TEST_ASSERT_TRUE(e->have_path);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_announce_round_trips);
@@ -615,6 +750,9 @@ int main(void) {
     RUN_TEST(test_rate_limit_survives_the_millisecond_rollover);
     RUN_TEST(test_member_answers_each_rollcall_once);
     RUN_TEST(test_member_seen_table_recycles_the_oldest);
+    RUN_TEST(test_member_releases_a_claim_it_could_not_keep);
+    RUN_TEST(test_answer_budget_bounds_what_an_initiator_can_spend_of_a_member);
+    RUN_TEST(test_answer_budget_survives_the_millisecond_rollover);
     RUN_TEST(test_ledger_start_records_the_operator_payload);
     RUN_TEST(test_ledger_counts_responses_once_and_keeps_the_first_time);
     RUN_TEST(test_ledger_reports_missing_only_on_an_anchored_mesh);
@@ -623,5 +761,7 @@ int main(void) {
     RUN_TEST(test_ledger_closes_once_and_counts_late_responses);
     RUN_TEST(test_ledger_round_schedule_walks_all_rounds_then_stops);
     RUN_TEST(test_ledger_counts_overflow_and_unattested);
+    RUN_TEST(test_receipt_paths_cannot_crowd_out_attested_answers);
+    RUN_TEST(test_an_unpinned_receipt_cannot_open_a_ledger_row);
     return UNITY_END();
 }

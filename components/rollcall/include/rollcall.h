@@ -53,7 +53,15 @@
 /* Ledger capacity. Responders past the cap are counted (see
  * rollcall_ledger_t.overflow) rather than silently dropped, so a ledger that
  * could not hold the whole mesh says so instead of reading as "these are all
- * the nodes that answered". */
+ * the nodes that answered".
+ *
+ * The table holds two kinds of row and they are NOT equal citizens. An
+ * ATTESTED answer is the ledger's whole output; a relay path harvested from
+ * the delivery-receipt machinery is decoration, and it is authenticated only
+ * by the SHARED network key, so its source address is anything an insider
+ * cares to write. A path may therefore never cost an answer a slot: see
+ * rollcall_ledger_note_path's contract and the reclaim rule in
+ * rollcall_ledger_note_response. */
 #define ROLLCALL_MAX_RESPONDERS 24
 #define ROLLCALL_MAX_EXPECTED 24
 
@@ -312,6 +320,67 @@ bool rollcall_seen_claim(rollcall_seen_table_t* t, uint32_t rollcall_id, uint32_
 bool rollcall_seen_contains(const rollcall_seen_table_t* t, uint32_t rollcall_id,
                             uint32_t initiator_addr);
 
+/*
+ * Drop a claim, so a later announce round for the same (rollcall_id,
+ * initiator_addr) is treated as never having been taken on.
+ *
+ * A claim is a promise to answer, and it must be released the moment the
+ * promise cannot be kept: if a claimed answer never reaches the air (the
+ * signature failed, the encode failed, or the budget-gated TX path refused
+ * it) then the bounded re-announce rounds are the member's only remaining
+ * chance to take part, and a claim left behind is exactly what silences it
+ * for the rest of the roll-call. Callers therefore claim only once the
+ * answer is queued, and release when a queued answer is abandoned.
+ */
+void rollcall_seen_release(rollcall_seen_table_t* t, uint32_t rollcall_id, uint32_t initiator_addr);
+
+/* ── Member side: the answer budget ──────────────────────────────────── */
+
+/*
+ * How often this node is willing to ANSWER roll-calls, whoever asks.
+ *
+ * The initiation limit (ROLLCALL_MIN_INTERVAL_MS) binds only the node
+ * running the script. It says nothing about what the rest of the fleet is
+ * asked to spend, and a network-key insider holding the public channel can
+ * broadcast a fresh announce as fast as it likes: every announce costs every
+ * member an Ed25519 signature, a 137-byte unicast with its retry ladder and
+ * a flooded delivery receipt. tx_gate would keep each node inside its own
+ * airtime budget, but that is not protection, it is the damage: the budget
+ * gets CONSUMED by roll-call answers and the node's chat, beacons and
+ * receipts are denied by the lane the roll-call filled.
+ *
+ * So the member side carries its own bound. At most
+ * ROLLCALL_ANSWER_MAX_PER_HOUR answers leave this node in any rolling
+ * ROLLCALL_ANSWER_WINDOW_MS, which is what makes the primitive's fleet-wide
+ * cost bounded by construction rather than by the initiator's good manners.
+ * The value is two initiators running continuously at their own
+ * ROLLCALL_MIN_INTERVAL_MS floor, so a cooperative fleet never meets it.
+ *
+ * A refused answer takes NO claim (rollcall_seen_claim), so a later round of
+ * the same roll-call is answered if the budget has room by then; refusals
+ * are counted and reported rather than silently swallowed.
+ */
+#define ROLLCALL_ANSWER_WINDOW_MS 3600000u
+#define ROLLCALL_ANSWER_MAX_PER_HOUR 12u
+
+typedef struct {
+    bool used[ROLLCALL_ANSWER_MAX_PER_HOUR];
+    uint32_t at_ms[ROLLCALL_ANSWER_MAX_PER_HOUR];
+} rollcall_answer_budget_t;
+
+void rollcall_answer_budget_init(rollcall_answer_budget_t* b);
+
+/* Answers still inside the window at now_ms. */
+uint8_t rollcall_answer_budget_used(const rollcall_answer_budget_t* b, uint32_t now_ms);
+
+/* Whether one more answer fits. Non-mutating; wrap-safe like every other
+ * millisecond deadline in the tree. */
+bool rollcall_answer_budget_allow(const rollcall_answer_budget_t* b, uint32_t now_ms);
+
+/* Charge one answer. Callers must only call this after
+ * rollcall_answer_budget_allow returned true. */
+void rollcall_answer_budget_note(rollcall_answer_budget_t* b, uint32_t now_ms);
+
 /* ── Initiator side: the ledger ──────────────────────────────────────── */
 
 typedef struct {
@@ -412,6 +481,11 @@ bool rollcall_ledger_maybe_close(rollcall_ledger_t* l, uint32_t now_ms);
  * Returns true when the response was recorded (including the idempotent
  * repeat), false when it was rejected: a closed ledger (counted as `late`),
  * a mismatched roll-call id, or a full table (counted as `overflow`).
+ *
+ * An answer outranks a path. When the table is full, a row that carries only
+ * a relay path (have_path, never responded) is reclaimed for the answer, so
+ * `overflow` can only ever mean "more members answered than this ledger can
+ * hold", never "receipts got here first".
  */
 bool rollcall_ledger_note_response(rollcall_ledger_t* l, uint32_t rollcall_id,
                                    uint32_t responder_addr, uint8_t round, uint32_t now_ms);
@@ -423,14 +497,31 @@ void rollcall_ledger_note_unattested(rollcall_ledger_t* l);
 
 /*
  * Attach the relay path the delivery-receipt machinery reported for a
- * responder. hop_count is clamped to ROLLCALL_PATH_MAX. Creates a row when
- * none exists (a node whose announce receipt arrived but whose response has
- * not), which is why `responded` and `have_path` are separate flags.
- * Returns false only when the ledger is closed, the id does not match, or
- * the table is full.
+ * responder. hop_count is clamped to ROLLCALL_PATH_MAX.
+ *
+ * responder_pinned is the caller's answer to "do I hold a verified identity
+ * pin for this address", and it gates ROW CREATION. A delivery receipt is
+ * authenticated by the shared network key alone, and its source address is
+ * chosen by whoever built it, so a receipt is not evidence that the named
+ * node exists. Without the gate, one insider that read an announce's
+ * cleartext packet_id off the air could mint ROLLCALL_MAX_RESPONDERS
+ * receipts under invented addresses, fill the table before the first
+ * staggered answer was even due, and turn every real member of the fleet
+ * into a `missing` row. Restricted to pinned addresses, a forged receipt can
+ * only occupy a slot the named member was already entitled to, and an
+ * arriving answer reclaims it anyway (rollcall_ledger_note_response).
+ *
+ * A path for an unpinned address attaches to an existing row and creates
+ * none, which loses nothing the ledger could have reported: an answer from
+ * an address this node holds no pin for is `unattested` and never becomes a
+ * row either.
+ *
+ * Returns false when the ledger is closed, the id does not match, the table
+ * is full, or no row exists and none may be created.
  */
 bool rollcall_ledger_note_path(rollcall_ledger_t* l, uint32_t rollcall_id, uint32_t responder_addr,
-                               uint8_t hop_count, const uint32_t* relay_path);
+                               bool responder_pinned, uint8_t hop_count,
+                               const uint32_t* relay_path);
 
 /* Look up a row by address, or NULL. */
 const rollcall_entry_t* rollcall_ledger_find(const rollcall_ledger_t* l, uint32_t addr);
