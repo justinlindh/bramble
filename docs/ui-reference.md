@@ -387,7 +387,7 @@ Displays node positions from the location manager (`mesh_get_location_state()`) 
 
 **Source:** `screens/scr_stats.c`  
 **LVGL trigger:** `scr_stats_create()` from `layout_set_tab(TAB_STATS)`  
-**Auto-refresh:** Every 5 seconds (rebuilds via `tab_refresh_timer_cb`)
+**Auto-refresh:** None. This screen is a snapshot taken on tab entry, deliberately: the `+N` / `-N` figures under each counter are the delta against the previous visit (`s_prev_snapshot`), which is a reading a per-second tick would destroy.
 
 ```text
 [Content Area: 320×180, vertical flex column, 8px padding, 6px row gap]
@@ -562,13 +562,18 @@ mesh_task receives packet
         └── layout_set_unread(count++) [show/update red badge on Chat tab]
 ```
 
-### Live Data Refresh (Nodes / Stats)
+### Live Data Refresh
+
+There is no global tab-content tick. A screen that needs live data owns a timer created by its own builder and deleted with its widgets, so it costs nothing while any other tab is open:
 
 ```text
-5s tab_refresh_timer_cb fires:
-  └── If active_tab == TAB_STATS or TAB_NODES:
-        └── layout_set_tab(active_tab)   [rebuild with fresh mesh state]
+scr_nodes         1s   ages, signal, recency styling in place; rebuild only on membership change
+scr_node_detail   1s   ages, signal readout, peer location
+scr_traffic       2s   captured event list
+scr_map           5s   peer markers
 ```
+
+Stats has no timer on purpose: its per-counter deltas are measured against the previous visit.
 
 ---
 

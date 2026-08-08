@@ -18,8 +18,7 @@ int node_format_age(uint32_t age_s, char* buf, size_t buf_len) {
     if (age_s < 60U)
         return snprintf(buf, buf_len, "%us", (unsigned)age_s);
     if (age_s < 3600U)
-        return snprintf(buf, buf_len, "%um %us", (unsigned)(age_s / 60U),
-                        (unsigned)(age_s % 60U));
+        return snprintf(buf, buf_len, "%um %us", (unsigned)(age_s / 60U), (unsigned)(age_s % 60U));
     if (age_s < 86400U)
         return snprintf(buf, buf_len, "%uh %um", (unsigned)(age_s / 3600U),
                         (unsigned)((age_s % 3600U) / 60U));
