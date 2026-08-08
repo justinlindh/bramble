@@ -10,7 +10,7 @@ info:
     serial is unauthenticated by design (physical access is the trust anchor).
     Unauthenticated WS/BLE clients may call only bramble.ping and
     bramble.getVersion; every other method answers Unauthorized (-1005).
-  version: 0.6.0
+  version: 0.7.0
   license:
     name: MIT
     identifier: MIT
