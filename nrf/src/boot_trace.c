@@ -16,11 +16,36 @@ static volatile bool s_adv_ok;
  * load. Volatile because the same words are written through the NVMC. */
 static const volatile uint32_t* const s_page = (const volatile uint32_t*)BOOT_TRACE_PAGE;
 
+/* Poll bound for a word write. nRF52840 Product Specification v1.11, NVMC
+ * electrical specification: tWRITE (write one 32-bit word) is 41us. This path
+ * has no clock to bound against: it runs before the scheduler starts, and
+ * from a fault handler with interrupts disabled, so tick counts do not
+ * advance and yielding is not an option. A raw poll count is what is left. At
+ * a handful of cycles per poll on a 64MHz core, 200000 lands in the tens of
+ * milliseconds, hundreds of times tWRITE. Coarse on purpose: the number only
+ * has to be far above a working write and far below "forever". */
+#define BOOT_TRACE_WRITE_POLLS 200000u
+
+/* Returns when the NVMC reports the write done, or when the bound expires.
+ *
+ * On expiry the record is ABANDONED and this returns anyway. That is the only
+ * safe behaviour: there is no way to report a flash failure by writing to
+ * flash, and one lost diagnostic word costs far less than hanging the node.
+ * It matters most on the path this whole file exists for, boot_trace_fail(),
+ * where spinning here would hang before the reset that was the entire point
+ * of taking the stamp. */
+static void wait_write_done(void) {
+    for (uint32_t i = 0; i < BOOT_TRACE_WRITE_POLLS; i++) {
+        if (nrfx_nvmc_write_done_check()) {
+            return;
+        }
+    }
+}
+
 static void page_reset(uint32_t carry_failed_boots) {
     nrfx_nvmc_page_erase(BOOT_TRACE_PAGE);
     nrfx_nvmc_word_write(BOOT_TRACE_PAGE, BOOT_TRACE_MAGIC);
-    while (!nrfx_nvmc_write_done_check()) {
-    }
+    wait_write_done();
     s_next = 1;
     if (carry_failed_boots > 0) {
         boot_trace_mark(BT_BOOT_CARRY, carry_failed_boots);
@@ -66,8 +91,9 @@ void boot_trace_mark(uint32_t tag, uint32_t aux) {
     }
     nrfx_nvmc_word_write(BOOT_TRACE_PAGE + 4u * s_next, BOOT_TRACE_TAG_MARKER | tag);
     nrfx_nvmc_word_write(BOOT_TRACE_PAGE + 4u * (s_next + 1u), aux);
-    while (!nrfx_nvmc_write_done_check()) {
-    }
+    wait_write_done();
+    /* Advanced even when the wait expired: the two words may be partially
+     * written, and a slot whose contents are unknown is never reused. */
     s_next += 2;
     s_last_tag = tag;
 }
