@@ -36,8 +36,17 @@ int mesh_nonce_write(uint64_t ceiling, void* ctx) {
     if (nvs_open(NVS_NS_NONCE, NVS_READWRITE, &h) != ESP_OK) {
         return -1;
     }
-    nvs_set_blob(h, NVS_KEY_NONCE_CEILING, &ceiling, sizeof(ceiling));
-    esp_err_t err = nvs_commit(h);
+    /* Both results are checked, and the set is the load-bearing one. This is
+     * nonce_counter's durability callback: reporting success for a write that
+     * did not land lets issuance run past the ceiling storage actually holds,
+     * and after a reboot that is nonce reuse under the same key. On the nRF
+     * backend nvs_commit() is a no-op confirmation (every set fsyncs its own
+     * file before returning, nrf/shim/nvs_lfs.c), so there the set result is
+     * the ONLY signal a failed flash program produces. */
+    esp_err_t err = nvs_set_blob(h, NVS_KEY_NONCE_CEILING, &ceiling, sizeof(ceiling));
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
     nvs_close(h);
     return err == ESP_OK ? 0 : -1;
 }

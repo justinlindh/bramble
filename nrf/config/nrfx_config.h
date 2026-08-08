@@ -16,8 +16,10 @@
 #define NRFX_SPIM2_ENABLED 1
 #define NRFX_GPIOTE_ENABLED 1
 #define NRFX_GPIOTE0_ENABLED 1
-// Internal flash for the settings/message filesystem.
-#define NRFX_NVMC_ENABLED 1
+// Internal flash is driven through src/nvmc_bounded.c on the nrfx HAL
+// primitives, not the nrfx NVMC driver: every blocking entry point that
+// driver offers spins on the READY flag with no bound, which is a permanent
+// silent hang on a controller that stops answering. See src/nvmc_bounded.h.
 // Battery voltage on boards with a cell divider (T1000-E); the driver is
 // linked per board via BRAMBLE_NRF_BATTERY_SRCS in CMakeLists.txt.
 #define NRFX_SAADC_ENABLED 1
