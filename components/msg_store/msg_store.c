@@ -264,8 +264,16 @@ bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
     for (int i = s_count - 1; i >= 0; i--) {
         int idx = (start + i) % MSG_STORE_MAX;
         if (s_msgs && s_msgs[idx].packet_id == packet_id) {
-            changed = s_msgs[idx].status != status;
-            s_msgs[idx].status = status;
+            /* Parked is sticky here too (see msg_store_update_by_uid's doc
+             * comment for the invariant and why): a row parked after having
+             * been transmitted once still carries that old packet_id, so a
+             * late FAILED report arriving through this packet_id path must
+             * not un-park it either. DELIVERED still applies: a late ACK for
+             * a since-parked message really was delivered. */
+            bool sticky = s_msgs[idx].status == MSG_STATUS_QUEUED && status == MSG_STATUS_FAILED;
+            changed = !sticky && s_msgs[idx].status != status;
+            if (!sticky)
+                s_msgs[idx].status = status;
             if (route_hops && route_hop_count > 0) {
                 uint8_t bounded =
                     (route_hop_count > MSG_ROUTE_MAX_HOPS) ? MSG_ROUTE_MAX_HOPS : route_hop_count;

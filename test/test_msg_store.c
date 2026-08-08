@@ -278,6 +278,36 @@ void test_update_by_uid_sent_to_failed_is_not_sticky(void) {
     TEST_ASSERT_EQUAL(MSG_STATUS_FAILED, out.status);
 }
 
+void test_update_status_refuses_queued_to_failed_for_a_reparked_send(void) {
+    /* A row can be parked while still carrying a packet_id from an earlier
+     * transmit attempt: sent (SENT, packet_id P) -> retries exhausted
+     * (FAILED, still P) -> user parks it (QUEUED, still P). A later report
+     * against P (not against uid) must not un-park it either, same sticky
+     * invariant as msg_store_update_by_uid, enforced at this packet_id door
+     * too. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "reparked", 8, 0, 0, 42, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_status(42, MSG_STATUS_FAILED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, out.status);
+}
+
+void test_update_status_allows_queued_to_delivered_for_a_reparked_send(void) {
+    /* A late ACK for a since-parked message really was delivered, so this
+     * transition must still go through even though FAILED is refused. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "reparked", 8, 0, 0, 42, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_status(42, MSG_STATUS_DELIVERED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, out.status);
+}
+
 void test_unpark_moves_queued_row_to_failed(void) {
     msg_store_init();
     msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
@@ -322,6 +352,8 @@ int main(void) {
     RUN_TEST(test_update_by_uid_allows_queued_to_sent);
     RUN_TEST(test_update_by_uid_allows_queued_to_delivered);
     RUN_TEST(test_update_by_uid_sent_to_failed_is_not_sticky);
+    RUN_TEST(test_update_status_refuses_queued_to_failed_for_a_reparked_send);
+    RUN_TEST(test_update_status_allows_queued_to_delivered_for_a_reparked_send);
     RUN_TEST(test_unpark_moves_queued_row_to_failed);
     RUN_TEST(test_unpark_refuses_non_queued_or_unknown_uid);
     return UNITY_END();
