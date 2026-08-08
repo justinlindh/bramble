@@ -233,6 +233,25 @@ prepare_local_env() {
   set_board_vars
 }
 
+# Serial access: do not assume a group name (Debian uses dialout, Arch uses
+# uucp). Test actual write access to the port; only if that fails, wrap in
+# sg with the group that OWNS the device node. Top-level, not nested inside
+# run_local: assert_encryption_matches_action needs it too, and relying on
+# run_local having defined it first is a call-order dependency a refactor
+# would quietly break.
+run_serial_cmd() {
+  if [[ -z "$PORT" || -w "$PORT" ]]; then
+    "$@"
+  elif [[ -e "$PORT" ]]; then
+    local grp
+    grp=$(stat -c %G "$PORT")
+    echo "==> No write access to $PORT, using sg $grp wrapper..."
+    sg "$grp" -c "$*"
+  else
+    "$@"
+  fi
+}
+
 # Refuse to write the wrong kind of image to a board.
 #
 # A node with flash encryption burned reads its flash through the decryption
@@ -255,10 +274,9 @@ assert_encryption_matches_action() {
     echo "==> WARNING: encryption check skipped (BRAMBLE_SKIP_ENCRYPTION_CHECK=1)"
     return 0
   fi
-  [[ -n "$PORT" ]] || return 0
 
   echo "==> Reading flash-encryption eFuse on $PORT..."
-  local summary crypt_cnt
+  local summary crypt_line bits ones encrypted
   if ! summary=$(run_serial_cmd python -m espefuse --port "$PORT" summary 2>/dev/null); then
     echo "flash.sh: could not read eFuses on $PORT, refusing to flash." >&2
     echo "  A plaintext image on a flash-encrypted board bricks it, and this" >&2
@@ -267,10 +285,27 @@ assert_encryption_matches_action() {
     exit 3
   fi
 
-  # "= Enable R/W (0b001)" when set, "= Disable R/W (0b000)" when not.
-  crypt_cnt=$(printf '%s\n' "$summary" | grep -E "SPI_BOOT_CRYPT_CNT|FLASH_CRYPT_CNT" | head -1)
-  local encrypted=0
-  [[ "$crypt_cnt" == *"Enable"* ]] && encrypted=1
+  # Parse the bit pattern, not the prose. The line reads
+  #   SPI_BOOT_CRYPT_CNT (BLOCK0)  ...  = Enable R/W (0b001)
+  # and an earlier version keyed off the literal word "Enable", which made the
+  # check fail OPEN the day esptool reworded that column: an unmatched string
+  # simply meant "not encrypted". The (0b...) pattern is the value itself, and
+  # the odd-parity rule below is the hardware's own definition, so a wording
+  # change cannot silently flip the verdict. A line or pattern we cannot parse
+  # at all is refused rather than assumed safe.
+  crypt_line=$(printf '%s\n' "$summary" | grep -E "SPI_BOOT_CRYPT_CNT|FLASH_CRYPT_CNT" | head -1)
+  bits=$(printf '%s\n' "$crypt_line" | sed -n 's/.*(0b\([01]\+\)).*/\1/p')
+  if [[ -z "$bits" ]]; then
+    echo "flash.sh: could not parse the flash-encryption eFuse on $PORT, refusing to flash." >&2
+    echo "  Expected a (0b...) bit pattern on the SPI_BOOT_CRYPT_CNT line, got:" >&2
+    echo "    ${crypt_line:-<no SPI_BOOT_CRYPT_CNT line at all>}" >&2
+    echo "  Re-run with BRAMBLE_SKIP_ENCRYPTION_CHECK=1 only if you are certain." >&2
+    exit 3
+  fi
+  # Encryption is on when an ODD number of bits is set (1 or 3), per the eFuse
+  # definition the espefuse summary states on that same line.
+  ones=${bits//0/}
+  encrypted=$(( ${#ones} % 2 ))
 
   if [[ "$encrypted" == "1" && "$ACTION" == "flash" ]]; then
     echo "flash.sh: $PORT has flash encryption enabled; a plaintext flash bricks it." >&2
@@ -286,22 +321,6 @@ assert_encryption_matches_action() {
 }
 
 run_local() {
-  # Serial access: do not assume a group name (Debian uses dialout, Arch uses
-  # uucp). Test actual write access to the port; only if that fails, wrap in
-  # sg with the group that OWNS the device node.
-  run_serial_cmd() {
-    if [[ -z "$PORT" || -w "$PORT" ]]; then
-      "$@"
-    elif [[ -e "$PORT" ]]; then
-      local grp
-      grp=$(stat -c %G "$PORT")
-      echo "==> No write access to $PORT, using sg $grp wrapper..."
-      sg "$grp" -c "$*"
-    else
-      "$@"
-    fi
-  }
-
   case "$ACTION" in
     build)
       echo "==> Building locally..."
