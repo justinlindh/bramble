@@ -797,6 +797,38 @@ void handle_delivery_receipt(const uint8_t* data, uint8_t len, int16_t rssi, int
     mesh_rollcall_note_receipt(receipt.src_addr, receipt.orig_packet_id, receipt.hop_count,
                                receipt.relay_path);
 
+    /* The originator's own record that a broadcast reached a specific node,
+     * and by which route, mirroring the unicast ACK path's "Message
+     * delivered to %08X" above. The console is the only place this arrival
+     * is visible on a node with no RPC client attached (the emulator carries
+     * no RPC transport); connected clients also get it through
+     * mesh_emit_broadcast_delivery_notification below. The relay path is
+     * printed in travel order, receiver first, which is the direction the
+     * receipt itself carries. */
+    uint8_t logged_hops = (receipt.hop_count > DELIVERY_RECEIPT_MAX_HOPS)
+                              ? DELIVERY_RECEIPT_MAX_HOPS
+                              : receipt.hop_count;
+    /* One "XXXXXXXX" per hop plus a '>' separator between them. Written
+     * nibble by nibble rather than with a running snprintf offset: an address
+     * is always exactly 8 hex digits, so the bound is exact by construction
+     * and needs no truncation reasoning. */
+    char path_str[DELIVERY_RECEIPT_MAX_HOPS * 9 + 1];
+    static const char hex_digits[] = "0123456789ABCDEF";
+    size_t path_len = 0;
+    for (uint8_t i = 0; i < logged_hops; i++) {
+        if (i > 0)
+            path_str[path_len++] = '>';
+        uint32_t hop_addr = receipt.relay_path[i];
+        for (int shift = 28; shift >= 0; shift -= 4)
+            path_str[path_len++] = hex_digits[(hop_addr >> shift) & 0xFu];
+    }
+    path_str[path_len] = '\0';
+    ESP_LOGI(TAG,
+             "Delivery receipt from %08" PRIX32 " for broadcast %08" PRIX32
+             " (%u relay hop(s)%s%s)",
+             receipt.src_addr, receipt.orig_packet_id, logged_hops, logged_hops ? " via " : "",
+             path_str);
+
     mesh_emit_broadcast_delivery_notification(receipt.src_addr, receipt.orig_packet_id, rssi,
                                               receipt.hop_count, receipt.relay_path);
 }

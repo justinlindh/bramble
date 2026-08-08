@@ -8,6 +8,19 @@ original Phase 1 implementation plan is archived at
 
 ## Quick start
 
+### The playground (start here if you have no hardware)
+
+```bash
+cd emulator
+make playground          # or: docker compose --profile playground up playground
+```
+
+Open the URL it prints (port 3005 under Docker). It boots a three-pager fleet
+of real firmware on a simulated ether and runs a guided tour through
+provisioning, a relayed channel message, a direct message with its 7-digit
+safety number, and a delivery receipt with the route it came home by. Full
+walkthrough and the honest framing: [../docs/playground.md](../docs/playground.md).
+
 ### Docker (recommended, zero prerequisites)
 
 ```bash
@@ -41,6 +54,11 @@ then load a scenario from the dropdown:
 - `emulator-3-pagers`: three unprovisioned pagers (attach/persistence only,
   no traffic).
 - `emu-dm-desync`: the DM session desync repro and its self-heal.
+- `emu-playground`: three unprovisioned pagers in a line, two of them out of
+  range of each other, with every provision and every message driven by hand.
+  This is what `make playground`
+  loads; add `?tour=1` to the URL to get the guided tour on a stack started
+  with `make run`.
 
 Individual targets, each a thin wrapper documented inline in `Makefile`:
 
@@ -51,6 +69,7 @@ Individual targets, each a thin wrapper documented inline in `Makefile`:
 | `make broker` | `go build` in `simulator/gosim` |
 | `make ui` | `npm ci && npm run build` in `simulator/ui` |
 | `make run` (alias `make serve`) | check + build all, then launch gosim serving the UI and scenarios on `0.0.0.0` |
+| `make playground` | check + build all, then launch gosim on the `emu-playground` scenario with the guided tour (`--playground`) |
 | `make headless` | the CI scenario suite (`ci/run_scenarios.sh`) |
 | `make clean` | remove build artifacts (node build dir/sdkconfig, gosim binary, UI dist) |
 
@@ -59,8 +78,10 @@ your machine. Note that the local simulator (`simulator/gosim`) also defaults
 to `3000`, so running both at once needs one of them moved. The Docker
 variants do not collide: the simulator publishes 3003 and the emulator 3004.
 
-ESP-IDF location defaults to `~/src/esp-idf`; override with `IDF_PATH=...`
-if yours lives elsewhere (e.g. `make run IDF_PATH=/opt/esp-idf`). The
+ESP-IDF is located by `scripts/ci-source-idf.sh`, the helper CI uses: an
+`idf.py` already on your `PATH`, else the install locations that script lists.
+Point it somewhere else with `IDF_PATH=...` (e.g. `make run
+IDF_PATH=/opt/esp-idf`), which it honours ahead of everything else. The
 emulator needs ESP-IDF's **linux** target
 (`"$IDF_PATH"/install.sh linux`), which is a separate install from the
 `esp32s3` one used for real boards; `make check` will tell you if it is

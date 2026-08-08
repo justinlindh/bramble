@@ -61,6 +61,25 @@ export class WsCapture {
     } catch {
       return;
     }
+
+    // A sim_reset means the broker tore the previous world down and is about
+    // to build a new one, so everything recorded so far describes a scenario
+    // that no longer exists. Dropping it here is what keeps a spec's view
+    // scoped to the scenario IT loaded, and it matters because the broker
+    // catches a newly connected client up on whatever world already exists
+    // (gosim Sim.SnapshotEvents): without this, a spec that opens a page while
+    // a previous spec's scenario is still loaded would start with that
+    // scenario's nodes and frames in its capture, and node ids resolved by
+    // slot position would name the wrong device. The app's own reducer does
+    // exactly this on sim_reset; the capture mirrors it.
+    if (msg.type === 'sim_reset') {
+      this.fbEvents = [];
+      this.joinEvents = [];
+      this.consoleEvents = [];
+      this.sentBtn = [];
+      this.raw = [];
+    }
+
     this.raw.push(msg);
     const t = Date.now();
     switch (msg.type) {

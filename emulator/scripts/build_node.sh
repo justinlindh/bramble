@@ -7,17 +7,18 @@
 #   idf.py --preview set-target linux   (first build only)
 #   idf.py build
 #
-# ESP-IDF location: set IDF_PATH, or it defaults to ~/src/esp-idf.
+# ESP-IDF location: discovered by scripts/ci-source-idf.sh, the same helper CI
+# uses: IDF_PATH when set, an idf.py already on PATH otherwise, and failing
+# both the install locations that script lists.
 
 set -eu
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # emulator/
-IDF_PATH="${IDF_PATH:-$HOME/src/esp-idf}"
 
 echo "==> building linux firmware node (emulator/node)"
 
 # shellcheck disable=SC1091
-source "$IDF_PATH/export.sh" >/dev/null
+source "$HERE/../scripts/ci-source-idf.sh" >/dev/null
 
 cd "$HERE/node"
 

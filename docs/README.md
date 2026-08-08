@@ -4,6 +4,7 @@ This index separates **operator/developer reference docs** from **historical pla
 
 ## Start here
 
+- [playground.md](playground.md): try Bramble in a browser with no hardware: a three-pager fleet of real firmware on a simulated ether, with a guided tour through provisioning, relaying, safety numbers and delivery receipts
 - [getting-started.md](getting-started.md): first-node walkthrough from flashing to your first confirmed message (provisioning, unprovisioned banner, optional trust anchor)
 - [../README.md](../README.md): project overview and quick start
 - [BUILDING.md](BUILDING.md): build/flash/monitor workflows (board-aware)

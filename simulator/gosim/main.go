@@ -12,6 +12,25 @@ import (
 	"strings"
 )
 
+// playgroundScenario is the fleet --playground boots: three real firmware
+// pagers in a line, two of them out of range of each other, booting
+// unprovisioned so the guided tour can teach the fail-closed state. The name
+// is a scenario file under the scenarios directory (simulator/scenarios).
+const playgroundScenario = "emu-playground"
+
+// uiConfig is what GET /api/ui-config answers. The browser UI asks for it once
+// at startup to decide whether to show the guided tour, so `make playground`
+// is a single command rather than a command plus a URL the user has to
+// remember to decorate. Tour stays false for an ordinary `make run`, which is
+// the simulator UI every other scenario is driven from.
+type uiConfig struct {
+	// Tour enables the guided tour overlay (simulator/ui/src/tour).
+	Tour bool `json:"tour"`
+	// Scenario is the scenario this process booted itself into, "" when it
+	// booted unscenarioed and is waiting for the UI to pick one.
+	Scenario string `json:"scenario"`
+}
+
 func findDir(candidates []string) string {
 	for _, d := range candidates {
 		if info, err := os.Stat(d); err == nil && info.IsDir() {
@@ -52,6 +71,9 @@ func main() {
 		"serial device of a PHY-passthrough gateway node (e.g. /dev/ttyUSB0); bridges the real "+
 			"RF channel into the ether (DESIGN.md section 10). Pair with --emu-listen so the "+
 			"gateway and the virtual nodes share a known broker socket")
+	playground := flag.Bool("playground", false,
+		"boot straight into the "+playgroundScenario+" scenario with the guided tour enabled "+
+			"(the zero-hardware first-contact entry point; see docs/playground.md)")
 	flag.Parse()
 
 	disableCollisionModel = *noCollisions
@@ -109,8 +131,32 @@ func main() {
 		go RunGatewaySupervised(*gateway, brokerPath)
 	}
 
+	// Playground: boot straight into the scenario instead of waiting for a
+	// human to pick one. Sent through the same command channel the UI's
+	// ScenarioLoader uses, so a firmware scenario auto-starts here exactly as
+	// it does on the interactive load path (see Sim.handleCommand).
+	if *playground {
+		log.Printf("playground: loading scenario %q with the guided tour enabled", playgroundScenario)
+		sim.Send(Command{Type: "start", Scenario: playgroundScenario})
+	}
+
 	// Routes
 	mux := http.NewServeMux()
+
+	// UI configuration: what this process wants the browser to do on load.
+	mux.HandleFunc("/api/ui-config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		cfg := uiConfig{}
+		if *playground {
+			cfg.Tour = true
+			cfg.Scenario = playgroundScenario
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cfg)
+	})
 
 	// WebSocket endpoint
 	mux.HandleFunc("/ws", hub.HandleWS)

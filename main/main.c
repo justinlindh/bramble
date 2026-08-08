@@ -70,6 +70,10 @@ int emu_node_start_autosend(void);
  * the location namespace so the real policy tick drives a scenario. No-op
  * unless EMU_LOCATION_CHANNEL is set. */
 int emu_node_seed_location_share_from_env(void);
+/* Interactive control path (emu_control.c): serves the broker's runtime
+ * provision and send messages, so an operator drives an inert fleet from the
+ * browser instead of a scenario keying it up at boot. */
+int emu_node_start_control(void);
 #endif
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
@@ -1767,6 +1771,10 @@ void app_main(void) {
      * location namespace on every pass, so writing it here is picked up on
      * the next tick. */
     emu_node_seed_location_share_from_env();
+    /* Emulator only: serve runtime provision/send messages from the broker.
+     * Registered here, after the mesh send path is live, for the same reason
+     * the scripted sender is. */
+    emu_node_start_control();
 #endif
 
     while (1) {
@@ -1954,8 +1962,20 @@ void app_main(void) {
          * reordered between the button press and this check. */
         if (ui.node_verify_confirmed) {
             ui.node_verify_confirmed = false;
-            if (s_nodes_detail_valid)
-                mesh_set_peer_verified(s_nodes_detail_addr, true);
+            if (s_nodes_detail_valid) {
+                /* Logged because this is a security decision the user made on
+                 * the device: the pin store records it, but nothing else on
+                 * the node left a trace that the safety number was compared
+                 * and accepted (or that the call was refused for an unpinned
+                 * peer). */
+                if (mesh_set_peer_verified(s_nodes_detail_addr, true)) {
+                    ESP_LOGI(TAG, "Peer %08" PRIX32 " marked VERIFIED (safety number confirmed)",
+                             s_nodes_detail_addr);
+                } else {
+                    ESP_LOGW(TAG, "Peer %08" PRIX32 " not verified: no identity pin",
+                             s_nodes_detail_addr);
+                }
+            }
         }
 
         /* Drain a passkey display/hide request latched by main_ble_passkey_cb
