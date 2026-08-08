@@ -57,14 +57,14 @@ typedef struct {
  * radio types rather than including the component header; keep in step. */
 typedef struct {
     bool supported;
-    uint8_t status;
-    uint16_t device_errors;
-    uint8_t ocp;
-    uint8_t ocp_expected;
+    const char* chip;
     int8_t tx_power_dbm;
-    uint8_t pa_duty_cycle;
-    uint8_t pa_hp_max;
-    int8_t pa_rated_dbm;
+    bool pa_fault;
+    bool pll_fault;
+    bool oscillator_fault;
+    bool calibration_fault;
+    bool config_verified;
+    char detail[192];
 } radio_health_t;
 typedef struct {
     uint32_t ts_ms;
@@ -417,6 +417,14 @@ bool ota_rollback_get_floor(char* out, size_t out_len) {
     (void)out_len;
     return false;
 }
+/* Link-only stub: these targets exercise other handlers, not the traffic
+ * event serializer, and they already provide their own addr_hex. Targets that
+ * do test the serializer link the real main/util.c instead. */
+void traffic_event_add_json(void* obj, const void* evt) {
+    (void)obj;
+    (void)evt;
+}
+
 const char* addr_hex(uint32_t addr, char* buf, size_t len) {
     snprintf(buf, len, "%08X", addr);
     return buf;

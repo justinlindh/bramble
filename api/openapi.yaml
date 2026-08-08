@@ -2564,79 +2564,64 @@ components:
     RadioHealthDiagnostics:
       type: object
       description: >
-        What the radio will report about its own transmit path. Neither the
-        commanded nor the radiated output power can be read back from an
-        SX1262: SetTxParams and SetPaConfig are write-only op-codes and no
-        register reports output power. So this pairs the level the driver
-        programmed with the evidence the chip does expose, which is enough to
-        catch a dead PA, an unlocked PLL or config writes that never landed.
-        Confirming the level actually radiated needs external instrumentation.
+        What the radio reports about its own transmit path. No supported part
+        can read back its commanded or radiated output power: the SX1262's
+        SetTxParams and SetPaConfig are write-only op-codes and no register
+        reports output power. So this pairs the level the driver programmed
+        with the faults the chip will admit to, which is enough to catch a dead
+        PA, an unlocked synthesizer, a failed calibration, or config writes
+        that never landed. Confirming the level actually radiated needs
+        external instrumentation.
+
+        The verdicts are deliberately generic rather than one part's register
+        layout, so they stay meaningful as other radios learn to answer. The
+        chip-specific raw values ride along in `detail` as human-readable text.
       required: [supported, tx_power_dbm]
       properties:
         supported:
           type: boolean
           description: >
-            False when the driver has no SX1262 to interrogate (the emulator's
-            virtual radio, or the LR1110 target, whose status and error words
-            do not share this layout). Only tx_power_dbm is populated then.
+            False when the driver cannot interrogate its transmit path: the
+            emulator's virtual radio, or a part whose mapping is not
+            implemented. Only tx_power_dbm is populated then.
         tx_power_dbm:
           type: integer
           description: >
-            Output power the driver programmed via SetTxParams, after clamping
-            to the chip's -9..+22 dBm range. This is intent, not measurement.
-        device_errors:
-          type: integer
-          description: Raw GetDeviceErrors bitmask.
-        device_errors_str:
+            Output power the driver programmed, after clamping to the radio's
+            own range. This is intent, not measurement.
+        chip:
           type: string
-          description: >
-            Space-separated flag names for device_errors, or "none". Flags are
-            PA_RAMP, PLL_LOCK, XOSC_START, IMG_CALIB, ADC_CALIB, PLL_CALIB,
-            RC13M_CALIB and RC64K_CALIB.
-        pa_ramp_error:
+          description: Radio part that answered, for example "SX1262".
+        pa_fault:
           type: boolean
           description: >
-            PA_RAMP is latched: the power amplifier did not ramp for a
-            transmit, so nothing usable went on air. The single strongest
-            on-chip signal that commanded power is not being produced.
-        status:
-          type: integer
-          description: Raw GetStatus byte.
-        chip_mode:
-          type: string
-          description: Chip mode decoded from status.
-          enum: [STBY_RC, STBY_XOSC, FS, RX, TX, UNKNOWN]
-        cmd_status:
-          type: string
-          description: >
-            Last-command status decoded from status. exec-failed or
-            processing-error means the chip rejected a command.
-          enum: [data-available, timeout, processing-error, exec-failed, tx-done, reserved]
-        ocp:
-          type: integer
-          description: Over-current protection register readback.
-        ocp_expected:
-          type: integer
-          description: OCP value the driver programmed for the high-power PA.
-        ocp_ok:
+            The power amplifier did not ramp for a transmit, so nothing usable
+            went on air. The strongest evidence a chip can give that the
+            commanded power is not being produced.
+        pll_fault:
+          type: boolean
+          description: The frequency synthesizer did not lock.
+        oscillator_fault:
+          type: boolean
+          description: The reference oscillator did not start.
+        calibration_fault:
           type: boolean
           description: >
-            False means PA configuration writes are not reaching the chip,
-            which caps output well below the commanded level. OCP is the only
-            PA-side register that reads back, so this is the proof that the
-            SetPaConfig path works at all.
-        pa_duty_cycle:
-          type: integer
-          description: paDutyCycle from the selected SetPaConfig operating point.
-        pa_hp_max:
-          type: integer
-          description: hpMax from the selected SetPaConfig operating point.
-        pa_rated_dbm:
-          type: integer
+            A calibration block failed. Costs link budget silently, without
+            failing any later command.
+        config_verified:
+          type: boolean
           description: >
-            Output level the selected PA operating point is characterized for.
-            The driver picks the lowest characterized point that still covers
-            the requested power.
+            Configuration written to the chip reads back as programmed. False
+            means config writes are not landing, which caps output well below
+            the commanded level.
+        detail:
+          type: string
+          description: >
+            Chip-specific supporting values as human-readable text, for example
+            decoded error flag names, chip mode and PA settings. Intended for
+            display and logs; do not parse it, the format is the driver's to
+            choose and may change with the part.
 
     ProbeIngressDiagnostics:
       type: object

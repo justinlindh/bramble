@@ -17,11 +17,22 @@ typedef enum {
     TRAFFIC_CAT_OTHER
 } traffic_category_t;
 
+/* Depth of the traffic event ring, overridable per platform at compile time,
+ * the same way DELIVERY_EVENT_RING_CAPACITY is. The ring is one of the largest
+ * static allocations on the nRF52840, where RAM is the binding constraint and
+ * the budget gate leaves under a kilobyte of headroom, so that target defines a
+ * smaller value in its own CMakeLists rather than this header carrying a
+ * platform ifdef. It holds debug telemetry, not anything the mesh needs to
+ * function, so a shorter history is the right thing to give up there. */
+#ifndef TRAFFIC_DEBUG_CAPACITY
+#define TRAFFIC_DEBUG_CAPACITY 512
+#endif
+
 /**
  * Traffic event structure
  * Captures essential metadata for TX/RX telemetry
- */
-/* Field order is deliberate: the four-byte members lead, then the small ones
+ *
+ * Field order is deliberate: the four-byte members lead, then the small ones
  * pack into the tail. This struct is the element type of a ring buffer sized
  * in the hundreds, so a member landing after a bool costs four bytes of
  * padding per event, and on the nRF52840 that is enough to breach the static

@@ -136,6 +136,12 @@ static uint8_t cad_det_peak_for(uint8_t sf, uint32_t bw_hz) {
     return peaks_4symb[row][sf - 5];
 }
 
+/* Output-power range the LR1110 accepts across both PA paths: the low-power
+ * PA reaches down to -17 dBm, the high-power PA tops out at +22. Distinct from
+ * the frequency plan's regulatory ceiling, which is higher than either. */
+#define LR1110_TX_POWER_MIN_DBM (-17)
+#define LR1110_TX_POWER_MAX_DBM 22
+
 /* PA selection per the Seeed shield table: low-power PA/VREG up to +14dBm,
  * high-power PA/VBAT above, one authoritative copy for boot config and
  * runtime power changes alike (the SX1262 backend has the same shape in
@@ -694,11 +700,11 @@ void radio_set_tx_power(int8_t power) {
     }
 }
 
-/* The health readback is SX1262-specific: its fields are that part's status
- * byte, device-error bitmask and OCP register, none of which map onto the
- * LR1110's own error and status commands. Report the programmed power with
- * supported=false rather than filling those fields with LR1110 values that
- * would decode into the wrong flag names. */
+/* The LR1110 has its own error word (lr11xx_system_get_errors, already read
+ * around calibration below) and could report these verdicts. Wiring that up
+ * needs bench time on a T1000-E to confirm which flags mean what on this part,
+ * so until then this reports the programmed power with supported=false rather
+ * than guessing at a mapping that would read as verified evidence. */
 int radio_get_health(radio_health_t* health) {
     if (!health)
         return -1;
@@ -707,6 +713,9 @@ int radio_get_health(radio_health_t* health) {
     health->tx_power_dbm = s_config.tx_power;
     return 0;
 }
+
+int8_t radio_tx_power_min_dbm(void) { return LR1110_TX_POWER_MIN_DBM; }
+int8_t radio_tx_power_max_dbm(void) { return LR1110_TX_POWER_MAX_DBM; }
 
 radio_state_t radio_get_state(void) { return (radio_state_t)atomic_load(&s_state); }
 

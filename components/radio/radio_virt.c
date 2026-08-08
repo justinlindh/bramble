@@ -653,7 +653,7 @@ void radio_set_tx_power(int8_t power) { s_config.tx_power = power; }
 
 /* There is no radio chip behind the virtual driver, so there is nothing to
  * interrogate. Report the programmed power and supported=false rather than
- * inventing status bytes, so a caller cannot mistake the emulator for evidence
+ * inventing verdicts, so a caller cannot mistake the emulator for evidence
  * about a real transmit path. */
 int radio_get_health(radio_health_t* health) {
     if (!health)
@@ -663,6 +663,12 @@ int radio_get_health(radio_health_t* health) {
     health->tx_power_dbm = s_config.tx_power;
     return 0;
 }
+
+/* The virtual radio imposes no PA limit of its own, so it reports the range
+ * the physical fleet uses; that keeps emulator configs interchangeable with
+ * hardware ones instead of accepting values no real node could program. */
+int8_t radio_tx_power_min_dbm(void) { return -9; }
+int8_t radio_tx_power_max_dbm(void) { return 22; }
 
 radio_state_t radio_get_state(void) { return (radio_state_t)atomic_load(&s_state); }
 

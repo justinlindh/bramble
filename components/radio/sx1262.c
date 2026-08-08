@@ -390,7 +390,7 @@ int sx1262_set_rf_frequency(float freq_mhz) {
  * +22 dBm pair at every level transmits, but at full PA current regardless
  * of the level actually asked for. */
 int sx1262_set_pa_config(int8_t power_dbm) {
-    sx1262_pa_op_point_t op = sx1262_pa_op_point_for(sx1262_clamp_tx_power(power_dbm));
+    sx1262_pa_op_point_t op = sx1262_pa_op_point_for(power_dbm);
     uint8_t data[4] = {op.pa_duty_cycle, op.hp_max, 0x00, 0x01};
     ESP_LOGD(TAG, "SetPaConfig: %d dBm -> duty 0x%02x hpMax 0x%02x (rated %d dBm)", power_dbm,
              op.pa_duty_cycle, op.hp_max, op.rated_dbm);
@@ -403,14 +403,12 @@ int sx1262_set_pa_config(int8_t power_dbm) {
 }
 
 /* Out-of-range power is not defined by the part, so clamp here as well as at
- * the callers: this is the last point before the value reaches the chip. */
+ * the callers: this is the last point before the value becomes a raw byte on
+ * the wire. Silent, because every in-tree path already clamps and warns before
+ * reaching this depth; a second warning for one condition would only make the
+ * log ambiguous about which layer let it through. */
 int sx1262_set_tx_params(int8_t power_dbm, uint8_t ramp_time) {
-    int8_t clamped = sx1262_clamp_tx_power(power_dbm);
-    if (clamped != power_dbm) {
-        ESP_LOGW(TAG, "SetTxParams: %d dBm out of chip range, clamped to %d dBm", power_dbm,
-                 clamped);
-    }
-    uint8_t data[2] = {(uint8_t)clamped, ramp_time};
+    uint8_t data[2] = {(uint8_t)sx1262_clamp_tx_power(power_dbm), ramp_time};
     return sx1262_write_command(SX1262_CMD_SET_TX_PARAMS, data, 2);
 }
 
@@ -779,7 +777,7 @@ int sx1262_init(void) {
      * failing any subsequent command. */
     uint16_t cal_errors = 0;
     if (sx1262_get_device_errors(&cal_errors) == 0 && (cal_errors & SX1262_DEVERR_ALL)) {
-        char errbuf[96];
+        char errbuf[SX1262_DEVERR_STR_MAX];
         ESP_LOGE(TAG, "Post-calibration device errors [%s]",
                  sx1262_device_errors_str(cal_errors, errbuf, sizeof(errbuf)));
     }

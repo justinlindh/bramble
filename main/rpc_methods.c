@@ -9,8 +9,6 @@
 #include "msg_store.h"
 #include "airtime_budget.h"
 #include "radio.h"
-/* For the device-error flag names and status decoders behind radio_health_t. */
-#include "sx1262.h"
 #include "phy_passthrough.h"
 #include "tx_gate.h"
 #include "freq_plan.h"
@@ -283,35 +281,25 @@ static int handle_get_diagnostics(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(probe, "dropped_reply", (double)probe_drop_reply);
     cJSON_AddNumberToObject(probe, "dropped_forward", (double)probe_drop_fwd);
 
-    /* Transmit-path evidence. Neither the commanded nor the radiated output
-     * power can be read back from the radio, so this reports what the chip
-     * will admit to: latched device errors (PA_RAMP means the amplifier never
-     * came up), chip mode and last-command status, and the OCP register, whose
-     * readback proves PA config writes are reaching the part at all. Pairing
-     * the programmed level with that evidence is what turns "we set 22 dBm"
-     * from an assertion into something a reader can check. */
+    /* Transmit-path evidence. No supported radio can report its commanded or
+     * radiated output power, so this pairs the level the driver programmed
+     * with the faults the chip will admit to. Serialized from the generic
+     * verdicts in radio_health_t rather than one part's registers, so this
+     * stays correct when a second radio learns to answer; the chip-specific
+     * values ride along in `detail` as text for a human to read. */
     radio_health_t rh;
     if (radio_get_health(&rh) == 0) {
         cJSON* health = cJSON_AddObjectToObject(result, "radio_health");
         cJSON_AddBoolToObject(health, "supported", rh.supported);
         cJSON_AddNumberToObject(health, "tx_power_dbm", rh.tx_power_dbm);
         if (rh.supported) {
-            char errbuf[96];
-            cJSON_AddNumberToObject(health, "device_errors", rh.device_errors);
-            cJSON_AddStringToObject(
-                health, "device_errors_str",
-                sx1262_device_errors_str(rh.device_errors, errbuf, sizeof(errbuf)));
-            cJSON_AddBoolToObject(health, "pa_ramp_error",
-                                  (rh.device_errors & SX1262_DEVERR_PA_RAMP) != 0);
-            cJSON_AddNumberToObject(health, "status", rh.status);
-            cJSON_AddStringToObject(health, "chip_mode", sx1262_chip_mode_str(rh.status));
-            cJSON_AddStringToObject(health, "cmd_status", sx1262_cmd_status_str(rh.status));
-            cJSON_AddNumberToObject(health, "ocp", rh.ocp);
-            cJSON_AddNumberToObject(health, "ocp_expected", rh.ocp_expected);
-            cJSON_AddBoolToObject(health, "ocp_ok", rh.ocp == rh.ocp_expected);
-            cJSON_AddNumberToObject(health, "pa_duty_cycle", rh.pa_duty_cycle);
-            cJSON_AddNumberToObject(health, "pa_hp_max", rh.pa_hp_max);
-            cJSON_AddNumberToObject(health, "pa_rated_dbm", rh.pa_rated_dbm);
+            cJSON_AddStringToObject(health, "chip", rh.chip ? rh.chip : "unknown");
+            cJSON_AddBoolToObject(health, "pa_fault", rh.pa_fault);
+            cJSON_AddBoolToObject(health, "pll_fault", rh.pll_fault);
+            cJSON_AddBoolToObject(health, "oscillator_fault", rh.oscillator_fault);
+            cJSON_AddBoolToObject(health, "calibration_fault", rh.calibration_fault);
+            cJSON_AddBoolToObject(health, "config_verified", rh.config_verified);
+            cJSON_AddStringToObject(health, "detail", rh.detail);
         }
     }
 
@@ -1017,6 +1005,16 @@ static int handle_set_radio(const cJSON* params, cJSON* result) {
         cJSON_AddStringToObject(result, "error", "radio reconfigure failed");
         return 0;
     }
+
+    /* Take back what the driver actually programmed before persisting or
+     * echoing it. The plan clamp above is regulatory (30 dBm in US915/AU915)
+     * and sits well above what any radio accepts, so the driver clamps again
+     * to the hardware range. Reporting the requested value here would persist
+     * a power to NVS, echo it to the caller and show it in the UI while the
+     * chip ran at a different one, and this same response also carries
+     * radio_health's programmed level, so the two would contradict each
+     * other. */
+    radio_get_config(&cfg);
 
     /* Persist to NVS */
     nvs_handle_t nvs;
@@ -3320,30 +3318,10 @@ static int handle_get_traffic_events(const cJSON* params, cJSON* result) {
         if (since_seq > 0 && evt->seq <= since_seq)
             continue;
 
+        /* Shared serializer so this and the onTrafficEvent notification
+         * cannot drift apart. */
         cJSON* obj = cJSON_CreateObject();
-        cJSON_AddNumberToObject(obj, "seq", evt->seq);
-        cJSON_AddNumberToObject(obj, "timestamp_ms", evt->timestamp_ms);
-        cJSON_AddNumberToObject(obj, "pkt_type", evt->pkt_type);
-
-        /* Category and airtime tier as canonical strings (shared with the
-         * traffic_event notification serializer via the traffic_debug
-         * component). */
-        cJSON_AddStringToObject(obj, "category", traffic_debug_category_name(evt->category));
-        cJSON_AddStringToObject(obj, "airtime_tier",
-                                traffic_debug_airtime_tier_name(evt->airtime_tier));
-
-        cJSON_AddNumberToObject(obj, "packet_len", evt->packet_len);
-        cJSON_AddNumberToObject(obj, "rssi", evt->rssi);
-        cJSON_AddBoolToObject(obj, "is_tx", evt->is_tx);
-
-        /* Omitted rather than sent as "00000000" when the origin is unknown,
-         * so a consumer plotting RSSI per peer cannot mistake "not carried by
-         * this packet type" for a real address. */
-        if (evt->src_addr != 0) {
-            char src_buf[12];
-            cJSON_AddStringToObject(obj, "src_addr",
-                                    addr_hex(evt->src_addr, src_buf, sizeof(src_buf)));
-        }
+        traffic_event_add_json(obj, evt);
 
         cJSON_AddItemToArray(events, obj);
         returned++;

@@ -32,30 +32,45 @@ typedef struct {
     bool explicit_header;
 } radio_config_t;
 
+/** Longest chip-specific detail string a driver may report. Sized so the
+ *  SX1262 driver's line, whose worst case is every device-error flag named in
+ *  full plus the chip mode, command status and PA settings, cannot truncate. */
+#define RADIO_HEALTH_DETAIL_MAX 192
+
 /**
- * What the radio chip will tell us about its own transmit path.
+ * What the radio will tell us about its own transmit path.
  *
- * Neither the commanded output power nor the actual radiated power can be read
- * back from an SX1262: SetTxParams and SetPaConfig are write-only op-codes and
- * no register reports output power. So this reports the next best evidence:
- * the latched device-error flags (PA_RAMP in particular means the PA did not
- * come up for a transmit), the chip mode and last-command status, and the OCP
- * register, which does read back and therefore proves PA config writes are
- * reaching the part. tx_power_dbm and the PA operating point are what the
- * driver programmed, so a caller can compare intent against evidence.
- *
+ * On no supported part can the commanded or the radiated output power be read
+ * back: the SX1262's SetTxParams and SetPaConfig are write-only op-codes and
+ * no register reports output power. So this reports the next best evidence,
+ * as verdicts rather than one chip's register layout, because every LoRa part
+ * this firmware drives has its own error word and its own PA configuration.
  * Confirming the level actually radiated needs external instrumentation.
+ *
+ * The verdicts are deliberately generic so the RPC layer can serialize them
+ * without knowing which radio answered. Each driver maps its own registers
+ * onto them and puts the raw values in `detail` for a human to read.
  */
 typedef struct {
-    bool supported;         /* false where there is no real chip to ask */
-    uint8_t status;         /* raw GetStatus byte */
-    uint16_t device_errors; /* GetDeviceErrors mask, SX1262_DEVERR_* */
-    uint8_t ocp;            /* OCP register readback */
-    uint8_t ocp_expected;   /* what the driver programmed */
-    int8_t tx_power_dbm;    /* level programmed via SetTxParams */
-    uint8_t pa_duty_cycle;  /* SetPaConfig operating point... */
-    uint8_t pa_hp_max;
-    int8_t pa_rated_dbm; /* ...and the level that point is rated for */
+    bool supported;      /* false where there is no real chip to ask */
+    const char* chip;    /* part name, NULL when unsupported */
+    int8_t tx_power_dbm; /* level the driver programmed, not a measurement */
+
+    /* The power amplifier did not ramp for a transmit, so nothing usable went
+     * on air. The strongest evidence a chip can give that the commanded power
+     * is not being produced. */
+    bool pa_fault;
+    bool pll_fault;         /* synthesizer did not lock */
+    bool oscillator_fault;  /* reference oscillator did not start */
+    bool calibration_fault; /* a calibration block failed */
+
+    /* Configuration written to the chip reads back as programmed. False means
+     * config writes are not landing, which caps output well below the
+     * commanded level. */
+    bool config_verified;
+
+    /* Chip-specific supporting values, human readable, never parsed. */
+    char detail[RADIO_HEALTH_DETAIL_MAX];
 } radio_health_t;
 
 /**
@@ -64,6 +79,17 @@ typedef struct {
  * supported=false and returns 0.
  */
 int radio_get_health(radio_health_t* health);
+
+/**
+ * Output-power range the radio actually accepts, in dBm.
+ *
+ * This is a hardware limit and is distinct from the frequency plan's
+ * regulatory ceiling, which is higher than any part's capability in US915 and
+ * AU915. Callers that persist or report a requested power must respect both,
+ * or they will store and echo a number the chip was never programmed with.
+ */
+int8_t radio_tx_power_min_dbm(void);
+int8_t radio_tx_power_max_dbm(void);
 
 typedef void (*radio_rx_callback_t)(const uint8_t* data, uint8_t len, const radio_rx_info_t* info);
 typedef void (*radio_tx_done_callback_t)(void);

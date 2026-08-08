@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 /* ---------- SX1262 SPI op-codes ---------- */
 #define SX1262_CMD_SET_SLEEP 0x84
@@ -130,6 +131,11 @@ static inline const char* sx1262_cmd_status_str(uint8_t status) {
     }
 }
 
+/* Buffer size that always holds the full decoded flag list: the eight names
+ * plus separators and a NUL. Sized here rather than at each call site so
+ * adding a flag is a one-line change. */
+#define SX1262_DEVERR_STR_MAX 96
+
 /* Render a device-error bitmask as a space-separated flag list, so a log line
  * names the fault instead of printing a mask a reader has to decode by hand.
  * Always NUL-terminates; writes "none" for a clear mask. Returns buf. */
@@ -150,28 +156,15 @@ static inline char* sx1262_device_errors_str(uint16_t errors, char* buf, size_t 
     for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); i++) {
         if (!(errors & flags[i].bit))
             continue;
-        const char* n = flags[i].name;
-        size_t need = 0;
-        while (n[need])
-            need++;
-        /* separator + name + NUL */
-        if (used + (used ? 1 : 0) + need + 1 > len)
+        int n = snprintf(buf + used, len - used, "%s%s", used ? " " : "", flags[i].name);
+        if (n < 0 || (size_t)n >= len - used) {
+            buf[used] = '\0'; /* would not fit: stop rather than truncate mid-name */
             break;
-        if (used)
-            buf[used++] = ' ';
-        for (size_t j = 0; j < need; j++)
-            buf[used++] = n[j];
-        buf[used] = '\0';
-    }
-    if (used == 0) {
-        const char* none = "none";
-        size_t i = 0;
-        while (none[i] && i + 1 < len) {
-            buf[i] = none[i];
-            i++;
         }
-        buf[i] = '\0';
+        used += (size_t)n;
     }
+    if (used == 0)
+        snprintf(buf, len, "none");
     return buf;
 }
 

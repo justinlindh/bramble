@@ -119,16 +119,16 @@ radiated needs external instrumentation such as an SDR or a power meter.
 What the chip does report is in `bramble.getDiagnostics` under `radio_health`,
 and in the boot trace as `Radio health (init)` lines:
 
-- `pa_ramp_error` true means the power amplifier did not ramp for a transmit,
-  so nothing usable went on air. This is the strongest on-chip signal that
+- `pa_fault` true means the power amplifier did not ramp for a transmit, so
+  nothing usable went on air. This is the strongest on-chip signal that
   commanded power is not being produced.
-- `device_errors_str` names every latched fault. `PLL_LOCK` and `IMG_CALIB`
-  cost real link budget without failing a transmit outright.
-- `ocp_ok` false means PA configuration writes are not reaching the chip at
-  all. OCP is the only PA-side register that reads back, so it is the proof
-  that the SetPaConfig path works.
-- `cmd_status` of `exec-failed` or `processing-error` means the chip rejected a
-  command.
+- `pll_fault`, `oscillator_fault` and `calibration_fault` cost real link budget
+  without failing a transmit outright.
+- `config_verified` false means configuration writes are not reaching the chip
+  at all, which caps output well below the commanded level.
+- `detail` carries the chip-specific values behind those verdicts, such as the
+  decoded error flag names and the PA settings in use. It is for reading, not
+  parsing.
 
 ### Comparing nodes on the bench
 

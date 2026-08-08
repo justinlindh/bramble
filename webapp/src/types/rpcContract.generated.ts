@@ -1787,42 +1787,29 @@ export interface components {
             flood_relay_drops: number;
             probe_ingress: components["schemas"]["ProbeIngressDiagnostics"];
         };
-        /** @description What the radio will report about its own transmit path. Neither the commanded nor the radiated output power can be read back from an SX1262: SetTxParams and SetPaConfig are write-only op-codes and no register reports output power. So this pairs the level the driver programmed with the evidence the chip does expose, which is enough to catch a dead PA, an unlocked PLL or config writes that never landed. Confirming the level actually radiated needs external instrumentation. */
+        /**
+         * @description What the radio reports about its own transmit path. No supported part can read back its commanded or radiated output power: the SX1262's SetTxParams and SetPaConfig are write-only op-codes and no register reports output power. So this pairs the level the driver programmed with the faults the chip will admit to, which is enough to catch a dead PA, an unlocked synthesizer, a failed calibration, or config writes that never landed. Confirming the level actually radiated needs external instrumentation.
+         *     The verdicts are deliberately generic rather than one part's register layout, so they stay meaningful as other radios learn to answer. The chip-specific raw values ride along in `detail` as human-readable text.
+         */
         RadioHealthDiagnostics: {
-            /** @description False when the driver has no SX1262 to interrogate (the emulator's virtual radio, or the LR1110 target, whose status and error words do not share this layout). Only tx_power_dbm is populated then. */
+            /** @description False when the driver cannot interrogate its transmit path: the emulator's virtual radio, or a part whose mapping is not implemented. Only tx_power_dbm is populated then. */
             supported: boolean;
-            /** @description Output power the driver programmed via SetTxParams, after clamping to the chip's -9..+22 dBm range. This is intent, not measurement. */
+            /** @description Output power the driver programmed, after clamping to the radio's own range. This is intent, not measurement. */
             tx_power_dbm: number;
-            /** @description Raw GetDeviceErrors bitmask. */
-            device_errors?: number;
-            /** @description Space-separated flag names for device_errors, or "none". Flags are PA_RAMP, PLL_LOCK, XOSC_START, IMG_CALIB, ADC_CALIB, PLL_CALIB, RC13M_CALIB and RC64K_CALIB. */
-            device_errors_str?: string;
-            /** @description PA_RAMP is latched: the power amplifier did not ramp for a transmit, so nothing usable went on air. The single strongest on-chip signal that commanded power is not being produced. */
-            pa_ramp_error?: boolean;
-            /** @description Raw GetStatus byte. */
-            status?: number;
-            /**
-             * @description Chip mode decoded from status.
-             * @enum {string}
-             */
-            chip_mode?: "STBY_RC" | "STBY_XOSC" | "FS" | "RX" | "TX" | "UNKNOWN";
-            /**
-             * @description Last-command status decoded from status. exec-failed or processing-error means the chip rejected a command.
-             * @enum {string}
-             */
-            cmd_status?: "data-available" | "timeout" | "processing-error" | "exec-failed" | "tx-done" | "reserved";
-            /** @description Over-current protection register readback. */
-            ocp?: number;
-            /** @description OCP value the driver programmed for the high-power PA. */
-            ocp_expected?: number;
-            /** @description False means PA configuration writes are not reaching the chip, which caps output well below the commanded level. OCP is the only PA-side register that reads back, so this is the proof that the SetPaConfig path works at all. */
-            ocp_ok?: boolean;
-            /** @description paDutyCycle from the selected SetPaConfig operating point. */
-            pa_duty_cycle?: number;
-            /** @description hpMax from the selected SetPaConfig operating point. */
-            pa_hp_max?: number;
-            /** @description Output level the selected PA operating point is characterized for. The driver picks the lowest characterized point that still covers the requested power. */
-            pa_rated_dbm?: number;
+            /** @description Radio part that answered, for example "SX1262". */
+            chip?: string;
+            /** @description The power amplifier did not ramp for a transmit, so nothing usable went on air. The strongest evidence a chip can give that the commanded power is not being produced. */
+            pa_fault?: boolean;
+            /** @description The frequency synthesizer did not lock. */
+            pll_fault?: boolean;
+            /** @description The reference oscillator did not start. */
+            oscillator_fault?: boolean;
+            /** @description A calibration block failed. Costs link budget silently, without failing any later command. */
+            calibration_fault?: boolean;
+            /** @description Configuration written to the chip reads back as programmed. False means config writes are not landing, which caps output well below the commanded level. */
+            config_verified?: boolean;
+            /** @description Chip-specific supporting values as human-readable text, for example decoded error flag names, chip mode and PA settings. Intended for display and logs; do not parse it, the format is the driver's to choose and may change with the part. */
+            detail?: string;
         };
         /** @description Inbound PROBE token-bucket accounting. PROBE is unauthenticated by design, so these buckets bound how much transmission an inbound probe can buy rather than who may send one. The buckets are node-global and never per-sender, because the only sender signal on a PROBE is an unauthenticated address field. */
         ProbeIngressDiagnostics: {

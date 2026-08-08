@@ -282,21 +282,8 @@ pending_rreq_fwd_t s_rreq_fwd_queue[RREQ_FWD_QUEUE_CAPACITY];
 /* Reliability: ACK tracking for outgoing unicast messages */
 pending_ack_table_t s_pending_acks;
 
-/* Traffic debug telemetry.
- *
- * The ring is one of the largest static allocations on the nRF52840, where RAM
- * is the binding constraint and the budget gate leaves under a kilobyte of
- * headroom. It holds debug telemetry, not anything the mesh needs to function,
- * so that target keeps a shorter history rather than spending its remaining
- * RAM on one. The ESP32-S3 has room for the full ring and keeps it.
- *
- * The nRF also packs enums into a byte, so an event is smaller there; the
- * shorter ring is about the budget, not the element size. */
-#if defined(BRAMBLE_PLATFORM_NRF)
-#define TRAFFIC_DEBUG_CAPACITY 256
-#else
-#define TRAFFIC_DEBUG_CAPACITY 512
-#endif
+/* Traffic debug telemetry. Depth comes from TRAFFIC_DEBUG_CAPACITY in
+ * traffic_debug.h, which each platform's build may override. */
 static traffic_event_t s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
 static traffic_debug_t s_traffic_debug;
 timesync_state_t s_timesync;
@@ -2935,29 +2922,10 @@ static void traffic_event_notify(const traffic_event_t* evt, void* ctx) {
         return;
     }
 
-    /* Build notification payload */
+    /* Build notification payload. Shared serializer so this and the
+     * getTrafficEvents reply cannot drift apart. */
     cJSON* params = cJSON_CreateObject();
-    cJSON_AddNumberToObject(params, "seq", evt->seq);
-    cJSON_AddNumberToObject(params, "timestamp_ms", evt->timestamp_ms);
-    cJSON_AddNumberToObject(params, "pkt_type", evt->pkt_type);
-
-    /* Category and airtime tier as canonical strings (shared with the
-     * traffic_debug_get RPC serializer via the traffic_debug component). */
-    cJSON_AddStringToObject(params, "category", traffic_debug_category_name(evt->category));
-    cJSON_AddStringToObject(params, "airtime_tier",
-                            traffic_debug_airtime_tier_name(evt->airtime_tier));
-
-    cJSON_AddNumberToObject(params, "packet_len", evt->packet_len);
-    cJSON_AddNumberToObject(params, "rssi", evt->rssi);
-    cJSON_AddBoolToObject(params, "is_tx", evt->is_tx);
-
-    /* Same optional-key contract as the getTrafficEvents serializer: present
-     * only when the frame actually carried an origin address. */
-    if (evt->src_addr != 0) {
-        char src_buf[12];
-        cJSON_AddStringToObject(params, "src_addr",
-                                addr_hex(evt->src_addr, src_buf, sizeof(src_buf)));
-    }
+    traffic_event_add_json(params, evt);
 
     /* Send notification via RPC notify system (which forwards to WebSocket) */
     rpc_notify("bramble.onTrafficEvent", params);

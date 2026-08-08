@@ -71,14 +71,14 @@ typedef struct {
  * radio types rather than including the component header; keep in step. */
 typedef struct {
     bool supported;
-    uint8_t status;
-    uint16_t device_errors;
-    uint8_t ocp;
-    uint8_t ocp_expected;
+    const char* chip;
     int8_t tx_power_dbm;
-    uint8_t pa_duty_cycle;
-    uint8_t pa_hp_max;
-    int8_t pa_rated_dbm;
+    bool pa_fault;
+    bool pll_fault;
+    bool oscillator_fault;
+    bool calibration_fault;
+    bool config_verified;
+    char detail[192];
 } radio_health_t;
 
 typedef struct {

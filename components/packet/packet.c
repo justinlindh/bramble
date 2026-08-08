@@ -494,6 +494,11 @@ esp_err_t bramble_identity_attestation_signed_msg(const bramble_identity_attesta
 /*  Origin address extraction (traffic attribution)                    */
 /* ------------------------------------------------------------------ */
 
+static inline uint32_t get_le32(const uint8_t* buf) {
+    return (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) | ((uint32_t)buf[2] << 16) |
+           ((uint32_t)buf[3] << 24);
+}
+
 bool bramble_packet_origin_addr(uint8_t type, const uint8_t* buf, size_t len, uint32_t* out) {
     if (!buf || !out || len < HEADER_SIZE + 4)
         return false;
@@ -505,16 +510,20 @@ bool bramble_packet_origin_addr(uint8_t type, const uint8_t* buf, size_t len, ui
     case PKT_TYPE_BEACON:
     case PKT_TYPE_DELIVERY_RECEIPT:
     case PKT_TYPE_IDENTITY_ATTESTATION:
-        *out = get_be32(buf + HEADER_SIZE);
+        *out = get_be32(buf + B);
         return true;
 
-    /* Hand-built envelopes: the builders memcpy the address in host order at
-     * BRAMBLE_DATA_SRC_ADDR_OFFSET, so it must be read back the same way. */
+    /* Hand-built envelopes: the builders memcpy the address straight out of a
+     * uint32_t, which on every target this firmware runs on puts it on the
+     * wire little-endian. Decoded explicitly rather than with a matching
+     * memcpy so the encoding is stated rather than inherited from the host,
+     * which is also what a future move to a single wire byte order would
+     * need to change. */
     case PKT_TYPE_DATA:
     case PKT_TYPE_LOCATION:
     case PKT_TYPE_PROBE:
     case PKT_TYPE_PROBE_ACK:
-        memcpy(out, buf + HEADER_SIZE, 4);
+        *out = get_le32(buf + BRAMBLE_DATA_SRC_ADDR_OFFSET);
         return true;
 
     default:
