@@ -100,6 +100,26 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len);
 uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len, uint32_t uid);
 
 /**
+ * Park a failed direct message for delivery when its peer rejoins.
+ * Moves the row identified by uid to MSG_STATUS_QUEUED, which msg_store
+ * persists, so the parked state survives a reboot. Returns false if no row
+ * carries that uid.
+ */
+bool mesh_park_message(uint32_t uid);
+
+/** Un-park a message, returning it to MSG_STATUS_FAILED. */
+bool mesh_cancel_parked_message(uint32_t uid);
+
+/**
+ * Re-send every message parked for peer_addr, oldest first.
+ * Called from the beacon handler on the rejoin edge only (a peer entering the
+ * neighbor table), never per beacon: a peer that is present but unreachable
+ * beacons every 60s, and flushing on each of those would be a retry loop.
+ * A send that fails leaves the row parked for the next genuine rejoin.
+ */
+void mesh_flush_parked_for(uint32_t peer_addr);
+
+/**
  * Send a dedicated location packet (PKT_TYPE_LOCATION) to a single destination.
  * Returns packet_id (>0) on success, 0 on failure.
  */

@@ -2409,6 +2409,38 @@ uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len
     return mesh_send_message_uid(dest_addr, data, len, uid);
 }
 
+bool mesh_park_message(uint32_t uid) {
+    if (uid == 0)
+        return false;
+    return msg_store_update_by_uid(uid, 0, MSG_STATUS_QUEUED);
+}
+
+bool mesh_cancel_parked_message(uint32_t uid) {
+    if (uid == 0)
+        return false;
+    return msg_store_update_by_uid(uid, 0, MSG_STATUS_FAILED);
+}
+
+void mesh_flush_parked_for(uint32_t peer_addr) {
+    uint32_t uids[MSG_STORE_MAX];
+    int n = msg_store_parked_uids_for_peer(peer_addr, uids, MSG_STORE_MAX);
+    if (n <= 0)
+        return;
+
+    ESP_LOGI(TAG, "Flushing %d parked message(s) for %08" PRIX32, n, peer_addr);
+    for (int i = 0; i < n; i++) {
+        stored_msg_t msg;
+        if (!msg_store_get_copy_by_uid(uids[i], &msg))
+            continue;
+        /* A failed send leaves the row parked, so it waits for the next
+         * genuine rejoin rather than retrying against a peer that is present
+         * but unreachable. */
+        uint32_t pkt =
+            mesh_resend_message(msg.peer_addr, (const uint8_t*)msg.text, msg.text_len, msg.uid);
+        ESP_LOGI(TAG, "Parked uid=%" PRIu32 " -> pkt=%08" PRIX32, msg.uid, pkt);
+    }
+}
+
 #ifdef CONFIG_IDF_TARGET_LINUX
 /* Emulator only: the address of this node's first known neighbor, or 0 if it has
  * none yet. A scenario's scripted sender (emu_autosend.c) uses it to DM a peer

@@ -416,6 +416,14 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         if (s_mailbox_enabled) {
             mailbox_flush_for(beacon.src_addr);
         }
+
+        /* Rejoin edge only: is_new_peer is true when this beacon ADMITTED the
+         * address to the neighbor table, which is the "they came back" event.
+         * Flushing per beacon instead would retry every 60s against a peer
+         * that is present but unreachable. */
+        if (is_new_peer) {
+            mesh_flush_parked_for(beacon.src_addr);
+        }
     }
 
     /* Sybil detection: check if multiple neighbors cluster at suspiciously similar RSSI.
