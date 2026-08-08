@@ -87,7 +87,10 @@ Flags:
 | `-scenario PATH` | Write the reconstructed scenario out, to run or edit by hand. |
 | `-json PATH` | Also write the machine-readable report (`-` for stdout). |
 
-Progress lines go to stderr; the report goes to stdout.
+Progress lines go to stderr and the human report goes to stdout. With `-json -`
+that swaps: stdout carries exactly one JSON document, so it pipes into `jq`
+without a parse error, and the human report is written to stderr alongside the
+progress lines.
 
 ### 3. Read the report
 

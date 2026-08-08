@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -52,18 +53,27 @@ type twinReportJSON struct {
 type twinReportAssumptions struct {
 	Kind                string `json:"kind"`
 	ReciprocalLinks     int    `json:"reciprocal_links_assumed"`
+	OneWayLinks         int    `json:"one_way_links"`
 	UnexportedNodes     int    `json:"unexported_nodes"`
 	ObservationWindowMs int64  `json:"observation_window_ms"`
 }
 
 func runTwin(args []string) int {
+	return runTwinIO(args, os.Stdout, os.Stderr)
+}
+
+// runTwinIO is runTwin with its two output streams named, which is what lets a
+// test read both and check that "-json -" really produces a document a consumer
+// can parse.
+func runTwinIO(args []string, out, errw io.Writer) int {
 	fs := flag.NewFlagSet("twin", flag.ContinueOnError)
+	fs.SetOutput(errw)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr,
+		fmt.Fprintln(errw,
 			"usage: bramble-gosim twin [flags] <export.json> [export.json ...]")
-		fmt.Fprintln(os.Stderr,
+		fmt.Fprintln(errw,
 			"\nEach export.json is one node's bramble.exportTopology result (the bare")
-		fmt.Fprintln(os.Stderr,
+		fmt.Fprintln(errw,
 			"result object or the whole JSON-RPC response). Flags:")
 		fs.PrintDefaults()
 	}
@@ -76,7 +86,8 @@ func runTwin(args []string) int {
 		"skip the capacity probe (which runs one full scenario per rate) and report topology "+
 			"and criticality only")
 	jsonOut := fs.String("json", "",
-		"also write the machine-readable report to this path (\"-\" for stdout)")
+		"also write the machine-readable report to this path (\"-\" for stdout, which moves "+
+			"the human report to stderr so stdout is one JSON document)")
 	scenarioOut := fs.String("scenario", "",
 		"write the reconstructed gosim scenario to this path, to run or edit by hand")
 	if err := fs.Parse(args); err != nil {
@@ -90,11 +101,11 @@ func runTwin(args []string) int {
 
 	rateList, err := parseTwinRates(*rates)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+		fmt.Fprintf(errw, "twin: %v\n", err)
 		return 2
 	}
 	if *durationMs <= 20000 {
-		fmt.Fprintf(os.Stderr,
+		fmt.Fprintf(errw,
 			"twin: -duration-ms %d is shorter than the 20 s of ramp-up and drain every probe "+
 				"run reserves, so no traffic would be offered\n", *durationMs)
 		return 2
@@ -104,7 +115,7 @@ func runTwin(args []string) int {
 	for _, path := range sources {
 		exp, err := loadTwinExport(path)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+			fmt.Fprintf(errw, "twin: %v\n", err)
 			return 1
 		}
 		exports = append(exports, exp)
@@ -112,11 +123,11 @@ func runTwin(args []string) int {
 
 	graph, err := buildTwinGraph(exports)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+		fmt.Fprintf(errw, "twin: %v\n", err)
 		return 1
 	}
 	if len(graph.Nodes) > twinMaxNodes {
-		fmt.Fprintf(os.Stderr,
+		fmt.Fprintf(errw,
 			"twin: %d nodes, more than the simulator's %d-node ceiling (MAX_NODES in "+
 				"simulator/engine/sim_node.h)\n", len(graph.Nodes), twinMaxNodes)
 		return 1
@@ -124,7 +135,7 @@ func runTwin(args []string) int {
 
 	workDir, err := os.MkdirTemp("", "bramble-twin-")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+		fmt.Fprintf(errw, "twin: %v\n", err)
 		return 1
 	}
 	defer os.RemoveAll(workDir)
@@ -134,24 +145,24 @@ func runTwin(args []string) int {
 	topo := buildTwinScenario(graph, "twin-topology", *seed, *durationMs, nil)
 	topoData, err := topo.JSON()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+		fmt.Fprintf(errw, "twin: %v\n", err)
 		return 1
 	}
 	topoPath := filepath.Join(workDir, "topology.json")
 	if err := os.WriteFile(topoPath, topoData, 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+		fmt.Fprintf(errw, "twin: %v\n", err)
 		return 1
 	}
 	if *scenarioOut != "" {
 		if err := os.WriteFile(*scenarioOut, topoData, 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+			fmt.Fprintf(errw, "twin: %v\n", err)
 			return 1
 		}
 	}
 
 	conn, err := twinAnalyzeConnectivity(topoPath, graph)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+		fmt.Fprintf(errw, "twin: %v\n", err)
 		return 1
 	}
 
@@ -159,12 +170,19 @@ func runTwin(args []string) int {
 	if !*skipCapacity {
 		probe, err = twinRunCapacityProbe(graph, workDir, *seed, *durationMs, rateList)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+			fmt.Fprintf(errw, "twin: %v\n", err)
 			return 1
 		}
 	}
 
-	fmt.Print(twinReport(graph, conn, probe, sources))
+	// With the JSON going to stdout, stdout has to be exactly one JSON
+	// document: a consumer piping into jq gets a parse error otherwise. The
+	// human report still gets written, to stderr, so nothing is lost.
+	textOut := out
+	if *jsonOut == "-" {
+		textOut = errw
+	}
+	fmt.Fprint(textOut, twinReport(graph, conn, probe, sources))
 
 	if *jsonOut != "" {
 		payload := twinReportJSON{
@@ -187,14 +205,17 @@ func runTwin(args []string) int {
 		}
 		data, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+			fmt.Fprintf(errw, "twin: %v\n", err)
 			return 1
 		}
 		data = append(data, '\n')
 		if *jsonOut == "-" {
-			os.Stdout.Write(data)
+			if _, err := out.Write(data); err != nil {
+				fmt.Fprintf(errw, "twin: %v\n", err)
+				return 1
+			}
 		} else if err := os.WriteFile(*jsonOut, data, 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "twin: %v\n", err)
+			fmt.Fprintf(errw, "twin: %v\n", err)
 			return 1
 		}
 	}
