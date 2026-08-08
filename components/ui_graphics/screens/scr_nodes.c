@@ -4,24 +4,27 @@
 #include "ui_shared_state.h"
 #include "node_presence.h"
 #include "theme/bramble_theme.h"
-#include "location.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-extern void mesh_get_location_state(location_manager_t* out);
-
 /* Per-card context for drill-down click handler and live refresh */
 typedef struct {
     bramble_layout_t* layout;
     neighbor_entry_t neighbor;
-    uint32_t now_ms;
     lv_obj_t* name_lbl;
     lv_obj_t* info_lbl;
     lv_obj_t* bar;
     lv_obj_t* dot;
+    /* Recency styling as last applied. LVGL's style setters do no old-value
+     * comparison: each one invalidates the widget twice whether or not the
+     * value changed, so re-applying five properties across three widgets on
+     * every one-second tick would repaint the whole row about 2.5x wider than
+     * the age string that actually changed. A peer crosses this threshold once
+     * per session, so the styling is only re-applied when it flips. */
+    bool stale;
 } node_card_ctx_t;
 
 #define MAX_CARD_CTX MAX_NEIGHBORS
@@ -34,7 +37,7 @@ static lv_obj_t* s_node_title = NULL;
 static bramble_layout_t* s_node_layout = NULL;
 static uint32_t s_node_sig = 0;
 
-static void populate_node_list(void);
+static void populate_node_list(const ui_mesh_state_t* state);
 
 /* Cheap membership signature: count plus a rolling hash of addresses.
  * Changes whenever a neighbor appears or is evicted (even count-stable
@@ -81,15 +84,11 @@ static int cmp_node_recency(const void* a, const void* b) {
 static struct {
     bramble_layout_t* layout;
     neighbor_entry_t neighbor;
-    bool has_loc;
-    location_cache_entry_t loc_entry;
-    uint32_t now_ms;
 } s_pending_open;
 
 static void node_detail_builder(bramble_layout_t* layout, void* ctx) {
     (void)ctx;
-    scr_node_detail_open(layout, &s_pending_open.neighbor, s_pending_open.has_loc,
-                         &s_pending_open.loc_entry, s_pending_open.now_ms);
+    scr_node_detail_open(layout, &s_pending_open.neighbor);
 }
 
 static void node_open_async(void* arg) {
@@ -104,25 +103,11 @@ static void node_open_cb(lv_event_t* e) {
     if (!ctx || !ctx->layout)
         return;
 
-    /* Look up peer location from location cache */
-    static location_manager_t loc;
-    mesh_get_location_state(&loc);
-
-    bool has_loc = false;
-    location_cache_entry_t loc_entry = {0};
-    for (int i = 0; i < loc.cache_count && i < LOCATION_MAX_CONTACTS; i++) {
-        if (loc.cache[i].active && loc.cache[i].peer_addr == ctx->neighbor.addr) {
-            has_loc = true;
-            loc_entry = loc.cache[i];
-            break;
-        }
-    }
-
+    /* Only the peer: the detail card looks up its own location and clock on
+     * every render, so anything else handed over here would be overwritten a
+     * second later. */
     s_pending_open.layout = ctx->layout;
     s_pending_open.neighbor = ctx->neighbor;
-    s_pending_open.has_loc = has_loc;
-    s_pending_open.loc_entry = loc_entry;
-    s_pending_open.now_ms = ctx->now_ms;
     ui_defer(node_open_async, NULL);
 }
 
@@ -148,7 +133,6 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
         ctx = &s_card_ctx[s_card_ctx_count++];
         ctx->layout = layout;
         ctx->neighbor = *n;
-        ctx->now_ms = now_ms;
         lv_obj_add_event_cb(card, node_open_cb, LV_EVENT_CLICKED, ctx);
     }
 
@@ -189,12 +173,7 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
     lv_obj_set_size(bar, 40, 8);
     lv_obj_align(bar, LV_ALIGN_TOP_RIGHT, -40, 4);
     lv_obj_set_style_bg_color(bar, BR_COLOR_SURFACE_2, 0);
-    int pct = (n->rssi + 120) * 100 / 70;
-    if (pct < 0)
-        pct = 0;
-    if (pct > 100)
-        pct = 100;
-    lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+    lv_bar_set_value(bar, node_signal_pct(n->rssi), LV_ANIM_OFF);
 
     /* Online dot */
     lv_obj_t* dot = lv_obj_create(card);
@@ -205,14 +184,15 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
     lv_obj_set_style_border_width(dot, 0, 0);
 
     /* Recency styling for name, bar and dot: fresh peers pop, stale ones fade. */
-    apply_node_recency_style(name_lbl, bar, dot,
-                             node_presence_for_age(age_s) == NODE_PRESENCE_STALE);
+    bool stale = node_is_stale(age_s);
+    apply_node_recency_style(name_lbl, bar, dot, stale);
 
     if (ctx) {
         ctx->name_lbl = name_lbl;
         ctx->info_lbl = info_lbl;
         ctx->bar = bar;
         ctx->dot = dot;
+        ctx->stale = stale;
     }
 }
 
@@ -227,7 +207,7 @@ static void nodes_refresh_cb(lv_timer_t* timer) {
     uint32_t sig = neighbor_signature(state);
     if (sig != s_node_sig) {
         s_node_sig = sig;
-        populate_node_list();
+        populate_node_list(state);
         return;
     }
 
@@ -240,26 +220,26 @@ static void nodes_refresh_cb(lv_timer_t* timer) {
             if (n->addr != ctx->neighbor.addr)
                 continue;
             ctx->neighbor = *n;
-            ctx->now_ms = now_ms;
             uint32_t age_s = node_age_seconds(now_ms, n->last_heard);
             char age_buf[16];
             node_format_age(age_s, age_buf, sizeof(age_buf));
             lv_label_set_text_fmt(ctx->info_lbl, "%ddBm  SNR:%d  %s", n->rssi, n->snr, age_buf);
-            int pct = (n->rssi + 120) * 100 / 70;
-            if (pct < 0)
-                pct = 0;
-            if (pct > 100)
-                pct = 100;
-            lv_bar_set_value(ctx->bar, pct, LV_ANIM_OFF);
-            apply_node_recency_style(ctx->name_lbl, ctx->bar, ctx->dot,
-                                     node_presence_for_age(age_s) == NODE_PRESENCE_STALE);
+            lv_bar_set_value(ctx->bar, node_signal_pct(n->rssi), LV_ANIM_OFF);
+            /* Only on a flip: see node_card_ctx_t.stale. */
+            bool stale = node_is_stale(age_s);
+            if (stale != ctx->stale) {
+                ctx->stale = stale;
+                apply_node_recency_style(ctx->name_lbl, ctx->bar, ctx->dot, stale);
+            }
             break;
         }
     }
 }
 
-static void populate_node_list(void) {
-    const ui_mesh_state_t* state = ui_shared_mesh_state();
+/* Takes the caller's already-fetched snapshot: mesh_get_state copies the whole
+ * 1.9 KB shared state under a mutex, and the refresh tick has one in hand
+ * already. */
+static void populate_node_list(const ui_mesh_state_t* state) {
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     int count = state->neighbors.count;
 
@@ -332,8 +312,9 @@ void scr_nodes_create(bramble_layout_t* layout) {
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
     s_node_list = list;
 
-    s_node_sig = neighbor_signature(ui_shared_mesh_state());
-    populate_node_list();
+    const ui_mesh_state_t* state = ui_shared_mesh_state();
+    s_node_sig = neighbor_signature(state);
+    populate_node_list(state);
 
     /* Live refresh every second: ages tick in place at the seconds resolution
      * node_format_age prints, so the row visibly counts up instead of looking

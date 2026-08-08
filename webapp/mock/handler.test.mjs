@@ -68,6 +68,35 @@ describe('mock handler shapes', () => {
     expect(handlers['bramble.otaGetOrigin']({}).overridden).toBe(false);
   });
 
+  it('BLE pairing RPCs answer the firmware shapes for set, clear and rejects', async () => {
+    const { handlers } = await load();
+    expect(handlers['bramble.getBleSecurity']({})).toEqual({
+      mode: 'just-works',
+      staticPasskeySet: false,
+    });
+
+    expect(handlers['bramble.setBlePasskey']({ passkey: '482913' })).toEqual({
+      ok: true,
+      mode: 'static-passkey',
+    });
+    expect(handlers['bramble.getBleSecurity']({})).toEqual({
+      mode: 'static-passkey',
+      staticPasskeySet: true,
+    });
+
+    // Rejections carry ok:false plus a reason, never a thrown error, so the
+    // client surfaces them instead of reporting a save that did not happen.
+    expect(handlers['bramble.setBlePasskey']({ passkey: '12345' }).ok).toBe(false);
+    expect(handlers['bramble.setBlePasskey']({}).ok).toBe(false);
+    expect(handlers['bramble.getBleSecurity']({}).staticPasskeySet).toBe(true);
+
+    expect(handlers['bramble.setBlePasskey']({ passkey: null })).toEqual({
+      ok: true,
+      mode: 'just-works',
+    });
+    expect(handlers['bramble.getBleSecurity']({}).staticPasskeySet).toBe(false);
+  });
+
   it('traffic debug persists and getTrafficEvents filters by seq (issue #96)', async () => {
     const { handlers } = await load();
     expect(handlers['bramble.getTrafficDebug']({}).enabled).toBe(false);

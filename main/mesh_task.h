@@ -114,6 +114,15 @@ void mesh_reboot_delayed(int delay_ms);
 /**
  * Get a snapshot of the routing table (thread-safe).
  */
+/**
+ * Copy one neighbor entry by address. Returns false if the peer is not in the
+ * table. A caller that wants a single peer should use this rather than
+ * mesh_get_state(): the full snapshot is a 1.9 KB copy under the state mutex,
+ * against 56 bytes here, and a screen refreshing once a second pays that
+ * difference every tick.
+ */
+bool mesh_get_neighbor(uint32_t addr, neighbor_entry_t* out);
+
 void mesh_get_routes(routing_table_t* out);
 
 /**

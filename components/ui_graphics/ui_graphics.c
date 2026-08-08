@@ -4,6 +4,7 @@
 #include "lv_port_trackball.h"
 #include "lv_port_keyboard.h"
 #include "ui_zone.h"
+#include "ui_pairing.h"
 #include "sleep_manager.h"
 #include "theme/bramble_theme.h"
 #include "screens/scr_layout.h"
@@ -33,6 +34,16 @@ static int s_unread_count = 0;
  * one capture can be in flight); s_shot_done is given by the UI task when a
  * requested capture completes (success or failure). */
 #define UI_SCREENSHOT_BUF_SIZE (UI_SCREENSHOT_LEN + 256) /* lv_snapshot alignment slack */
+/* Top-layer compositing scratch: lv_screen_active() does not include
+ * lv_layer_top(), where every modal lives (pairing code, confirm dialogs,
+ * toasts), so a capture taken while one is up shows the screen underneath
+ * it instead of what the panel displays. The top layer is snapshotted
+ * separately in ARGB8888 (it is mostly transparent, so alpha is needed to
+ * blend it) and composited over the base frame. Allocated only when a
+ * capture actually finds children on the top layer. */
+#define UI_SCREENSHOT_TOP_LEN (UI_SCREENSHOT_WIDTH * UI_SCREENSHOT_HEIGHT * 4)
+#define UI_SCREENSHOT_TOP_BUF_SIZE (UI_SCREENSHOT_TOP_LEN + 256)
+static uint8_t* s_shot_top_buf = NULL;
 static uint8_t* s_shot_buf = NULL;
 static const uint8_t* s_shot_data = NULL; /* pixel data start within s_shot_buf */
 static size_t s_shot_len = 0;
@@ -138,10 +149,21 @@ static void status_refresh_timer_cb(lv_timer_t* timer) {
 
 /* Drive the sleep manager's blocking display power-down on the UI task. The
  * inactivity esp_timer only raises a flag; the actual SPI work happens here so
- * it never stalls the esp_timer service task (and the 1 ms lv_tick). */
+ * it never stalls the esp_timer service task (and the 1 ms lv_tick). Also
+ * drains any pending BLE pairing show/hide request (ui_pairing.c): sharing
+ * this cadence rather than running a dedicated 100ms timer for pairing lets
+ * the LVGL task actually sleep between ticks when idle, and 500ms worst-case
+ * latency is negligible against NimBLE's ~30s SM pairing timeout.
+ * sleep_manager_process() below is a no-op until sleep_manager_init() runs
+ * (see its own initialized guard), so it is safe for this timer to start
+ * ticking before that, which matters for ui_pairing_poll(): pairing can
+ * start before the splash timeout, so this timer is created at LVGL init
+ * (see ui_graphics_init) rather than deferred to splash_timer_cb with the
+ * other overlay-adjacent subsystems. */
 static void sleep_process_timer_cb(lv_timer_t* timer) {
     (void)timer;
     sleep_manager_process();
+    ui_pairing_poll();
 }
 
 /* Timer callback to transition from splash to main UI */
@@ -171,15 +193,17 @@ static void splash_timer_cb(lv_timer_t* timer) {
 
     s_layout = layout_create();
 
-    /* Create periodic refresh timers */
-    /* Screens that need live data own their own timer (scr_nodes,
-     * scr_node_detail, scr_map, scr_traffic), so there is no global
-     * tab-content tick: an earlier one called layout_set_tab() every 5 s and
-     * destroyed scroll position and drill-down views, and what replaced it was
-     * an empty callback that only survived in the docs as a refresh mechanism
-     * that did not exist. */
+    /* Create periodic refresh timers. sleep_process_timer_cb (sleep drive +
+     * pairing poll) is created earlier, at LVGL init (see ui_graphics_init),
+     * not here.
+     *
+     * There is no global tab-content tick: screens that need live data own
+     * their own timer (scr_nodes, scr_node_detail, scr_map, scr_traffic). An
+     * earlier global one called layout_set_tab() every 5 s and destroyed
+     * scroll position and drill-down views, and what replaced it was an empty
+     * callback that only survived in the docs as a refresh mechanism that did
+     * not exist. */
     lv_timer_create(status_refresh_timer_cb, 2000, NULL); /* Status bar: 2s */
-    lv_timer_create(sleep_process_timer_cb, 500, NULL);   /* Sleep drive: 0.5s */
 
     /* Initialize sleep manager for automatic display power saving */
     sleep_manager_init();
@@ -221,8 +245,70 @@ int ui_graphics_init(void) {
     /* Create one-shot timer to transition to main UI after 2 seconds */
     lv_timer_create(splash_timer_cb, 2000, NULL);
 
+    /* BLE pairing can start before the splash timeout, so the timer that
+     * drains its handoff (sleep_process_timer_cb, which also polls
+     * ui_pairing_poll(); see its own comment) must exist as soon as LVGL
+     * itself does, not deferred to splash_timer_cb with the other
+     * overlay-adjacent subsystems. */
+    lv_timer_create(sleep_process_timer_cb, 500, NULL);
+
     ESP_LOGI(TAG, "LVGL initialized with splash screen");
     return 0;
+}
+
+/* Blends lv_layer_top() over an already-captured RGB565 base frame, in
+ * place. lv_screen_active() excludes the top layer, so without this a
+ * capture taken while a modal is up (BLE pairing code, confirm dialog,
+ * toast) shows only the screen behind it. Silently leaves the base frame
+ * untouched when the top layer is empty or its scratch buffer cannot be
+ * allocated: a capture without the overlay beats no capture at all. */
+static void composite_top_layer(uint8_t* base) {
+    lv_obj_t* top = lv_layer_top();
+    if (top == NULL || lv_obj_get_child_count(top) == 0)
+        return;
+
+    if (!s_shot_top_buf) {
+        s_shot_top_buf = heap_caps_calloc(1, UI_SCREENSHOT_TOP_BUF_SIZE, MALLOC_CAP_SPIRAM);
+        if (!s_shot_top_buf)
+            s_shot_top_buf = calloc(1, UI_SCREENSHOT_TOP_BUF_SIZE);
+        if (!s_shot_top_buf) {
+            ESP_LOGW(TAG, "No memory for top-layer capture (%u bytes); overlay omitted",
+                     (unsigned)UI_SCREENSHOT_TOP_BUF_SIZE);
+            return;
+        }
+    }
+
+    lv_image_dsc_t tdsc;
+    if (lv_snapshot_take_to_buf(top, LV_COLOR_FORMAT_ARGB8888, &tdsc, s_shot_top_buf,
+                                UI_SCREENSHOT_TOP_BUF_SIZE) != LV_RESULT_OK ||
+        !tdsc.data) {
+        ESP_LOGW(TAG, "Top-layer snapshot failed; overlay omitted");
+        return;
+    }
+    if (tdsc.header.w != UI_SCREENSHOT_WIDTH || tdsc.header.h != UI_SCREENSHOT_HEIGHT) {
+        ESP_LOGW(TAG, "Top-layer shape %ux%u unexpected; overlay omitted", (unsigned)tdsc.header.w,
+                 (unsigned)tdsc.header.h);
+        return;
+    }
+
+    /* Blend with lv_color_16_16_mix, the same helper LVGL's own RGB565
+     * renderer uses, so the capture rounds overlay edges exactly the way the
+     * panel does rather than by a second, slightly different rule. ARGB8888
+     * is byte order B,G,R,A (lv_color32_t on little-endian); the base frame
+     * is read and written bytewise because its start carries the snapshot's
+     * alignment slack. */
+    const uint8_t* src = tdsc.data;
+    for (int i = 0; i < UI_SCREENSHOT_WIDTH * UI_SCREENSHOT_HEIGHT; i++) {
+        uint8_t a = src[i * 4 + 3];
+        if (a == 0)
+            continue;
+        uint16_t dst16 = (uint16_t)(base[i * 2] | (base[i * 2 + 1] << 8));
+        uint16_t src16 =
+            lv_color_to_u16(lv_color_make(src[i * 4 + 2], src[i * 4 + 1], src[i * 4 + 0]));
+        uint16_t out = lv_color_16_16_mix(src16, dst16, a);
+        base[i * 2] = (uint8_t)(out & 0xFF);
+        base[i * 2 + 1] = (uint8_t)(out >> 8);
+    }
 }
 
 /* Services a pending screenshot request. MUST only run on the LVGL-owning
@@ -275,6 +361,8 @@ static void service_screenshot_request(void) {
         xSemaphoreGive(s_shot_done);
         return;
     }
+
+    composite_top_layer((uint8_t*)dsc.data);
 
     s_shot_data = dsc.data;
     s_shot_len = len;

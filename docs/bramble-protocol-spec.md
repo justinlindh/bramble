@@ -1452,15 +1452,19 @@ struct neighbor_entry {
 
 Beacons admit a peer to the table and are the only thing that advances its
 tenure (`beacon_count`, `first_seen_ms`), which is what
-`neighbor_is_established` gates the anti-Sybil corroboration quorum on. Frames
-other than beacons refresh `last_heard`, `rssi` and `snr` for an address the
-table already holds, and only when the sending address is covered by the
-frame's own authentication: a DATA frame whose `prev_hop` equals its MAC-bound
-`src_addr` (the originator transmitted it itself), or an ACK still at
-`hop_count` zero. A relayed frame teaches nothing authenticated about who put
-it on the air and is ignored for liveness. Without this, `last_heard` tracks
-only beacon cadence, so a peer in an active exchange reads as minutes stale and
-can be evicted mid-conversation.
+`neighbor_is_established` gates the anti-Sybil corroboration quorum on. Two
+other frame types also refresh `last_heard`, `rssi` and `snr`, for an address
+the table already holds: a DATA frame whose `prev_hop` equals its MAC-bound
+`src_addr` (the originator transmitted it itself), and an ACK still at
+`hop_count` zero. Those are the two cases where the frame's own authentication
+covers the address of whoever put it on the air; a relayed frame teaches
+nothing authenticated about its transmitter and is ignored for liveness, and
+the remaining types are not currently used for liveness at all. The refresh is
+monotonic: a frame carrying a timestamp at or behind the stored `last_heard` is
+refused outright rather than clamped, so an out-of-order dispatch cannot un-age
+a peer. Without any of this, `last_heard` would track only beacon cadence, so a
+peer in an active exchange reads as minutes stale and can be evicted
+mid-conversation.
 
 #### Pending Route Discovery Table
 

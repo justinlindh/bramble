@@ -361,7 +361,14 @@ location_manager_t s_location_mgr;
 
 uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000ULL); }
 
-void mesh_publish_neighbors(void) {
+/* Copy the live neighbor table into the mutex-guarded snapshot the UI and RPC
+ * read. Anything that mutates s_neighbors outside the periodic maintenance
+ * tick publishes it, or the change stays invisible for up to a purge interval.
+ * handle_beacon is the one mutator that does NOT call this: it publishes
+ * inline, batched into the same critical section that bumps beacon_rx_count
+ * and last_rx_rssi/snr, and routing it through here would take a
+ * non-recursive mutex twice. */
+static void mesh_publish_neighbors(void) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_shared.neighbors = s_neighbors;
     xSemaphoreGive(s_state_mutex);
@@ -2742,6 +2749,22 @@ bool mesh_route_is_usable(uint32_t dest_addr) {
     bool usable = (r != NULL && r->state != ROUTE_BROKEN && r->state != ROUTE_STALE);
     xSemaphoreGive(s_state_mutex);
     return usable;
+}
+
+bool mesh_get_neighbor(uint32_t addr, neighbor_entry_t* out) {
+    if (!out)
+        return false;
+    bool found = false;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    for (int i = 0; i < s_shared.neighbors.count && i < MAX_NEIGHBORS; i++) {
+        if (s_shared.neighbors.entries[i].addr == addr) {
+            *out = s_shared.neighbors.entries[i];
+            found = true;
+            break;
+        }
+    }
+    xSemaphoreGive(s_state_mutex);
+    return found;
 }
 
 void mesh_get_routes(routing_table_t* out) {

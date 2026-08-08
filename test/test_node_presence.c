@@ -18,14 +18,20 @@ void test_age_seconds_clamps_last_heard_in_the_future(void) {
     TEST_ASSERT_EQUAL_UINT32(0, node_age_seconds(0, 0xFFFFFFFFu));
 }
 
-void test_presence_live_below_stale_threshold(void) {
-    TEST_ASSERT_EQUAL(NODE_PRESENCE_LIVE, node_presence_for_age(0));
-    TEST_ASSERT_EQUAL(NODE_PRESENCE_LIVE, node_presence_for_age(NODE_STALE_AGE_S - 1));
+void test_stale_threshold(void) {
+    TEST_ASSERT_FALSE(node_is_stale(0));
+    TEST_ASSERT_FALSE(node_is_stale(NODE_STALE_AGE_S - 1));
+    TEST_ASSERT_TRUE(node_is_stale(NODE_STALE_AGE_S));
+    TEST_ASSERT_TRUE(node_is_stale(NODE_STALE_AGE_S * 10));
 }
 
-void test_presence_stale_at_and_above_threshold(void) {
-    TEST_ASSERT_EQUAL(NODE_PRESENCE_STALE, node_presence_for_age(NODE_STALE_AGE_S));
-    TEST_ASSERT_EQUAL(NODE_PRESENCE_STALE, node_presence_for_age(NODE_STALE_AGE_S * 10));
+void test_signal_pct_maps_and_clamps(void) {
+    /* -120 dBm is the floor of the usable window, -50 the ceiling. */
+    TEST_ASSERT_EQUAL_INT(0, node_signal_pct(-120));
+    TEST_ASSERT_EQUAL_INT(0, node_signal_pct(-128));
+    TEST_ASSERT_EQUAL_INT(100, node_signal_pct(-50));
+    TEST_ASSERT_EQUAL_INT(100, node_signal_pct(0));
+    TEST_ASSERT_EQUAL_INT(50, node_signal_pct(-85));
 }
 
 void test_reach_online_only_while_a_neighbor_is_fresh(void) {
@@ -40,7 +46,7 @@ void test_reach_online_window_is_tighter_than_the_row_dim_threshold(void) {
      * still styled as live. */
     TEST_ASSERT_TRUE(NODE_ONLINE_AGE_S < NODE_STALE_AGE_S);
     TEST_ASSERT_EQUAL(NODE_REACH_REACHABLE, node_reach_classify(true, NODE_ONLINE_AGE_S, false));
-    TEST_ASSERT_EQUAL(NODE_PRESENCE_LIVE, node_presence_for_age(NODE_ONLINE_AGE_S));
+    TEST_ASSERT_FALSE(node_is_stale(NODE_ONLINE_AGE_S));
 }
 
 void test_reach_quiet_neighbor_stays_reachable_not_unknown(void) {
@@ -102,8 +108,8 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_age_seconds_truncates_to_whole_seconds);
     RUN_TEST(test_age_seconds_clamps_last_heard_in_the_future);
-    RUN_TEST(test_presence_live_below_stale_threshold);
-    RUN_TEST(test_presence_stale_at_and_above_threshold);
+    RUN_TEST(test_stale_threshold);
+    RUN_TEST(test_signal_pct_maps_and_clamps);
     RUN_TEST(test_reach_online_only_while_a_neighbor_is_fresh);
     RUN_TEST(test_reach_online_window_is_tighter_than_the_row_dim_threshold);
     RUN_TEST(test_reach_quiet_neighbor_stays_reachable_not_unknown);

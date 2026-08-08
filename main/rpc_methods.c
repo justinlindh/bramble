@@ -38,6 +38,9 @@
 #include "location.h"
 #include "wifi_manager.h"
 #include "ws_server.h"
+#include "ble_server.h"
+#include "ble_pairing_policy.h"
+#include "ble_pairing_store.h"
 #include "network_key.h"
 /* Deep sleep, GPIO wake, esp_wifi and mDNS exist only on the ESP32 targets:
  * not on the POSIX/Linux simulator, and not on the nRF52840 (which has no
@@ -1017,6 +1020,87 @@ static int handle_set_radio(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(result, "bw_hz", cfg.bw_hz);
     cJSON_AddNumberToObject(result, "tx_power_dbm", cfg.tx_power);
     cJSON_AddNumberToObject(result, "coding_rate", cfg.coding_rate);
+    return 0;
+}
+
+/* bramble.getBleSecurity: current SMP pairing posture. The passkey value is
+ * write-only and never reported. */
+static int handle_get_ble_security(const cJSON* params, cJSON* result) {
+    (void)params;
+    bool static_set = ble_pairing_store_is_set();
+    ble_pairing_mode_t mode =
+        ble_pairing_mode_resolve(ble_server_has_passkey_display(), static_set);
+    cJSON_AddStringToObject(result, "mode", ble_pairing_mode_name(mode));
+    cJSON_AddBoolToObject(result, "staticPasskeySet", static_set);
+    return 0;
+}
+
+/* bramble.setBlePasskey: {"passkey":"123456"} sets, explicit null or "" clears.
+ * The "passkey" member itself must be present: an omitted parameter is a
+ * distinct error, not a clear, so a caller that forgets it cannot silently
+ * wipe a configured passkey.
+ * Displayless boards only; display boards generate a random code per
+ * pairing and reject static configuration.
+ * Any change must wipe stored bonds first (bonds created under the previous
+ * policy would otherwise stay trusted, making a freshly set passkey theater
+ * for already-bonded peers): ble_server_wipe_bonds() runs before the store
+ * is touched, and this handler only persists the change and reports ok:true
+ * if that wipe actually succeeded. */
+static int handle_set_ble_passkey(const cJSON* params, cJSON* result) {
+    if (ble_server_has_passkey_display()) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error",
+                                "board shows a random pairing code; static passkey unsupported");
+        return 0;
+    }
+    if (!params || !cJSON_HasObjectItem(params, "passkey")) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "missing passkey parameter");
+        return 0;
+    }
+    const cJSON* pk = cJSON_GetObjectItem(params, "passkey");
+    bool clearing = cJSON_IsNull(pk) || (cJSON_IsString(pk) && pk->valuestring[0] == '\0');
+    uint32_t value = 0;
+    if (!clearing && (!cJSON_IsString(pk) || !ble_pairing_passkey_parse(pk->valuestring, &value))) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "passkey must be exactly 6 digits");
+        return 0;
+    }
+
+    /* Wipe first, before persisting anything. This RPC is only reachable
+     * here on displayless boards (the passkey-display check above already
+     * rejected display boards): on the nRF target the BLE host is always up
+     * by the time RPCs run, and the linux emulator's stub has no bonds to
+     * begin with, so there is no boot window where a pending wipe could be
+     * lost and no cross-boot pending-wipe machinery is needed. */
+    if (ble_server_wipe_bonds() != 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error",
+                                "failed to invalidate existing pairings; passkey unchanged");
+        return 0;
+    }
+
+    if (clearing) {
+        if (ble_pairing_store_clear() != 0) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error", "failed to clear passkey");
+            return 0;
+        }
+    } else {
+        if (ble_pairing_store_set(value) != 0) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error", "failed to persist passkey");
+            return 0;
+        }
+    }
+    ble_server_pairing_config_changed();
+    /* clearing already says whether the store now holds a passkey; no need
+     * to reopen NVS via ble_pairing_store_is_set() to rederive it. This
+     * handler is only reachable without a passkey-display cb registered
+     * (checked above), so the resolve table collapses to these two modes. */
+    ble_pairing_mode_t mode = clearing ? BLE_PAIRING_JUST_WORKS : BLE_PAIRING_STATIC_PASSKEY;
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "mode", ble_pairing_mode_name(mode));
     return 0;
 }
 
@@ -3593,6 +3677,8 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.sendProbe", handle_send_probe);
     rpc_register("bramble.setRadio", handle_set_radio);
     rpc_register("bramble.setNodeName", handle_set_node_name);
+    rpc_register("bramble.getBleSecurity", handle_get_ble_security);
+    rpc_register("bramble.setBlePasskey", handle_set_ble_passkey);
     rpc_register("bramble.getTimezone", handle_get_timezone);
     rpc_register("bramble.setTimezone", handle_set_timezone);
     rpc_register("bramble.setPeerVerified", handle_set_peer_verified);

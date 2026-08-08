@@ -117,10 +117,25 @@ it is not enabled.
   (`ble_link_payload_permitted` in `components/ble/include/ble_link_sec.h`),
   so neither the token nor RPC traffic crosses the air in the clear and a
   passive sniffer who records the entire pairing exchange still cannot
-  derive the link key. The residual is the pairing model: `sm_io_cap` is
-  no-input-no-output, so pairing is Just Works with no MITM protection,
-  and an active attacker present at first-pairing time can interpose
-  (section 5).
+  derive the link key. The pairing model resolves to one of three modes per
+  board (`ble_pairing_mode_resolve` in
+  `components/ble/include/ble_pairing_policy.h`): a board whose UI
+  registers a passkey-display callback (T-Deck Plus LVGL modal, Heltec V4
+  text-UI overlay) shows a random 6-digit code on its own screen for each
+  pairing attempt, with `sm_io_cap` set to `BLE_HS_IO_DISPLAY_ONLY` and
+  `sm_mitm=1`; a displayless board with an operator-set static passkey
+  (`bramble.setBlePasskey`) uses that fixed code under the same
+  MITM-protected I/O capability; a board with neither falls back to Just
+  Works (`BLE_HS_IO_NO_INPUT_OUTPUT`, `sm_mitm=0`), the bootstrap case
+  where the RPC token remains the compensating control. Both passkey modes
+  authenticate the link against an active attacker present at pairing
+  time; Just Works does not. A static passkey is weaker than a random
+  per-pairing code: repeated pairing attempts leak passkey bits to an
+  active attacker one attempt at a time, and while an exponential
+  advertising-restart backoff (1s doubling, capped at 60s, after
+  consecutive pairing failures) slows that leak, it does not eliminate it
+  (section 5). Setting, changing, or clearing the static passkey wipes
+  every stored BLE bond, so all clients must re-pair under the new policy.
 
 **Compromised OTA source.** An attacker who controls the firmware download
 server, the URL given to the device, or the TLS path. Three controls stack
@@ -1217,14 +1232,16 @@ same PR that fixes it.
   fix of the root cause: RREQ carries no authentication on the wire (adding
   it is a wire-format change gated on a protocol-version bump), so an RREQ
   source route is treated as exactly what it is, an unauthenticated hint.
-- **The identity private key, all channel keys, the RPC auth token, and,
-  once provisioned, the network key are stored as plaintext NVS entries,
-  and message history is plaintext SPIFFS**, with flash encryption, NVS
-  encryption, and secure boot all disabled in the build
-  (`components/identity/identity.c`, `components/channel/channel_storage.c`,
-  `components/msg_store/msg_store_spiffs.c`, `components/network_key`;
-  `sdkconfig` has `CONFIG_SECURE_FLASH_ENC_ENABLED`, `CONFIG_NVS_ENCRYPTION`,
-  and `CONFIG_SECURE_BOOT` all unset).
+- **The identity private key, all channel keys, the RPC auth token, the
+  operator-set static BLE pairing passkey, and, once provisioned, the
+  network key are stored as plaintext NVS entries, and message history is
+  plaintext SPIFFS**, with flash encryption, NVS encryption, and secure boot
+  all disabled in the build (`components/identity/identity.c`,
+  `components/channel/channel_storage.c`,
+  `components/msg_store/msg_store_spiffs.c`, `components/network_key`,
+  `components/ble/ble_pairing_store.c`; `sdkconfig` has
+  `CONFIG_SECURE_FLASH_ENC_ENABLED`, `CONFIG_NVS_ENCRYPTION`, and
+  `CONFIG_SECURE_BOOT` all unset).
 - **The WebSocket transport is plaintext HTTP on port 80**, so an on-path
   LAN attacker reads all RPC traffic including the bearer token;
   credentials travel only in headers (an `Authorization` header, or for
@@ -1300,16 +1317,25 @@ These do not go away when section 4 empties out.
   deliberate device-as-secret design, not an oversight: a stolen device
   already yields its plaintext flash (section 4), and a forgotten token
   must not brick the owner out of their own hardware.
-- **BLE pairing is Just Works, so first-pairing MITM is not defended.**
-  The BLE link is encrypted and bonded (LE Secure Connections, section 1),
-  which defeats passive capture of the RPC token, but `sm_io_cap` is
-  no-input-no-output because not every supported board has the display
-  plus confirm input a passkey or numeric-comparison flow needs, and a
-  flow that works on one board profile and disables BLE on another is
-  worse than a uniform one (`components/ble/ble_server.c`). An active
-  attacker present at first-pairing time can therefore interpose as the
-  peer; once a bond exists the stored LTK is required, so the exposure is
-  the first pairing, not every session.
+- **BLE pairing MITM protection depends on board display capability and
+  operator configuration.** The BLE link is always encrypted and bonded
+  (LE Secure Connections, section 1), which defeats passive capture of the
+  RPC token under any pairing mode. A board with a passkey-display
+  callback (T-Deck Plus, Heltec V4) shows a random 6-digit code per
+  pairing attempt and authenticates the link against an active attacker
+  present at pairing time. A displayless board authenticates the same way
+  once the operator sets a static passkey with `bramble.setBlePasskey`,
+  but that code is fixed rather than per-pairing: an active attacker who
+  makes repeated pairing attempts learns passkey bits one attempt at a
+  time, and the advertising-restart backoff after consecutive failures
+  (1s doubling, capped at 60s) slows that leak without eliminating it. A
+  displayless board with no static passkey set, and any board before that
+  first configuration, falls back to Just Works with no MITM protection;
+  an active attacker present at that pairing can interpose as the peer.
+  Once a bond exists the stored LTK is required regardless of mode, so the
+  exposure window is pairing time, not every session, and any change to
+  the static passkey (set, change, or clear) wipes stored bonds and
+  reopens that window for every client until it re-pairs.
 - **Cleartext routing headers.** Destination addresses must be readable by
   relays for multi-hop forwarding to work at this power and duty-cycle
   budget. Onion routing over LoRa airtime budgets is not a trade Bramble

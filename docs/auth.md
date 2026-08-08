@@ -16,6 +16,69 @@ On **first boot** the firmware generates a random 32-character hex token
 and stores it in NVS. There is no out-of-the-box open access; auth is on
 by default. The token persists across reboots and firmware updates.
 
+## BLE Link-Layer Pairing
+
+BLE access has two independent layers: SMP pairing at the link layer, then
+the auth token described in this document at the application layer. A new
+client's OS Bluetooth stack pairs with the device's GATT service before
+any RPC exchange happens; the token handshake below runs over that
+already-encrypted link. This link-layer pairing is a different mechanism
+from `bramble pair`, the serial command described next for retrieving the
+token; the two share a name, not a purpose.
+
+The device resolves one of three pairing modes at boot, per board and
+operator configuration: a board with a passkey-display UI callback
+(T-Deck Plus, Heltec V4) shows a random 6-digit code on its own screen
+that the client enters in its OS pairing dialog; a displayless board
+pairs against a fixed code the operator sets with
+`bramble.setBlePasskey`; a board with neither falls back to Just Works,
+pairing with no code exchange and the RPC token as the compensating
+control. See `docs/SECURITY-MODEL.md` for the full threat model,
+including why a static passkey is weaker than a random per-pairing code.
+
+Both layers apply independently: pairing authenticates (or, under Just
+Works, only encrypts) the radio link itself, while the auth token gates
+which RPC methods a paired connection may call. Disabling the auth token
+(see "Disabling Auth" below) does not change what BLE pairing requires;
+only the token layer is affected.
+
+- `bramble.getBleSecurity`: reports the current pairing mode
+  (`passkey-display`, `static-passkey`, or `just-works`) and whether a
+  static passkey is set. The passkey value itself is write-only and never
+  returned.
+- `bramble.setBlePasskey`: sets or clears the static passkey on
+  displayless boards (`{"passkey":"123456"}` to set, `null` or `""` to
+  clear); rejected on boards with a passkey-display callback. Any change
+  wipes stored BLE bonds, so every client must re-pair.
+
+On a passkey-display board, the code appears on the device itself for as
+long as the pairing attempt is live, and clears when it completes, fails,
+or the client disconnects:
+
+<p align="center"><img src="images/ble-pairing/tdeck-pairing-modal.png" alt="T-Deck Plus showing a 6-digit BLE pairing code" width="266"></p>
+
+That capture is the live framebuffer of a T-Deck Plus mid-pairing, pulled
+over serial with the `bramble.screenshot` RPC, cropped to the dialog.
+
+The web app exposes this under **Config -> Device Management ->
+Bluetooth Pairing**. On a passkey-display board the card is
+informational, since there is nothing to set; on a displayless board it
+shows whether a static passkey is set and offers controls to set or
+clear one, and reports that changing it unpairs existing clients.
+
+<table>
+<tr>
+<td align="center" width="33%"><img src="images/ble-pairing/webapp-card-display-board.png" alt="Bluetooth Pairing card on a board that shows its own code" width="320"></td>
+<td align="center" width="33%"><img src="images/ble-pairing/webapp-card-no-passkey.png" alt="Bluetooth Pairing card with no passkey set" width="320"></td>
+<td align="center" width="33%"><img src="images/ble-pairing/webapp-card-passkey-set.png" alt="Bluetooth Pairing card with a passkey set" width="320"></td>
+</tr>
+<tr>
+<td align="center">Board that shows its own code: nothing to configure.</td>
+<td align="center">Board with no display and no passkey set.</td>
+<td align="center">Passkey set, with the re-pair warning.</td>
+</tr>
+</table>
+
 ## Pairing: Getting the Token
 
 The token leaves the device over serial only. Connect via USB and run:
@@ -158,8 +221,9 @@ async with websockets.connect(url, additional_headers=headers) as ws:
   you recover a forgotten token.
 - The token is stored in plaintext in NVS on the device. A flash dump
   extracts it (tracked in `docs/SECURITY-MODEL.md` known gaps).
-- BLE uses a first-write token handshake with throttled retries. The web
-  app remembers BLE tokens per device in its device book and fails closed
+- BLE uses a first-write token handshake with throttled retries, run after
+  SMP pairing completes (see "BLE Link-Layer Pairing" above). The web app
+  remembers BLE tokens per device in its device book and fails closed
   (prompts for a token) when a node demands one it does not have.
 - If the token store fails (NVS error), the device fails closed: full RPC
   access is unavailable rather than silently open.

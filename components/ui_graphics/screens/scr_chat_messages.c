@@ -64,6 +64,7 @@ extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_
 extern uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len,
                                     uint32_t uid);
 extern bool mesh_route_is_usable(uint32_t dest_addr);
+extern bool mesh_get_neighbor(uint32_t addr, neighbor_entry_t* out);
 extern int mesh_get_channel_count(void);
 extern const char* mesh_get_channel_name(int index);
 extern const char* mesh_get_peer_name(uint32_t addr);
@@ -82,18 +83,13 @@ static node_reach_t dm_peer_reach(uint32_t peer_addr, uint32_t* age_s_out) {
     if (peer_addr == 0)
         return NODE_REACH_UNKNOWN;
 
-    const ui_mesh_state_t* state = ui_shared_mesh_state();
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
-    bool has_neighbor = false;
-    uint32_t age_s = 0;
-    for (int i = 0; i < state->neighbors.count && i < MAX_NEIGHBORS; i++) {
-        if (state->neighbors.entries[i].addr == peer_addr) {
-            has_neighbor = true;
-            age_s = node_age_seconds(now_ms, state->neighbors.entries[i].last_heard);
-            break;
-        }
-    }
+    /* One 56-byte entry, not the 1.9 KB shared-state snapshot: this runs once a
+     * second for as long as a DM thread is open. */
+    neighbor_entry_t n;
+    bool has_neighbor = mesh_get_neighbor(peer_addr, &n);
+    uint32_t age_s = has_neighbor ? node_age_seconds(now_ms, n.last_heard) : 0;
 
     bool has_active_route = !has_neighbor && mesh_route_is_usable(peer_addr);
 
