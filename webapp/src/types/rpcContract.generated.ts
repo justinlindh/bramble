@@ -1840,9 +1840,9 @@ export interface components {
             chip?: string;
             /** @description The power amplifier did not ramp for a transmit, so nothing usable went on air. The strongest evidence a chip can give that the commanded power is not being produced. */
             pa_fault?: boolean;
-            /** @description The frequency synthesizer did not lock. */
+            /** @description The frequency synthesizer did not lock. Stops transmission rather than degrading it, and is rarer than a PA fault rather than milder: with no lock there is no frequency to sit on. */
             pll_fault?: boolean;
-            /** @description The reference oscillator did not start. */
+            /** @description The reference oscillator did not start. Also stops transmission, for the same reason: with no reference there is no clock at all. */
             oscillator_fault?: boolean;
             /** @description A calibration block failed. Costs link budget silently, without failing any later command. */
             calibration_fault?: boolean;

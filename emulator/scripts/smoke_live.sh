@@ -46,13 +46,18 @@ info()  { printf '  %s\n' "$*"; }
 
 cleanup() {
     if [ -n "$GOSIM_PID" ] && kill -0 "$GOSIM_PID" 2>/dev/null; then
-        # Kill the node children first (direct children of gosim), then gosim.
+        # Kill the node children first (direct children of gosim), then gosim,
+        # whose SIGTERM handler reaps any node still standing.
         pkill -P "$GOSIM_PID" 2>/dev/null || true
         kill "$GOSIM_PID" 2>/dev/null || true
         wait "$GOSIM_PID" 2>/dev/null || true
     fi
-    # Safety net for any orphaned node processes from this run.
-    pkill -f "$NODE_BIN" 2>/dev/null || true
+    # Deliberately no name-wide `pkill -f "$NODE_BIN"` net here. Every gosim run
+    # on the host executes the same relative binary path, so that pattern also
+    # matches OTHER runs' firmware nodes: it would SIGTERM the nodes of a
+    # concurrent emulator/ci/run_scenarios.sh mid-scenario, whose strict
+    # no-deaths rule then correctly fails a healthy suite. Teardown here is
+    # scoped to the pid this run spawned, per emulator/e2e/run_e2e.sh's rule.
 }
 trap cleanup EXIT INT TERM
 
