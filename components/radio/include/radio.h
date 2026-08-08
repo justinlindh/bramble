@@ -218,4 +218,54 @@ static inline void cad_timeout_policy_on_success(cad_timeout_policy_t* p) {
     p->consecutive_timeouts = 0;
 }
 
+/* Retry cadence for a radio recovery that did not take. The mesh loop calls
+ * radio_check_and_clear_reinit() every ~10ms, and a full recovery hard-resets
+ * the chip (255ms) and recalibrates, so retrying at loop rate would consume the
+ * mesh task. 5s is far below any liveness deadline that matters (a neighbor
+ * ages out after minutes) and leaves the loop free in between. */
+#define BRAMBLE_RADIO_REINIT_RETRY_MS 5000u
+
+/**
+ * Retry state for the driver-owned reinit contract. Zero-initialized.
+ *
+ * Both backends clear the reinit latch before attempting recovery, so that a
+ * hard reset raised DURING the attempt is not swallowed by the attempt that
+ * follows it. The cost is that a recovery which fails loses the request
+ * entirely: the chip stays at power-on defaults with no RF switch table, no
+ * TCXO configuration and no modulation parameters, transmitting nothing any
+ * neighbor can hear, while every SPI command still returns success and the
+ * mesh task loops on none the wiser. This policy is what makes the backends
+ * re-raise instead, on a cadence a genuinely dead chip cannot turn into a
+ * busy-loop.
+ */
+typedef struct {
+    bool retry_pending;      /* a previous attempt failed and is owed a retry */
+    uint32_t retry_after_ms; /* when that retry becomes due */
+} radio_reinit_policy_t;
+
+/**
+ * True when a recovery attempt should run now: always, unless a failed
+ * attempt's backoff is still in flight. The comparison is a wrap-safe unsigned
+ * difference, so it survives the millisecond clock's 49.7-day rollover.
+ */
+static inline bool radio_reinit_policy_should_attempt(const radio_reinit_policy_t* p,
+                                                      uint32_t now_ms) {
+    if (!p->retry_pending)
+        return true;
+    return (uint32_t)(now_ms - p->retry_after_ms) < 0x80000000u;
+}
+
+/** Record how an attempt went: success clears the debt, failure schedules the
+ *  next attempt one backoff away. */
+static inline void radio_reinit_policy_on_result(radio_reinit_policy_t* p, bool ok,
+                                                 uint32_t now_ms) {
+    if (ok) {
+        p->retry_pending = false;
+        p->retry_after_ms = 0;
+        return;
+    }
+    p->retry_pending = true;
+    p->retry_after_ms = now_ms + BRAMBLE_RADIO_REINIT_RETRY_MS;
+}
+
 #endif

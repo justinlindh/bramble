@@ -34,6 +34,7 @@
 
 #include "esp_log.h"
 #include "esp_task_wdt.h"
+#include "esp_timer.h"
 #include "lr11xx_hal_nrf.h"
 #include "radio.h"
 #include "radio_internal.h"
@@ -78,6 +79,9 @@ static void rx_seq_unlock(void) {
 }
 
 static cad_timeout_policy_t s_cad_timeout_policy;
+
+/* Retry state for radio_check_and_clear_reinit(); mesh-task-only. */
+static radio_reinit_policy_t s_reinit_policy;
 
 /* ------------------------------------------------------------------ */
 /*  LR1110 parameter mapping                                           */
@@ -788,17 +792,41 @@ void radio_sleep(void) {
 bool radio_check_and_clear_reinit(void) {
     if (!lr11xx_hal_nrf_needs_reinit())
         return false;
+
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (!radio_reinit_policy_should_attempt(&s_reinit_policy, now)) {
+        /* An earlier attempt failed and its backoff is still running. The
+         * latch stays raised, so tx_abort() keeps deferring recovery to this
+         * function rather than restarting RX on a chip at power-on defaults,
+         * and the next pass past the backoff picks the request up. */
+        return false;
+    }
+
+    /* Cleared before the attempt, not after: a stuck-BUSY hard reset raised
+     * from inside the bring-up below must survive, and clearing on the way out
+     * would swallow it. Whatever the attempt does with the chip, the policy
+     * below re-raises the request if it did not take. */
     lr11xx_hal_nrf_clear_reinit();
     ESP_LOGW(TAG, "Radio reinit after hard reset, reconfiguring");
+
     /* The hard reset lost the system settings too; redo the full bring-up
      * before the parameter reconfigure. */
-    if (lr1110_system_init() != 0) {
+    bool ok = lr1110_system_init() == 0;
+    if (!ok) {
         ESP_LOGE(TAG, "LR1110 system re-init failed after hard reset");
-        return true;
+    } else {
+        int rc = radio_reconfigure(&s_config);
+        if (rc != 0) {
+            ESP_LOGE(TAG, "Radio reconfigure failed after hard reset: %d", rc);
+            ok = false;
+        }
     }
-    int rc = radio_reconfigure(&s_config);
-    if (rc != 0) {
-        ESP_LOGE(TAG, "Radio reconfigure failed after hard reset: %d", rc);
+
+    radio_reinit_policy_on_result(&s_reinit_policy, ok, now);
+    if (!ok) {
+        /* Without this the request is gone for good and the radio never
+         * recovers, while the node stays alive and looks healthy. */
+        lr11xx_hal_nrf_request_reinit();
     }
     return true;
 }

@@ -18,6 +18,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -69,6 +70,9 @@ static void rx_seq_unlock(void) {
 
 /* Consecutive CAD-timeout run state for the fail-open/closed policy (#118). */
 static cad_timeout_policy_t s_cad_timeout_policy;
+
+/* Retry state for radio_check_and_clear_reinit(); mesh-task-only. */
+static radio_reinit_policy_t s_reinit_policy;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -783,12 +787,28 @@ void radio_sleep(void) {
 bool radio_check_and_clear_reinit(void) {
     if (!sx1262_needs_reinit())
         return false;
+
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (!radio_reinit_policy_should_attempt(&s_reinit_policy, now)) {
+        /* An earlier attempt failed and its backoff is still running; the
+         * latch stays raised so the next pass picks it up. */
+        return false;
+    }
+
+    /* Cleared before the attempt, not after: a stuck-BUSY hard reset raised
+     * from inside the reconfigure below must survive. The policy re-raises the
+     * request if the attempt did not take. */
     sx1262_clear_reinit();
     ESP_LOGW(TAG, "Radio reinit after hard reset, reconfiguring");
     int rc = radio_reconfigure(&s_config);
     if (rc != 0) {
         ESP_LOGE(TAG, "Radio reconfigure failed after hard reset: %d", rc);
+        /* Without this the request is gone for good: the chip stays at
+         * power-on defaults, DIO2 is no longer the RF switch so nothing
+         * radiates, and the node looks healthy from every other angle. */
+        sx1262_request_reinit();
     }
+    radio_reinit_policy_on_result(&s_reinit_policy, rc == 0, now);
     return true;
 }
 
