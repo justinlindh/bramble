@@ -122,8 +122,13 @@ and in the boot trace as `Radio health (init)` lines:
 - `pa_fault` true means the power amplifier did not ramp for a transmit, so
   nothing usable went on air. This is the strongest on-chip signal that
   commanded power is not being produced.
-- `pll_fault`, `oscillator_fault` and `calibration_fault` cost real link budget
-  without failing a transmit outright.
+- `pll_fault` and `oscillator_fault` also stop transmission, they are just
+  rarer than a PA fault rather than milder: with no synthesizer lock there is no
+  frequency to sit on, and with no reference oscillator there is no clock at
+  all, so nothing usable leaves the antenna either way.
+- `calibration_fault` is the quiet one. It costs real link budget while every
+  later command still succeeds, so it will not show up as a failure anywhere
+  else.
 - `config_verified` false means configuration writes are not reaching the chip
   at all, which caps output well below the commanded level.
 - `detail` carries the chip-specific values behind those verdicts, such as the

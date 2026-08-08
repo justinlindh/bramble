@@ -60,9 +60,15 @@ typedef struct {
      * on air. The strongest evidence a chip can give that the commanded power
      * is not being produced. */
     bool pa_fault;
-    bool pll_fault;         /* synthesizer did not lock */
-    bool oscillator_fault;  /* reference oscillator did not start */
-    bool calibration_fault; /* a calibration block failed */
+    /* These two also stop transmission rather than merely degrading it, and are
+     * rarer than a PA fault rather than milder: with no synthesizer lock there
+     * is no frequency to sit on, and with no reference there is no clock. */
+    bool pll_fault;        /* synthesizer did not lock */
+    bool oscillator_fault; /* reference oscillator did not start */
+
+    /* The quiet one: costs link budget while every later command still
+     * succeeds, so it surfaces nowhere else. */
+    bool calibration_fault;
 
     /* Configuration written to the chip reads back as programmed. False means
      * config writes are not landing, which caps output well below the
