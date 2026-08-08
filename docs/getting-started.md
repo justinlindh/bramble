@@ -148,9 +148,11 @@ and will route for each other. A node still reporting `Unprovisioned` is not
 part of the authenticated control plane and cannot route for the fleet, no
 matter what firmware it is running.
 
-Repeat this step for every additional node. The full fleet procedure, what a
-matching fingerprint does and does not prove, and how re-keying partitions a
-fleet are in
+Repeat this step for every additional node. Past a handful of nodes, doing
+this by hand gets tedious: `bramble netkey generate` and `bramble netkey
+provision` do the same two steps from a shell, and `bramble netkey status`
+checks convergence. The full fleet procedure, what a matching fingerprint does
+and does not prove, and how re-keying partitions a fleet are in
 [network-key-provisioning.md](network-key-provisioning.md).
 
 What a shared network key does and does not buy you: it excludes outsiders

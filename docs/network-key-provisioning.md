@@ -87,6 +87,7 @@ interchangeable, and a fleet can mix them.
 | --- | --- | --- | --- |
 | Web app, **Config → Network Key** | yes | yes | The full surface: QR display and scan, re-key confirmation, live fingerprint. |
 | Web flasher, **Device Setup** | no | yes | Join-only, over the serial link already open from flashing. |
+| `bramble netkey` (CLI) | yes | yes | Scriptable, for provisioning a fleet without a GUI. |
 | Raw RPC | yes | yes | `bramble.generateNetworkKey`, `bramble.setNetworkKey`, `bramble.getNetworkKeyStatus`. |
 
 The web flasher does not offer founding on purpose. Minting a fleet's root
@@ -97,15 +98,17 @@ cannot offer those, and the key is unrecoverable afterwards.
 ## Fleet procedure
 
 1. **Found the network on one node.** In the web app, **Config → Network
-   Key → Found a new network → Generate key**. Record the key and note the
-   fingerprint.
+   Key → Found a new network → Generate key**, or run `bramble netkey
+   generate`. Record the key and note the fingerprint.
 
 2. **Join every other node.** Scan the QR or paste the key into **Join an
-   existing network**, or paste it into the web flasher's Network Key field
-   while flashing.
+   existing network**, paste it into the web flasher's Network Key field while
+   flashing, or run `bramble netkey provision --key-file <file>` against each
+   node.
 
 3. **Confirm convergence.** Check every node reports the founder's
-   fingerprint on the Network Key section's Status line.
+   fingerprint, on the Network Key section's Status line or with
+   `bramble netkey status`.
    **A node still reporting `Unprovisioned` is not part of
    the authenticated control plane**: it neither emits nor accepts
    control-plane MACs, so it cannot route for the fleet, regardless of what
@@ -115,7 +118,8 @@ cannot offer those, and the key is unrecoverable afterwards.
 
 Provisioning a different key on a node that already has one re-keys it and
 cuts it off from every node still on the old key. The web app makes you
-confirm before doing this. There is no fleet-wide rekey operation: re-keying
+confirm before doing this, and the CLI refuses without `--force`. There is no
+fleet-wide rekey operation: re-keying
 a fleet means provisioning the new key on every node, and the fleet is
 partitioned until you finish. Nodes on the old key and nodes on the new key
 will not route for each other.
