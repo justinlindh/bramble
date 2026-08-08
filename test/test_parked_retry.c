@@ -40,15 +40,40 @@ static struct {
 } s_queue[FAKE_QUEUE_SLOTS];
 static int s_delivered[FAKE_MAX_UID]; /* times each uid actually reached the peer */
 
+/* The third outcome, and the one the other two cannot express: the frame goes
+ * out and is never acknowledged. It is neither a success nor a synchronous
+ * failure, it is a transmit whose verdict arrives seconds later from the ACK
+ * retry tick, and on a marginal link it is the NORMAL outcome. */
+static bool s_resend_transmits_but_no_ack;
+
+/* The same transmit, but left OUTSTANDING: the frame is on the air and neither
+ * an ACK nor a give-up has arrived yet. */
+static bool s_resend_stays_in_flight;
+
+/* Mirrors the one thing the flush needs from the pending-ack table: whether
+ * this row's last frame is still awaiting acknowledgement. In the firmware
+ * that is pending_ack_is_active(&s_pending_acks, row.packet_id). */
+static uint32_t s_in_flight_uid;
+
+/* Frames actually put on the air per uid. This is the measure that matters for
+ * duplication: two frames for one uid carry two different packet_ids, and the
+ * receiver dedups on packet_id, so the peer displays one written message
+ * twice. */
+static int s_frames_on_air[FAKE_MAX_UID];
+
 void setUp(void) {
     neighbor_init(&s_nb);
     memset(&s_sweep, 0, sizeof(s_sweep));
     memset(s_queue, 0, sizeof(s_queue));
     memset(s_delivered, 0, sizeof(s_delivered));
+    memset(s_frames_on_air, 0, sizeof(s_frames_on_air));
     msg_store_init();
     s_store_scans = 0;
     s_resend_succeeds = true;
     s_resend_fail_uid = 0;
+    s_resend_transmits_but_no_ack = false;
+    s_resend_stays_in_flight = false;
+    s_in_flight_uid = 0;
 }
 
 void tearDown(void) {}
@@ -67,8 +92,36 @@ static int delivered_count(uint32_t uid) {
 /* Mirrors one re-send out of mesh_flush_parked_for. Either it goes out now, or
  * there is no route or session yet and it is queued for one; a queued row
  * stays QUEUED, which is what lets a later flush pick it up again. */
+/* Mirrors the transmit-then-silence path, using the REAL msg_store calls the
+ * firmware makes and in the same order: mesh_send_dm stamps the row with its
+ * wire packet_id and marks it SENT (mesh_dm.c, the active-session branch), and
+ * seconds later the ACK retry tick gives up and reports FAILED against that
+ * packet_id (mesh_task.c's pending-ack tick). Whether the row is still parked
+ * afterwards is decided entirely by msg_store's transition rules, which is
+ * what this drives. */
+static void transmit_without_ack(uint32_t uid) {
+    uint32_t pkt = 0x9000u + uid;
+    msg_store_update_by_uid(uid, pkt, MSG_STATUS_SENT);
+    msg_store_update_status(pkt, MSG_STATUS_FAILED);
+}
+
 static void fake_resend(uint32_t uid) {
+    TEST_ASSERT_LESS_THAN_UINT32(FAKE_MAX_UID, uid);
+    if (s_resend_stays_in_flight) {
+        /* The frame is on the air and the verdict has not arrived. The row is
+         * stamped exactly as mesh_send_dm stamps it. */
+        s_frames_on_air[uid]++;
+        msg_store_update_by_uid(uid, 0x9000u + uid, MSG_STATUS_SENT);
+        s_in_flight_uid = uid;
+        return;
+    }
+    if (s_resend_transmits_but_no_ack) {
+        s_frames_on_air[uid]++;
+        transmit_without_ack(uid);
+        return;
+    }
     if (s_resend_succeeds && uid != s_resend_fail_uid) {
+        s_frames_on_air[uid]++;
         deliver(uid);
         return;
     }
@@ -97,9 +150,15 @@ static void send_queue_drains(void) {
     for (int i = 0; i < FAKE_QUEUE_SLOTS; i++) {
         if (s_queue[i].used) {
             s_queue[i].used = false;
+            s_frames_on_air[s_queue[i].uid]++;
             deliver(s_queue[i].uid);
         }
     }
+}
+
+static int frames_on_air(uint32_t uid) {
+    TEST_ASSERT_LESS_THAN_UINT32(FAKE_MAX_UID, uid);
+    return s_frames_on_air[uid];
 }
 
 /* Mirrors mesh_flush_parked_for (mesh_task.c): select the peer's parked rows,
@@ -109,6 +168,14 @@ static int fake_flush_parked_for(uint32_t peer_addr) {
     s_store_scans++;
     int n = msg_store_parked_uids_for_peer(peer_addr, uids, MSG_STORE_MAX);
     for (int i = 0; i < n; i++) {
+        /* A row whose last frame is still awaiting an ACK is skipped, not
+         * re-sent: the send queue's uid keying cannot cover this one, because a
+         * transmitted frame holds no queue entry. It is still COUNTED, so the
+         * peer stays armed and the row gets its next attempt once the frame has
+         * resolved. Mirrors the pending_ack_is_active guard in
+         * mesh_flush_parked_for. */
+        if (uids[i] == s_in_flight_uid)
+            continue;
         fake_resend(uids[i]);
     }
     return n;
@@ -455,6 +522,75 @@ void test_a_peer_the_sweep_passed_over_is_not_held_by_the_previous_peers_hold(vo
                                   "belonged to the peer the sweep actually tried");
 }
 
+/* 3i-quater. The attempt that transmits and is never acknowledged. This is not
+ * an edge case: it is the ordinary outcome on a marginal link, and a marginal
+ * link is the reason the message was parked in the first place. The frame goes
+ * out, the row is stamped SENT, and seconds later the ACK retry tick reports
+ * FAILED against that packet_id. If SENT is allowed to happen, the row is no
+ * longer QUEUED when the failure lands, the sticky rule that protects a parked
+ * row does not apply, and the row goes FAILED. Nothing anywhere re-parks a row
+ * (mesh_park_message is the only producer of QUEUED in the tree), so the
+ * message is stranded after exactly one attempt, under a promise that it will
+ * keep trying. */
+void test_an_unacknowledged_attempt_leaves_the_message_parked(void) {
+    const uint32_t peer = 0x0000CC00u;
+    s_resend_transmits_but_no_ack = true;
+
+    beacon_from(peer, 1000);
+    uint32_t uid = park_dm_for(peer, "did you get this", 2000);
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000)); /* transmitted, never acknowledged */
+
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_QUEUED, status_of(uid),
+                              "an attempt that reached the air and was never acknowledged "
+                              "un-parked the message: it is FAILED, nothing re-parks it, and it "
+                              "will never be retried again");
+
+    /* Still parked is only half of it. The point is that it gets another go. */
+    s_resend_transmits_but_no_ack = false;
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000 + PARKED_RETRY_COOLDOWN_MS));
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_DELIVERED, status_of(uid),
+                              "the message stayed parked but never drew a second attempt");
+}
+
+/* 3i-quinquies. The flip side, and the hazard the fix above could create: a row
+ * that stays QUEUED while its frame is still in the air is exactly the state
+ * the next trigger could re-select, which would put one written message on the
+ * air twice. The send queue's uid keying does not cover this, because a
+ * transmitted frame holds no queue entry: it holds a pending ACK. So the flush
+ * skips a row whose packet_id is still awaiting one.
+ *
+ * Deliberately NOT left to the cooldown outlasting the ACK retry budget (about
+ * 14s at MSG_TIER_NORMAL against a 300s cooldown). That is true today and it is
+ * a timing coincidence, which is the exact shape of the invariant this branch
+ * already had to delete a set of assertions for. */
+void test_a_flush_does_not_re_send_a_row_still_awaiting_an_ack(void) {
+    const uint32_t peer = 0x0000DD00u;
+
+    beacon_from(peer, 1000);
+    uint32_t uid = park_dm_for(peer, "in the air", 2000);
+
+    /* The attempt transmits and stays outstanding: no ACK, no give-up yet. */
+    s_resend_stays_in_flight = true;
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000));
+    TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, status_of(uid));
+    TEST_ASSERT_EQUAL_INT(1, frames_on_air(uid));
+
+    /* A second trigger reaches the same peer while that frame is outstanding.
+     * It must find the row and leave it alone rather than send it again. */
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000 + PARKED_RETRY_COOLDOWN_MS));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, frames_on_air(uid),
+                                  "a parked row was re-sent while its previous frame was still "
+                                  "awaiting an ACK, so one written message went on the air twice "
+                                  "under two packet_ids and the peer displays both");
+
+    /* Once the frame resolves the row is free to be attempted again. */
+    s_in_flight_uid = 0;
+    s_resend_stays_in_flight = false;
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000 + 2 * PARKED_RETRY_COOLDOWN_MS));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, status_of(uid));
+    TEST_ASSERT_EQUAL_INT(2, frames_on_air(uid));
+}
+
 /* 3j. Rotation: every parked peer gets a turn, none starves. */
 void test_the_sweep_gives_each_parked_peer_a_turn(void) {
     s_resend_succeeds = false;
@@ -629,6 +765,8 @@ int main(void) {
     RUN_TEST(test_the_sweep_passes_over_a_direct_neighbour_and_moves_on);
     RUN_TEST(test_a_peer_the_sweep_passed_over_is_not_held_by_the_previous_peers_hold);
     RUN_TEST(test_the_sweep_rescues_a_neighbour_whose_arming_was_lost);
+    RUN_TEST(test_an_unacknowledged_attempt_leaves_the_message_parked);
+    RUN_TEST(test_a_flush_does_not_re_send_a_row_still_awaiting_an_ack);
     RUN_TEST(test_the_sweep_gives_each_parked_peer_a_turn);
     RUN_TEST(test_the_sweep_never_flushes_when_nothing_is_parked);
     RUN_TEST(test_a_known_peer_with_nothing_parked_never_scans_the_store);

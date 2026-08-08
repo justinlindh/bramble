@@ -158,17 +158,35 @@ void msg_store_add_dm_uid(uint32_t peer_addr, msg_direction_t dir, const char* t
  * (which is still by packet_id) lands on that one row.
  * Returns true if a row with this uid was found. uid 0 never matches.
  *
- * Parked is sticky: a row currently MSG_STATUS_QUEUED refuses a transition to
- * MSG_STATUS_FAILED and stays QUEUED instead. A parked message leaves the
- * parked state only by being sent (QUEUED -> SENT or -> DELIVERED, both still
- * apply normally) or by the user cancelling it via msg_store_unpark(), never
- * by a send attempt failing. Without this, every failure path in the send
- * pipeline (payload too large, handshake cap, session queue TTL, ...) already
- * calls this function with MSG_STATUS_FAILED on the same uid it parked,
- * which would silently un-park the row on its very first failed retry and it
- * would never flush again. Every other transition, including SENT ->
- * MSG_STATUS_FAILED for a message that actually reached the air and then
- * exhausted its ACK retries, is unaffected.
+ * Parked is sticky: MSG_STATUS_DELIVERED is the ONLY status a row currently
+ * MSG_STATUS_QUEUED will accept. Anything else, including MSG_STATUS_SENT, is
+ * refused and the row stays QUEUED. A parked message therefore leaves the
+ * parked state exactly two ways: it is genuinely delivered, or the user
+ * cancels it via msg_store_unpark().
+ *
+ * SENT is refused rather than allowed, which is the part that is easy to get
+ * wrong. Marking a parked row SENT looks like honest progress, and it is fatal:
+ * an attempt that reaches the air but is never acknowledged ends with the ACK
+ * retry tick reporting MSG_STATUS_FAILED against that packet_id, and a row
+ * sitting at SENT is no longer protected by this rule, so it goes FAILED. Since
+ * mesh_park_message is the only producer of QUEUED anywhere in the tree,
+ * nothing would ever re-park it and the message is stranded after exactly ONE
+ * attempt, under a promise to the user that it will keep trying. An
+ * unacknowledged attempt is the normal outcome on a marginal link, which is the
+ * very situation parking exists for.
+ *
+ * Staying QUEUED across the transmit costs nothing, because the packet_id this
+ * function stamps is written before the status is considered: ACK correlation
+ * still lands on the row, so a real delivery still resolves it. What it means
+ * for the caller is that a parked row's status does not report attempt
+ * progress, only the outcome, and the badge keeps telling the user the truth,
+ * which is that the message is still waiting.
+ *
+ * Without the rule, every failure path in the send pipeline (payload too large,
+ * handshake cap, session queue TTL, ACK exhaustion) calls this function with
+ * MSG_STATUS_FAILED on the same uid it parked. Transitions between non-QUEUED
+ * statuses, including SENT -> FAILED for an ordinary unparked message, are
+ * unaffected.
  */
 bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t status);
 

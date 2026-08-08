@@ -264,21 +264,16 @@ bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
     for (int i = s_count - 1; i >= 0; i--) {
         int idx = (start + i) % MSG_STORE_MAX;
         if (s_msgs && s_msgs[idx].packet_id == packet_id) {
-            /* Parked is sticky here too (see msg_store_update_by_uid's doc
-             * comment for the invariant itself). This guard has no
-             * observable effect today: the only two callers that ever report
-             * MSG_STATUS_FAILED through this packet_id path are
-             * rerr_ack_fastfail.c and mesh_task.c's ACK retry tick, and both
-             * act only on a pending-ack entry gated by pa->active. The
-             * retry-exhausted path clears pa->active in the very same call
-             * that reports FAILED, which is also the earliest point a row
-             * becomes eligible to be parked, so by the time a row is
-             * parkable no live entry remains that could fire FAILED against
-             * its packet_id again. The guard is here anyway so a future
-             * caller of this path can't quietly break the invariant.
-             * DELIVERED still applies unconditionally: a late ACK for a
-             * since-parked message really was delivered. */
-            bool sticky = s_msgs[idx].status == MSG_STATUS_QUEUED && status == MSG_STATUS_FAILED;
+            /* Parked is sticky here too, on exactly the rule
+             * msg_store_update_by_uid's doc comment states: DELIVERED is the
+             * only status a QUEUED row accepts. This is the path that used to
+             * strand a parked message. The ACK retry tick reports FAILED
+             * against a packet_id, and a parked row that had been marked SENT
+             * by its own retry was no longer QUEUED when that landed, so the
+             * old FAILED-only guard did not fire and the row left the parked
+             * state for good. Keeping the row QUEUED through the transmit is
+             * what makes this guard the one that catches it. */
+            bool sticky = s_msgs[idx].status == MSG_STATUS_QUEUED && status != MSG_STATUS_DELIVERED;
             changed = !sticky && s_msgs[idx].status != status;
             if (!sticky)
                 s_msgs[idx].status = status;
@@ -331,10 +326,12 @@ bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t stat
             /* The wire packet_id this stamps rides along on whatever write a
              * status change earns; it is correlation state, not something a
              * reboot has any use for on its own. */
-            /* Parked is sticky: a send attempt failing must never un-park a
-             * QUEUED row (see the doc comment on this function). Only
-             * msg_store_unpark() may move a QUEUED row to FAILED. */
-            bool sticky = s_msgs[idx].status == MSG_STATUS_QUEUED && status == MSG_STATUS_FAILED;
+            /* Parked is sticky: DELIVERED is the ONLY status a QUEUED row
+             * accepts (see the doc comment on this function). A send attempt
+             * must never un-park a row, and the packet_id stamped just above
+             * is what lets the attempt's eventual ACK still find it. Only
+             * msg_store_unpark() may move a QUEUED row out any other way. */
+            bool sticky = s_msgs[idx].status == MSG_STATUS_QUEUED && status != MSG_STATUS_DELIVERED;
             changed = !sticky && s_msgs[idx].status != status;
             if (!sticky)
                 s_msgs[idx].status = status;

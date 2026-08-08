@@ -2632,12 +2632,32 @@ int mesh_flush_parked_for(uint32_t peer_addr) {
              * going with the rest of the batch. */
             continue;
         }
-        /* A failed send leaves the row parked, not FAILED: msg_store's
-         * QUEUED -> FAILED transition is sticky-refused (msg_store.h,
-         * msg_store_update_by_uid), so nothing in the resend pipeline below
-         * can un-park this row just because this attempt failed. It waits
-         * for the next genuine rejoin rather than retrying against a peer
-         * that is present but unreachable. */
+        /* Never a second frame for a row whose last one is still outstanding.
+         * The send queue already refuses a uid it holds, but that only covers
+         * a message WAITING for a route or a session; once the frame has been
+         * transmitted it holds no queue entry, only a pending ACK, and the two
+         * together are what make "one message, one frame in the air" a
+         * property of the code rather than of the retry interval happening to
+         * outlast the ACK budget.
+         *
+         * Counted in n regardless, deliberately: the row IS still parked, so
+         * the peer must stay armed and try it again once this attempt has
+         * resolved. Dropping it from the count would disarm the peer and
+         * strand the message, which is the defect class this whole file
+         * exists to close. */
+        if (pending_ack_is_active(&s_pending_acks, msg.packet_id)) {
+            ESP_LOGI(TAG, "Parked uid=%" PRIu32 " still awaiting ACK on pkt=%08" PRIX32 ", skipped",
+                     msg.uid, msg.packet_id);
+            continue;
+        }
+        /* No send attempt below can un-park this row. msg_store refuses every
+         * transition out of QUEUED except DELIVERED (msg_store.h,
+         * msg_store_update_by_uid), which covers both the synchronous failure
+         * paths and the asynchronous one that actually bit: a frame that
+         * reaches the air is NOT marked SENT here, so when its ACK never comes
+         * and the retry tick reports FAILED against its packet_id, the row is
+         * still QUEUED and still protected. The row leaves the parked state
+         * only by being delivered or by the user cancelling it. */
         uint32_t pkt =
             mesh_resend_message(msg.peer_addr, (const uint8_t*)msg.text, msg.text_len, msg.uid);
         ESP_LOGI(TAG, "Parked uid=%" PRIu32 " -> pkt=%08" PRIX32, msg.uid, pkt);

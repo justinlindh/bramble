@@ -35,6 +35,19 @@ void pending_ack_init(pending_ack_table_t* table);
 int pending_ack_add(pending_ack_table_t* table, uint32_t packet_id, uint32_t dest_addr,
                     uint8_t tier, const uint8_t* packet, uint16_t len, uint32_t now_ms);
 bool pending_ack_remove(pending_ack_table_t* table, uint32_t packet_id);
+
+/*
+ * Is this frame still outstanding: transmitted, and neither acknowledged nor
+ * given up on. packet_id 0 is never outstanding, since it is the value a row
+ * carries when no frame has gone out for it at all.
+ *
+ * Exists for the parked-message retry, which must not put one written message
+ * on the air twice. The send queue refuses a uid it already holds, but that
+ * only covers a message still WAITING for a route or a session; once the frame
+ * has been transmitted it holds no queue entry, and this table is the only
+ * thing that knows the attempt is unresolved.
+ */
+bool pending_ack_is_active(const pending_ack_table_t* table, uint32_t packet_id);
 void pending_ack_tick(pending_ack_table_t* table, uint32_t now_ms);
 uint8_t tier_max_retries(uint8_t tier);
 uint32_t tier_base_delay_ms(uint8_t tier);

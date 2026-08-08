@@ -328,9 +328,16 @@ void test_update_by_uid_refuses_queued_to_failed(void) {
     TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, out.status);
 }
 
-void test_update_by_uid_allows_queued_to_sent(void) {
-    /* Real progress out of QUEUED must still work: the sticky rule only
-     * blocks the FAILED transition, not delivery. */
+void test_update_by_uid_refuses_queued_to_sent_but_still_stamps_the_packet_id(void) {
+    /* SENT is refused for a parked row, and this is the transition the whole
+     * parked-retry feature turns on. Allowing it strands the message: the row
+     * leaves QUEUED, so when the ACK never arrives and the retry tick reports
+     * FAILED against this packet_id the sticky rule no longer protects it, the
+     * row goes FAILED, and nothing in the tree ever re-parks a row.
+     *
+     * The packet_id must still be stamped, or the fix would trade a stranded
+     * message for an unresolvable one: it is what a real ACK is correlated
+     * against, and it is written before the status is considered. */
     msg_store_init();
     msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
 
@@ -338,7 +345,33 @@ void test_update_by_uid_allows_queued_to_sent(void) {
 
     stored_msg_t out;
     TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
-    TEST_ASSERT_EQUAL(MSG_STATUS_SENT, out.status);
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_QUEUED, out.status,
+                              "a parked row marked SENT is one unacknowledged attempt away from "
+                              "being stranded FAILED forever");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(42, out.packet_id,
+                                     "the attempt's packet_id must still be stamped, or a real "
+                                     "ACK for this attempt can never resolve the row");
+}
+
+void test_update_status_by_packet_id_cannot_fail_a_parked_row(void) {
+    /* The ACK retry tick's exact call: it reports FAILED against a packet_id,
+     * not a uid. This is the path that stranded the message, and it has to be
+     * closed on the packet_id side too, not only the uid side. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 42, MSG_STATUS_SENT)); /* stamps packet_id 42 */
+
+    TEST_ASSERT_TRUE(msg_store_update_status(42, MSG_STATUS_FAILED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_QUEUED, out.status,
+                              "ACK exhaustion un-parked the message through the packet_id path");
+
+    /* And a real ACK for that same attempt still resolves it. */
+    TEST_ASSERT_TRUE(msg_store_update_status(42, MSG_STATUS_DELIVERED));
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, out.status);
 }
 
 void test_update_by_uid_allows_queued_to_delivered(void) {
@@ -443,7 +476,8 @@ int main(void) {
     RUN_TEST(test_next_parked_peer_ignores_everything_that_is_not_a_parked_dm);
     RUN_TEST(test_next_parked_peer_survives_ring_wrap);
     RUN_TEST(test_update_by_uid_refuses_queued_to_failed);
-    RUN_TEST(test_update_by_uid_allows_queued_to_sent);
+    RUN_TEST(test_update_by_uid_refuses_queued_to_sent_but_still_stamps_the_packet_id);
+    RUN_TEST(test_update_status_by_packet_id_cannot_fail_a_parked_row);
     RUN_TEST(test_update_by_uid_allows_queued_to_delivered);
     RUN_TEST(test_update_by_uid_sent_to_failed_is_not_sticky);
     RUN_TEST(test_update_status_refuses_queued_to_failed_for_a_reparked_send);
