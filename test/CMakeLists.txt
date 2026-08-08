@@ -2204,6 +2204,16 @@ target_compile_definitions(test_ble_link_sec PRIVATE
     SDKCONFIG_DEFAULTS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../sdkconfig.defaults"
 )
 
+# BLE pairing mode policy, passkey validation, pairing-failure backoff
+add_executable(test_ble_pairing_policy
+    test_ble_pairing_policy.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
+)
+target_include_directories(test_ble_pairing_policy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+)
+
 # WS credential parser: header-only auth, no query string (NEW-SEC-6)
 add_executable(test_ws_auth_credential
     test_ws_auth_credential.c
