@@ -339,8 +339,17 @@ of the same GCC release: Arm's `13.2.Rel1` binary release reports the pinned
 T1000-E. Only CI's exact packaging reproduces CI's bytes, so `nrf/README.md`
 documents an `ubuntu:24.04` container that installs the same
 `gcc-arm-none-eabi` package the image bakes, and that is the answer for a
-question that turns on bytes. The version pin is still what keeps the runner
-image, the workflow and the docs from drifting apart, and what keeps a local
+question that turns on bytes. Where the pin sits is a judgement, not an
+accident: `13.2.1` is what the runner image bakes from Ubuntu Noble and what
+every nRF budget margin is measured against, and across the three toolchains
+measured for this gate the T1000-E static figure spans 106336 to 106488 bytes
+against a 106496 ceiling. Which toolchain builds is therefore worth more than
+the margin the gate has left, which is what makes a move to a newer GCC a
+deliberate change rather than a version bump: it edits `.arm-gcc-version`,
+bumps `ARM_GCC_VERSION` in the private runner-image definition so the image
+agrees, updates every file `check-arm-gcc-version.sh` names, and re-measures
+both boards' budgets in the same change. The version pin is still what keeps the
+runner image, the workflow and the docs from drifting apart, and what keeps a local
 build in the same GCC generation as CI.
 
 ### `quality.yml`
