@@ -2416,20 +2416,25 @@ bool mesh_park_message(uint32_t uid) {
 }
 
 bool mesh_cancel_parked_message(uint32_t uid) {
-    if (uid == 0)
-        return false;
-    return msg_store_update_by_uid(uid, 0, MSG_STATUS_FAILED);
+    /* msg_store_update_by_uid refuses QUEUED -> FAILED (parked is sticky, so
+     * a failed send retry can't silently un-park a row); cancel needs the
+     * one deliberate door out of QUEUED that msg_store_unpark provides. */
+    return msg_store_unpark(uid);
 }
 
 void mesh_flush_parked_for(uint32_t peer_addr) {
-    uint32_t uids[MSG_STORE_MAX];
+    /* static: mesh_flush_parked_for runs only on the mesh task, never
+     * reentrantly, so these are safe off the stack. uids alone is up to
+     * MSG_STORE_MAX * sizeof(uint32_t) (800 bytes at the 200-row tdeck-plus
+     * cap), which is worth keeping off the packet RX call path's stack. */
+    static uint32_t uids[MSG_STORE_MAX];
+    static stored_msg_t msg;
     int n = msg_store_parked_uids_for_peer(peer_addr, uids, MSG_STORE_MAX);
     if (n <= 0)
         return;
 
     ESP_LOGI(TAG, "Flushing %d parked message(s) for %08" PRIX32, n, peer_addr);
     for (int i = 0; i < n; i++) {
-        stored_msg_t msg;
         if (!msg_store_get_copy_by_uid(uids[i], &msg)) {
             /* Expected, not an error: the row can be evicted from the ring
              * between msg_store_parked_uids_for_peer's selection above and
@@ -2437,9 +2442,12 @@ void mesh_flush_parked_for(uint32_t peer_addr) {
              * going with the rest of the batch. */
             continue;
         }
-        /* A failed send leaves the row parked, so it waits for the next
-         * genuine rejoin rather than retrying against a peer that is present
-         * but unreachable. */
+        /* A failed send leaves the row parked, not FAILED: msg_store's
+         * QUEUED -> FAILED transition is sticky-refused (msg_store.h,
+         * msg_store_update_by_uid), so nothing in the resend pipeline below
+         * can un-park this row just because this attempt failed. It waits
+         * for the next genuine rejoin rather than retrying against a peer
+         * that is present but unreachable. */
         uint32_t pkt =
             mesh_resend_message(msg.peer_addr, (const uint8_t*)msg.text, msg.text_len, msg.uid);
         ESP_LOGI(TAG, "Parked uid=%" PRIu32 " -> pkt=%08" PRIX32, msg.uid, pkt);

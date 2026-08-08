@@ -315,11 +315,47 @@ bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t stat
             /* The wire packet_id this stamps rides along on whatever write a
              * status change earns; it is correlation state, not something a
              * reboot has any use for on its own. */
-            changed = s_msgs[idx].status != status;
-            s_msgs[idx].status = status;
+            /* Parked is sticky: a send attempt failing must never un-park a
+             * QUEUED row (see the doc comment on this function). Only
+             * msg_store_unpark() may move a QUEUED row to FAILED. */
+            bool sticky = s_msgs[idx].status == MSG_STATUS_QUEUED && status == MSG_STATUS_FAILED;
+            changed = !sticky && s_msgs[idx].status != status;
+            if (!sticky)
+                s_msgs[idx].status = status;
             found = true;
             found_idx = idx;
             from_end = s_count - 1 - i;
+            break;
+        }
+    }
+    MSG_UNLOCK();
+    if (found && changed)
+        persist_row_update(found_idx, from_end);
+    return found;
+}
+
+bool msg_store_unpark(uint32_t uid) {
+    if (uid == 0)
+        return false;
+    msg_store_ensure_alloc();
+    if (!s_msgs)
+        return false;
+    bool found = false;
+    bool changed = false;
+    int found_idx = 0;
+    int from_end = 0;
+    MSG_LOCK();
+    int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+    for (int i = s_count - 1; i >= 0; i--) {
+        int idx = (start + i) % MSG_STORE_MAX;
+        if (s_msgs[idx].uid == uid) {
+            found = s_msgs[idx].status == MSG_STATUS_QUEUED;
+            if (found) {
+                s_msgs[idx].status = MSG_STATUS_FAILED;
+                changed = true;
+                found_idx = idx;
+                from_end = s_count - 1 - i;
+            }
             break;
         }
     }

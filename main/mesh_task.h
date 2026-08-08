@@ -115,7 +115,10 @@ bool mesh_cancel_parked_message(uint32_t uid);
  * Called from the beacon handler on the rejoin edge only (a peer entering the
  * neighbor table), never per beacon: a peer that is present but unreachable
  * beacons every 60s, and flushing on each of those would be a retry loop.
- * A send that fails leaves the row parked for the next genuine rejoin.
+ * A send that fails leaves the row parked for the next genuine rejoin: the
+ * resend pipeline's failure paths all report MSG_STATUS_FAILED through
+ * msg_store_update_by_uid, whose QUEUED -> FAILED transition is sticky-
+ * refused, so a failed attempt here cannot un-park the row on its own.
  */
 void mesh_flush_parked_for(uint32_t peer_addr);
 

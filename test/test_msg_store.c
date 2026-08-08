@@ -226,6 +226,82 @@ void test_get_copy_by_uid_survives_ring_wrap(void) {
     TEST_ASSERT_EQUAL_STRING("wrap-new", out.text);
 }
 
+void test_update_by_uid_refuses_queued_to_failed(void) {
+    /* Parked is sticky: a send attempt failing must never silently un-park a
+     * QUEUED row, or a parked message stops flushing on the next rejoin
+     * after its very first failed retry. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 0, MSG_STATUS_FAILED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, out.status);
+}
+
+void test_update_by_uid_allows_queued_to_sent(void) {
+    /* Real progress out of QUEUED must still work: the sticky rule only
+     * blocks the FAILED transition, not delivery. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 42, MSG_STATUS_SENT));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_SENT, out.status);
+}
+
+void test_update_by_uid_allows_queued_to_delivered(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 42, MSG_STATUS_DELIVERED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, out.status);
+}
+
+void test_update_by_uid_sent_to_failed_is_not_sticky(void) {
+    /* The sticky rule must not leak to normal (non-parked) rows: a message
+     * that actually reached the air and then exhausted its ACK retries is a
+     * genuine failure and must still show as FAILED. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "on-air", 6, 0, 0, 42, MSG_STATUS_SENT, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 0, MSG_STATUS_FAILED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_FAILED, out.status);
+}
+
+void test_unpark_moves_queued_row_to_failed(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_unpark(1));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_FAILED, out.status);
+}
+
+void test_unpark_refuses_non_queued_or_unknown_uid(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "on-air", 6, 0, 0, 42, MSG_STATUS_SENT, 1);
+
+    TEST_ASSERT_FALSE(msg_store_unpark(1));
+    TEST_ASSERT_FALSE(msg_store_unpark(999));
+    TEST_ASSERT_FALSE(msg_store_unpark(0));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_SENT, out.status);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_msg_store_default_channel_index_is_minus_one);
@@ -242,5 +318,11 @@ int main(void) {
     RUN_TEST(test_parked_uids_survive_ring_wrap);
     RUN_TEST(test_get_copy_by_uid_finds_row_and_rejects_unknown_or_zero);
     RUN_TEST(test_get_copy_by_uid_survives_ring_wrap);
+    RUN_TEST(test_update_by_uid_refuses_queued_to_failed);
+    RUN_TEST(test_update_by_uid_allows_queued_to_sent);
+    RUN_TEST(test_update_by_uid_allows_queued_to_delivered);
+    RUN_TEST(test_update_by_uid_sent_to_failed_is_not_sticky);
+    RUN_TEST(test_unpark_moves_queued_row_to_failed);
+    RUN_TEST(test_unpark_refuses_non_queued_or_unknown_uid);
     return UNITY_END();
 }

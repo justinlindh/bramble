@@ -157,8 +157,30 @@ void msg_store_add_dm_uid(uint32_t peer_addr, msg_direction_t dir, const char* t
  * packet_id onto the row an earlier stage already created, so ACK correlation
  * (which is still by packet_id) lands on that one row.
  * Returns true if a row with this uid was found. uid 0 never matches.
+ *
+ * Parked is sticky: a row currently MSG_STATUS_QUEUED refuses a transition to
+ * MSG_STATUS_FAILED and stays QUEUED instead. A parked message leaves the
+ * parked state only by being sent (QUEUED -> SENT or -> DELIVERED, both still
+ * apply normally) or by the user cancelling it via msg_store_unpark(), never
+ * by a send attempt failing. Without this, every failure path in the send
+ * pipeline (payload too large, handshake cap, session queue TTL, ...) already
+ * calls this function with MSG_STATUS_FAILED on the same uid it parked,
+ * which would silently un-park the row on its very first failed retry and it
+ * would never flush again. Every other transition, including SENT ->
+ * MSG_STATUS_FAILED for a message that actually reached the air and then
+ * exhausted its ACK retries, is unaffected.
  */
 bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t status);
+
+/**
+ * Un-park a message: sets a MSG_STATUS_QUEUED row to MSG_STATUS_FAILED
+ * unconditionally, bypassing the sticky rule in msg_store_update_by_uid().
+ * This is the only door out of QUEUED that a failed send cannot walk through
+ * by accident; it exists so the user's explicit Cancel can still work.
+ * Returns false, and changes nothing, if the row is not currently QUEUED or
+ * uid is unknown (including uid 0).
+ */
+bool msg_store_unpark(uint32_t uid);
 
 /**
  * Collect the uids of messages parked for a peer, oldest first.
