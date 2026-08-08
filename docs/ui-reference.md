@@ -277,7 +277,7 @@ This is a full-screen overlay over the content area. The **tab bar is hidden** a
 |----------------|-----------------|------------------------------------------------|
 | [←] Back       | Left            | 40×24 btn, transparent bg, SYMBOL_LEFT         |
 | Presence dot   | After Back, DM only | 8×8 circle. SUCCESS green = a neighbor heard within `NODE_ONLINE_AGE_S` (90s); WARNING amber = a quiet neighbor or a peer reachable only over an active route; TEXT_SEC gray = neither. `node_reach_classify()`, the same three states and the same threshold the webapp chat header uses |
-| Title          | After the dot   | 138px, Montserrat 12, TEXT, LONG_DOT. Peer name (or hex address) for a DM, `#channel` otherwise. A DM peer that is not online gets its age appended, `"Alice  4m"`; an online peer does not, because the dot already says so |
+| Title          | After the dot   | 138px, Montserrat 12, TEXT, LONG_DOT. Peer name (or hex address) for a DM, `#channel` otherwise. A quiet-neighbor (amber) DM peer gets its age appended, `"Alice  4m"`. An online peer does not, because the dot already says so, and a gray peer has no known age to show |
 | Verify / Switch| Right, 108×22   | DM: the SAS verification state, opens the verify screen. Channel: SYMBOL_SHUFFLE "Switch", cycles the target |
 
 The dot and the trailing age refresh once a second while the thread is open, on a timer owned by the header.
@@ -307,7 +307,7 @@ Each bubble is a `row` container (304px wide, transparent) containing a `bubble`
 
 An outgoing bubble carries a delivery badge in its trailing meta: one check for sent, two for delivered, a cross in DANGER for failed.
 
-**Expanded bubble.** Tapping an outgoing bubble with a packet id expands it (one at a time, tracked by `s_selected_packet_id`); tapping again collapses it. Expanded, it adds:
+**Expanded bubble.** Tapping an outgoing bubble expands it; tapping again collapses it. One is expanded at a time, tracked by `s_selected_uid`: the row uid rather than the packet id, because a DM that failed before it ever reached the air carries `packet_id` 0 and would otherwise be unselectable. A bubble expands if it has a packet id, or if it is a retryable failed DM. Expanded, it adds:
 
 - the relay path, but only when it says something the receipt line does not, that is a single-recipient message that actually traversed a relay
 - a receipt summary from the delivery event ring, falling back to the message status when the ring has rotated past it
