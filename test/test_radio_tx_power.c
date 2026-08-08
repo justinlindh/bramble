@@ -16,6 +16,7 @@
 
 #include <string.h>
 
+#include "radio.h"
 #include "sx1262.h"
 
 void setUp(void) {}
@@ -56,6 +57,41 @@ void test_clamp_output_always_within_chip_range(void) {
         int8_t c = sx1262_clamp_tx_power((int8_t)p);
         TEST_ASSERT_TRUE(c >= SX1262_TX_POWER_MIN_DBM);
         TEST_ASSERT_TRUE(c <= SX1262_TX_POWER_MAX_DBM);
+    }
+}
+
+/* ── Generic per-driver clamp ─────────────────────────────────────── */
+
+/* Every backend clamps through this one function, including the bare-metal
+ * LR1110 target that carries no host suite of its own, so its behaviour is
+ * pinned here rather than three times over. Review of the original change
+ * caught two backends storing an unclamped power, which made NVS, the RPC echo
+ * and radio_health report a level the radio was never programmed with. */
+void test_radio_clamp_respects_arbitrary_ranges(void) {
+    /* LR1110: -17..+22 across both PA paths. */
+    TEST_ASSERT_EQUAL_INT(22, radio_clamp_tx_power(30, -17, 22));
+    TEST_ASSERT_EQUAL_INT(-17, radio_clamp_tx_power(-100, -17, 22));
+    TEST_ASSERT_EQUAL_INT(14, radio_clamp_tx_power(14, -17, 22));
+    /* SX1262 and the virtual radio: -9..+22. */
+    TEST_ASSERT_EQUAL_INT(22, radio_clamp_tx_power(30, -9, 22));
+    TEST_ASSERT_EQUAL_INT(-9, radio_clamp_tx_power(-10, -9, 22));
+}
+
+void test_radio_clamp_output_always_within_range(void) {
+    for (int p = -128; p <= 127; p++) {
+        int8_t c = radio_clamp_tx_power((int8_t)p, -17, 22);
+        TEST_ASSERT_TRUE(c >= -17);
+        TEST_ASSERT_TRUE(c <= 22);
+    }
+}
+
+/* The chip-specific SX1262 clamp and the generic one must not disagree, or the
+ * driver's own last-line-of-defence would contradict the layer above it. */
+void test_radio_clamp_agrees_with_sx1262_clamp(void) {
+    for (int p = -128; p <= 127; p++) {
+        TEST_ASSERT_EQUAL_INT(
+            sx1262_clamp_tx_power((int8_t)p),
+            radio_clamp_tx_power((int8_t)p, SX1262_TX_POWER_MIN_DBM, SX1262_TX_POWER_MAX_DBM));
     }
 }
 
@@ -219,6 +255,10 @@ int main(void) {
     RUN_TEST(test_clamp_rejects_below_chip_min);
     RUN_TEST(test_clamp_is_idempotent);
     RUN_TEST(test_clamp_output_always_within_chip_range);
+
+    RUN_TEST(test_radio_clamp_respects_arbitrary_ranges);
+    RUN_TEST(test_radio_clamp_output_always_within_range);
+    RUN_TEST(test_radio_clamp_agrees_with_sx1262_clamp);
 
     RUN_TEST(test_op_point_22dbm_matches_datasheet);
     RUN_TEST(test_op_point_20dbm_matches_datasheet);

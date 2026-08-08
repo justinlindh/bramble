@@ -84,6 +84,23 @@ static const char* TAG = "radio_virt";
 /*  State                                                              */
 /* ------------------------------------------------------------------ */
 
+/* The virtual radio imposes no PA limit of its own, so it enforces the range
+ * the physical fleet uses. Advertising a range without enforcing it would let
+ * the emulator and the simulator run at powers no real node could program,
+ * which is exactly the divergence they exist to rule out. */
+#define RADIO_VIRT_TX_POWER_MIN_DBM (-9)
+#define RADIO_VIRT_TX_POWER_MAX_DBM 22
+
+static int8_t clamp_and_log_tx_power(int8_t requested) {
+    int8_t clamped =
+        radio_clamp_tx_power(requested, RADIO_VIRT_TX_POWER_MIN_DBM, RADIO_VIRT_TX_POWER_MAX_DBM);
+    if (clamped != requested) {
+        ESP_LOGW(TAG, "TX power %d dBm outside range %d..%d, using %d dBm", requested,
+                 RADIO_VIRT_TX_POWER_MIN_DBM, RADIO_VIRT_TX_POWER_MAX_DBM, clamped);
+    }
+    return clamped;
+}
+
 static radio_config_t s_config;
 static atomic_int s_state = RADIO_STATE_IDLE; /* radio_state_t */
 static radio_rx_callback_t s_rx_cb;
@@ -400,7 +417,9 @@ static void on_cadres_msg(const cJSON* msg, void* ctx) {
 /* ------------------------------------------------------------------ */
 
 int radio_init(const radio_config_t* config) {
-    s_config = *config;
+    radio_config_t applied = *config;
+    applied.tx_power = clamp_and_log_tx_power(applied.tx_power);
+    s_config = applied;
 
     emu_link_on("rx", on_rx_msg, NULL);
     emu_link_on("txdone", on_txdone_msg, NULL);
@@ -428,7 +447,9 @@ int radio_init(const radio_config_t* config) {
 }
 
 int radio_reconfigure(const radio_config_t* config) {
-    s_config = *config;
+    radio_config_t applied = *config;
+    applied.tx_power = clamp_and_log_tx_power(applied.tx_power);
+    s_config = applied;
     radio_start_rx();
     return 0;
 }
@@ -649,7 +670,7 @@ bool radio_cad_check(void) {
     return busy;
 }
 
-void radio_set_tx_power(int8_t power) { s_config.tx_power = power; }
+void radio_set_tx_power(int8_t power) { s_config.tx_power = clamp_and_log_tx_power(power); }
 
 /* There is no radio chip behind the virtual driver, so there is nothing to
  * interrogate. Report the programmed power and supported=false rather than
@@ -667,8 +688,8 @@ int radio_get_health(radio_health_t* health) {
 /* The virtual radio imposes no PA limit of its own, so it reports the range
  * the physical fleet uses; that keeps emulator configs interchangeable with
  * hardware ones instead of accepting values no real node could program. */
-int8_t radio_tx_power_min_dbm(void) { return -9; }
-int8_t radio_tx_power_max_dbm(void) { return 22; }
+int8_t radio_tx_power_min_dbm(void) { return RADIO_VIRT_TX_POWER_MIN_DBM; }
+int8_t radio_tx_power_max_dbm(void) { return RADIO_VIRT_TX_POWER_MAX_DBM; }
 
 radio_state_t radio_get_state(void) { return (radio_state_t)atomic_load(&s_state); }
 
