@@ -837,6 +837,15 @@ bool radio_check_and_clear_reinit(void) {
         if (rc != 0) {
             ESP_LOGE(TAG, "Radio reconfigure failed after hard reset: %d", rc);
             ok = false;
+        } else if (radio_get_state() != RADIO_STATE_RX) {
+            /* radio_reconfigure returns 0 once its configure commands land,
+             * but its trailing radio_start_rx() returns void and only records
+             * RADIO_STATE_IDLE if it failed. A single failed SetRx that did not
+             * trip the third BUSY strike therefore looks like a clean recovery
+             * while the chip is not listening, which is the exact condition
+             * this function exists to escape. Recovery means receiving. */
+            ESP_LOGE(TAG, "Radio reinit reconfigured but did not re-enter RX");
+            ok = false;
         }
     }
 

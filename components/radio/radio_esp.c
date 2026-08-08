@@ -804,8 +804,20 @@ bool radio_check_and_clear_reinit(void) {
     sx1262_clear_reinit();
     ESP_LOGW(TAG, "Radio reinit after hard reset, reconfiguring");
     int rc = radio_reconfigure(&s_config);
-    if (rc != 0) {
+    bool ok = rc == 0;
+    if (!ok) {
         ESP_LOGE(TAG, "Radio reconfigure failed after hard reset: %d", rc);
+    } else if (radio_get_state() != RADIO_STATE_RX) {
+        /* radio_reconfigure returns 0 once its configure commands land, but its
+         * trailing radio_start_rx() returns void and only records
+         * RADIO_STATE_IDLE if it failed. A single failed SetRx that did not
+         * trip BUSY_STUCK_THRESHOLD therefore looks like a clean recovery while
+         * the chip is not listening, which is the exact condition this function
+         * exists to escape. Recovery means receiving. */
+        ESP_LOGE(TAG, "Radio reinit reconfigured but did not re-enter RX");
+        ok = false;
+    }
+    if (!ok) {
         /* Without this the request is gone for good: the chip stays at
          * power-on defaults, DIO2 is no longer the RF switch so nothing
          * radiates, and the node looks healthy from every other angle. */
@@ -817,7 +829,7 @@ bool radio_check_and_clear_reinit(void) {
      * is 3 consecutive timeouts and the command waits are 2000ms, 5000ms for
      * calibration), which would leave the deadline already in the past and put
      * the mesh task in a back-to-back reconfigure loop with no gap at all. */
-    radio_reinit_policy_on_result(&s_reinit_policy, rc == 0, reinit_now_ms());
+    radio_reinit_policy_on_result(&s_reinit_policy, ok, reinit_now_ms());
     return true;
 }
 

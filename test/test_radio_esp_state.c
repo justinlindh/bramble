@@ -796,6 +796,31 @@ static void test_failed_reinit_retries_after_the_backoff(void) {
     TEST_ASSERT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
 }
 
+/* A recovery only counts if the radio actually ended up receiving.
+ * radio_reconfigure returns 0 as soon as its configure commands land; its
+ * trailing radio_start_rx() returns void and merely records RADIO_STATE_IDLE
+ * when it fails. A single failed SetRx that does not trip BUSY_STUCK_THRESHOLD
+ * therefore raises no latch and, keyed on rc alone, reads as a clean recovery
+ * while the node hears nothing: exactly the silent-radio failure this whole
+ * change exists to prevent, reached through the recovery path itself. */
+static void test_reinit_that_cannot_re_enter_rx_is_not_a_success(void) {
+    arm_failure("set_rx", -1);
+    sx1262_request_reinit();
+
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+    /* The chip is configured but deaf. */
+    TEST_ASSERT_NOT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
+    /* So the request must still be standing, and another attempt owed. */
+    TEST_ASSERT_TRUE(sx1262_needs_reinit());
+
+    /* And it recovers on the paced retry once SetRx works again. */
+    advance_ms(BRAMBLE_RADIO_REINIT_RETRY_MS);
+    s_fail_call = NULL;
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+    TEST_ASSERT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
+    TEST_ASSERT_FALSE(sx1262_needs_reinit());
+}
+
 /* A failing recovery against a wedged chip can take longer than the backoff.
  * The deadline must therefore be measured from when the attempt finished: a
  * caller that samples the clock once up front produces a deadline already in
@@ -853,6 +878,7 @@ int main(void) {
     RUN_TEST(test_successful_reinit_clears_the_request);
     RUN_TEST(test_failed_reinit_leaves_the_request_standing);
     RUN_TEST(test_failed_reinit_retries_after_the_backoff);
+    RUN_TEST(test_reinit_that_cannot_re_enter_rx_is_not_a_success);
     RUN_TEST(test_a_slow_failing_reinit_still_backs_off);
 
     return UNITY_END();
