@@ -5,11 +5,15 @@
 # missing, and how to get anything missing. Exits nonzero if the emulator
 # cannot be built/run with the current toolchain.
 #
-# ESP-IDF location: set IDF_PATH, or it defaults to ~/src/esp-idf.
+# ESP-IDF location: discovered by scripts/ci-source-idf.sh, the same helper CI
+# uses, so a checkout the pipeline can build is one this check passes. It takes
+# IDF_PATH when set, an idf.py already on PATH otherwise, and failing both it
+# walks the install locations that script lists.
 
 set -u
 
-IDF_PATH="${IDF_PATH:-$HOME/src/esp-idf}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+IDF_SOURCE_SH="$REPO_ROOT/scripts/ci-source-idf.sh"
 
 missing=0
 
@@ -20,17 +24,28 @@ bad()  { printf '  MISSING  %s\n' "$*"; missing=1; }
 echo "=== Bramble emulator prerequisite check ==="
 
 # --- ESP-IDF / idf.py, linux preview target -------------------------------
-if [ ! -f "$IDF_PATH/export.sh" ]; then
-    bad "ESP-IDF not found at $IDF_PATH/export.sh"
+# Probed in a subshell: sourcing export.sh rewrites PATH and a pile of
+# environment, and a check has no business leaving that behind in the caller's
+# shell. It reports the version and the IDF_PATH the helper settled on, so a
+# machine with several toolchains says which one the build will use.
+idf_probe() {
+    # shellcheck disable=SC1090
+    source "$IDF_SOURCE_SH" >/dev/null 2>&1 || return 1
+    command -v idf.py >/dev/null 2>&1 || return 1
+    printf '%s (IDF_PATH=%s)' "$(idf.py --version 2>/dev/null)" "${IDF_PATH:-unset}"
+}
+
+if [ ! -f "$IDF_SOURCE_SH" ]; then
+    bad "ESP-IDF locator missing: $IDF_SOURCE_SH"
+elif idf_desc=$(idf_probe); then
+    pass "idf.py $idf_desc, linux preview target"
+else
+    bad "ESP-IDF not found: no idf.py on PATH and no export.sh in any known location"
     note "set IDF_PATH=/path/to/esp-idf, or clone ESP-IDF 5.4.1 and install the"
     note "linux target: git clone -b v5.4.1 --recurse-submodules \\"
-    note "  https://github.com/espressif/esp-idf.git ~/src/esp-idf && \\"
-    note "  ~/src/esp-idf/install.sh linux"
-elif ver=$(bash -c "source '$IDF_PATH/export.sh' >/dev/null 2>&1 && idf.py --version" 2>/dev/null); then
-    pass "idf.py ($ver, IDF_PATH=$IDF_PATH, linux preview target)"
-else
-    bad "idf.py did not initialize from $IDF_PATH/export.sh"
-    note "run: $IDF_PATH/install.sh linux"
+    note "  https://github.com/espressif/esp-idf.git ~/esp-idf && \\"
+    note "  ~/esp-idf/install.sh linux"
+    note "the locations searched are listed by: bash $IDF_SOURCE_SH"
 fi
 
 # --- go ---------------------------------------------------------------------
