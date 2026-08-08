@@ -26,6 +26,7 @@
 int g_rollcall_start_result = MESH_ROLLCALL_OK;
 uint32_t g_rollcall_next_id = 0x0000BEEF;
 uint32_t g_rollcall_pending_dropped = 0;
+uint32_t g_rollcall_answer_limited = 0;
 bool g_rollcall_ledger_present = false;
 rollcall_ledger_t g_rollcall_ledger;
 
@@ -45,15 +46,18 @@ const rollcall_ledger_t* mesh_rollcall_ledger(void) {
 
 uint32_t mesh_rollcall_pending_dropped(void) { return g_rollcall_pending_dropped; }
 
+uint32_t mesh_rollcall_answer_limited(void) { return g_rollcall_answer_limited; }
+
 uint32_t g_rollcall_retry_after_ms = 0;
 uint32_t mesh_rollcall_retry_after_ms(void) { return g_rollcall_retry_after_ms; }
 
-void mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uint8_t* data,
+bool mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uint8_t* data,
                                    size_t data_len) {
     (void)src_addr;
     (void)channel_idx;
     (void)data;
     (void)data_len;
+    return false;
 }
 
 void mesh_rollcall_handle_response(uint32_t src_addr, const uint8_t* data, size_t data_len) {

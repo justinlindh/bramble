@@ -48,6 +48,12 @@ const rollcall_ledger_t* mesh_rollcall_ledger(void);
  * only appearing as a hole in someone else's ledger. */
 uint32_t mesh_rollcall_pending_dropped(void);
 
+/* Answers this node refused because it had already spent its answer budget
+ * (ROLLCALL_ANSWER_MAX_PER_HOUR in ROLLCALL_ANSWER_WINDOW_MS). Non-zero means
+ * something on this mesh is asking for roll-calls faster than the fleet has
+ * agreed to pay for them. */
+uint32_t mesh_rollcall_answer_limited(void);
+
 /*
  * Milliseconds until mesh_rollcall_start would be accepted, 0 when it would
  * be accepted now. Covers BOTH refusals with one number, taking whichever
@@ -58,9 +64,18 @@ uint32_t mesh_rollcall_pending_dropped(void);
  */
 uint32_t mesh_rollcall_retry_after_ms(void);
 
-/* RX: a decrypted, authenticated APP_TYPE_ROLLCALL payload (broadcast
- * announce). Claims the answer-once slot and queues a staggered response. */
-void mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uint8_t* data,
+/*
+ * RX: a decrypted, authenticated APP_TYPE_ROLLCALL payload (broadcast
+ * announce). Queues a staggered response and claims the answer-once slot.
+ *
+ * Returns true only when this call newly took the roll-call on, which is what
+ * the caller uses to decide whether to emit a broadcast delivery receipt for
+ * the frame. A member that already answered, or that refused (queue full,
+ * answer budget spent, malformed frame), returns false: re-announce rounds
+ * would otherwise cost the whole mesh a fresh flooded receipt each, three
+ * times per roll-call, for information the initiator already holds.
+ */
+bool mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uint8_t* data,
                                    size_t data_len);
 
 /* RX: a decrypted, authenticated APP_TYPE_ROLLCALL_REPLY payload (unicast

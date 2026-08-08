@@ -60,7 +60,9 @@ typedef struct {
     /* Member side. */
     rollcall_seen_table_t seen;
     rollcall_pending_t pending[ROLLCALL_PENDING_MAX];
+    rollcall_answer_budget_t answer_budget;
     uint32_t pending_dropped; /* answers refused for a full pending queue */
+    uint32_t answer_limited;  /* answers refused for a spent answer budget */
 } rollcall_runtime_t;
 
 static rollcall_runtime_t* s_rc;
@@ -79,6 +81,7 @@ static rollcall_runtime_t* rollcall_runtime(void) {
     rollcall_ledger_init(&s_rc->ledger);
     rollcall_rate_init(&s_rc->rate);
     rollcall_seen_init(&s_rc->seen);
+    rollcall_answer_budget_init(&s_rc->answer_budget);
     s_rc->announce_channel_idx = 0;
     return s_rc;
 }
@@ -232,6 +235,8 @@ const rollcall_ledger_t* mesh_rollcall_ledger(void) {
 
 uint32_t mesh_rollcall_pending_dropped(void) { return (s_rc == NULL) ? 0u : s_rc->pending_dropped; }
 
+uint32_t mesh_rollcall_answer_limited(void) { return (s_rc == NULL) ? 0u : s_rc->answer_limited; }
+
 uint32_t mesh_rollcall_retry_after_ms(void) {
     if (s_rc == NULL)
         return 0;
@@ -276,29 +281,37 @@ static void rollcall_emit_complete(const rollcall_ledger_t* l) {
 
 /* ── Member ─────────────────────────────────────────────────────────── */
 
-void mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uint8_t* data,
+bool mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uint8_t* data,
                                    size_t data_len) {
     rollcall_announce_t ann;
     if (!rollcall_announce_decode(data, data_len, &ann)) {
         ESP_LOGW(TAG, "Malformed roll-call announce from %08" PRIX32, src_addr);
-        return;
+        return false;
     }
 
     rollcall_runtime_t* rc = rollcall_runtime();
     if (rc == NULL)
-        return;
+        return false;
 
     uint32_t t = now_ms();
 
     /* Re-announce rounds are idempotent for a member that already answered:
      * the claim is keyed on (id, initiator), NOT on the round, so rounds 2
      * and 3 cost a decode and nothing else. */
-    if (!rollcall_seen_claim(&rc->seen, ann.rollcall_id, src_addr, t)) {
+    if (rollcall_seen_contains(&rc->seen, ann.rollcall_id, src_addr)) {
         ESP_LOGD(TAG, "ROLLCALL round %u already answered id=%08" PRIX32 " from %08" PRIX32,
                  (unsigned)ann.round, ann.rollcall_id, src_addr);
-        return;
+        return false;
     }
 
+    /*
+     * Every refusal below happens BEFORE the claim is taken. A claim is a
+     * promise to answer, and burning one on an announce this node then
+     * refuses would silence it for the whole roll-call: the bounded
+     * re-announce rounds exist precisely to give a member that could not
+     * answer round 1 another chance, and rounds 2 and 3 are dropped by the
+     * claim rather than reaching this code at all.
+     */
     int slot = -1;
     for (int i = 0; i < ROLLCALL_PENDING_MAX; i++) {
         if (!rc->pending[i].used) {
@@ -312,8 +325,26 @@ void mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uin
          * on the node too rather than only as a hole in someone's ledger. */
         rc->pending_dropped++;
         ESP_LOGW(TAG, "ROLLCALL pending queue full, dropping answer to %08" PRIX32, src_addr);
-        return;
+        return false;
     }
+
+    /* The fleet's own bound on what roll-calls may cost it, independent of
+     * how fast anyone asks. See rollcall.h's answer-budget contract. The
+     * budget is CHARGED in rollcall_send_pending, when an answer actually
+     * reaches the air, so a refused or undeliverable answer costs nothing;
+     * the most that can be in flight past the cap is the pending queue's
+     * depth, ROLLCALL_PENDING_MAX. */
+    if (!rollcall_answer_budget_allow(&rc->answer_budget, t)) {
+        rc->answer_limited++;
+        ESP_LOGW(TAG,
+                 "ROLLCALL answer budget spent (%u/hour), refusing id=%08" PRIX32
+                 " from %08" PRIX32,
+                 (unsigned)ROLLCALL_ANSWER_MAX_PER_HOUR, ann.rollcall_id, src_addr);
+        return false;
+    }
+
+    if (!rollcall_seen_claim(&rc->seen, ann.rollcall_id, src_addr, t))
+        return false;
 
     uint32_t delay = rollcall_response_delay_ms(
         s_identity->address, ann.rollcall_id, (uint8_t)neighbor_count(&s_neighbors), esp_random());
@@ -341,9 +372,26 @@ void mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uin
     cJSON_AddNumberToObject(params, "round", ann.round);
     rpc_notify("bramble.onRollCall", params);
     cJSON_Delete(params);
+    return true;
 }
 
-/* Sign and transmit one queued answer. */
+/*
+ * Sign and transmit one queued answer.
+ *
+ * Every path that abandons the answer without putting it on the air releases
+ * the answer-once claim first. The claim exists to make a re-announce free
+ * for a member that ALREADY ANSWERED; a member whose answer never left the
+ * radio has not answered, and holding its claim would turn a transient
+ * failure (a signing error, an airtime denial) into permanent silence for
+ * the rest of the roll-call, with the initiator's ledger naming a node that
+ * is alive, in range and idle.
+ */
+static void rollcall_abandon_pending(rollcall_pending_t* p) {
+    if (s_rc != NULL)
+        rollcall_seen_release(&s_rc->seen, p->rollcall_id, p->initiator_addr);
+    memset(p, 0, sizeof(*p));
+}
+
 static void rollcall_send_pending(rollcall_pending_t* p) {
     rollcall_response_t resp;
     memset(&resp, 0, sizeof(resp));
@@ -354,19 +402,19 @@ static void rollcall_send_pending(rollcall_pending_t* p) {
     uint8_t msg[ROLLCALL_MSG_SIZE];
     if (rollcall_signed_msg(p->rollcall_id, p->initiator_addr, s_identity->address, msg,
                             sizeof(msg)) == 0) {
-        memset(p, 0, sizeof(*p));
+        rollcall_abandon_pending(p);
         return;
     }
     if (crypto_ed25519_sign(s_identity->ed25519_private_key, msg, sizeof(msg), resp.sig) != 0) {
         ESP_LOGE(TAG, "Roll-call response signing failed");
-        memset(p, 0, sizeof(*p));
+        rollcall_abandon_pending(p);
         return;
     }
 
     uint8_t payload[ROLLCALL_RESPONSE_SIZE];
     size_t n = rollcall_response_encode(&resp, payload, sizeof(payload));
     if (n == 0) {
-        memset(p, 0, sizeof(*p));
+        rollcall_abandon_pending(p);
         return;
     }
 
@@ -377,16 +425,20 @@ static void rollcall_send_pending(rollcall_pending_t* p) {
     /* Unicast, so send_data_packet registers it in the pending-ACK table at
      * MSG_TIER_NORMAL: the roll-call inherits the shipped retry/backoff
      * behavior instead of growing a retry loop of its own. A zero return is
-     * a real failure (budget denial included) and the answer is dropped
-     * rather than retried outside that machinery. */
+     * a real failure (budget denial included) and the answer is not retried
+     * outside that machinery; the claim goes back so a later announce round
+     * can try again. */
     uint32_t pkt_id = send_data_packet(p->initiator_addr, payload, n, &s_channels[ch_idx],
                                        APP_TYPE_ROLLCALL_REPLY);
     if (pkt_id == 0) {
         ESP_LOGW(TAG, "ROLLCALL response to %08" PRIX32 " not transmitted", p->initiator_addr);
-    } else {
-        ESP_LOGI(TAG, "ROLLCALL RESPONSE id=%08" PRIX32 " to=%08" PRIX32 " pkt=%08" PRIX32,
-                 p->rollcall_id, p->initiator_addr, pkt_id);
+        rollcall_abandon_pending(p);
+        return;
     }
+    ESP_LOGI(TAG, "ROLLCALL RESPONSE id=%08" PRIX32 " to=%08" PRIX32 " pkt=%08" PRIX32,
+             p->rollcall_id, p->initiator_addr, pkt_id);
+    if (s_rc != NULL)
+        rollcall_answer_budget_note(&s_rc->answer_budget, now_ms());
     memset(p, 0, sizeof(*p));
 }
 
@@ -485,7 +537,14 @@ void mesh_rollcall_note_receipt(uint32_t responder_addr, uint32_t orig_packet_id
         path[n++] = relay_path[i];
     }
 
-    rollcall_ledger_note_path(&s_rc->ledger, s_rc->ledger.rollcall_id, responder_addr, n, path);
+    /* A delivery receipt is authenticated by the SHARED network key and its
+     * src_addr is whatever the sender wrote, so it is not evidence that the
+     * named node exists: the ledger only lets a receipt open a row for an
+     * address this node already pins. See rollcall_ledger_note_path. */
+    bool pinned = identity_store_lookup(&s_identity_pins, responder_addr) != NULL;
+
+    rollcall_ledger_note_path(&s_rc->ledger, s_rc->ledger.rollcall_id, responder_addr, pinned, n,
+                              path);
 }
 
 /* ── Tick ───────────────────────────────────────────────────────────── */
