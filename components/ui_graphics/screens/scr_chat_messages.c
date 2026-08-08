@@ -410,7 +410,13 @@ static void park_async(void* arg) {
     }
 
     if (mesh_park_message(uid)) {
-        ui_toast_show("Will send when back");
+        /* Not "when back": ACK-retry exhaustion, the common way a DM ends
+         * up here, happens while the peer keeps beaconing normally, so the
+         * peer is frequently not away at all. "Automatically" is the part
+         * that is always true, on the beacon-driven rejoin edge and on the
+         * cooldown-limited retry for a peer that never left the neighbor
+         * table (main/mesh_beacon.c). */
+        ui_toast_show("Will retry automatically");
     } else {
         ui_toast_show("Nothing to queue");
     }
@@ -819,12 +825,16 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
             /* Room for "Delivered to 4: " plus four full node names and
              * separators; 128 truncated the "+N" tail once names stopped
              * being clipped to 7 chars. A parked message has no receipts to
-             * report: it says why it is waiting instead. */
+             * report: it says why it is waiting instead, without claiming
+             * anything about the peer's whereabouts. ACK-retry exhaustion,
+             * the common way a DM ends up parkable, happens while the peer
+             * keeps beaconing normally, so "the peer is away" is false in
+             * the common case; the peer's name is dropped rather than
+             * anchoring that false claim to a specific person, and this
+             * thread already says whose bubble it is. */
             char receipt_buf[192];
             if (is_parked) {
-                char peer_buf[CHAT_RECEIPT_NAME_MAX];
-                format_peer_name(peer_buf, sizeof(peer_buf), msg->peer_addr, false);
-                snprintf(receipt_buf, sizeof(receipt_buf), "Waiting until %s is back", peer_buf);
+                snprintf(receipt_buf, sizeof(receipt_buf), "Will retry automatically");
             } else {
                 build_receipt_summary(receipt_buf, sizeof(receipt_buf), msg->packet_id,
                                       msg->status);
