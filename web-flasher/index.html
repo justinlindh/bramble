@@ -106,6 +106,19 @@
 
                 <hr class="form-divider" />
 
+                <div class="board-select">
+                    <label for="network-key">Network Key:</label>
+                    <input id="network-key" type="text" autocomplete="off" placeholder="bramble://net/v1?k=... or 64 hex chars" />
+                </div>
+                <p class="wifi-note">Paste the key from a node that is already on your mesh, to
+                join this node to it. <strong>Without a network key a node is inert</strong>: it has
+                no way to verify mesh traffic, so it will not mesh at all. Setting up your first
+                node? Leave this blank, then open the
+                <a href="https://bramblemesh.org/app/" target="_blank" rel="noopener">Bramble web app</a>
+                and use <strong>Config &rarr; Network Key &rarr; Found a new network</strong> to mint one.</p>
+
+                <hr class="form-divider" />
+
                 <details id="auth-panel" class="advanced-panel">
                     <summary>🔒 Security (optional)</summary>
                     <div class="advanced-body">

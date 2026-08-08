@@ -63,8 +63,11 @@ const wrapped = {
 //   - anchor: 100% webapp (six commits, six times touching only
 //     webapp/src/**); the on-device anchor/attestation protocol code lands
 //     under `security`, `rpc`, or `protocol`, all included below.
-//   - mock: webapp/mock is a standalone dev-only mock RPC server with its
-//     own package.json, never part of a shipped build.
+//   - mock: webapp/mock is the mock RPC node. It has its own package.json
+//     and never touches device code, so it cuts no firmware release, but it
+//     is NOT dev-only: webapp/Dockerfile copies it into the runtime image and
+//     unified-server.mjs serves it as the hosted demo node, so it is in
+//     WEBAPP_SCOPES (see .releaserc.webapp.cjs).
 //   - go-public: one-off internal-refs redaction work, not a feature scope.
 //   - emu, emu_link, emulator, emulator-qemu: the IDF linux target and its
 //     QEMU/emu-link harness. Every dual-build component in this repo
