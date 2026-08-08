@@ -2489,6 +2489,8 @@ components:
             $ref: '#/components/schemas/TaskStackHighWaterMark'
         backpressure:
           $ref: '#/components/schemas/BackpressureDiagnostics'
+        radio_health:
+          $ref: '#/components/schemas/RadioHealthDiagnostics'
         gps_rx_bytes:
           type: number
           description: >
@@ -2558,6 +2560,83 @@ components:
             instead of transmitting it un-jittered.
         probe_ingress:
           $ref: '#/components/schemas/ProbeIngressDiagnostics'
+
+    RadioHealthDiagnostics:
+      type: object
+      description: >
+        What the radio will report about its own transmit path. Neither the
+        commanded nor the radiated output power can be read back from an
+        SX1262: SetTxParams and SetPaConfig are write-only op-codes and no
+        register reports output power. So this pairs the level the driver
+        programmed with the evidence the chip does expose, which is enough to
+        catch a dead PA, an unlocked PLL or config writes that never landed.
+        Confirming the level actually radiated needs external instrumentation.
+      required: [supported, tx_power_dbm]
+      properties:
+        supported:
+          type: boolean
+          description: >
+            False when the driver has no SX1262 to interrogate (the emulator's
+            virtual radio, or the LR1110 target, whose status and error words
+            do not share this layout). Only tx_power_dbm is populated then.
+        tx_power_dbm:
+          type: integer
+          description: >
+            Output power the driver programmed via SetTxParams, after clamping
+            to the chip's -9..+22 dBm range. This is intent, not measurement.
+        device_errors:
+          type: integer
+          description: Raw GetDeviceErrors bitmask.
+        device_errors_str:
+          type: string
+          description: >
+            Space-separated flag names for device_errors, or "none". Flags are
+            PA_RAMP, PLL_LOCK, XOSC_START, IMG_CALIB, ADC_CALIB, PLL_CALIB,
+            RC13M_CALIB and RC64K_CALIB.
+        pa_ramp_error:
+          type: boolean
+          description: >
+            PA_RAMP is latched: the power amplifier did not ramp for a
+            transmit, so nothing usable went on air. The single strongest
+            on-chip signal that commanded power is not being produced.
+        status:
+          type: integer
+          description: Raw GetStatus byte.
+        chip_mode:
+          type: string
+          description: Chip mode decoded from status.
+          enum: [STBY_RC, STBY_XOSC, FS, RX, TX, UNKNOWN]
+        cmd_status:
+          type: string
+          description: >
+            Last-command status decoded from status. exec-failed or
+            processing-error means the chip rejected a command.
+          enum: [data-available, timeout, processing-error, exec-failed, tx-done, reserved]
+        ocp:
+          type: integer
+          description: Over-current protection register readback.
+        ocp_expected:
+          type: integer
+          description: OCP value the driver programmed for the high-power PA.
+        ocp_ok:
+          type: boolean
+          description: >
+            False means PA configuration writes are not reaching the chip,
+            which caps output well below the commanded level. OCP is the only
+            PA-side register that reads back, so this is the proof that the
+            SetPaConfig path works at all.
+        pa_duty_cycle:
+          type: integer
+          description: paDutyCycle from the selected SetPaConfig operating point.
+        pa_hp_max:
+          type: integer
+          description: hpMax from the selected SetPaConfig operating point.
+        pa_rated_dbm:
+          type: integer
+          description: >
+            Output level the selected PA operating point is characterized for.
+            The driver picks the lowest characterized point that still covers
+            the requested power.
 
     ProbeIngressDiagnostics:
       type: object
@@ -3486,6 +3565,17 @@ components:
         is_tx:
           type: boolean
           description: true if this is a TX event, false for RX.
+        src_addr:
+          type: string
+          pattern: '^[0-9A-F]{8}$'
+          description: >
+            Claimed origin address of an RX frame, as 8 uppercase hex digits.
+            Present only when the frame's packet type carries an origin address;
+            absent for TX events and for types that carry none, so that
+            "unknown" is never confused with a real address. Read from the
+            unauthenticated wire prefix, so it is telemetry, not a verified
+            identity. Pairing it with rssi is what makes per-peer signal
+            strength measurable, since neighbour RSSI only refreshes on beacons.
 
     MonitorEventStreamNotification:
       type: object

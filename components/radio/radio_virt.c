@@ -651,6 +651,19 @@ bool radio_cad_check(void) {
 
 void radio_set_tx_power(int8_t power) { s_config.tx_power = power; }
 
+/* There is no radio chip behind the virtual driver, so there is nothing to
+ * interrogate. Report the programmed power and supported=false rather than
+ * inventing status bytes, so a caller cannot mistake the emulator for evidence
+ * about a real transmit path. */
+int radio_get_health(radio_health_t* health) {
+    if (!health)
+        return -1;
+    memset(health, 0, sizeof(*health));
+    health->supported = false;
+    health->tx_power_dbm = s_config.tx_power;
+    return 0;
+}
+
 radio_state_t radio_get_state(void) { return (radio_state_t)atomic_load(&s_state); }
 
 void radio_set_rx_callback(radio_rx_callback_t cb) { s_rx_cb = cb; }

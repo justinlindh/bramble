@@ -413,6 +413,26 @@ esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, u
  * residual already accepted for the RREP control plane.
  */
 #define BRAMBLE_DATA_SRC_ADDR_OFFSET (HEADER_SIZE)
+
+/**
+ * Read the origin address a received frame carries at wire offset HEADER_SIZE.
+ *
+ * Two encodings share that offset, which is why this cannot be one
+ * unconditional read: the types framed by bramble_*_serialize write src_addr
+ * big-endian via put_be32, while the hand-built envelope types (DATA, its
+ * LOCATION twin, and the PROBE pair) memcpy the field in host order.
+ *
+ * Returns false, leaving *out untouched, when the frame is too short or its
+ * type carries no origin address there. RREQ, RREP and RERR lead with
+ * query_id or reporter_addr, so they are deliberately excluded rather than
+ * misread into a plausible-looking address. Callers must treat false as
+ * "unknown origin", never as address zero.
+ *
+ * The address is read off the still-unauthenticated wire prefix, so it is a
+ * claim, not a verified identity. It is fine for telemetry and attribution;
+ * it must not be used for any trust decision.
+ */
+bool bramble_packet_origin_addr(uint8_t type, const uint8_t* buf, size_t len, uint32_t* out);
 #define BRAMBLE_DATA_PREV_HOP_OFFSET (HEADER_SIZE + 4)
 #define BRAMBLE_DATA_AUTH_HMAC_OFFSET (HEADER_SIZE + 8)
 #define BRAMBLE_DATA_AUTH_HMAC_SIZE 8

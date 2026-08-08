@@ -466,6 +466,26 @@ target_include_directories(test_radio_bw_mapping PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
 )
 
+# SX1262 transmit-power path: chip-range clamping, PA operating-point
+# selection, and the device-error / status decoders behind radio_health.
+add_executable(test_radio_tx_power
+    test_radio_tx_power.c
+    unity/unity.c
+)
+target_include_directories(test_radio_tx_power PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+
+# Per-packet origin address used to attribute RX RSSI to a peer
+add_executable(test_packet_origin_addr
+    test_packet_origin_addr.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+    unity/unity.c
+)
+target_include_directories(test_packet_origin_addr PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+)
+
 # CAD-timeout fail-open/closed policy (issue #118)
 add_executable(test_cad_timeout_policy
     test_cad_timeout_policy.c

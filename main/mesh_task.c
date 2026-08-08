@@ -1108,8 +1108,13 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
         return;
     }
 
-    /* Record raw RX event */
-    traffic_debug_record_rx(&s_traffic_debug, header.type, pkt->len, pkt->rssi);
+    /* Record raw RX event. The claimed origin rides along so an RSSI sample
+     * can be attributed to a peer: neighbor-table RSSI only refreshes on
+     * beacon reception, so without this the event stream carries signal
+     * strength that belongs to nobody in particular. Unknown stays 0. */
+    uint32_t traffic_src = 0;
+    bramble_packet_origin_addr(header.type, pkt->data, pkt->len, &traffic_src);
+    traffic_debug_record_rx(&s_traffic_debug, header.type, pkt->len, pkt->rssi, traffic_src);
 
     /* Dedup check:
      * - include packet type to avoid PROBE vs PROBE_ACK collisions
@@ -2932,6 +2937,14 @@ static void traffic_event_notify(const traffic_event_t* evt, void* ctx) {
     cJSON_AddNumberToObject(params, "packet_len", evt->packet_len);
     cJSON_AddNumberToObject(params, "rssi", evt->rssi);
     cJSON_AddBoolToObject(params, "is_tx", evt->is_tx);
+
+    /* Same optional-key contract as the getTrafficEvents serializer: present
+     * only when the frame actually carried an origin address. */
+    if (evt->src_addr != 0) {
+        char src_buf[12];
+        cJSON_AddStringToObject(params, "src_addr",
+                                addr_hex(evt->src_addr, src_buf, sizeof(src_buf)));
+    }
 
     /* Send notification via RPC notify system (which forwards to WebSocket) */
     rpc_notify("bramble.onTrafficEvent", params);

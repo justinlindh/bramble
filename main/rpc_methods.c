@@ -9,6 +9,8 @@
 #include "msg_store.h"
 #include "airtime_budget.h"
 #include "radio.h"
+/* For the device-error flag names and status decoders behind radio_health_t. */
+#include "sx1262.h"
 #include "phy_passthrough.h"
 #include "tx_gate.h"
 #include "freq_plan.h"
@@ -280,6 +282,38 @@ static int handle_get_diagnostics(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(probe, "accepted", (double)probe_accepted);
     cJSON_AddNumberToObject(probe, "dropped_reply", (double)probe_drop_reply);
     cJSON_AddNumberToObject(probe, "dropped_forward", (double)probe_drop_fwd);
+
+    /* Transmit-path evidence. Neither the commanded nor the radiated output
+     * power can be read back from the radio, so this reports what the chip
+     * will admit to: latched device errors (PA_RAMP means the amplifier never
+     * came up), chip mode and last-command status, and the OCP register, whose
+     * readback proves PA config writes are reaching the part at all. Pairing
+     * the programmed level with that evidence is what turns "we set 22 dBm"
+     * from an assertion into something a reader can check. */
+    radio_health_t rh;
+    if (radio_get_health(&rh) == 0) {
+        cJSON* health = cJSON_AddObjectToObject(result, "radio_health");
+        cJSON_AddBoolToObject(health, "supported", rh.supported);
+        cJSON_AddNumberToObject(health, "tx_power_dbm", rh.tx_power_dbm);
+        if (rh.supported) {
+            char errbuf[96];
+            cJSON_AddNumberToObject(health, "device_errors", rh.device_errors);
+            cJSON_AddStringToObject(
+                health, "device_errors_str",
+                sx1262_device_errors_str(rh.device_errors, errbuf, sizeof(errbuf)));
+            cJSON_AddBoolToObject(health, "pa_ramp_error",
+                                  (rh.device_errors & SX1262_DEVERR_PA_RAMP) != 0);
+            cJSON_AddNumberToObject(health, "status", rh.status);
+            cJSON_AddStringToObject(health, "chip_mode", sx1262_chip_mode_str(rh.status));
+            cJSON_AddStringToObject(health, "cmd_status", sx1262_cmd_status_str(rh.status));
+            cJSON_AddNumberToObject(health, "ocp", rh.ocp);
+            cJSON_AddNumberToObject(health, "ocp_expected", rh.ocp_expected);
+            cJSON_AddBoolToObject(health, "ocp_ok", rh.ocp == rh.ocp_expected);
+            cJSON_AddNumberToObject(health, "pa_duty_cycle", rh.pa_duty_cycle);
+            cJSON_AddNumberToObject(health, "pa_hp_max", rh.pa_hp_max);
+            cJSON_AddNumberToObject(health, "pa_rated_dbm", rh.pa_rated_dbm);
+        }
+    }
 
     /* GNSS raw-feed diagnostics: byte/line counters and chip banner tell
      * "UART dead" from "flowing but unparseable" on a console-less board. */
@@ -3301,6 +3335,15 @@ static int handle_get_traffic_events(const cJSON* params, cJSON* result) {
         cJSON_AddNumberToObject(obj, "packet_len", evt->packet_len);
         cJSON_AddNumberToObject(obj, "rssi", evt->rssi);
         cJSON_AddBoolToObject(obj, "is_tx", evt->is_tx);
+
+        /* Omitted rather than sent as "00000000" when the origin is unknown,
+         * so a consumer plotting RSSI per peer cannot mistake "not carried by
+         * this packet type" for a real address. */
+        if (evt->src_addr != 0) {
+            char src_buf[12];
+            cJSON_AddStringToObject(obj, "src_addr",
+                                    addr_hex(evt->src_addr, src_buf, sizeof(src_buf)));
+        }
 
         cJSON_AddItemToArray(events, obj);
         returned++;

@@ -30,6 +30,13 @@ typedef struct {
     uint16_t packet_len;         /* Packet length in bytes */
     int8_t rssi;                 /* RSSI for RX, 0 for TX */
     bool is_tx;                  /* true=TX, false=RX */
+    /* Claimed origin of an RX frame, 0 when unknown or for TX. Without it an
+     * RSSI sample cannot be tied to a peer, which makes the event stream
+     * useless for per-link RF work: neighbor-table RSSI only refreshes on
+     * beacons, so this is the only per-packet signal-strength record. Read off
+     * the unauthenticated wire prefix (see bramble_packet_origin_addr), so it
+     * is telemetry, never a trust input. */
+    uint32_t src_addr;
 } traffic_event_t;
 
 /**
@@ -124,8 +131,11 @@ void traffic_debug_record_tx(traffic_debug_t* td, uint8_t pkt_type, uint16_t len
  * @param pkt_type Packet type
  * @param len Packet length
  * @param rssi RSSI value
+ * @param src_addr Claimed origin address, or 0 when the frame's type carries
+ *                 none (see bramble_packet_origin_addr). Telemetry only.
  */
-void traffic_debug_record_rx(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, int8_t rssi);
+void traffic_debug_record_rx(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, int8_t rssi,
+                             uint32_t src_addr);
 
 /**
  * Get number of events currently in buffer

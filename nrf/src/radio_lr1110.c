@@ -694,6 +694,20 @@ void radio_set_tx_power(int8_t power) {
     }
 }
 
+/* The health readback is SX1262-specific: its fields are that part's status
+ * byte, device-error bitmask and OCP register, none of which map onto the
+ * LR1110's own error and status commands. Report the programmed power with
+ * supported=false rather than filling those fields with LR1110 values that
+ * would decode into the wrong flag names. */
+int radio_get_health(radio_health_t* health) {
+    if (!health)
+        return -1;
+    memset(health, 0, sizeof(*health));
+    health->supported = false;
+    health->tx_power_dbm = s_config.tx_power;
+    return 0;
+}
+
 radio_state_t radio_get_state(void) { return (radio_state_t)atomic_load(&s_state); }
 
 void radio_set_rx_callback(radio_rx_callback_t cb) { s_rx_cb = cb; }

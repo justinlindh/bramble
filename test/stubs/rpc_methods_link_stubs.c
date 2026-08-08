@@ -52,6 +52,20 @@ typedef struct {
     bool crc;
     bool explicit_header;
 } radio_config_t;
+
+/* Mirrors radio.h's radio_health_t. These stubs deliberately redeclare the
+ * radio types rather than including the component header; keep in step. */
+typedef struct {
+    bool supported;
+    uint8_t status;
+    uint16_t device_errors;
+    uint8_t ocp;
+    uint8_t ocp_expected;
+    int8_t tx_power_dbm;
+    uint8_t pa_duty_cycle;
+    uint8_t pa_hp_max;
+    int8_t pa_rated_dbm;
+} radio_health_t;
 typedef struct {
     uint32_t ts_ms;
     uint32_t src;
@@ -308,6 +322,16 @@ void freq_plan_get_default(uint32_t* f, int8_t* p) {
         *p = 14;
 }
 void radio_get_config(radio_config_t* cfg) { memset(cfg, 0, sizeof(*cfg)); }
+/* No SX1262 behind the host build, so report the unsupported shape the real
+ * virtual driver reports: getDiagnostics must still emit a radio_health block
+ * with supported=false rather than fabricating chip status bytes. */
+int radio_get_health(radio_health_t* h) {
+    if (!h)
+        return -1;
+    memset(h, 0, sizeof(*h));
+    h->supported = false;
+    return 0;
+}
 /* PHY passthrough (phy.tx) routes through the tx gate; link stub only. */
 int tx_gate_send(const uint8_t* buf, uint8_t len, int kind) {
     (void)buf;

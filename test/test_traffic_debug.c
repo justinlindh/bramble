@@ -122,7 +122,7 @@ void test_seq_increments_monotonically(void) {
     traffic_debug_enable(&td, true);
 
     traffic_debug_record_tx(&td, PKT_TYPE_BEACON, 100, AIRTIME_TIER_BROADCAST);
-    traffic_debug_record_rx(&td, PKT_TYPE_ACK, 50, -60);
+    traffic_debug_record_rx(&td, PKT_TYPE_ACK, 50, -60, 0);
     traffic_debug_record_tx(&td, PKT_TYPE_DATA, 200, AIRTIME_TIER_NORMAL);
 
     const traffic_event_t* evt0 = traffic_debug_get_event(&td, 0);
@@ -255,7 +255,7 @@ void test_disabled_drops_all_events(void) {
     traffic_debug_enable(&td, false);
 
     traffic_debug_record_tx(&td, PKT_TYPE_BEACON, 100, AIRTIME_TIER_BROADCAST);
-    traffic_debug_record_rx(&td, PKT_TYPE_ACK, 50, -60);
+    traffic_debug_record_rx(&td, PKT_TYPE_ACK, 50, -60, 0);
 
     TEST_ASSERT_EQUAL(0, traffic_debug_get_count(&td));
     TEST_ASSERT_EQUAL(0, traffic_debug_get_dropped(&td));
@@ -313,7 +313,7 @@ void test_record_rx_populates_fields(void) {
     traffic_debug_init(&td, events, 32);
     traffic_debug_enable(&td, true);
 
-    traffic_debug_record_rx(&td, PKT_TYPE_BEACON, 120, -75);
+    traffic_debug_record_rx(&td, PKT_TYPE_BEACON, 120, -75, 0);
 
     const traffic_event_t* evt = traffic_debug_get_event(&td, 0);
     TEST_ASSERT_NOT_NULL(evt);
@@ -322,6 +322,46 @@ void test_record_rx_populates_fields(void) {
     TEST_ASSERT_EQUAL(120, evt->packet_len);
     TEST_ASSERT_EQUAL(-75, evt->rssi);
     TEST_ASSERT_FALSE(evt->is_tx);
+}
+
+/* The RSSI in an RX event is only useful for per-link RF work if it can be
+ * tied to a peer, so the origin address has to survive into the stored event. */
+void test_record_rx_carries_src_addr(void) {
+    traffic_debug_init(&td, events, 32);
+    traffic_debug_enable(&td, true);
+
+    traffic_debug_record_rx(&td, PKT_TYPE_BEACON, 120, -75, 0x10B76F29u);
+
+    const traffic_event_t* evt = traffic_debug_get_event(&td, 0);
+    TEST_ASSERT_NOT_NULL(evt);
+    TEST_ASSERT_EQUAL_HEX32(0x10B76F29u, evt->src_addr);
+    TEST_ASSERT_EQUAL(-75, evt->rssi);
+}
+
+/* An unknown origin must stay 0 rather than inheriting the previous event's
+ * address out of the reused ring slot. */
+void test_record_rx_unknown_src_is_zero(void) {
+    traffic_debug_init(&td, events, 32);
+    traffic_debug_enable(&td, true);
+
+    traffic_debug_record_rx(&td, PKT_TYPE_BEACON, 120, -75, 0x10B76F29u);
+    traffic_debug_record_rx(&td, PKT_TYPE_RREQ, 30, -80, 0);
+
+    const traffic_event_t* evt = traffic_debug_get_event(&td, 1);
+    TEST_ASSERT_NOT_NULL(evt);
+    TEST_ASSERT_EQUAL_HEX32(0u, evt->src_addr);
+}
+
+/* TX events have no remote origin to report. */
+void test_record_tx_has_zero_src_addr(void) {
+    traffic_debug_init(&td, events, 32);
+    traffic_debug_enable(&td, true);
+
+    traffic_debug_record_tx(&td, PKT_TYPE_BEACON, 100, AIRTIME_TIER_BROADCAST);
+
+    const traffic_event_t* evt = traffic_debug_get_event(&td, 0);
+    TEST_ASSERT_NOT_NULL(evt);
+    TEST_ASSERT_EQUAL_HEX32(0u, evt->src_addr);
 }
 
 /* ── Unity Runner ─────────────────────────────────────────────────── */
@@ -368,6 +408,9 @@ int main(void) {
     /* Event details */
     RUN_TEST(test_record_tx_populates_fields);
     RUN_TEST(test_record_rx_populates_fields);
+    RUN_TEST(test_record_rx_carries_src_addr);
+    RUN_TEST(test_record_rx_unknown_src_is_zero);
+    RUN_TEST(test_record_tx_has_zero_src_addr);
 
     return UNITY_END();
 }

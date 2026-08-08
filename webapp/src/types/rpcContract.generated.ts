@@ -1583,9 +1583,9 @@ export interface components {
             /** @description Override update interval in seconds. */
             interval_s?: number;
         };
-        /** @description Per-channel location sharing rule. The node broadcasts its position under this channel's key, so every holder of that key receives it and no route, DM session or prior traffic is required. The tier is the resolution the whole channel receives. A receiver additionally requires a valid network-key origin MAC before it believes the position, so a node outside the network cannot originate one. */
+        /** @description Per-channel location sharing rule. The node broadcasts its position under this channel's key, so every holder of that key receives it and no route, DM session or prior traffic is required. The tier is the resolution the whole channel receives. A receiver additionally requires a valid network-key origin MAC before it believes the position, so a node outside the network cannot originate one. The channel must be a keyed one: a keyed channel gives location both confidentiality and the full per-sender replay window. */
         LocationChannelTarget: {
-            /** @description Channel index. Outside this range names no channel the node can share to, and setLocationConfig rejects the whole request. Channel 0 is the public channel, whose PSK is well known: targeting it makes the position readable by anyone in radio range, not only by the network. Pick a private channel to keep a group's positions within that group. */
+            /** @description Channel index, 1 to 15. Outside that range names no channel the node can share to, and setLocationConfig rejects the whole request without applying any part of it. Channel 0 is the public channel and is rejected: its PSK is well known, so a target on it would broadcast exact coordinates readable by anyone in radio range, and the shared replay window is deliberately skipped there. Create a channel with a PSK and target the index addChannel returns. A public-channel rule left in storage by an earlier build does not resolve to a target, so an upgrade stops it transmitting. */
             channel: number;
             /** @description Whether rule is enabled. */
             enabled?: boolean;
@@ -1765,6 +1765,7 @@ export interface components {
             heap: components["schemas"]["HeapDiagnostics"];
             task_stack_hwm: components["schemas"]["TaskStackHighWaterMark"][];
             backpressure?: components["schemas"]["BackpressureDiagnostics"];
+            radio_health?: components["schemas"]["RadioHealthDiagnostics"];
             /** @description Total bytes received on the GNSS UART since the driver last started. Present only on boards with GPS capability. Zero rx bytes with the driver running means the UART link is dead. */
             gps_rx_bytes?: number;
             /** @description Total complete NMEA-ish lines parsed out of the GNSS byte stream since the driver last started. Present only on boards with GPS capability. Nonzero rx bytes with zero rx lines means data is flowing but not framing as lines. */
@@ -1785,6 +1786,43 @@ export interface components {
             /** @description Flood rebroadcasts dropped because the jittered relay queue was full. The node was already holding a full queue of pending relays, which is local congestion, so it dropped the copy instead of transmitting it un-jittered. */
             flood_relay_drops: number;
             probe_ingress: components["schemas"]["ProbeIngressDiagnostics"];
+        };
+        /** @description What the radio will report about its own transmit path. Neither the commanded nor the radiated output power can be read back from an SX1262: SetTxParams and SetPaConfig are write-only op-codes and no register reports output power. So this pairs the level the driver programmed with the evidence the chip does expose, which is enough to catch a dead PA, an unlocked PLL or config writes that never landed. Confirming the level actually radiated needs external instrumentation. */
+        RadioHealthDiagnostics: {
+            /** @description False when the driver has no SX1262 to interrogate (the emulator's virtual radio, or the LR1110 target, whose status and error words do not share this layout). Only tx_power_dbm is populated then. */
+            supported: boolean;
+            /** @description Output power the driver programmed via SetTxParams, after clamping to the chip's -9..+22 dBm range. This is intent, not measurement. */
+            tx_power_dbm: number;
+            /** @description Raw GetDeviceErrors bitmask. */
+            device_errors?: number;
+            /** @description Space-separated flag names for device_errors, or "none". Flags are PA_RAMP, PLL_LOCK, XOSC_START, IMG_CALIB, ADC_CALIB, PLL_CALIB, RC13M_CALIB and RC64K_CALIB. */
+            device_errors_str?: string;
+            /** @description PA_RAMP is latched: the power amplifier did not ramp for a transmit, so nothing usable went on air. The single strongest on-chip signal that commanded power is not being produced. */
+            pa_ramp_error?: boolean;
+            /** @description Raw GetStatus byte. */
+            status?: number;
+            /**
+             * @description Chip mode decoded from status.
+             * @enum {string}
+             */
+            chip_mode?: "STBY_RC" | "STBY_XOSC" | "FS" | "RX" | "TX" | "UNKNOWN";
+            /**
+             * @description Last-command status decoded from status. exec-failed or processing-error means the chip rejected a command.
+             * @enum {string}
+             */
+            cmd_status?: "data-available" | "timeout" | "processing-error" | "exec-failed" | "tx-done" | "reserved";
+            /** @description Over-current protection register readback. */
+            ocp?: number;
+            /** @description OCP value the driver programmed for the high-power PA. */
+            ocp_expected?: number;
+            /** @description False means PA configuration writes are not reaching the chip, which caps output well below the commanded level. OCP is the only PA-side register that reads back, so this is the proof that the SetPaConfig path works at all. */
+            ocp_ok?: boolean;
+            /** @description paDutyCycle from the selected SetPaConfig operating point. */
+            pa_duty_cycle?: number;
+            /** @description hpMax from the selected SetPaConfig operating point. */
+            pa_hp_max?: number;
+            /** @description Output level the selected PA operating point is characterized for. The driver picks the lowest characterized point that still covers the requested power. */
+            pa_rated_dbm?: number;
         };
         /** @description Inbound PROBE token-bucket accounting. PROBE is unauthenticated by design, so these buckets bound how much transmission an inbound probe can buy rather than who may send one. The buckets are node-global and never per-sender, because the only sender signal on a PROBE is an unauthenticated address field. */
         ProbeIngressDiagnostics: {
@@ -2279,6 +2317,8 @@ export interface components {
             rssi: number;
             /** @description true if this is a TX event, false for RX. */
             is_tx: boolean;
+            /** @description Claimed origin address of an RX frame, as 8 uppercase hex digits. Present only when the frame's packet type carries an origin address; absent for TX events and for types that carry none, so that "unknown" is never confused with a real address. Read from the unauthenticated wire prefix, so it is telemetry, not a verified identity. Pairing it with rssi is what makes per-peer signal strength measurable, since neighbour RSSI only refreshes on beacons. */
+            src_addr?: string;
         };
         /** @description Canonical JSON-RPC notification envelope for monitor/event-stream events. */
         MonitorEventStreamNotification: {

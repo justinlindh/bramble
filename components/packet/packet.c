@@ -489,3 +489,35 @@ esp_err_t bramble_identity_attestation_signed_msg(const bramble_identity_attesta
     memcpy(buf + IDENTITY_ATTESTATION_MSG_CONTEXT_LEN + 36, p->ed25519_pub, 32);
     return ESP_OK;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Origin address extraction (traffic attribution)                    */
+/* ------------------------------------------------------------------ */
+
+bool bramble_packet_origin_addr(uint8_t type, const uint8_t* buf, size_t len, uint32_t* out) {
+    if (!buf || !out || len < HEADER_SIZE + 4)
+        return false;
+
+    switch (type) {
+    /* Framed through bramble_*_serialize, which writes src_addr with
+     * put_be32 at offset B. */
+    case PKT_TYPE_ACK:
+    case PKT_TYPE_BEACON:
+    case PKT_TYPE_DELIVERY_RECEIPT:
+    case PKT_TYPE_IDENTITY_ATTESTATION:
+        *out = get_be32(buf + HEADER_SIZE);
+        return true;
+
+    /* Hand-built envelopes: the builders memcpy the address in host order at
+     * BRAMBLE_DATA_SRC_ADDR_OFFSET, so it must be read back the same way. */
+    case PKT_TYPE_DATA:
+    case PKT_TYPE_LOCATION:
+    case PKT_TYPE_PROBE:
+    case PKT_TYPE_PROBE_ACK:
+        memcpy(out, buf + HEADER_SIZE, 4);
+        return true;
+
+    default:
+        return false;
+    }
+}

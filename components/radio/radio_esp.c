@@ -95,6 +95,25 @@ static int set_sync_word(uint8_t sw) {
     return sx1262_write_register(0x0740, regs, 2);
 }
 
+/* Defined below with the rest of the health readback; both call sites must be
+ * outside the radio locks, since radio_get_health takes them itself. */
+static void log_radio_health(const char* when);
+
+/* Clamp a requested power to what the chip accepts and say so. The regional
+ * plan clamps to a regulatory ceiling (30 dBm in US915/AU915) that is well
+ * above the SX1262's +22 dBm limit, so a plan-clamped value can still be out
+ * of range for the part. Applied here rather than only at the callers so every
+ * path into the driver (RPC, settings UI, NVS restore, profile defaults) lands
+ * on a value the chip defines, and so s_config reports what was programmed. */
+static int8_t clamp_and_log_tx_power(int8_t requested) {
+    int8_t clamped = sx1262_clamp_tx_power(requested);
+    if (clamped != requested) {
+        ESP_LOGW(TAG, "TX power %d dBm outside SX1262 range %d..%d, using %d dBm", requested,
+                 SX1262_TX_POWER_MIN_DBM, SX1262_TX_POWER_MAX_DBM, clamped);
+    }
+    return clamped;
+}
+
 static int configure_radio(const radio_config_t* cfg) {
     int rc;
 
@@ -265,6 +284,10 @@ static void radio_task(void* arg) {
 /* ------------------------------------------------------------------ */
 
 int radio_reconfigure(const radio_config_t* config) {
+    radio_config_t applied = *config;
+    applied.tx_power = clamp_and_log_tx_power(applied.tx_power);
+    config = &applied;
+
     ESP_LOGI(TAG, "Reconfiguring radio: %.1f MHz SF%u BW%" PRIu32 " TX %ddBm",
              config->frequency_mhz, config->sf, config->bw_hz, config->tx_power);
 
@@ -307,6 +330,7 @@ int radio_reconfigure(const radio_config_t* config) {
     rx_seq_unlock();
     tx_gate_radio_unlock();
     ESP_LOGI(TAG, "Radio reconfigured successfully");
+    log_radio_health("reconfigure");
     return 0;
 }
 
@@ -322,6 +346,10 @@ void radio_get_config(radio_config_t* config) { memcpy(config, &s_config, sizeof
 int radio_init(const radio_config_t* config) {
     ESP_LOGD(TAG, "radio_init: %.1f MHz, SF%u, BW %" PRIu32, config->frequency_mhz, config->sf,
              config->bw_hz);
+
+    radio_config_t applied = *config;
+    applied.tx_power = clamp_and_log_tx_power(applied.tx_power);
+    config = &applied;
 
     memcpy(&s_config, config, sizeof(s_config));
 
@@ -387,6 +415,10 @@ int radio_init(const radio_config_t* config) {
     if (radio_get_state() != RADIO_STATE_RX) {
         ESP_LOGE(TAG, "radio_init: could not enter RX, node is not receiving yet");
     }
+
+    /* Last, so the trace records the transmit path's state once the chip is
+     * fully configured and receiving. */
+    log_radio_health("init");
 
     ESP_LOGD(TAG, "radio_init complete");
     return 0;
@@ -465,12 +497,24 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
          * radio_transmit_raw as a phantom success. */
         tx_disarm();
 
-        /* Diagnostic: read back what the radio chip thinks happened */
+        /* Diagnostic: read back what the radio chip thinks happened. Direct
+         * sx1262 calls rather than radio_get_health(), because the transmit
+         * gate lock is already held here and radio_get_health takes it. */
         uint16_t irq_status = sx1262_get_irq_status();
         int dio1_level = gpio_get_level(board_get_config()->radio.dio1);
         ESP_LOGE(TAG, "TX timeout: DIO1=%d IRQ_reg=0x%04x (TxDone=%d Timeout=%d)", dio1_level,
                  irq_status, (irq_status & SX1262_IRQ_TX_DONE) ? 1 : 0,
                  (irq_status & SX1262_IRQ_TIMEOUT) ? 1 : 0);
+
+        /* A transmit that never completed is exactly when the latched device
+         * errors are worth the extra SPI round trip: PA_RAMP here means the
+         * power amplifier did not come up, so nothing usable went on air. */
+        uint16_t dev_errors = 0;
+        if (sx1262_get_device_errors(&dev_errors) == 0 && (dev_errors & SX1262_DEVERR_ALL)) {
+            char errbuf[96];
+            ESP_LOGE(TAG, "TX timeout: device errors [%s]",
+                     sx1262_device_errors_str(dev_errors, errbuf, sizeof(errbuf)));
+        }
         atomic_store(&s_state, RADIO_STATE_IDLE);
         /* radio_start_rx() does its own standby with error handling, so no
          * bare unchecked standby here. */
@@ -597,6 +641,7 @@ bool radio_cad_check(void) {
 }
 
 void radio_set_tx_power(int8_t power) {
+    power = clamp_and_log_tx_power(power);
     s_config.tx_power = power;
     int rc = sx1262_set_pa_config(power);
     if (rc == 0) {
@@ -606,6 +651,75 @@ void radio_set_tx_power(int8_t power) {
         /* Not fatal: the radio keeps transmitting at its previous power. Log
          * it so a node running at the wrong power is visible in the trace. */
         ESP_LOGE(TAG, "radio_set_tx_power(%d) failed (rc=%d), power unchanged on chip", power, rc);
+    }
+}
+
+int radio_get_health(radio_health_t* health) {
+    if (!health)
+        return -1;
+    memset(health, 0, sizeof(*health));
+    health->supported = true;
+    health->tx_power_dbm = s_config.tx_power;
+
+    sx1262_pa_op_point_t op = sx1262_pa_op_point_for(s_config.tx_power);
+    health->pa_duty_cycle = op.pa_duty_cycle;
+    health->pa_hp_max = op.hp_max;
+    health->pa_rated_dbm = op.rated_dbm;
+    health->ocp_expected = SX1262_OCP_140MA;
+
+    /* Serialize against transmits and the RX-done read: these are three more
+     * SPI command sequences, and splicing them into an in-flight transmit is
+     * exactly the hazard issues #82 and #225 closed. */
+    tx_gate_radio_lock();
+    rx_seq_lock();
+    int rc = sx1262_get_status(&health->status);
+    if (rc == 0)
+        rc = sx1262_get_device_errors(&health->device_errors);
+    if (rc == 0)
+        rc = sx1262_read_register(SX1262_REG_OCP, &health->ocp, 1);
+    rx_seq_unlock();
+    tx_gate_radio_unlock();
+
+    if (rc != 0) {
+        ESP_LOGW(TAG, "radio_get_health: chip readback failed (rc=%d)", rc);
+        health->supported = false;
+    }
+    return rc;
+}
+
+/* Log what the chip admits to about its transmit path. Called after init and
+ * after a reconfigure, so a node that came up with a dead PA, an unlocked PLL
+ * or an uncalibrated image says so in the boot trace instead of just being
+ * quietly short on range. */
+static void log_radio_health(const char* when) {
+    radio_health_t h;
+    if (radio_get_health(&h) != 0 || !h.supported)
+        return;
+
+    char errbuf[96];
+    sx1262_device_errors_str(h.device_errors, errbuf, sizeof(errbuf));
+
+    if (h.device_errors & SX1262_DEVERR_ALL) {
+        ESP_LOGE(TAG, "Radio health (%s): device errors [%s]", when, errbuf);
+    } else {
+        ESP_LOGI(TAG, "Radio health (%s): device errors [%s]", when, errbuf);
+    }
+    ESP_LOGI(TAG,
+             "Radio health (%s): mode %s, last command %s, TX %d dBm (PA duty 0x%02x hpMax "
+             "0x%02x rated %d dBm)",
+             when, sx1262_chip_mode_str(h.status), sx1262_cmd_status_str(h.status), h.tx_power_dbm,
+             h.pa_duty_cycle, h.pa_hp_max, h.pa_rated_dbm);
+
+    /* OCP is the one PA-side register that reads back. A mismatch means the
+     * PA config write did not take, which caps output power well below the
+     * commanded level. */
+    if (h.ocp != h.ocp_expected) {
+        ESP_LOGE(TAG,
+                 "Radio health (%s): OCP reads 0x%02x, expected 0x%02x: PA config writes are "
+                 "not reaching the chip",
+                 when, h.ocp, h.ocp_expected);
+    } else {
+        ESP_LOGI(TAG, "Radio health (%s): OCP 0x%02x verified", when, h.ocp);
     }
 }
 

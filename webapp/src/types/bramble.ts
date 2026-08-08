@@ -12,7 +12,7 @@ export interface NodeIdentity {
 // ─── Radio ─────────────────────────────────────────────────────────────
 
 export interface RadioConfig {
-  txPowerDbm: number;       // 2-20
+  txPowerDbm: number;       // 2-22 (SX1262 high-power PA tops out at +22 dBm)
   sf: 7 | 8 | 9 | 10 | 11 | 12;
   bwKhz: 125 | 250 | 500;
   cr: 5 | 6 | 7 | 8;       // coding rate denominator (4/5 = 5, etc.)

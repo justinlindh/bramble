@@ -32,6 +32,39 @@ typedef struct {
     bool explicit_header;
 } radio_config_t;
 
+/**
+ * What the radio chip will tell us about its own transmit path.
+ *
+ * Neither the commanded output power nor the actual radiated power can be read
+ * back from an SX1262: SetTxParams and SetPaConfig are write-only op-codes and
+ * no register reports output power. So this reports the next best evidence:
+ * the latched device-error flags (PA_RAMP in particular means the PA did not
+ * come up for a transmit), the chip mode and last-command status, and the OCP
+ * register, which does read back and therefore proves PA config writes are
+ * reaching the part. tx_power_dbm and the PA operating point are what the
+ * driver programmed, so a caller can compare intent against evidence.
+ *
+ * Confirming the level actually radiated needs external instrumentation.
+ */
+typedef struct {
+    bool supported;         /* false where there is no real chip to ask */
+    uint8_t status;         /* raw GetStatus byte */
+    uint16_t device_errors; /* GetDeviceErrors mask, SX1262_DEVERR_* */
+    uint8_t ocp;            /* OCP register readback */
+    uint8_t ocp_expected;   /* what the driver programmed */
+    int8_t tx_power_dbm;    /* level programmed via SetTxParams */
+    uint8_t pa_duty_cycle;  /* SetPaConfig operating point... */
+    uint8_t pa_hp_max;
+    int8_t pa_rated_dbm; /* ...and the level that point is rated for */
+} radio_health_t;
+
+/**
+ * Read the transmit-path evidence above off the chip.
+ * Returns 0 on success. On drivers with no real radio behind them, fills in
+ * supported=false and returns 0.
+ */
+int radio_get_health(radio_health_t* health);
+
 typedef void (*radio_rx_callback_t)(const uint8_t* data, uint8_t len, const radio_rx_info_t* info);
 typedef void (*radio_tx_done_callback_t)(void);
 typedef void (*radio_cad_done_callback_t)(bool detected);
