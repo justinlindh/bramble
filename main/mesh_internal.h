@@ -282,6 +282,14 @@ uint32_t now_ms(void);
  * must pass an address the frame's own authentication covers, never a
  * relay-mutable hint. */
 void mesh_note_peer_heard(uint32_t addr, int16_t rssi, int8_t snr);
+
+/* Admit or refresh a neighbor and store its name, under s_state_mutex.
+ * s_neighbors has cross-task readers, so every write to it goes through a
+ * wrapper like this one rather than touching the table directly; see the
+ * comment on the wrappers in mesh_task.c for why the mutex is safe to take on
+ * the RX path. Returns the entry index, or negative if there is none. */
+int mesh_neighbor_update_locked(uint32_t addr, int8_t rssi, int8_t snr, uint32_t pubkey_hash,
+                                uint32_t t, const char* name, uint8_t name_len);
 uint32_t next_packet_id(void);
 int mesh_tx(const uint8_t* buf, uint8_t len, tx_kind_t kind);
 uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, size_t payload_len,

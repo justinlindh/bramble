@@ -406,6 +406,27 @@ static int hs_dedup_check_and_record(uint32_t src_addr, const uint8_t eph_pub[32
  */
 static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t* data, size_t len,
                                       int channel_idx, uint32_t uid) {
+    /* At most one entry per message, the same rule queue_message states in
+     * full: a uid names one row, the payload for a row never changes, and a
+     * second entry for it means the drain sends one written message twice.
+     * Returning the existing entry's pkt_id keeps the caller's contract, since
+     * that is the id this message is already being tracked under, and leaves
+     * the original entry's TTL alone. uid 0 is untracked and exempt.
+     *
+     * The match deliberately spans both reasons rather than only session
+     * entries, because a route entry and a session entry for one uid would
+     * each be drained by their own path and send it twice. The cost is that a
+     * uid still held as a route entry reports failure here (a route entry
+     * carries no pkt_id), which is a spurious failure report and never a
+     * duplicate: the row stays parked and the route entry still goes out. */
+    if (uid != 0) {
+        for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+            if (s_queued_msgs[i].used && s_queued_msgs[i].uid == uid) {
+                ESP_LOGD(TAG, "uid %" PRIu32 " already queued for %08" PRIX32, uid, dest_addr);
+                return s_queued_msgs[i].pkt_id;
+            }
+        }
+    }
     int free_idx = -1;
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
         if (!s_queued_msgs[i].used) {

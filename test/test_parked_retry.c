@@ -22,9 +22,29 @@ static int s_store_scans;          /* flush attempts, i.e. scans of the message 
 static bool s_resend_succeeds;     /* whether the faked transmit lands an ACK */
 static uint32_t s_resend_fail_uid; /* one uid the faked transmit refuses, 0 for none */
 
+/* The send queue, mirrored from mesh_task.c's queue_message and mesh_dm.c's
+ * queue_session_message: a fixed slot array, first free slot wins, entries
+ * drained when the route or session they were waiting for arrives.
+ *
+ * Modelling it is not decoration. A re-send that cannot go out right now does
+ * not fail, it QUEUES, and the row stays parked while it sits there. A harness
+ * that just writes a status hides the whole failure mode this queue creates:
+ * the same row occupying two slots and going out twice, which is one message
+ * written by the user and two delivered to the peer. The delivery counter
+ * below is what makes that visible. */
+#define FAKE_QUEUE_SLOTS 8
+#define FAKE_MAX_UID 32
+static struct {
+    bool used;
+    uint32_t uid;
+} s_queue[FAKE_QUEUE_SLOTS];
+static int s_delivered[FAKE_MAX_UID]; /* times each uid actually reached the peer */
+
 void setUp(void) {
     neighbor_init(&s_nb);
     memset(&s_sweep, 0, sizeof(s_sweep));
+    memset(s_queue, 0, sizeof(s_queue));
+    memset(s_delivered, 0, sizeof(s_delivered));
     msg_store_init();
     s_store_scans = 0;
     s_resend_succeeds = true;
@@ -33,18 +53,63 @@ void setUp(void) {
 
 void tearDown(void) {}
 
+static void deliver(uint32_t uid) {
+    TEST_ASSERT_LESS_THAN_UINT32(FAKE_MAX_UID, uid);
+    s_delivered[uid]++;
+    msg_store_update_by_uid(uid, 0x1000u + uid, MSG_STATUS_DELIVERED);
+}
+
+static int delivered_count(uint32_t uid) {
+    TEST_ASSERT_LESS_THAN_UINT32(FAKE_MAX_UID, uid);
+    return s_delivered[uid];
+}
+
+/* Mirrors one re-send out of mesh_flush_parked_for. Either it goes out now, or
+ * there is no route or session yet and it is queued for one; a queued row
+ * stays QUEUED, which is what lets a later flush pick it up again. */
+static void fake_resend(uint32_t uid) {
+    if (s_resend_succeeds && uid != s_resend_fail_uid) {
+        deliver(uid);
+        return;
+    }
+    /* One entry per uid, mirroring the same rule in queue_message and
+     * queue_session_message: a row already waiting to go out is not queued
+     * again, whatever asked for it a second time. */
+    for (int i = 0; i < FAKE_QUEUE_SLOTS; i++) {
+        if (s_queue[i].used && s_queue[i].uid == uid)
+            return;
+    }
+    for (int i = 0; i < FAKE_QUEUE_SLOTS; i++) {
+        if (!s_queue[i].used) {
+            s_queue[i].used = true;
+            s_queue[i].uid = uid;
+            return;
+        }
+    }
+    /* Queue full: the send fails outright, and msg_store's sticky rule keeps
+     * the row parked rather than letting it go FAILED. */
+    msg_store_update_by_uid(uid, 0, MSG_STATUS_FAILED);
+}
+
+/* The route or session the queue was waiting for arrives, so everything in it
+ * goes out (flush_queued_messages / flush_session_queue). */
+static void send_queue_drains(void) {
+    for (int i = 0; i < FAKE_QUEUE_SLOTS; i++) {
+        if (s_queue[i].used) {
+            s_queue[i].used = false;
+            deliver(s_queue[i].uid);
+        }
+    }
+}
+
 /* Mirrors mesh_flush_parked_for (mesh_task.c): select the peer's parked rows,
- * re-send each, and report how many rows it found. A successful re-send lands
- * as DELIVERED; a failed one reports FAILED, which msg_store's sticky rule
- * refuses, so the row stays parked exactly as it does on the device. */
+ * re-send each, and report how many rows it found. */
 static int fake_flush_parked_for(uint32_t peer_addr) {
     uint32_t uids[MSG_STORE_MAX];
     s_store_scans++;
     int n = msg_store_parked_uids_for_peer(peer_addr, uids, MSG_STORE_MAX);
     for (int i = 0; i < n; i++) {
-        bool ok = s_resend_succeeds && uids[i] != s_resend_fail_uid;
-        msg_store_update_by_uid(uids[i], (uint32_t)(0x1000 + i),
-                                ok ? MSG_STATUS_DELIVERED : MSG_STATUS_FAILED);
+        fake_resend(uids[i]);
     }
     return n;
 }
@@ -55,7 +120,7 @@ static int fake_flush_parked_for(uint32_t peer_addr) {
 static int beacon_from(uint32_t peer_addr, uint32_t now_ms) {
     int idx = neighbor_update(&s_nb, peer_addr, -60, 8, 0xABCDu, now_ms);
     bool is_new_peer = neighbor_is_newly_admitted(&s_nb, idx, now_ms);
-    if (!parked_retry_beacon_should_flush(&s_nb, &s_sweep, peer_addr, is_new_peer, now_ms))
+    if (!parked_retry_beacon_decide_flush(&s_nb, &s_sweep, peer_addr, is_new_peer, now_ms))
         return -1;
     int found = fake_flush_parked_for(peer_addr);
     parked_retry_flushed(&s_nb, peer_addr, found, now_ms);
@@ -64,15 +129,15 @@ static int beacon_from(uint32_t peer_addr, uint32_t now_ms) {
 
 /* Mirrors the parked sweep in mesh_periodic_maintenance (mesh_task.c): once
  * per sweep interval, take the next peer with parked messages and try it,
- * unless it is a direct neighbor, which the beacon trigger owns. Returns the
- * peer it attempted, or 0. */
+ * unless it is a neighbor with a live trigger of its own. Returns the peer it
+ * attempted, or 0. */
 static uint32_t sweep_at(uint32_t now_ms) {
     if (!parked_retry_sweep_due(&s_sweep, now_ms))
         return 0;
     uint32_t peer = 0;
     if (!msg_store_next_parked_peer(s_sweep.last_peer, &peer))
         return 0;
-    if (neighbor_lookup(&s_nb, peer) != NULL) {
+    if (parked_retry_sweep_defers_to_beacon(&s_nb, peer)) {
         parked_retry_sweep_skipped(&s_sweep, peer);
         return 0;
     }
@@ -82,7 +147,10 @@ static uint32_t sweep_at(uint32_t now_ms) {
 }
 
 /* An hour of ordinary life: one in-range peer beaconing on cadence, and the
- * maintenance tick running at the same 60s period the firmware uses. */
+ * maintenance tick. The tick is really the mesh task's ~10ms loop
+ * (mesh_task.c, vTaskDelay(pdMS_TO_TICKS(10))), so anything paced here is
+ * paced by its own schedule and not by how often it is asked; 60s steps just
+ * keep these loops short, and a 10ms step gives the same answers. */
 static void run_an_hour_from(uint32_t start_ms, uint32_t chatty_peer) {
     for (uint32_t t = start_ms; t <= start_ms + 3600000u; t += 60000u) {
         if (chatty_peer != 0)
@@ -287,7 +355,9 @@ void test_the_sweep_attempts_a_stuck_peer_once_per_sweep_interval(void) {
     run_an_hour_from(60000, 0);
 
     /* One attempt at the first opportunity, then one per interval, and never
-     * one per maintenance tick (which would be 61 over this hour). */
+     * one per tick. This loop asks 61 times an hour; the firmware asks every
+     * 10ms, so on a device the difference between paced and unpaced is 13
+     * attempts against roughly 360000. */
     TEST_ASSERT_EQUAL_INT_MESSAGE(1 + 3600000u / PARKED_RETRY_SWEEP_MS, s_store_scans - before,
                                   "the sweep must pace itself the same way the beacon path does");
 }
@@ -336,6 +406,55 @@ void test_the_sweep_passes_over_a_direct_neighbour_and_moves_on(void) {
     TEST_ASSERT_EQUAL_INT(1, beacon_from(neighbour, 3000 + PARKED_RETRY_SWEEP_MS + 1000));
 }
 
+/* 3i-bis. The pass-over has one exception, and it is the difference between a
+ * lost arm costing a delay and costing the message. A neighbour holding parked
+ * rows with NOTHING armed has no trigger at all: the beacon path only flushes
+ * an armed peer or a newly admitted one, and a peer that keeps beaconing is
+ * never admitted again. Reachable in the ordinary course by a full table
+ * evicting and readmitting the entry, which brings it back zeroed. */
+void test_the_sweep_rescues_a_neighbour_whose_arming_was_lost(void) {
+    const uint32_t peer = 0x0000AA00u;
+
+    beacon_from(peer, 1000);
+    uint32_t uid = park_dm_for(peer, "armed, then not", 2000);
+
+    /* The arming is lost while the peer stays a neighbour and keeps beaconing:
+     * no rejoin edge is possible and nothing is armed, so every beacon from
+     * here on declines to flush. */
+    neighbor_entry_t* e = neighbor_lookup(&s_nb, peer);
+    TEST_ASSERT_NOT_NULL(e);
+    e->parked_retry_after_ms = 0;
+    TEST_ASSERT_EQUAL_INT(-1, beacon_from(peer, 3000));
+
+    run_an_hour_from(60000, peer);
+
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_DELIVERED, status_of(uid),
+                              "a neighbour with parked rows and no arming has no trigger at "
+                              "all, and the sweep passed over it because it is a neighbour");
+}
+
+/* 3i-ter. The hold belongs to the peer that was attempted, and only to it.
+ * Asserted directly against the two calls rather than through a paced sweep,
+ * because today the sweep interval and the cooldown are equal, so a stale hold
+ * has always expired by the time the next sweep runs and an integrated test
+ * would pass whether or not the hold is cleared. This is the contract that
+ * keeps it that way if those two are ever tuned apart. */
+void test_a_peer_the_sweep_passed_over_is_not_held_by_the_previous_peers_hold(void) {
+    const uint32_t attempted = 0x0000BB00u;
+    const uint32_t passed_over = 0x0000BB01u;
+
+    parked_retry_swept(&s_sweep, attempted, 1000);
+    parked_retry_sweep_skipped(&s_sweep, passed_over);
+
+    /* The peer that was passed over has its own parked row and its own arming,
+     * and its beacon must flush: the sweep never touched it. */
+    beacon_from(passed_over, 1000);
+    park_dm_for(passed_over, "mine to send", 1000);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, beacon_from(passed_over, 1000),
+                                  "a peer the sweep passed over was silenced by a hold that "
+                                  "belonged to the peer the sweep actually tried");
+}
+
 /* 3j. Rotation: every parked peer gets a turn, none starves. */
 void test_the_sweep_gives_each_parked_peer_a_turn(void) {
     s_resend_succeeds = false;
@@ -353,8 +472,11 @@ void test_the_sweep_gives_each_parked_peer_a_turn(void) {
     TEST_ASSERT_EQUAL_HEX32(0x100u, sweep_at(t)); /* wrapped, nobody starved */
 }
 
-/* 3k. Nothing parked: the sweep costs one selection pass and never a flush. */
-void test_the_sweep_does_nothing_at_all_when_nothing_is_parked(void) {
+/* 3k. Nothing parked: the sweep costs one selection pass per interval and
+ * never a flush. It is the flushes that are counted here, since those are what
+ * cost airtime and a walk of the store's rows; the selection pass itself is
+ * the sweep's fixed price and is not what this pins. */
+void test_the_sweep_never_flushes_when_nothing_is_parked(void) {
     const uint32_t chatty = 0x1111FFFFu;
     beacon_from(chatty, 1000);
     int before = s_store_scans;
@@ -422,14 +544,49 @@ void test_parking_another_message_does_not_wait_out_the_cooldown(void) {
     s_resend_succeeds = false;
 
     beacon_from(peer, 1000);
-    park_dm_for(peer, "first", 2000);
+    uint32_t uid1 = park_dm_for(peer, "first", 2000);
     TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000));  /* attempt, stays parked */
     TEST_ASSERT_EQUAL_INT(-1, beacon_from(peer, 4000)); /* cooling down */
 
-    s_resend_succeeds = true;
     uint32_t uid2 = park_dm_for(peer, "second", 5000);
     TEST_ASSERT_EQUAL_INT(2, beacon_from(peer, 6000));
+
+    /* Both are now waiting on the same route or session, and it arrives. */
+    send_queue_drains();
     TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, status_of(uid2));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, delivered_count(uid1),
+                                  "parking a second message re-armed the peer, the next flush "
+                                  "re-sent a row that was already sitting in the send queue, and "
+                                  "the peer received one written message twice");
+}
+
+/* 7b. The other way two attempts can land inside the queue's window: the peer
+ * is admitted again. is_new_peer flushes unconditionally, by design, and in a
+ * table at capacity a peer is readmitted by rotation rather than by anyone
+ * being away for the ten minutes a purge needs, so "again" can be a minute and
+ * a half later. */
+void test_a_readmitted_peer_cannot_re_send_what_is_still_in_the_queue(void) {
+    const uint32_t peer = 0x00000001u;
+    s_resend_succeeds = false;
+
+    beacon_from(peer, 1000);
+    uint32_t uid = park_dm_for(peer, "queued and waiting", 2000);
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 3000)); /* attempt: now in the queue */
+
+    /* The table fills and this peer, the least recently heard, loses its slot
+     * along with the armed field that lived in it. */
+    for (uint32_t i = 0; i < MAX_NEIGHBORS; i++)
+        beacon_from(0x1000u + i, 4000 + i * 10);
+    TEST_ASSERT_NULL(neighbor_lookup(&s_nb, peer));
+
+    /* It is readmitted 88 seconds later, the N=100 readmission interval, well
+     * inside the window its first attempt is still queued in. */
+    TEST_ASSERT_EQUAL_INT(1, beacon_from(peer, 91000));
+
+    send_queue_drains();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, delivered_count(uid),
+                                  "a readmitted peer re-sent a row that was already sitting in "
+                                  "the send queue, and received one written message twice");
 }
 
 /* 8. Arming a peer that is not in the table is a no-op, not a crash. */
@@ -470,12 +627,15 @@ int main(void) {
     RUN_TEST(test_the_sweep_attempts_a_stuck_peer_once_per_sweep_interval);
     RUN_TEST(test_a_peer_the_sweep_just_tried_is_not_immediately_retried_by_its_beacon);
     RUN_TEST(test_the_sweep_passes_over_a_direct_neighbour_and_moves_on);
+    RUN_TEST(test_a_peer_the_sweep_passed_over_is_not_held_by_the_previous_peers_hold);
+    RUN_TEST(test_the_sweep_rescues_a_neighbour_whose_arming_was_lost);
     RUN_TEST(test_the_sweep_gives_each_parked_peer_a_turn);
-    RUN_TEST(test_the_sweep_does_nothing_at_all_when_nothing_is_parked);
+    RUN_TEST(test_the_sweep_never_flushes_when_nothing_is_parked);
     RUN_TEST(test_a_known_peer_with_nothing_parked_never_scans_the_store);
     RUN_TEST(test_a_flush_that_finds_nothing_disarms_the_peer);
     RUN_TEST(test_delivering_the_last_parked_message_stops_the_retries);
     RUN_TEST(test_parking_another_message_does_not_wait_out_the_cooldown);
+    RUN_TEST(test_a_readmitted_peer_cannot_re_send_what_is_still_in_the_queue);
     RUN_TEST(test_arming_an_absent_peer_is_a_no_op);
     RUN_TEST(test_the_cooldown_survives_the_uptime_clock_wrapping);
     return UNITY_END();

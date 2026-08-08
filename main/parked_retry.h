@@ -18,10 +18,9 @@
  * attempt before it ages out of the table and hands the job back to the rejoin
  * edge, and the two triggers never stack up on the same peer.
  *
- * A third constraint pins the floor and is asserted at compile time next to
- * mesh_flush_parked_for: the cooldown must outlast the send queue's TTLs, or a
- * retry could enqueue a row that is still sitting in the queue from the
- * previous attempt and the peer would receive the message twice.
+ * Purely an airtime knob: nothing about correctness rests on the number. A
+ * retry cannot duplicate a message however soon it lands, because the send
+ * queue holds at most one entry per uid (see mesh_flush_parked_for).
  */
 #define PARKED_RETRY_COOLDOWN_MS 300000u
 
@@ -55,10 +54,25 @@ bool parked_retry_sweep_due(parked_sweep_t* s, uint32_t now_ms);
 void parked_retry_swept(parked_sweep_t* s, uint32_t peer_addr, uint32_t now_ms);
 
 /* Record that the sweep passed OVER peer_addr without attempting it (it is a
- * direct neighbor, so the beacon trigger owns it). Advances the rotation and
- * nothing else: holding a peer the sweep did not touch would suppress the
- * trigger that does own it. */
+ * direct neighbor with a live trigger of its own, so the beacon path owns it).
+ * Advances the rotation and clears any hold: holding a peer the sweep did not
+ * touch would suppress the trigger that does own it. */
 void parked_retry_sweep_skipped(parked_sweep_t* s, uint32_t peer_addr);
+
+/* Whether the sweep should leave peer_addr to the beacon trigger. True only
+ * for a neighbor that is actually armed. A neighbor with parked rows and an
+ * UNARMED entry is an anomaly with no other way out: the beacon path will not
+ * flush it (nothing armed, and a peer that keeps beaconing is never admitted
+ * again to fire the rejoin edge), and the sweep passing over every neighbor on
+ * principle would leave it stranded forever under a promise this node made.
+ *
+ * Two ways to reach that state, one of them ordinary: an entry evicted from a
+ * full table and readmitted comes back zeroed, and the park that armed it is
+ * long past. The other is the arming write racing the mesh task's own
+ * neighbor-table writes. Neither is worth a special case of its own, and the
+ * check below covers any third way nobody has thought of, so the sweep treats
+ * "parked rows but no arming" as the anomaly it is and takes the peer. */
+bool parked_retry_sweep_defers_to_beacon(neighbor_table_t* table, uint32_t peer_addr);
 
 /* Arm peer_addr's neighbor entry so the peer's next beacon re-sends what was
  * just parked for it. Returns false if peer_addr has no entry, which needs no
@@ -71,14 +85,21 @@ void parked_retry_sweep_skipped(parked_sweep_t* s, uint32_t peer_addr);
  */
 bool parked_retry_arm(neighbor_table_t* table, uint32_t peer_addr, uint32_t now_ms);
 
-/* Whether a beacon just received from peer_addr should flush that peer's
- * parked messages. True on the rejoin edge (is_new_peer), exactly as before,
- * and also when the peer was armed by a park and its cooldown has elapsed.
- * An unarmed peer costs one table lookup and nothing else: no store scan.
- * Always false while the sweep holds this peer, whichever of the two reasons
- * would otherwise have said yes.
+/* Decide whether a beacon just received from peer_addr should flush that
+ * peer's parked messages, and record the consequences of that decision.
+ *
+ * MESH TASK ONLY, and it WRITES the table. Not a query despite the question it
+ * answers: when the sweep holds this peer, the decision is to defer rather
+ * than to drop, and deferring means arming the entry for when the hold ends.
+ * Calling it from an RPC or UI task would be the cross-task write into
+ * s_neighbors that everything else in this file goes out of its way to funnel
+ * through a lock. The name says decide, not ask, for exactly that reason.
+ *
+ * Flushes on the rejoin edge (is_new_peer), and when the peer was armed by a
+ * park and its cooldown has elapsed. An unarmed peer costs one table lookup
+ * and nothing else: no store scan.
  */
-bool parked_retry_beacon_should_flush(neighbor_table_t* table, const parked_sweep_t* sweep,
+bool parked_retry_beacon_decide_flush(neighbor_table_t* table, const parked_sweep_t* sweep,
                                       uint32_t peer_addr, bool is_new_peer, uint32_t now_ms);
 
 /* Record what the flush found, where found is the number of parked rows it

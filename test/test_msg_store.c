@@ -283,6 +283,11 @@ void test_next_parked_peer_ignores_everything_that_is_not_a_parked_dm(void) {
     msg_store_add_dm_uid(0x100, MSG_DIR_OUTGOING, "failed", 6, 0, 0, 0, MSG_STATUS_FAILED, 1);
     msg_store_add_dm_uid(0x200, MSG_DIR_INCOMING, "in", 2, 0, 0, 0, MSG_STATUS_NONE, 2);
     msg_store_add_channel(0x300, MSG_DIR_OUTGOING, "ch", 2, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    /* channel_index 0 is the boundary that matters: it is the unicast default
+     * a DM arrives on, so filing by the raw channel id rather than by
+     * MSG_STORE_DM_CHANNEL puts a channel-0 broadcast here looking exactly
+     * like a DM. Only a NEGATIVE index is a DM. */
+    msg_store_add_channel(0x350, MSG_DIR_OUTGOING, "ch0", 3, 0, 0, 0, MSG_STATUS_QUEUED, 0);
 
     uint32_t peer = 0xDEAD;
     TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, &peer));

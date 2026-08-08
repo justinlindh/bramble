@@ -376,13 +376,61 @@ static void mesh_publish_neighbors(void) {
     xSemaphoreGive(s_state_mutex);
 }
 
+/* s_state_mutex guards EVERY write to s_neighbors, including the mesh task's
+ * own, which is why these three wrappers exist. The mutex used to be taken
+ * only by the cross-task readers and writers (mesh_get_peer_name, and the park
+ * that arms a peer), while the mesh task mutated the table beside them without
+ * it, so it was not mutual exclusion at all: a reader could copy a name being
+ * memcpy'd into, and an arming write could land in a slot a purge was
+ * compacting. A lock that holds off only some of its writers is worse than no
+ * lock, because everything that touches the table reads the take as safety.
+ *
+ * Safe to take here, and the check is not "no other lock appears nearby": each
+ * section below contains ONLY leaf calls into components/routing (which takes
+ * no locks and calls nothing that does) plus a memcpy, and every caller of
+ * these three reaches them from the mesh task's RX dispatch or maintenance
+ * tick with no lock held. So nothing can nest, in either order. They stay
+ * short for the same reason the publish is short: this is the packet RX path.
+ */
+static bool mesh_neighbor_touch_locked(uint32_t addr, int16_t rssi, int8_t snr, uint32_t t) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool refreshed = neighbor_touch(&s_neighbors, addr, (int8_t)rssi, snr, t);
+    xSemaphoreGive(s_state_mutex);
+    return refreshed;
+}
+
+static void mesh_neighbor_purge_locked(uint32_t t) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    neighbor_purge(&s_neighbors, t);
+    xSemaphoreGive(s_state_mutex);
+}
+
+int mesh_neighbor_update_locked(uint32_t addr, int8_t rssi, int8_t snr, uint32_t pubkey_hash,
+                                uint32_t t, const char* name, uint8_t name_len) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    int idx = neighbor_update(&s_neighbors, addr, rssi, snr, pubkey_hash, t);
+    /* The name write rides inside the same section: it is a 16 byte memcpy
+     * into the entry that was just created or refreshed, and mesh_get_peer_name
+     * copies that same array out under this mutex from another task. */
+    if (idx >= 0) {
+        if (name_len > 0) {
+            memcpy(s_neighbors.entries[idx].name, name, name_len);
+            s_neighbors.entries[idx].name[name_len] = '\0';
+        } else {
+            s_neighbors.entries[idx].name[0] = '\0';
+        }
+    }
+    xSemaphoreGive(s_state_mutex);
+    return idx;
+}
+
 void mesh_note_peer_heard(uint32_t addr, int16_t rssi, int8_t snr) {
     if (addr == 0 || !s_identity || addr == s_identity->address)
         return;
     /* Only refreshes an address a beacon already admitted (neighbor_touch
      * never creates entries), and only ever called with an address the frame's
      * own MAC covers, so this widens liveness without widening trust. */
-    if (neighbor_touch(&s_neighbors, addr, (int8_t)rssi, snr, now_ms()))
+    if (mesh_neighbor_touch_locked(addr, rssi, snr, now_ms()))
         mesh_publish_neighbors();
 }
 
@@ -1102,8 +1150,18 @@ void flush_queued_messages(uint32_t dest_addr) {
             s_queued_msgs[i].dest_addr == dest_addr) {
             ESP_LOGI(TAG, "Sending queued msg to %08" PRIX32 " (%u bytes)", dest_addr,
                      (unsigned)s_queued_msgs[i].len);
+            /* This entry is being consumed, so it must stop matching the
+             * one-entry-per-uid rule in queue_message before re-entering the
+             * send pipeline: this send can legitimately queue the same uid
+             * again (the route went away between install and drain, or the DM
+             * path now needs a session), and it would otherwise be refused as
+             * a duplicate of the very entry about to be freed, dropping the
+             * message. The slot stays `used` across the call so nothing can
+             * pick it as free and memcpy over the payload being sent from it. */
+            uint32_t queued_uid = s_queued_msgs[i].uid;
+            s_queued_msgs[i].uid = 0;
             mesh_send_message_uid(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len,
-                                  s_queued_msgs[i].uid);
+                                  queued_uid);
             s_queued_msgs[i].used = false;
         }
     }
@@ -1535,9 +1593,11 @@ uint32_t s_probe_request_id;
  * several parked peers each waits its turn, so a peer's own retry period is
  * the sweep interval times the number of parked peers.
  *
- * Direct neighbors are passed over, not attempted: they belong to the beacon
- * trigger, and letting both count down against one peer is how the same rows
- * end up queued twice.
+ * Direct neighbors with a live trigger of their own are passed over, not
+ * attempted: they belong to the beacon path, and letting both count down
+ * against one peer is how one message ends up sent twice. A neighbor holding
+ * parked rows with NO arming is the exception and is taken, because nothing
+ * else will ever come for it (see parked_retry_sweep_defers_to_beacon).
  *
  * Runs on the mesh task, from the maintenance tick rather than the packet RX
  * path, and holds no lock: mesh_flush_parked_for transmits. Costs a node with
@@ -1548,7 +1608,7 @@ static void sweep_parked_messages(uint32_t t) {
     uint32_t peer = 0;
     if (!msg_store_next_parked_peer(s_parked_sweep.last_peer, &peer))
         return; /* nothing parked anywhere: the overwhelmingly common case */
-    if (neighbor_lookup(&s_neighbors, peer) != NULL) {
+    if (parked_retry_sweep_defers_to_beacon(&s_neighbors, peer)) {
         parked_retry_sweep_skipped(&s_parked_sweep, peer);
         return;
     }
@@ -1615,7 +1675,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
 
     /* Periodic neighbor purge + route maintenance */
     if ((t - *last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
-        neighbor_purge(&s_neighbors, t);
+        mesh_neighbor_purge_locked(t);
         dedup_purge(&s_dedup, t);
         dedup_purge(&s_flood_dedup, t);
         dedup_purge(&s_delivered_dedup, t);
@@ -2321,6 +2381,27 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* d
 }
 
 static int queue_message(uint32_t dest_addr, const uint8_t* data, size_t len, uint32_t uid) {
+    /* At most one entry per message. A uid names one row in the store, and the
+     * payload for a given row never changes, so a second entry for it is not a
+     * second message: it is the same one, queued twice, and the drain sends
+     * both. One written message, two delivered. Anything that can ask twice
+     * hits this, and the parked-message retries can: they re-send a row that
+     * is STILL PARKED precisely because it is sitting in here waiting.
+     *
+     * Refuse rather than replace. The payload is identical so there is nothing
+     * to update, and replacing would restamp the timestamp, letting repeated
+     * retries push the TTL out indefinitely and keep a message queued past the
+     * budget that TTL exists to enforce. Reporting success is accurate: the
+     * message IS queued for a route. uid 0 means untracked, and untracked
+     * entries are not the same message as each other, so they are exempt. */
+    if (uid != 0) {
+        for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+            if (s_queued_msgs[i].used && s_queued_msgs[i].uid == uid) {
+                ESP_LOGD(TAG, "uid %" PRIu32 " already queued for %08" PRIX32, uid, dest_addr);
+                return 0;
+            }
+        }
+    }
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
         if (!s_queued_msgs[i].used) {
             s_queued_msgs[i].dest_addr = dest_addr;
@@ -2484,26 +2565,19 @@ bool mesh_cancel_parked_message(uint32_t uid) {
     return msg_store_unpark(uid);
 }
 
-/* A retry must never land while the previous attempt's queue entry is still
- * alive. queue_message and queue_session_message both take the first FREE
- * slot and neither keys on uid, so one parked row could occupy two slots and
- * go out twice: one message written, two delivered. What makes that
- * impossible is the retry cooldown outlasting both queue TTLs, including the
- * purge cadence they are checked on (an entry is not reclaimed the instant it
- * expires, only at the next purge tick). Keep it that way. */
-_Static_assert(PARKED_RETRY_COOLDOWN_MS > DM_QUEUE_TTL_MS + NEIGHBOR_PURGE_INTERVAL,
-               "parked retry can re-queue a DM still awaiting a session");
-_Static_assert(PARKED_RETRY_COOLDOWN_MS > 60000 + NEIGHBOR_PURGE_INTERVAL,
-               "parked retry can re-queue a DM still awaiting a route");
-/* Same floor for the timer-driven sweep, which re-queues the same way. It
- * reaches one peer per interval, so the interval IS that peer's spacing; and
- * where the two triggers could both reach one peer, the sweep holds the beacon
- * path off for a cooldown (parked_retry_beacon_should_flush), so every pair of
- * attempts on one peer is at least the smaller of these two apart. */
-_Static_assert(PARKED_RETRY_SWEEP_MS > DM_QUEUE_TTL_MS + NEIGHBOR_PURGE_INTERVAL,
-               "parked sweep can re-queue a DM still awaiting a session");
-_Static_assert(PARKED_RETRY_SWEEP_MS > 60000 + NEIGHBOR_PURGE_INTERVAL,
-               "parked sweep can re-queue a DM still awaiting a route");
+/* A retry must never put one written message on the air twice, and what
+ * guarantees that is the send queue holding at most one entry per uid
+ * (queue_message, queue_session_message). It is a property of the queue, so it
+ * holds for every caller, however often and from wherever they ask.
+ *
+ * It used to be a timing coincidence instead: the retry cooldown happened to
+ * outlast both queue TTLs, so a second attempt could not land while the first
+ * was still queued. That was true but fragile, since it silently depended on
+ * every path into a flush respecting the cooldown, and two do not (a fresh
+ * park re-arms a peer immediately, and the rejoin edge fires unconditionally).
+ * With the queue keyed on uid the cooldown is free to be what it reads as: an
+ * airtime knob, tunable on its own merits without a correctness argument
+ * hanging off the number. */
 
 int mesh_flush_parked_for(uint32_t peer_addr) {
     /* static: mesh_flush_parked_for runs only on the mesh task, never

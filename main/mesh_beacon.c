@@ -370,17 +370,12 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
      * slot. Only the join tone needs it; see where it is used. */
     bool table_was_full = neighbor_count(&s_neighbors) >= MAX_NEIGHBORS;
 #endif
-    int idx =
-        neighbor_update(&s_neighbors, beacon.src_addr, (int8_t)rssi, snr, beacon.pubkey_hash, t);
+    /* Admission and the peer's name go in together under s_state_mutex (see
+     * mesh_neighbor_update_locked): both write the entry another task can be
+     * reading through mesh_get_peer_name. */
+    int idx = mesh_neighbor_update_locked(beacon.src_addr, (int8_t)rssi, snr, beacon.pubkey_hash, t,
+                                          beacon.name, beacon.name_len);
     bool is_new_peer = neighbor_is_newly_admitted(&s_neighbors, idx, t);
-
-    /* Store peer name if present */
-    if (idx >= 0 && beacon.name_len > 0) {
-        memcpy(s_neighbors.entries[idx].name, beacon.name, beacon.name_len);
-        s_neighbors.entries[idx].name[beacon.name_len] = '\0';
-    } else if (idx >= 0) {
-        s_neighbors.entries[idx].name[0] = '\0';
-    }
 
     /* Feed timesync from beacon: requires corroboration from multiple sources */
     if (beacon.network_time != 0 && beacon.time_confidence != 0xFFFF) {
@@ -448,16 +443,19 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
          * never newly join it, and its parked messages never go out at all.
          * mesh_flush_parked_for transmits, so it stays outside every lock.
          *
-         * Known bound, accepted: the armed field lives in the neighbor entry
-         * and dies with it, so once the table is full and rotating, every
-         * readmission is a fresh rejoin edge that the cooldown cannot govern.
-         * The retry interval for one peer degrades to roughly the beacon
-         * interval times N/(N-MAX_NEIGHBORS) for N peers in earshot: about 5
-         * minutes at N=40 (what the cooldown allows anyway), 2 minutes at
-         * N=64, 88 seconds at N=100. It only bites past about 50, a regime
-         * where this project's own measured delivery is already at or below
-         * 10 percent. RAISING MAX_NEIGHBORS moves that threshold with it. */
-        if (parked_retry_beacon_should_flush(&s_neighbors, &s_parked_sweep, beacon.src_addr,
+         * Known bound, accepted, and airtime only: the armed field lives in
+         * the neighbor entry and dies with it, so once the table is full and
+         * rotating, every readmission is a fresh rejoin edge that the cooldown
+         * cannot govern. The retry interval for one peer degrades to roughly
+         * the beacon interval times N/(N-MAX_NEIGHBORS) for N peers in
+         * earshot: about 5 minutes at N=40 (what the cooldown allows anyway),
+         * 2 minutes at N=64, 88 seconds at N=100. It only bites past about 50,
+         * a regime where this project's own measured delivery is already at or
+         * below 10 percent. RAISING MAX_NEIGHBORS moves that threshold with
+         * it. What it costs is repeated attempts, never a repeated delivery:
+         * an attempt landing while the last one is still queued is refused by
+         * the send queue, which holds at most one entry per uid. */
+        if (parked_retry_beacon_decide_flush(&s_neighbors, &s_parked_sweep, beacon.src_addr,
                                              is_new_peer, t)) {
             int found = mesh_flush_parked_for(beacon.src_addr);
             parked_retry_flushed(&s_neighbors, beacon.src_addr, found, t);

@@ -28,7 +28,22 @@ void parked_retry_swept(parked_sweep_t* s, uint32_t peer_addr, uint32_t now_ms) 
     s->hold_until_ms = deadline_at(now_ms + PARKED_RETRY_COOLDOWN_MS);
 }
 
-void parked_retry_sweep_skipped(parked_sweep_t* s, uint32_t peer_addr) { s->last_peer = peer_addr; }
+void parked_retry_sweep_skipped(parked_sweep_t* s, uint32_t peer_addr) {
+    s->last_peer = peer_addr;
+    /* The hold belongs to whichever peer was ATTEMPTED, and last_peer has just
+     * stopped being that peer. Leaving it set would suppress the beacon
+     * trigger for a peer the sweep never touched, which is the one thing this
+     * function exists not to do. Today a previous hold has always expired by
+     * now, since a sweep runs no more often than a cooldown, so this is a trap
+     * rather than a live bug: clearing it means the trap cannot spring if
+     * those two intervals are ever tuned apart. */
+    s->hold_until_ms = 0;
+}
+
+bool parked_retry_sweep_defers_to_beacon(neighbor_table_t* table, uint32_t peer_addr) {
+    const neighbor_entry_t* e = neighbor_lookup(table, peer_addr);
+    return e != NULL && e->parked_retry_after_ms != 0;
+}
 
 bool parked_retry_arm(neighbor_table_t* table, uint32_t peer_addr, uint32_t now_ms) {
     neighbor_entry_t* e = neighbor_lookup(table, peer_addr);
@@ -44,7 +59,7 @@ bool parked_retry_arm(neighbor_table_t* table, uint32_t peer_addr, uint32_t now_
     return true;
 }
 
-bool parked_retry_beacon_should_flush(neighbor_table_t* table, const parked_sweep_t* sweep,
+bool parked_retry_beacon_decide_flush(neighbor_table_t* table, const parked_sweep_t* sweep,
                                       uint32_t peer_addr, bool is_new_peer, uint32_t now_ms) {
     /* Checked before the rejoin edge, not after, because the rejoin edge is
      * exactly how this collides: the sweep tries a peer that is not in the
