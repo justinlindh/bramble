@@ -264,12 +264,18 @@ bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
     for (int i = s_count - 1; i >= 0; i--) {
         int idx = (start + i) % MSG_STORE_MAX;
         if (s_msgs && s_msgs[idx].packet_id == packet_id) {
-            /* Parked is sticky here too (see msg_store_update_by_uid's doc
-             * comment for the invariant and why): a row parked after having
-             * been transmitted once still carries that old packet_id, so a
-             * late FAILED report arriving through this packet_id path must
-             * not un-park it either. DELIVERED still applies: a late ACK for
-             * a since-parked message really was delivered. */
+            /* Invariant hardening, not a live bug fix: as of this writing
+             * neither caller of msg_store_update_status(..., MSG_STATUS_FAILED)
+             * (rerr_ack_fastfail.c, mesh_task.c's ACK retry tick) can actually
+             * reach a parked row here. Both drive off a pending-ack entry
+             * gated on pa->active, and the retry-exhausted path clears
+             * pa->active in the same call that reports FAILED, before a user
+             * can park the row. So this guard has no observable effect today.
+             * It is here anyway (see msg_store_update_by_uid's doc comment
+             * for the invariant) so a future caller of this packet_id path
+             * cannot quietly break "parked leaves parked only by being sent
+             * or cancelled". DELIVERED still applies: a late ACK for a
+             * since-parked message really was delivered. */
             bool sticky = s_msgs[idx].status == MSG_STATUS_QUEUED && status == MSG_STATUS_FAILED;
             changed = !sticky && s_msgs[idx].status != status;
             if (!sticky)

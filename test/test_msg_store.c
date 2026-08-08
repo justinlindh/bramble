@@ -279,12 +279,13 @@ void test_update_by_uid_sent_to_failed_is_not_sticky(void) {
 }
 
 void test_update_status_refuses_queued_to_failed_for_a_reparked_send(void) {
-    /* A row can be parked while still carrying a packet_id from an earlier
-     * transmit attempt: sent (SENT, packet_id P) -> retries exhausted
-     * (FAILED, still P) -> user parks it (QUEUED, still P). A later report
-     * against P (not against uid) must not un-park it either, same sticky
-     * invariant as msg_store_update_by_uid, enforced at this packet_id door
-     * too. */
+    /* This pins invariant hardening, not a reachable-today code path: no
+     * caller of msg_store_update_status(..., MSG_STATUS_FAILED) can
+     * currently reach a row this way, since both drive off a pending-ack
+     * entry that is already deactivated by the time a row can be parked
+     * (see msg_store_update_status_with_route's comment). The guard is
+     * pinned anyway so a future caller of this packet_id door cannot
+     * quietly un-park a row the uid door already protects. */
     msg_store_init();
     msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "reparked", 8, 0, 0, 42, MSG_STATUS_QUEUED, 1);
 
