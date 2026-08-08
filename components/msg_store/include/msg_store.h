@@ -203,6 +203,18 @@ int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int m
 bool msg_store_get_copy_by_uid(uint32_t uid, stored_msg_t* out);
 
 /**
+ * Read just the peer address of the row carrying this uid. Returns false for
+ * uid 0, a NULL out, or an unknown uid.
+ *
+ * A stored_msg_t is over 700 bytes, so a caller that wants nothing but the
+ * recipient should not be putting one on a task stack to get it (the flush
+ * path keeps its copy static for the same reason). Parking a message runs on
+ * whichever task drove the UI or the RPC, and those stacks are not sized for
+ * a message-sized frame.
+ */
+bool msg_store_peer_for_uid(uint32_t uid, uint32_t* out_peer_addr);
+
+/**
  * Update delivery status for a message by packet_id.
  * Returns true if found and updated.
  */

@@ -100,10 +100,15 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len);
 uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len, uint32_t uid);
 
 /**
- * Park a failed direct message for delivery when its peer rejoins.
+ * Park a failed direct message for delivery when its peer is next reachable.
  * Moves the row identified by uid to MSG_STATUS_QUEUED, which msg_store
  * persists, so the parked state survives a reboot. Returns false if no row
  * carries that uid.
+ *
+ * Also arms the peer's neighbor entry (parked_retry.h) when the peer is
+ * already in the table, which is what gives the message a delivery trigger:
+ * the rejoin edge alone only fires for an address ENTERING the table, and a
+ * peer that beacons fine while its ACKs are lost never leaves it.
  */
 bool mesh_park_message(uint32_t uid);
 
@@ -111,16 +116,21 @@ bool mesh_park_message(uint32_t uid);
 bool mesh_cancel_parked_message(uint32_t uid);
 
 /**
- * Re-send every message parked for peer_addr, oldest first.
- * Called from the beacon handler on the rejoin edge only (a peer entering the
- * neighbor table), never per beacon: a peer that is present but unreachable
- * beacons every 60s, and flushing on each of those would be a retry loop.
- * A send that fails leaves the row parked for the next genuine rejoin: the
- * resend pipeline's failure paths all report MSG_STATUS_FAILED through
+ * Re-send every message parked for peer_addr, oldest first, and return how
+ * many parked rows it found (0 if there was nothing to send).
+ *
+ * Called from the beacon handler, never on every beacon: a peer that is
+ * present but unreachable beacons every 60s, and flushing on each of those
+ * would be a retry loop. parked_retry.h owns which beacons qualify, and takes
+ * the returned count as its signal for whether the peer still has anything
+ * waiting. Transmits, so it must be called with no lock held.
+ *
+ * A send that fails leaves the row parked for the next attempt: the resend
+ * pipeline's failure paths all report MSG_STATUS_FAILED through
  * msg_store_update_by_uid, whose QUEUED -> FAILED transition is sticky-
  * refused, so a failed attempt here cannot un-park the row on its own.
  */
-void mesh_flush_parked_for(uint32_t peer_addr);
+int mesh_flush_parked_for(uint32_t peer_addr);
 
 /**
  * Send a dedicated location packet (PKT_TYPE_LOCATION) to a single destination.

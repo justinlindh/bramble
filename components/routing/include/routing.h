@@ -25,6 +25,13 @@ typedef struct {
     char name[17];             /* node name from beacon (max 16 chars + null) */
     uint32_t first_seen_ms;    /* timestamp of first beacon from this address (tenure start) */
     uint16_t beacon_count;     /* beacons received from this address, saturates at 0xFFFF */
+    /* Uptime after which a beacon from this peer re-sends what is parked for
+     * it, or 0 for nothing parked. In RAM only, never persisted and never on
+     * the wire. Owned by parked_retry.c (main/parked_retry.h), which is the
+     * only thing that reads or writes it; it lives here because the beacon
+     * handler has the entry in hand already, so an armed check costs no lookup
+     * and no scan. */
+    uint32_t parked_retry_after_ms;
 } neighbor_entry_t;
 
 typedef struct {

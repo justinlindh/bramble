@@ -417,12 +417,18 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
             mailbox_flush_for(beacon.src_addr);
         }
 
-        /* Rejoin edge only: is_new_peer is true when this beacon ADMITTED the
-         * address to the neighbor table, which is the "they came back" event.
-         * Flushing per beacon instead would retry every 60s against a peer
-         * that is present but unreachable. */
-        if (is_new_peer) {
-            mesh_flush_parked_for(beacon.src_addr);
+        /* Two edges deliver a parked message, and neither flushes per beacon
+         * (that would retry every 60s against a peer that is present but
+         * unreachable): the rejoin edge, is_new_peer, which is this beacon
+         * ADMITTING the address to the table; and a peer armed by a park while
+         * it was already in the table, rate limited to one attempt per
+         * PARKED_RETRY_COOLDOWN_MS. Without the second, a peer whose ACKs are
+         * being lost keeps beaconing, so it never leaves the table and can
+         * never newly join it, and its parked messages never go out at all.
+         * mesh_flush_parked_for transmits, so it stays outside every lock. */
+        if (parked_retry_beacon_should_flush(&s_neighbors, beacon.src_addr, is_new_peer, t)) {
+            int found = mesh_flush_parked_for(beacon.src_addr);
+            parked_retry_flushed(&s_neighbors, beacon.src_addr, found, t);
         }
     }
 

@@ -408,6 +408,27 @@ int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int m
     return n;
 }
 
+bool msg_store_peer_for_uid(uint32_t uid, uint32_t* out_peer_addr) {
+    if (!out_peer_addr || uid == 0) {
+        return false;
+    }
+    bool ok = false;
+    MSG_LOCK();
+    if (s_msgs) {
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        for (int i = 0; i < s_count; i++) {
+            const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
+            if (m->uid == uid) {
+                *out_peer_addr = m->peer_addr;
+                ok = true;
+                break;
+            }
+        }
+    }
+    MSG_UNLOCK();
+    return ok;
+}
+
 bool msg_store_get_copy_by_uid(uint32_t uid, stored_msg_t* out) {
     if (!out || uid == 0) {
         return false;

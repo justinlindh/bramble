@@ -9,6 +9,7 @@
 #include "beacon_policy_calc.h"
 #include "probe_results.h"
 #include "probe_reply.h"
+#include "parked_retry.h"
 #include "broadcast_delivery_receipt.h"
 #include "rpc_dispatcher.h"
 #include "radio.h"
@@ -2412,7 +2413,29 @@ uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len
 bool mesh_park_message(uint32_t uid) {
     if (uid == 0)
         return false;
-    return msg_store_update_by_uid(uid, 0, MSG_STATUS_QUEUED);
+    if (!msg_store_update_by_uid(uid, 0, MSG_STATUS_QUEUED))
+        return false;
+
+    /* Arm the peer so its next beacon re-sends this, for the case the rejoin
+     * edge structurally cannot reach: a peer that is present but not ACKing
+     * keeps beaconing, so it never leaves the neighbor table and can never be
+     * newly admitted to it. A peer that is NOT in the table is left alone;
+     * arriving is what the rejoin edge already watches for.
+     *
+     * Both store calls above and below release MSG_LOCK before this takes
+     * s_state_mutex: the two locks are separate and non-recursive, and nesting
+     * them in one order here and the other elsewhere is a deadlock. This runs
+     * on the UI/RPC caller's task, not the mesh task, so the write into
+     * s_neighbors is a cross-task one and takes the mutex the same way
+     * mesh_get_peer_name's cross-task read does. */
+    uint32_t peer_addr = 0;
+    if (!msg_store_peer_for_uid(uid, &peer_addr))
+        return true; /* parked; the row was evicted before we could read its peer */
+    uint32_t t = now_ms();
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    parked_retry_arm(&s_neighbors, peer_addr, t);
+    xSemaphoreGive(s_state_mutex);
+    return true;
 }
 
 bool mesh_cancel_parked_message(uint32_t uid) {
@@ -2422,7 +2445,7 @@ bool mesh_cancel_parked_message(uint32_t uid) {
     return msg_store_unpark(uid);
 }
 
-void mesh_flush_parked_for(uint32_t peer_addr) {
+int mesh_flush_parked_for(uint32_t peer_addr) {
     /* static: mesh_flush_parked_for runs only on the mesh task, never
      * reentrantly, so these are safe off the stack. uids alone is up to
      * MSG_STORE_MAX * sizeof(uint32_t) (800 bytes at the 200-row tdeck-plus
@@ -2431,7 +2454,7 @@ void mesh_flush_parked_for(uint32_t peer_addr) {
     static stored_msg_t msg;
     int n = msg_store_parked_uids_for_peer(peer_addr, uids, MSG_STORE_MAX);
     if (n <= 0)
-        return;
+        return 0;
 
     ESP_LOGI(TAG, "Flushing %d parked message(s) for %08" PRIX32, n, peer_addr);
     for (int i = 0; i < n; i++) {
@@ -2452,6 +2475,7 @@ void mesh_flush_parked_for(uint32_t peer_addr) {
             mesh_resend_message(msg.peer_addr, (const uint8_t*)msg.text, msg.text_len, msg.uid);
         ESP_LOGI(TAG, "Parked uid=%" PRIu32 " -> pkt=%08" PRIX32, msg.uid, pkt);
     }
+    return n;
 }
 
 #ifdef CONFIG_IDF_TARGET_LINUX

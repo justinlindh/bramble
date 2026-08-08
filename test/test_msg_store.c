@@ -226,6 +226,38 @@ void test_get_copy_by_uid_survives_ring_wrap(void) {
     TEST_ASSERT_EQUAL_STRING("wrap-new", out.text);
 }
 
+void test_peer_for_uid_reads_the_recipient_without_a_row_copy(void) {
+    /* What arming a parked retry needs from a uid, and all it needs: parking
+     * runs on the UI or RPC task, and a stored_msg_t is too big to put on
+     * those stacks just to learn who a message was for. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xC0FFEE, MSG_DIR_OUTGOING, "who", 3, 0, 0, 0, MSG_STATUS_QUEUED, 11);
+
+    uint32_t peer = 0;
+    TEST_ASSERT_TRUE(msg_store_peer_for_uid(11, &peer));
+    TEST_ASSERT_EQUAL_UINT32(0xC0FFEE, peer);
+
+    TEST_ASSERT_FALSE(msg_store_peer_for_uid(999, &peer));
+    TEST_ASSERT_FALSE(msg_store_peer_for_uid(0, &peer));
+    TEST_ASSERT_FALSE(msg_store_peer_for_uid(11, NULL));
+    TEST_ASSERT_EQUAL_UINT32(0xC0FFEE, peer); /* a rejected read leaves it alone */
+}
+
+void test_peer_for_uid_survives_ring_wrap(void) {
+    msg_store_init();
+    for (int i = 0; i < 2 * MSG_STORE_MAX - 1; i++) {
+        msg_store_add(0x9999, MSG_DIR_INCOMING, "filler", 6, -70, 5);
+    }
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "wrap-old", 8, 0, 0, 0, MSG_STATUS_QUEUED, 100);
+    msg_store_add_dm_uid(0xBBBB, MSG_DIR_OUTGOING, "wrap-new", 8, 0, 0, 0, MSG_STATUS_QUEUED, 200);
+
+    uint32_t peer = 0;
+    TEST_ASSERT_TRUE(msg_store_peer_for_uid(100, &peer));
+    TEST_ASSERT_EQUAL_UINT32(0xAAAA, peer);
+    TEST_ASSERT_TRUE(msg_store_peer_for_uid(200, &peer));
+    TEST_ASSERT_EQUAL_UINT32(0xBBBB, peer);
+}
+
 void test_update_by_uid_refuses_queued_to_failed(void) {
     /* Parked is sticky: a send attempt failing must never silently un-park a
      * QUEUED row, or a parked message stops flushing on the next rejoin
@@ -349,6 +381,8 @@ int main(void) {
     RUN_TEST(test_parked_uids_survive_ring_wrap);
     RUN_TEST(test_get_copy_by_uid_finds_row_and_rejects_unknown_or_zero);
     RUN_TEST(test_get_copy_by_uid_survives_ring_wrap);
+    RUN_TEST(test_peer_for_uid_reads_the_recipient_without_a_row_copy);
+    RUN_TEST(test_peer_for_uid_survives_ring_wrap);
     RUN_TEST(test_update_by_uid_refuses_queued_to_failed);
     RUN_TEST(test_update_by_uid_allows_queued_to_sent);
     RUN_TEST(test_update_by_uid_allows_queued_to_delivered);

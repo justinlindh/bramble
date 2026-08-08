@@ -2634,3 +2634,21 @@ add_executable(test_sas_format
 target_include_directories(test_sas_format PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
 )
+
+# Parked-message retry trigger (extracted from mesh_beacon.c/mesh_task.c, which
+# are ESP-IDF-only): the beacon-side decision that gives a message parked for a
+# peer that never left the neighbor table a way to go out. Linked against the
+# real routing and msg_store components so the test drives the actual neighbor
+# table and the actual parked-row selection, not stand-ins.
+add_executable(test_parked_retry
+    test_parked_retry.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/parked_retry.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/msg_store.c
+)
+target_include_directories(test_parked_retry PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
