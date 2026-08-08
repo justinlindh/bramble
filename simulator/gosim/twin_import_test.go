@@ -529,3 +529,98 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// twinExportWith parses one export document, failing the test if it does not
+// parse: the shorthand the reciprocity cases below are built from.
+func twinExportWith(t *testing.T, addr string, neighbors []map[string]any) *twinExport {
+	t.Helper()
+	exp, err := parseTwinExport(twinDoc(addr, neighbors, nil), addr)
+	if err != nil {
+		t.Fatalf("parseTwinExport(%s): %v", addr, err)
+	}
+	return exp
+}
+
+func TestTwinMergeKeepsAOneWayLinkBothEndsExported(t *testing.T) {
+	// 0A1B2C3D hears 3D4E5F60. 3D4E5F60 exported too, and its neighbour table
+	// is empty: it does not hear 0A1B2C3D. That is measured evidence of a
+	// one-way link, so the merge must not invent the reverse direction.
+	g, err := buildTwinGraph([]*twinExport{
+		twinExportWith(t, "0A1B2C3D", []map[string]any{twinNeighborEntry("3D4E5F60", -95, 7)}),
+		twinExportWith(t, "3D4E5F60", nil),
+	})
+	if err != nil {
+		t.Fatalf("buildTwinGraph: %v", err)
+	}
+	want := []string{"3D4E5F60>0A1B2C3D@-95/7:observed"}
+	if got := linkKeys(g); !equalStrings(got, want) {
+		t.Fatalf("links\n got %v\nwant %v", got, want)
+	}
+	if len(g.UnobservedLinks()) != 0 {
+		t.Fatalf("a direction was assumed against the far end's own export: %v",
+			g.UnobservedLinks())
+	}
+	if ow := g.OneWayLinks(); len(ow) != 1 || ow[0].From != "3D4E5F60" {
+		t.Fatalf("one-way links %v, want the single measured asymmetry", ow)
+	}
+
+	// The report has to name it, and must not claim a clean reconstruction.
+	report := twinReport(g, nil, nil, []string{"a.json", "b.json"})
+	if !strings.Contains(report, "One-way links, heard at one end and not the other (1)") {
+		t.Fatalf("report does not name the one-way link:\n%s", report)
+	}
+	if strings.Contains(report, "None: every node exported") {
+		t.Fatalf("report calls an asymmetric reconstruction clean:\n%s", report)
+	}
+}
+
+func TestTwinMergeFillsOnlyTheDirectionsNobodyCouldReport(t *testing.T) {
+	// 0A1B2C3D and 2C3D4E5F both hear 1B2C3D4E, which exports and lists only
+	// 0A1B2C3D. 4E5F6071 never exports at all. So 1B2C3D4E -> 2C3D4E5F stays
+	// one-way on 1B2C3D4E's own evidence, while the direction toward the node
+	// that never exported is filled by reciprocity.
+	g, err := buildTwinGraph([]*twinExport{
+		twinExportWith(t, "0A1B2C3D", []map[string]any{twinNeighborEntry("1B2C3D4E", -95, 7)}),
+		twinExportWith(t, "2C3D4E5F", []map[string]any{twinNeighborEntry("1B2C3D4E", -99, 5)}),
+		twinExportWith(t, "1B2C3D4E", []map[string]any{
+			twinNeighborEntry("0A1B2C3D", -92, 9), twinNeighborEntry("4E5F6071", -88, 11)}),
+	})
+	if err != nil {
+		t.Fatalf("buildTwinGraph: %v", err)
+	}
+	want := []string{
+		"0A1B2C3D>1B2C3D4E@-92/9:observed",
+		"1B2C3D4E>0A1B2C3D@-95/7:observed",
+		"1B2C3D4E>2C3D4E5F@-99/5:observed",
+		"1B2C3D4E>4E5F6071@-88/11:assumed",
+		"4E5F6071>1B2C3D4E@-88/11:observed",
+	}
+	if got := linkKeys(g); !equalStrings(got, want) {
+		t.Fatalf("links\n got %v\nwant %v", got, want)
+	}
+	ow := g.OneWayLinks()
+	if len(ow) != 1 || ow[0].From != "1B2C3D4E" || ow[0].To != "2C3D4E5F" {
+		t.Fatalf("one-way links %v, want 1B2C3D4E -> 2C3D4E5F only", ow)
+	}
+}
+
+func TestTwinOneWayLinkLeavesTheEndsUnconnected(t *testing.T) {
+	// radio_nodes_connected requires both directions, so a measured one-way
+	// link is not a path: the partition traversal has to see two pieces, which
+	// is the whole reason the merge must not invent the reverse direction.
+	g, err := buildTwinGraph([]*twinExport{
+		twinExportWith(t, "0A1B2C3D", []map[string]any{twinNeighborEntry("3D4E5F60", -95, 7)}),
+		twinExportWith(t, "3D4E5F60", nil),
+	})
+	if err != nil {
+		t.Fatalf("buildTwinGraph: %v", err)
+	}
+	conn, err := twinAnalyzeConnectivity(writeTwinScenarioFile(t, g, 120000, nil), g)
+	if err != nil {
+		t.Fatalf("twinAnalyzeConnectivity: %v", err)
+	}
+	if len(conn.BaselineComponents) != 2 {
+		t.Fatalf("baseline components %v, want two: a one-way link joins nothing",
+			conn.BaselineComponents)
+	}
+}

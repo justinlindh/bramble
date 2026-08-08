@@ -46,6 +46,10 @@ type twinLink struct {
 	// device really did report hearing this transmitter. False means the
 	// direction was filled in by reciprocity because To never exported (see
 	// fillReciprocal); the report names every such link.
+	//
+	// A direction that is absent from the graph entirely is the third case: To
+	// exported and did not list From, which is a device reporting that it does
+	// not hear this transmitter.
 	Observed bool `json:"observed"`
 	// LastSeenMs is the age of the observation as the reporting node measured
 	// it, and is what arbitrates when two exports describe the same direction.
@@ -152,7 +156,13 @@ func buildTwinGraph(exports []*twinExport) (*twinGraph, error) {
 	for _, l := range links {
 		g.Links = append(g.Links, *l)
 	}
-	g.fillReciprocal()
+	exported := map[string]bool{}
+	for addr, n := range nodes {
+		if n.Exported {
+			exported[addr] = true
+		}
+	}
+	g.fillReciprocal(exported)
 
 	for _, n := range nodes {
 		g.Nodes = append(g.Nodes, *n)
@@ -220,23 +230,36 @@ func (g *twinGraph) adoptRadio(exp *twinExport) error {
 	return nil
 }
 
-// fillReciprocal supplies the missing direction of every one-sided link.
+// fillReciprocal supplies the missing direction of every one-sided link whose
+// missing direction is genuinely unknown.
 //
-// A link only both of whose directions were observed needs two exports. When
-// only one end exported, the reverse direction is unknown, and leaving it out
-// would model a one-way link no protocol exchange can cross: the twin would
-// report a mesh far more broken than the one that is running. Assuming
-// reciprocity at the same RSSI and SNR is the smaller and more honest error,
-// and every filled direction is marked Observed=false so the report can name
-// it and the operator can close the gap by exporting from the other end.
-func (g *twinGraph) fillReciprocal() {
+// The direction To -> From is observable by From alone: From is the receiver,
+// and a receiver reports what it hears in its own neighbor table. So there are
+// two cases, and only one of them is a gap. If From never exported, nobody
+// could have reported that direction; leaving it out would model a one-way link
+// no protocol exchange can cross, and the twin would report a mesh far more
+// broken than the one that is running. Assuming reciprocity at the same RSSI
+// and SNR is the smaller and more honest error, and every filled direction is
+// marked Observed=false so the report can name it and the operator can close
+// the gap by exporting from the other end.
+//
+// If From did export and its neighbor table does not name To, that is not a
+// gap: it is a device reporting that it does not hear To. Filling it in would
+// overwrite evidence with an assumption, and the twin would carry a two-way
+// link across a genuinely one-way one. Those directions stay absent, which is
+// what lets the imported link table (directed, see simulator/engine/sim_radio.h)
+// actually carry a one-way link.
+//
+// exported names the addresses that contributed an export document of their
+// own.
+func (g *twinGraph) fillReciprocal(exported map[string]bool) {
 	have := map[string]bool{}
 	for _, l := range g.Links {
 		have[l.From+">"+l.To] = true
 	}
 	var added []twinLink
 	for _, l := range g.Links {
-		if have[l.To+">"+l.From] {
+		if have[l.To+">"+l.From] || exported[l.From] {
 			continue
 		}
 		have[l.To+">"+l.From] = true
@@ -289,6 +312,26 @@ func (g *twinGraph) UnobservedLinks() []twinLink {
 	var out []twinLink
 	for _, l := range g.Links {
 		if !l.Observed {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// OneWayLinks lists the links whose reverse direction is absent from the graph
+// because the node at the far end exported and did not report hearing this
+// transmitter. Those are asymmetric links the exports themselves evidence, and
+// the twin carries them as one-way: no protocol exchange crosses them, so the
+// partition traversal (radio_nodes_connected, which requires both directions)
+// treats the two ends as unconnected.
+func (g *twinGraph) OneWayLinks() []twinLink {
+	have := map[string]bool{}
+	for _, l := range g.Links {
+		have[l.From+">"+l.To] = true
+	}
+	var out []twinLink
+	for _, l := range g.Links {
+		if !have[l.To+">"+l.From] {
 			out = append(out, l)
 		}
 	}

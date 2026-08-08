@@ -230,6 +230,7 @@ an `assumptions` block that restates the bounds in fields rather than prose:
 {
   "kind": "simulation over an observed link snapshot; not a field measurement and not a propagation prediction",
   "reciprocal_links_assumed": 1,
+  "one_way_links": 0,
   "unexported_nodes": 1,
   "observation_window_ms": 600000
 }
@@ -247,11 +248,16 @@ an `assumptions` block that restates the bounds in fields rather than prose:
   a directed observation: the RSSI was measured at the exporting node, so it
   describes the neighbour-to-exporter direction. Two documents describing the
   same direction resolve to the fresher reading, and the merge notes it.
-  Reciprocity fills the missing direction of a one-sided link, marked as
-  assumed, because modelling a one-way link no protocol exchange can cross
-  would report a mesh far more broken than the one that is running. Exports
-  from nodes on genuinely different PHYs are refused, since one twin models one
-  channel.
+  Reciprocity fills the missing direction of a link only when the node at the
+  far end never exported, so nobody could have reported that direction: leaving
+  it out would model a one-way link no protocol exchange can cross and report a
+  mesh far more broken than the one that is running. When the far end did
+  export and its neighbour table does not name the transmitter, that is a
+  device reporting that it does not hear it, and the direction stays out: the
+  twin carries the link as one-way, the report names it, and the partition
+  traversal (`radio_nodes_connected`, which requires both directions) treats
+  the two ends as unconnected. Exports from nodes on genuinely different PHYs
+  are refused, since one twin models one channel.
 - **The scenario** (`simulator/gosim/twin_scenario.go`) is an ordinary gosim
   scenario carrying a `links` block, which puts the radio into link mode
   (`radio_config_t` in `simulator/engine/sim_radio.h`). In link mode audibility

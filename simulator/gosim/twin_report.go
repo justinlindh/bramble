@@ -115,6 +115,18 @@ func writeTwinCoverage(b *strings.Builder, g *twinGraph) {
 		fmt.Fprintf(&sb, "  A real one-way link would make the mesh worse than the twin shows.")
 		blocks = append(blocks, sb.String())
 	}
+	if ow := g.OneWayLinks(); len(ow) > 0 {
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "One-way links, heard at one end and not the other (%d):\n", len(ow))
+		for _, l := range ow {
+			fmt.Fprintf(&sb, "  %s -> %s at %d dBm / %d dB, and %s does not report hearing %s\n",
+				l.From, l.To, l.RSSI, l.SNR, l.From, l.To)
+		}
+		fmt.Fprintf(&sb, "  Both ends exported, so this asymmetry is measured, not assumed. No\n")
+		fmt.Fprintf(&sb, "  protocol exchange crosses a one-way link, so the twin treats these two\n")
+		fmt.Fprintf(&sb, "  ends as unconnected.")
+		blocks = append(blocks, sb.String())
+	}
 	if len(g.RouteOnlyAddrs) > 0 {
 		blocks = append(blocks, fmt.Sprintf(
 			"Addresses seen in routing tables with no observed link (%d): %s\n"+
