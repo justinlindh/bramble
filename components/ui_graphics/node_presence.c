@@ -12,6 +12,13 @@ node_presence_t node_presence_for_age(uint32_t age_s) {
     return (age_s >= NODE_STALE_AGE_S) ? NODE_PRESENCE_STALE : NODE_PRESENCE_LIVE;
 }
 
+node_reach_t node_reach_classify(bool has_neighbor, uint32_t age_s, bool has_active_route) {
+    if (has_neighbor) {
+        return (age_s < NODE_ONLINE_AGE_S) ? NODE_REACH_ONLINE : NODE_REACH_REACHABLE;
+    }
+    return has_active_route ? NODE_REACH_REACHABLE : NODE_REACH_UNKNOWN;
+}
+
 int node_format_age(uint32_t age_s, char* buf, size_t buf_len) {
     if (!buf || buf_len == 0)
         return 0;

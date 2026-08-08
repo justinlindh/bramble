@@ -28,6 +28,35 @@ void test_presence_stale_at_and_above_threshold(void) {
     TEST_ASSERT_EQUAL(NODE_PRESENCE_STALE, node_presence_for_age(NODE_STALE_AGE_S * 10));
 }
 
+void test_reach_online_only_while_a_neighbor_is_fresh(void) {
+    TEST_ASSERT_EQUAL(NODE_REACH_ONLINE, node_reach_classify(true, 0, false));
+    TEST_ASSERT_EQUAL(NODE_REACH_ONLINE, node_reach_classify(true, NODE_ONLINE_AGE_S - 1, false));
+    TEST_ASSERT_EQUAL(NODE_REACH_REACHABLE, node_reach_classify(true, NODE_ONLINE_AGE_S, false));
+}
+
+void test_reach_online_window_is_tighter_than_the_row_dim_threshold(void) {
+    /* The two thresholds answer different questions and must not be collapsed:
+     * a peer can read "not online" in a chat header while its Nodes row is
+     * still styled as live. */
+    TEST_ASSERT_TRUE(NODE_ONLINE_AGE_S < NODE_STALE_AGE_S);
+    TEST_ASSERT_EQUAL(NODE_REACH_REACHABLE, node_reach_classify(true, NODE_ONLINE_AGE_S, false));
+    TEST_ASSERT_EQUAL(NODE_PRESENCE_LIVE, node_presence_for_age(NODE_ONLINE_AGE_S));
+}
+
+void test_reach_quiet_neighbor_stays_reachable_not_unknown(void) {
+    /* It has not been purged, so the last thing we know is that it was there. */
+    TEST_ASSERT_EQUAL(NODE_REACH_REACHABLE,
+                      node_reach_classify(true, NODE_STALE_AGE_S * 100, false));
+}
+
+void test_reach_route_only_peer_is_reachable(void) {
+    TEST_ASSERT_EQUAL(NODE_REACH_REACHABLE, node_reach_classify(false, 0, true));
+}
+
+void test_reach_unknown_with_neither_neighbor_nor_route(void) {
+    TEST_ASSERT_EQUAL(NODE_REACH_UNKNOWN, node_reach_classify(false, 0, false));
+}
+
 void test_format_age_seconds(void) {
     char buf[16];
     node_format_age(0, buf, sizeof(buf));
@@ -75,6 +104,11 @@ int main(void) {
     RUN_TEST(test_age_seconds_clamps_last_heard_in_the_future);
     RUN_TEST(test_presence_live_below_stale_threshold);
     RUN_TEST(test_presence_stale_at_and_above_threshold);
+    RUN_TEST(test_reach_online_only_while_a_neighbor_is_fresh);
+    RUN_TEST(test_reach_online_window_is_tighter_than_the_row_dim_threshold);
+    RUN_TEST(test_reach_quiet_neighbor_stays_reachable_not_unknown);
+    RUN_TEST(test_reach_route_only_peer_is_reachable);
+    RUN_TEST(test_reach_unknown_with_neither_neighbor_nor_route);
     RUN_TEST(test_format_age_seconds);
     RUN_TEST(test_format_age_minutes_keep_the_seconds_digit);
     RUN_TEST(test_format_age_hours_and_days);

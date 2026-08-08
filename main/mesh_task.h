@@ -89,6 +89,17 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* d
 uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len);
 
 /**
+ * Re-send a message that already owns a row in the message store, identified
+ * by that row's stable uid. Every stage of the send pipeline reconciles the
+ * uid's existing row instead of adding a new one, so a retry moves that one
+ * row back to SENT (and later DELIVERED or FAILED) rather than appending a
+ * duplicate to the thread. This is what a "Retry" affordance on a failed
+ * message calls; pass uid 0 and it behaves exactly like mesh_send_message.
+ * Returns packet_id (>0) on success, 0 on failure.
+ */
+uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len, uint32_t uid);
+
+/**
  * Send a dedicated location packet (PKT_TYPE_LOCATION) to a single destination.
  * Returns packet_id (>0) on success, 0 on failure.
  */
@@ -104,6 +115,14 @@ void mesh_reboot_delayed(int delay_ms);
  * Get a snapshot of the routing table (thread-safe).
  */
 void mesh_get_routes(routing_table_t* out);
+
+/**
+ * True if a route to dest_addr exists and is neither BROKEN nor STALE.
+ * Answers "is there somewhere to send this" without copying the whole
+ * routing table, which is 64 entries a caller would otherwise have to find
+ * two kilobytes of stack or static storage for.
+ */
+bool mesh_route_is_usable(uint32_t dest_addr);
 
 /**
  * Snapshot the used DM session slots (thread-safe). Entries come out in table

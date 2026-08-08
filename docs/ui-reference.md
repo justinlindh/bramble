@@ -271,10 +271,14 @@ This is a full-screen overlay over the content area. The **tab bar is hidden** a
 
 ### Header Row (h=28, SURFACE bg)
 
-| Element   | Position         | Details                                        |
-|-----------|------------------|------------------------------------------------|
-| [←] Back  | Left             | 40×24 btn, transparent bg, SYMBOL_LEFT         |
-| "Chat"    | Center           | Montserrat 14, TEXT color                       |
+| Element        | Position        | Details                                        |
+|----------------|-----------------|------------------------------------------------|
+| [←] Back       | Left            | 40×24 btn, transparent bg, SYMBOL_LEFT         |
+| Presence dot   | After Back, DM only | 8×8 circle. SUCCESS green = a neighbor heard within `NODE_ONLINE_AGE_S` (90s); WARNING amber = a quiet neighbor or a peer reachable only over an active route; TEXT_SEC gray = neither. `node_reach_classify()`, the same three states and the same threshold the webapp chat header uses |
+| Title          | After the dot   | 138px, Montserrat 12, TEXT, LONG_DOT. Peer name (or hex address) for a DM, `#channel` otherwise. A DM peer that is not online gets its age appended, `"Alice  4m"`; an online peer does not, because the dot already says so |
+| Verify / Switch| Right, 108×22   | DM: the SAS verification state, opens the verify screen. Channel: SYMBOL_SHUFFLE "Switch", cycles the target |
+
+The dot and the trailing age refresh once a second while the thread is open, on a timer owned by the header.
 
 Tapping [←] → restores tab bar, restores content area size (320×180), rebuilds chat list.
 
@@ -298,6 +302,14 @@ Each bubble is a `row` container (304px wide, transparent) containing a `bubble`
               │ {message text wrapping} │   Montserrat 14, TEXT color
               └────────────────────────┘   SENT bg (#1A4B91), radius=8
 ```
+
+An outgoing bubble carries a delivery badge in its trailing meta: one check for sent, two for delivered, a cross in DANGER for failed.
+
+**Expanded bubble.** Tapping an outgoing bubble with a packet id expands it (one at a time, tracked by `s_selected_packet_id`); tapping again collapses it. Expanded, it adds:
+
+- the relay path, but only when it says something the receipt line does not, that is a single-recipient message that actually traversed a relay
+- a receipt summary from the delivery event ring, falling back to the message status when the ring has rotated past it
+- **Retry**, on a failed DM only. `mesh_resend_message()` re-sends the stored text carrying the row's uid, so the send pipeline reconciles that same row back to SENT rather than appending a second bubble with the same text. A broadcast or channel send is not ACK-tracked and so never reaches a failed status to retry from
 
 After loading all messages, list auto-scrolls to bottom (`lv_obj_scroll_to_y(..., LV_COORD_MAX)`).
 

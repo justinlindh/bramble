@@ -7,6 +7,9 @@
 #include "chat_target.h"
 #include "chat_unread.h"
 #include "chat_message_ui.h"
+#include "node_presence.h"
+#include "routing.h"
+#include "ui_shared_state.h"
 #include "ui_toast.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -28,6 +31,18 @@ static lv_obj_t* s_send_btn = NULL;
 static lv_obj_t* s_title = NULL;
 static uint32_t s_selected_packet_id = 0;
 
+/* DM header presence: a dot beside the peer name saying whether a message sent
+ * right now has anywhere to go. Both are ui_zone_track'd, so LVGL nulls them
+ * when the header dies with the content area, and the presence timer (created
+ * by the builder, deleted with the header) checks s_presence_dot before
+ * touching anything. */
+static lv_obj_t* s_presence_dot = NULL;
+
+/* Retry button of the currently expanded failed bubble, or NULL. Rebuilt with
+ * the message list on every render, so it is cleared at the top of each pass
+ * and only ever points into the widgets that pass created. */
+static lv_obj_t* s_retry_btn = NULL;
+
 /* Key-change interstitial (DM forward-secrecy + SAS, Task 8): which DM this
  * interstitial's buttons act on. Set right before it is shown, read only from
  * its own click callbacks. */
@@ -46,6 +61,9 @@ extern int mesh_send_broadcast(const uint8_t* data, size_t len);
 extern uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* data,
                                   size_t len);
 extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len);
+extern uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len,
+                                    uint32_t uid);
+extern bool mesh_route_is_usable(uint32_t dest_addr);
 extern int mesh_get_channel_count(void);
 extern const char* mesh_get_channel_name(int index);
 extern const char* mesh_get_peer_name(uint32_t addr);
@@ -54,6 +72,43 @@ extern size_t mesh_delivery_receipts_for_message(uint32_t message_id, uint32_t* 
                                                  size_t* total_unique);
 extern bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified,
                                        bool* key_changed);
+
+/* Reachability of the DM peer right now, plus how long ago it was heard.
+ * age_s is only meaningful when the peer is still in the neighbor table; a
+ * peer known only by route has no last-heard to report. */
+static node_reach_t dm_peer_reach(uint32_t peer_addr, uint32_t* age_s_out) {
+    if (age_s_out)
+        *age_s_out = 0;
+    if (peer_addr == 0)
+        return NODE_REACH_UNKNOWN;
+
+    const ui_mesh_state_t* state = ui_shared_mesh_state();
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+
+    bool has_neighbor = false;
+    uint32_t age_s = 0;
+    for (int i = 0; i < state->neighbors.count && i < MAX_NEIGHBORS; i++) {
+        if (state->neighbors.entries[i].addr == peer_addr) {
+            has_neighbor = true;
+            age_s = node_age_seconds(now_ms, state->neighbors.entries[i].last_heard);
+            break;
+        }
+    }
+
+    bool has_active_route = !has_neighbor && mesh_route_is_usable(peer_addr);
+
+    if (age_s_out && has_neighbor)
+        *age_s_out = age_s;
+    return node_reach_classify(has_neighbor, age_s, has_active_route);
+}
+
+static lv_color_t dm_reach_color(node_reach_t reach) {
+    if (reach == NODE_REACH_ONLINE)
+        return BR_COLOR_SUCCESS;
+    if (reach == NODE_REACH_REACHABLE)
+        return BR_COLOR_WARNING;
+    return BR_COLOR_TEXT_SEC;
+}
 
 static void update_title(void) {
     if (!s_title)
@@ -69,10 +124,28 @@ static void update_title(void) {
 
     static char buf[48];
     if (s_target.kind == CHAT_TARGET_DM) {
+        char name_buf[24];
         if (peer_name && peer_name[0]) {
-            snprintf(buf, sizeof(buf), "%s", peer_name);
+            snprintf(name_buf, sizeof(name_buf), "%s", peer_name);
         } else {
-            snprintf(buf, sizeof(buf), "%08lX", (unsigned long)s_target.peer_addr);
+            snprintf(name_buf, sizeof(name_buf), "%08lX", (unsigned long)s_target.peer_addr);
+        }
+
+        /* The dot carries the state; the age is only appended once the peer has
+         * gone quiet, because "Alice 3s" beside a green dot is noise, and the
+         * header has no room to spare next to the verify button. */
+        uint32_t age_s = 0;
+        node_reach_t reach = dm_peer_reach(s_target.peer_addr, &age_s);
+        if (s_presence_dot) {
+            lv_obj_set_style_bg_color(s_presence_dot, dm_reach_color(reach), 0);
+        }
+
+        if (reach == NODE_REACH_REACHABLE && age_s > 0) {
+            char age_buf[12];
+            chat_format_age(age_s, age_buf, sizeof(age_buf));
+            snprintf(buf, sizeof(buf), "%s  %s", name_buf, age_buf);
+        } else {
+            snprintf(buf, sizeof(buf), "%s", name_buf);
         }
     } else if (channel_name) {
         snprintf(buf, sizeof(buf), "#%s", channel_name);
@@ -80,6 +153,18 @@ static void update_title(void) {
         snprintf(buf, sizeof(buf), "Chat");
     }
     lv_label_set_text(s_title, buf);
+}
+
+static void presence_refresh_cb(lv_timer_t* timer) {
+    (void)timer;
+    if (s_title && s_target.kind == CHAT_TARGET_DM)
+        update_title();
+}
+
+static void presence_delete_cb(lv_event_t* e) {
+    lv_timer_t* timer = (lv_timer_t*)lv_event_get_user_data(e);
+    if (timer)
+        lv_timer_delete(timer);
 }
 
 static bool message_matches_target(const stored_msg_t* msg) {
@@ -203,6 +288,48 @@ static void compose_ready_cb(lv_event_t* e) {
 static void rerender_async(void* arg) {
     (void)arg;
     render_messages_for_target(false);
+}
+
+/* Retry: re-send a message whose delivery attempts were exhausted. The row's
+ * uid rides back into the send path, so the pipeline reconciles the row this
+ * message already owns (back to SENT, then DELIVERED or FAILED) instead of
+ * appending a second bubble with the same text. The store is the source of
+ * truth for the text and the recipient: the uid is all the click has to carry,
+ * and the row is re-read at click time so a status that changed since the
+ * bubble was drawn is respected. */
+static void retry_async(void* arg) {
+    uint32_t uid = (uint32_t)(uintptr_t)arg;
+    if (uid == 0)
+        return;
+
+    stored_msg_t msg;
+    bool found = false;
+    for (int i = msg_store_count() - 1; i >= 0; i--) {
+        if (msg_store_get_copy(i, &msg) && msg.uid == uid) {
+            found = true;
+            break;
+        }
+    }
+    if (!found || msg.status != MSG_STATUS_FAILED || msg.direction != MSG_DIR_OUTGOING ||
+        msg.channel_index >= 0) {
+        ESP_LOGW(TAG, "retry uid=%lu: no longer a failed outgoing DM", (unsigned long)uid);
+        return;
+    }
+
+    if (mesh_resend_message(msg.peer_addr, (const uint8_t*)msg.text, msg.text_len, uid) == 0) {
+        ESP_LOGW(TAG, "retry uid=%lu: send failed", (unsigned long)uid);
+        ui_toast_show("Retry failed");
+    } else {
+        ui_toast_show("Retrying");
+    }
+    render_messages_for_target(false);
+}
+
+static void retry_click_cb(lv_event_t* e) {
+    /* The re-render cleans s_msg_list, which owns this very button, and the
+     * send itself can update the row: both have to happen out of the button's
+     * own CLICKED dispatch. See ui_defer. */
+    ui_defer(retry_async, lv_event_get_user_data(e));
 }
 
 static void msg_bubble_click_cb(lv_event_t* e) {
@@ -583,6 +710,35 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
             lv_obj_set_width(receipt_lbl, LV_PCT(100));
             lv_obj_set_style_text_font(receipt_lbl, &lv_font_montserrat_10, 0);
             lv_obj_set_style_text_color(receipt_lbl, BR_COLOR_TEXT_SEC, 0);
+
+            /* A message that exhausted its delivery attempts is a dead end
+             * otherwise: the only recourse was to retype it. Offered on DMs
+             * only, which is also the only thing that can reach FAILED (a
+             * broadcast or channel send is not ACK-tracked, so it never gets a
+             * failure verdict to retry from). uid 0 means a row stored before
+             * uids existed, which has nothing to reconcile against. */
+            if (msg->status == MSG_STATUS_FAILED && msg->channel_index < 0 && msg->uid != 0) {
+                lv_obj_t* retry_btn = lv_btn_create(bubble);
+                lv_obj_set_size(retry_btn, 72, BR_TAP_TARGET_MIN);
+                lv_obj_set_style_bg_color(retry_btn, BR_COLOR_SURFACE_2, 0);
+                lv_obj_set_style_radius(retry_btn, BR_RADIUS, 0);
+                lv_obj_set_style_shadow_width(retry_btn, 0, 0);
+                lv_obj_set_style_pad_all(retry_btn, 2, 0);
+
+                lv_obj_t* retry_lbl = lv_label_create(retry_btn);
+                lv_label_set_text(retry_lbl, LV_SYMBOL_REFRESH " Retry");
+                lv_obj_set_style_text_font(retry_lbl, &lv_font_montserrat_12, 0);
+                lv_obj_set_style_text_color(retry_lbl, BR_COLOR_TEXT, 0);
+                lv_obj_center(retry_lbl);
+
+                lv_obj_add_event_cb(retry_btn, retry_click_cb, LV_EVENT_CLICKED,
+                                    (void*)(uintptr_t)msg->uid);
+                /* At most one bubble is expanded at a time (s_selected_packet_id
+                 * is a single value), so one pointer is enough for
+                 * chat_sync_content_group to splice this into the trackball
+                 * walk right after its own bubble. */
+                s_retry_btn = retry_btn;
+            }
         }
 
         lv_obj_add_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
@@ -620,6 +776,12 @@ static void chat_sync_content_group(void) {
         lv_group_add_obj(cg, target);
         if (foc_pkt && (uint32_t)(uintptr_t)lv_obj_get_user_data(target) == foc_pkt)
             restore = target;
+        /* Retry sits inside its bubble, so the row walk above would skip it and
+         * leave it touch-only. Splice it in directly after its own bubble, which
+         * is where a trackball user expects to land next. */
+        if (s_retry_btn && lv_obj_get_parent(s_retry_btn) == target) {
+            lv_group_add_obj(cg, s_retry_btn);
+        }
     }
 
     if (s_compose_ta)
@@ -646,6 +808,10 @@ static void render_messages_for_target(bool scroll_to_bottom) {
     bool was_at_bottom = (lv_obj_get_scroll_bottom(s_msg_list) <= 8);
 
     lv_refr_now(lv_display_get_default());
+    /* The clean below deletes the previous pass's retry button, so drop the
+     * pointer before it dangles; this pass sets it again if a failed bubble is
+     * expanded. */
+    s_retry_btn = NULL;
     lv_obj_clean(s_msg_list);
 
     uint32_t now_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
@@ -788,11 +954,41 @@ static void chat_view_builder(bramble_layout_t* layout, void* ctx) {
         ui_zone_add_chrome(target_btn, false);
     }
 
+    /* Presence dot, DM only: a channel has no single peer to be online. Sits
+     * between Back and the title so the name reads as belonging to it. */
+    lv_obj_t* title_anchor = back_btn;
+    int title_gap = 8;
+    if (s_target.kind == CHAT_TARGET_DM) {
+        ui_zone_track(&s_presence_dot, lv_obj_create(header));
+        lv_obj_set_size(s_presence_dot, 8, 8);
+        lv_obj_set_style_radius(s_presence_dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_opa(s_presence_dot, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(s_presence_dot, 0, 0);
+        lv_obj_set_style_bg_color(s_presence_dot, dm_reach_color(NODE_REACH_UNKNOWN), 0);
+        lv_obj_align_to(s_presence_dot, back_btn, LV_ALIGN_OUT_RIGHT_MID, 4, 0);
+        title_anchor = s_presence_dot;
+        title_gap = 6;
+    }
+
     ui_zone_track(&s_title, lv_label_create(header));
     lv_obj_set_style_text_font(s_title, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_title, BR_COLOR_TEXT, 0);
-    lv_obj_align_to(s_title, back_btn, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+    /* Bounded so LV_LABEL_LONG_DOT has something to clip against: the verify /
+     * switch button occupies the right 112px of the 312px inner header, and
+     * Back plus the dot take the left ~58px. A long peer name ellipsises
+     * instead of running under the button. */
+    lv_obj_set_width(s_title, 138);
+    lv_label_set_long_mode(s_title, LV_LABEL_LONG_DOT);
+    lv_obj_align_to(s_title, title_anchor, LV_ALIGN_OUT_RIGHT_MID, title_gap, 0);
     update_title();
+
+    /* Presence tick, DM only: the dot and the trailing age follow the peer
+     * while the thread is open, rather than reporting whatever was true when
+     * it was opened. Owned by the header, so it stops on leaving the thread. */
+    if (s_target.kind == CHAT_TARGET_DM) {
+        lv_timer_t* presence = lv_timer_create(presence_refresh_cb, 1000, NULL);
+        lv_obj_add_event_cb(header, presence_delete_cb, LV_EVENT_DELETE, presence);
+    }
 
     /* Message list area */
     int msg_area_h = content_h - 28 - BR_COMPOSE_BAR_H;
