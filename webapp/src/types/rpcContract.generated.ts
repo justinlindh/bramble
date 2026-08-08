@@ -224,6 +224,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.exportTopology": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export this node's observed mesh state
+         * @description Returns one node's view of the mesh as a single document: its identity, the neighbours it hears with per-link RSSI and SNR, its routing table, and the PHY and frequency-plan parameters that decide time-on-air. The neighbours and routes arrays are the same shapes bramble.getNeighbors and bramble.getRoutes return, written by the same emitters. Collect one export per node and feed the files to the simulator's digital-twin importer (docs/digital-twin.md) to reconstruct the deployment as a runnable scenario.
+         */
+        post: operations["exportTopology"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.getDmSessions": {
         parameters: {
             query?: never;
@@ -1913,6 +1933,42 @@ export interface components {
         RoutesResponse: {
             routes: components["schemas"]["Route"][];
         };
+        /** @description One node's observed mesh state, shaped for the simulator's digital-twin importer. Observation only: every field is state the node already keeps, read at the moment of the call. */
+        TopologyExportResponse: {
+            /** @description Document schema version. The importer refuses a version it does not know rather than guessing at fields. */
+            twin_schema: number;
+            node: {
+                /** @description This node's address as 8-char uppercase hex. */
+                address: string;
+                /** @description Configured node name (omitted when unset). */
+                name?: string;
+                firmware_version: string;
+                protocol_version: string;
+                hardware: string;
+                /** @description Seconds since boot, the age bound on every observation below. */
+                uptime_s: number;
+            };
+            /** @description Runtime PHY plus the compiled-in frequency plan. sf, bw_hz and coding_rate are what price a frame's time-on-air; the plan's duty cycle bounds what the deployment may spend. */
+            radio: {
+                frequency_mhz: number;
+                sf: number;
+                bw_hz: number;
+                /** @description 1 to 4, meaning 4/5 through 4/8. */
+                coding_rate: number;
+                tx_power_dbm: number;
+                /** @description Frequency plan name, for example US915. */
+                region: string;
+                /** @description Regulatory regime the plan follows. */
+                regulatory: string;
+                /** @description Plan duty-cycle ceiling; 100 means no limit. */
+                max_duty_cycle_pct: number;
+                /** @description Whether the ceiling is hard-enforced or advisory. */
+                duty_cycle_enforced: boolean;
+            };
+            /** @description Nodes heard directly, with the link quality they were heard at. */
+            neighbors: components["schemas"]["Neighbor"][];
+            routes: components["schemas"]["Route"][];
+        };
         /** @description One used slot of the DM session table. Metadata only: the session key, the peer's cached identity key and the ratchet chain keys are never returned. */
         DmSession: {
             /** @description Peer address, 8 hex digits. */
@@ -3167,6 +3223,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoutesResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    exportTopology: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description Observed topology export */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopologyExportResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */
