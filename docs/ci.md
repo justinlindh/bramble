@@ -332,6 +332,17 @@ because a contributor cannot always install an exact GCC from their distro;
 `nrf/scripts/size_report.py` then stamps the compiler into its verdict line and
 its JSON, so a mismatched number is never mistaken for CI's.
 
+The version pin narrows the gap without closing it. A toolchain ships a C
+library with the compiler, and newlib's own statics differ between distributions
+of the same GCC release: Arm's `13.2.Rel1` binary release reports the pinned
+`13.2.1` and still lands 144 bytes below the runner image's count for the
+T1000-E. Only CI's exact packaging reproduces CI's bytes, so `nrf/README.md`
+documents an `ubuntu:24.04` container that installs the same
+`gcc-arm-none-eabi` package the image bakes, and that is the answer for a
+question that turns on bytes. The version pin is still what keeps the runner
+image, the workflow and the docs from drifting apart, and what keeps a local
+build in the same GCC generation as CI.
+
 ### `quality.yml`
 
 | Job (context name) | Runs when | Required? |

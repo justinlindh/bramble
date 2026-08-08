@@ -54,7 +54,10 @@ required=(
   "nrf/CMakeLists.txt::${sot_file}"
   "nrf/scripts/size_report.py::${sot_file}"
   "nrf/README.md::arm-none-eabi-gcc ${want}"
-  "nrf/README.md::arm-gnu-toolchain-${rel}"
+  # The Ubuntu package version CI installs embeds Arm's release label
+  # (`15:13.2.rel1-2`), so asserting the derived label keeps the container recipe
+  # that reproduces CI's byte counts from drifting off the pin.
+  "nrf/README.md::${rel}"
   "CONTRIBUTING.md::arm-none-eabi-gcc ${want}"
   "CONTRIBUTING.md::${sot_file}"
   "CLAUDE.md::arm-none-eabi-gcc ${want}"

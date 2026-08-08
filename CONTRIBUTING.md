@@ -108,11 +108,14 @@ gates every reference against it. This one matters more than a normal
 toolchain preference: the nRF build's memory gate fails on a byte count, GCC
 releases produce different byte counts from identical source, and the
 difference exceeds the headroom this target runs at, so a build with a
-different compiler cannot be compared to a CI result. Distro packages track
-their own release, so install Arm's build of the pinned version; the download
-and the `PATH` line are in [nrf/README.md](nrf/README.md). Configuring with
-anything else still works and prints a loud CMake warning, and every size
-report names the compiler behind its numbers.
+different compiler cannot be compared to a CI result. Matching the version is
+necessary but not sufficient for byte-exact agreement, because the bundled
+newlib differs between distributions of the same GCC;
+[nrf/README.md](nrf/README.md) has the one-line container that reproduces CI's
+counts exactly, which is what to reach for when a question turns on bytes. A
+host compiler is fine otherwise: it still works, prints a loud CMake warning
+when it disagrees with the pin, and every size report names the compiler
+behind its numbers.
 
 **Emulator:** ESP-IDF with the **linux** target installed (`install.sh linux`,
 not `install.sh esp32s3`), plus Go, Node, and `jq`. Run

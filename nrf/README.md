@@ -77,29 +77,7 @@ supported device yet.
 
 ## Build
 
-Needs `arm-none-eabi-gcc 13.2.1`, CMake >= 3.24, Ninja, Python 3. The
-compiler version is pinned, not incidental: the memory gate below fails the
-build on a byte count, and different GCC releases produce different byte
-counts from the same source. On this target that difference is larger than
-the headroom the T1000-E build runs at, so a build with the wrong compiler
-produces a number that looks like CI's and is not. `.arm-gcc-version` at the
-repo root is the single source of truth, CI asserts its runner image matches
-it, `scripts/lint/check-arm-gcc-version.sh` gates every reference against it,
-and configuring with anything else prints a loud CMake warning.
-
-Distro packages of `arm-none-eabi-gcc` track whatever their release shipped,
-so install Arm's own build to match:
-
-```sh
-curl -LO https://developer.arm.com/-/media/Files/downloads/gnu/13.2.rel1/binrel/arm-gnu-toolchain-13.2.rel1-x86_64-arm-none-eabi.tar.xz
-tar -xJf arm-gnu-toolchain-13.2.rel1-x86_64-arm-none-eabi.tar.xz -C ~/.local/opt
-export PATH="$HOME/.local/opt/arm-gnu-toolchain-13.2.Rel1-x86_64-arm-none-eabi/bin:$PATH"
-arm-none-eabi-gcc --version   # 13.2.1, the pin
-```
-
-Arm labels that release `13.2.Rel1` and its compiler reports `13.2.1`;
-`aarch64` and `darwin-arm64` builds of the same release are published beside
-it. Dependencies
+Needs `arm-none-eabi-gcc 13.2.1`, CMake >= 3.24, Ninja, Python 3. Dependencies
 (nrfx, CMSIS, FreeRTOS-Kernel, mbedtls, Monocypher, cJSON) are
 FetchContent-pinned in `nrf/CMakeLists.txt` and
 `components/crypto/crypto_deps.cmake` (the crypto pins are shared with the
@@ -118,6 +96,35 @@ report and fails the build on any of three limits: total RAM over
 The report stamps the compiler that produced it into its verdict line and
 into `size-report.json`, so a number copied out of a local build always
 carries whether it is comparable to CI's.
+
+### Reproducing CI's byte counts
+
+The compiler version is pinned, not incidental. `.arm-gcc-version` at the repo
+root is the single source of truth, CI asserts its runner image matches it,
+`scripts/lint/check-arm-gcc-version.sh` gates every reference against it, and
+configuring with a different version prints a loud CMake warning. GCC releases
+produce different byte counts from identical source, by more than the headroom
+this target runs at: 16.1.0 puts T1000-E static RAM at 106488 bytes where CI's
+13.2.1 puts it at 106480, against a 106496 ceiling.
+
+The version alone still does not settle it, because a toolchain ships a C
+library along with the compiler and newlib carries statics of its own. Arm's
+own `13.2.Rel1` binary release reports the same `13.2.1` and produces 106336
+bytes, 144 below CI. What CI runs is Ubuntu Noble's packaging,
+`gcc-arm-none-eabi` `15:13.2.rel1-2` against `libnewlib-arm-none-eabi`
+`4.4.0.20231231-2`. Building in that container reproduces CI's bytes exactly:
+
+```sh
+docker run --rm -v "$PWD:/src" -w /src ubuntu:24.04 sh -c '
+  apt-get update && apt-get install -y gcc-arm-none-eabi cmake ninja-build python3
+  cmake -S nrf -B nrf/build-ci -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake -DCMAKE_BUILD_TYPE=MinSizeRel
+  cmake --build nrf/build-ci'
+```
+
+A host `arm-none-eabi-gcc` is fine for day-to-day iteration; it just does not
+settle a budget question. When the answer turns on bytes rather than on whether
+the code compiles, build in the container or read the number off CI.
 
 Board selection: `-DBRAMBLE_NRF_BOARD=wm1110_devkit` (default) or
 `t1000e`. The board header (`boards/`) owns the pin map, the LR1110 RF

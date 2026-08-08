@@ -31,7 +31,10 @@ the free-heap figure in the boot log and heartbeats.
 Every number here is stamped with the compiler that produced it. The margins on
 this target are single-digit bytes, and GCC versions disagree by more than that
 on the same source, so a report without a toolchain on it is not a number anyone
-can compare to CI's. The pin lives in `.arm-gcc-version` at the repo root.
+can compare to CI's. The version pin lives in `.arm-gcc-version` at the repo
+root. Matching it is necessary but not sufficient for byte-exact agreement with
+CI, since the bundled newlib differs between distributions of the same GCC; see
+nrf/README.md for the container that reproduces CI's counts.
 
 Usage: size_report.py ELF [--budget-kb 252] [--static-budget-kb 104]
                           [--heap-floor-kb 144] [--json PATH]
@@ -127,7 +130,7 @@ def main():
     if not pin:
         toolchain_note = "no pin found in .arm-gcc-version"
     elif toolchain_matches_pin:
-        toolchain_note = f"matches the CI pin {pin}"
+        toolchain_note = f"matches the CI version pin {pin}"
     else:
         toolchain_note = f"DOES NOT match the CI pin {pin}, so these bytes are not CI's bytes"
 

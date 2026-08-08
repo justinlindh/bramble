@@ -117,9 +117,11 @@ suites), `scripts/`, `docs/`, `api/openapi.yaml` (the RPC contract).
   pin is not a preference: the nRF build's memory gate fails on a byte count,
   and GCC releases disagree on that count by more than the headroom this target
   runs at, so a size number from an unpinned compiler is not comparable to CI's
-  and must never be reported as if it were. `nrf/README.md` has the download for
-  the pinned Arm release; a mismatched build warns at configure time and every
-  size report names the compiler behind its numbers.
+  and must never be reported as if it were. Matching the version is not enough
+  either: newlib differs between distributions of the same GCC, so only the
+  `ubuntu:24.04` container in `nrf/README.md` reproduces CI's byte counts. Use
+  it whenever a claim turns on bytes. A mismatched build warns at configure time
+  and every size report names the compiler behind its numbers.
 
 ## CI and releases
 
