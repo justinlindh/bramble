@@ -4,6 +4,7 @@
 #include "lv_port_trackball.h"
 #include "lv_port_keyboard.h"
 #include "ui_zone.h"
+#include "ui_pairing.h"
 #include "sleep_manager.h"
 #include "theme/bramble_theme.h"
 #include "screens/scr_layout.h"
@@ -222,6 +223,11 @@ int ui_graphics_init(void) {
 
     /* Create one-shot timer to transition to main UI after 2 seconds */
     lv_timer_create(splash_timer_cb, 2000, NULL);
+
+    /* BLE pairing can start before the splash timeout, so its handoff timer
+     * must exist as soon as LVGL itself does, not deferred to
+     * splash_timer_cb with the other overlay-adjacent subsystems. */
+    ui_pairing_init();
 
     ESP_LOGI(TAG, "LVGL initialized with splash screen");
     return 0;
