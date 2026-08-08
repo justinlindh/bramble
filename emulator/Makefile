@@ -44,6 +44,13 @@ ui: check
 ## Open the URL it prints and load the "emu-channel-delivery" scenario for a
 ## live provisioned 3-pager mesh, or "emulator-3-pagers" for an unprovisioned
 ## attach/persistence smoke.
+##
+## gosim is launched from the repo root, not from emulator/: a scenario's
+## firmware_nodes[].binary is a repo-relative path that gosim resolves against
+## its OWN working directory (Go's exec.Command uses a path containing a "/"
+## as-is), so from anywhere else every firmware node fails to spawn with "no
+## such file or directory". The CI scenario suite and the e2e harness both
+## spawn gosim from the repo root for the same reason.
 run: node broker ui
 	@echo "==> launching bramble-gosim: broker + UI, port $(PORT)"
 	@echo "    gosim binds :$(PORT), i.e. 0.0.0.0:$(PORT) (verified: Go's"
@@ -52,7 +59,8 @@ run: node broker ui
 	@ip="$$(hostname -I 2>/dev/null | awk '{print $$1}')"; \
 	echo "    open: http://localhost:$(PORT)/  (this host)"; \
 	if [ -n "$$ip" ]; then echo "    or:   http://$$ip:$(PORT)/  (LAN / another machine)"; fi
-	"$(GOSIM_BIN)" --ui "$(UI_DIR)/dist" --scenarios "$(SCEN_DIR)" --port "$(PORT)"
+	cd "$(REPO_ROOT)" && "$(GOSIM_BIN)" --ui "$(UI_DIR)/dist" \
+	    --scenarios "$(SCEN_DIR)" --port "$(PORT)"
 
 serve: run
 
@@ -65,7 +73,8 @@ playground: node broker ui
 	@ip="$$(hostname -I 2>/dev/null | awk '{print $$1}')"; \
 	echo "    open: http://localhost:$(PORT)/  (this host)"; \
 	if [ -n "$$ip" ]; then echo "    or:   http://$$ip:$(PORT)/  (LAN / another machine)"; fi
-	"$(GOSIM_BIN)" --ui "$(UI_DIR)/dist" --scenarios "$(SCEN_DIR)" --port "$(PORT)" --playground
+	cd "$(REPO_ROOT)" && "$(GOSIM_BIN)" --ui "$(UI_DIR)/dist" \
+	    --scenarios "$(SCEN_DIR)" --port "$(PORT)" --playground
 
 ## headless: run the CI scenario suite locally.
 headless: node broker
