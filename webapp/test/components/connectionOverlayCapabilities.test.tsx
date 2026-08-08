@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ConnectionOverlay } from '../../src/components/ConnectionOverlay';
 import { useStore } from '../../src/store/index';
 
@@ -24,7 +24,7 @@ describe('ConnectionOverlay capability gating', () => {
     cleanup();
   });
 
-  it('disables LAN direct connect in hosted mode with reason', async () => {
+  it('explains hosted-mode WiFi instead of dead-ending on a disabled button', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({
@@ -39,14 +39,29 @@ describe('ConnectionOverlay capability gating', () => {
     expect(await screen.findByText('Hosted')).toBeInTheDocument();
 
     const wifiButton = screen.getByRole('button', { name: /wifi/i });
-    await waitFor(() => expect(wifiButton).toBeDisabled());
-    expect(wifiButton).toHaveAttribute('title', 'LAN direct connect is unavailable in hosted mode. Use USB or Bluetooth.');
+    await waitFor(() => expect(wifiButton).toHaveAttribute('aria-disabled', 'true'));
+    // Selectable, unlike a disabled button, because selecting it is what
+    // shows the explanation.
+    expect(wifiButton).not.toBeDisabled();
+
+    fireEvent.click(wifiButton);
+
+    expect(screen.getByText('WiFi needs a direct connection to your node')).toBeInTheDocument();
+    expect(screen.getByText(/cannot reach your node over WiFi/)).toBeInTheDocument();
+    // jsdom reports a desktop user agent, so the desktop app is a usable
+    // answer here and the CTA is offered.
+    expect(screen.getByRole('link', { name: 'Get the desktop app' })).toHaveAttribute(
+      'href',
+      'https://github.com/justinlindh/bramble/releases',
+    );
+    // Nothing offers an action that cannot succeed.
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
   });
 
-  it('enables USB only when navigator.serial exists', () => {
-    // jsdom has no serial API by default
+  it('marks USB unavailable only when navigator.serial is missing', () => {
     render(<ConnectionOverlay />);
-    expect(screen.getByRole('button', { name: /usb/i })).toBeDisabled();
+    // jsdom has no serial API by default
+    expect(screen.getByRole('button', { name: /usb/i })).toHaveAttribute('aria-disabled', 'true');
 
     cleanup();
     Object.defineProperty(navigator, 'serial', {
@@ -55,6 +70,6 @@ describe('ConnectionOverlay capability gating', () => {
     });
 
     render(<ConnectionOverlay />);
-    expect(screen.getByRole('button', { name: /usb/i })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /usb/i })).not.toHaveAttribute('aria-disabled', 'true');
   });
 });
