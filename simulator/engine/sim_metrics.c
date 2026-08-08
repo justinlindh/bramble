@@ -22,12 +22,6 @@ void metrics_update_active_nodes(metrics_state_t* metrics, int count) {
     metrics->active_nodes = count;
 }
 
-double metrics_delivery_rate(const metrics_state_t* metrics) {
-    if (metrics->total_packets == 0)
-        return 0.0;
-    return (double)metrics->delivered_packets / (double)metrics->total_packets;
-}
-
 double metrics_avg_latency_ms(const metrics_state_t* metrics) {
     if (metrics->latency_count == 0)
         return 0.0;

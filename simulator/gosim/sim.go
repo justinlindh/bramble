@@ -654,7 +654,7 @@ func (s *Sim) handleInterferenceEnd(evt *C.sim_event_t) {
 
 // putSharedMetrics fills the counter and rate fields the periodic "metrics"
 // tick and the terminal "final_metrics" event report identically into m. Both
-// events used to inline these 20 key/value pairs verbatim, so a change to one
+// events used to inline these 19 key/value pairs verbatim, so a change to one
 // (a renamed counter, a different divisor) had to be mirrored in the other or
 // the two payloads would silently drift, exactly the hazard the surrounding
 // comments warn about. The fields that legitimately differ between the two
@@ -680,12 +680,6 @@ func (s *Sim) putSharedMetrics(m map[string]any) {
 	m["channel_log_overflow"] = uint64(s.radio.channel.overflow_drops)
 	m["airtime_total_ms"] = uint64(s.metrics.airtime_total_us) / 1000
 	m["avg_latency_ms"] = float64(C.metrics_avg_latency_ms(&s.metrics))
-	// delivery_rate divides delivered by total_packets (every frame of every
-	// type on the air, beacons included), which is NOT a message delivery
-	// figure and understates end-to-end delivery by an order of magnitude in
-	// control-heavy runs. Kept under its old name for continuity; the honest
-	// number is message_delivery_rate on the final_metrics event.
-	m["delivery_rate"] = float64(C.metrics_delivery_rate(&s.metrics))
 }
 
 func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
