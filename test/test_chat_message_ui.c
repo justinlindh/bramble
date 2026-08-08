@@ -33,6 +33,32 @@ void test_details_toggle_available_for_any_outgoing_with_packet_id(void) {
     TEST_ASSERT_FALSE(chat_message_has_details_toggle(true, 0));
 }
 
+void test_retryable_for_a_failed_dm_that_never_reached_the_air(void) {
+    /* The case this exists for, seen on the bench: a DM whose attempts were
+     * exhausted while it was still queued for a route or a session carries
+     * packet_id 0. Gating retry on a packet id hid the button from exactly the
+     * failure a user most wants to retry, so retryability keys on the uid. */
+    TEST_ASSERT_FALSE(chat_message_has_details_toggle(true, 0));
+    TEST_ASSERT_TRUE(chat_message_is_retryable(true, -1, MSG_STATUS_FAILED, 7));
+}
+
+void test_retryable_only_for_failed_outgoing_dms(void) {
+    TEST_ASSERT_TRUE(chat_message_is_retryable(true, -1, MSG_STATUS_FAILED, 7));
+
+    /* Incoming: nothing of ours to re-send. */
+    TEST_ASSERT_FALSE(chat_message_is_retryable(false, -1, MSG_STATUS_FAILED, 7));
+    /* Channel or broadcast: not ACK-tracked, so never actually FAILED, and a
+     * resend would not reconcile a single recipient's row anyway. */
+    TEST_ASSERT_FALSE(chat_message_is_retryable(true, 0, MSG_STATUS_FAILED, 7));
+    TEST_ASSERT_FALSE(chat_message_is_retryable(true, 3, MSG_STATUS_FAILED, 7));
+    /* Still in flight or already delivered: nothing to retry. */
+    TEST_ASSERT_FALSE(chat_message_is_retryable(true, -1, MSG_STATUS_SENT, 7));
+    TEST_ASSERT_FALSE(chat_message_is_retryable(true, -1, MSG_STATUS_DELIVERED, 7));
+    TEST_ASSERT_FALSE(chat_message_is_retryable(true, -1, MSG_STATUS_NONE, 7));
+    /* No uid: nothing for the resend to reconcile against. */
+    TEST_ASSERT_FALSE(chat_message_is_retryable(true, -1, MSG_STATUS_FAILED, 0));
+}
+
 static void test_name_of(char* out, size_t out_len, uint32_t addr) {
     snprintf(out, out_len, "N%02X", (unsigned)(addr & 0xFF));
 }
@@ -123,6 +149,8 @@ int main(void) {
     RUN_TEST(test_delivery_badge_status_delivered_is_double_check_and_delivered_color);
     RUN_TEST(test_delivery_badge_status_failed_is_close_and_failed_color);
     RUN_TEST(test_details_toggle_available_for_any_outgoing_with_packet_id);
+    RUN_TEST(test_retryable_for_a_failed_dm_that_never_reached_the_air);
+    RUN_TEST(test_retryable_only_for_failed_outgoing_dms);
     RUN_TEST(test_receipt_summary_lists_all_when_few);
     RUN_TEST(test_receipt_summary_truncates_with_plus_n);
     RUN_TEST(test_receipt_summary_keeps_full_names);

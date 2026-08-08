@@ -2400,6 +2400,10 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len) 
     return mesh_send_message_uid(dest_addr, data, len, 0);
 }
 
+uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len, uint32_t uid) {
+    return mesh_send_message_uid(dest_addr, data, len, uid);
+}
+
 #ifdef CONFIG_IDF_TARGET_LINUX
 /* Emulator only: the address of this node's first known neighbor, or 0 if it has
  * none yet. A scenario's scripted sender (emu_autosend.c) uses it to DM a peer
@@ -2737,6 +2741,14 @@ void mesh_get_state(mesh_shared_state_t* out) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *out = s_shared;
     xSemaphoreGive(s_state_mutex);
+}
+
+bool mesh_route_is_usable(uint32_t dest_addr) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    const route_entry_t* r = route_lookup(&s_routes, dest_addr);
+    bool usable = (r != NULL && r->state != ROUTE_BROKEN && r->state != ROUTE_STALE);
+    xSemaphoreGive(s_state_mutex);
+    return usable;
 }
 
 bool mesh_get_neighbor(uint32_t addr, neighbor_entry_t* out) {

@@ -29,6 +29,14 @@ chat_delivery_badge_t chat_message_delivery_badge(msg_status_t status);
  * status, route when it says something, delivery receipts. */
 bool chat_message_has_details_toggle(bool is_outgoing, uint32_t packet_id);
 
+/* A failed outgoing DM can be re-sent. Keyed on the row's uid, NOT its
+ * packet_id: a message that exhausted its attempts without ever reaching the
+ * air has packet_id 0, and it is the one most worth a retry. A message that
+ * satisfies this is expandable even when chat_message_has_details_toggle is
+ * false, or the Retry button would have nowhere to live. */
+bool chat_message_is_retryable(bool is_outgoing, int16_t channel_index, msg_status_t status,
+                               uint32_t uid);
+
 /* Whether the expanded panel should draw a route line.
  *
  * A route is only worth showing for a single-recipient message that actually
