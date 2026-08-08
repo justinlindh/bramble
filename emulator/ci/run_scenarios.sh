@@ -32,6 +32,18 @@
 #                         wall-clock variance, so CI gates on the symptom + heal
 #                         trigger, not the final post-heal render. See the
 #                         scenario file.)
+#   emu-parked-delivery   park-b holds its own mesh_task_start (no radio at
+#                         all) for a fixed window, so it is genuinely
+#                         unreachable; park-a targets park-b's real address via
+#                         a handoff file (never a beacon, so the eventual
+#                         rejoin is a genuine is_new_peer edge, not a table
+#                         update) and sends two DMs that fail and get parked.
+#                         When park-b's window ends and it joins the mesh,
+#                         park-a's rejoin-triggered flush redelivers both.
+#                         Asserts both distinct message bodies land in park-b's
+#                         console log, individually identified, not a count.
+#                         One run, no retries; any node death fails the suite.
+#                         See the scenario file for the full construction.
 #
 # PREREQUISITES:
 #   1. The linux node binary: emulator/node/build/bramble-node.elf
@@ -567,6 +579,128 @@ location_suite() {
     return 1
 }
 
+# --- Scenario 5: parked delivery -------------------------------------------
+# park-b holds its own mesh_task_start (main.c's EMU_MESH_START_DELAY_MS,
+# 180s) for the whole failure phase, so it transmits and receives nothing at
+# all: a genuinely faithful outage, not a beacon-suppression trick. park-a
+# resolves park-b's real, randomly-generated address from a handoff file
+# (EMU_AUTO_SEND_TO=file:peer_addr.txt, written by park-b at boot well before
+# its mesh delay elapses; see emu_autosend.c's resolve_dest_from_file) rather
+# than "neighbor" resolution, because "neighbor" blocks on an actual beacon by
+# design and park-a must never have heard one before the rejoin:
+# mesh_flush_parked_for only fires on an is_new_peer edge (mesh_beacon.c),
+# which is a first-ever admission to the neighbor table, not a refresh of an
+# existing one. With park-b genuinely off the mesh, park-a's two scripted DMs
+# ('PARK ALPHA', 'PARK BETA', a few seconds apart) can find no route, and each
+# queued-for-route entry expires MSG_STATUS_FAILED after the flat 60s route
+# TTL, checked on mesh_task's 60s purge cadence (so up to ~120s worst case if
+# a send lands right after a tick fires; see emu_autosend.c's park_test_task
+# for the full derivation). park-a's EMU_AUTO_PARK=1 parks each individually
+# via mesh_park_message once FAILED, the only lever available here: the
+# T-Deck's LVGL Queue button (scr_chat_messages.c) is not compiled for the
+# virtual-pager board this emulator uses, so this scenario proves the
+# mesh-level path (park, rejoin, redeliver), not the button that reaches it on
+# real hardware.
+#
+# The wait is EVENT-DRIVEN like the other suites: poll the growing log for
+# the two individually-identified '[MSG from <addr>] PARK ALPHA' / '... PARK
+# BETA' lines (main/mesh_task.c's CLI stdout echo, emitted only once a
+# message is actually received, decrypted and stored: genuine delivery, not a
+# count or the absence of a crash) and stop the instant both are present. The
+# budget is sized as a multiple of the nominal schedule, not a duration:
+# park-b's fixed 180s mesh delay must exceed both the ~120s worst-case FAILED
+# window AND the time both sends are actually parked, because
+# mesh_flush_parked_for only fires on an is_new_peer edge and that edge fires
+# EXACTLY ONCE per admission (see is_new_peer in mesh_beacon.c); if park-b
+# became reachable before both rows were parked, that edge would find nothing
+# to flush (confirmed empirically: a 20s mesh delay still let the two sends
+# reach their real ~120s FAILED TTL untouched, because nothing rescues a
+# route-queued entry just because the destination becomes reachable, but the
+# early is_new_peer never re-fires once the rows are later parked, so nothing
+# would ever redeliver them). 180s comfortably exceeds that ~120-125s
+# park-completion point with margin, plus settle time for the post-rejoin DM
+# handshake (session-less, so it needs a fresh KE exchange). 900s gives
+# roughly 4x the ~200-220s nominal completion, matching this suite's practice
+# of a wide margin for CPU-starvation slack. A genuine regression (flush never
+# fires, or the sticky-park guard breaks) simply never produces both lines and
+# the wait times out.
+parked_suite() {
+    echo "[5] emu-parked-delivery"
+    local budget_s="${EMU_PARKED_BUDGET_S:-900}"
+    local sim_ms="${EMU_PARKED_SIM_CAP_MS:-600000}"
+    local scen="$SCEN_DIR/emu-parked-delivery.json"
+    [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
+    local PARKED_LOG; PARKED_LOG="$LOG_DIR/emu-parked-delivery-$(date +%s).log"
+
+    info "running emu-parked-delivery (marker budget ${budget_s}s, sim cap $((sim_ms / 1000))s)..."
+    EMU_SCENARIO_DURATION_MS="$sim_ms" \
+        timeout "$budget_s" "$GOSIM_BIN" -headless -scenario "$scen" >"$PARKED_LOG" 2>&1 &
+    local pid=$!
+    CHILD_PIDS+=("$pid")
+
+    # Matches mesh_task.c's "Also print to stdout for CLI users" line
+    # ('[MSG from %08X] %s'), emitted only once a message is actually
+    # received, decrypted and stored (main/mesh_task.c ~line 1040, and the
+    # fragment-reassembly path at ~line 956). Deliberately NOT the ESP_LOGI
+    # '>>> %s' decode-log line right above it: gosim's console capture wraps
+    # every line as a JSON string, and Go's default JSON encoder HTML-escapes
+    # '>' to >, so a literal '>>> ' pattern silently never matches the
+    # log on disk. The bracket line has no such characters. The hex address
+    # is a wildcard (park-b's real address is only known at runtime, and
+    # differs every run), so this cannot match park-a's own outbound
+    # 'park-test DM to <addr> (n/2): PARK ALPHA' log line, a different format
+    # that never contains '[MSG from '.
+    parked_markers_present() {
+        grep -qE '\[MSG from [0-9A-Fa-f]+\] PARK ALPHA' "$PARKED_LOG" &&
+            grep -qE '\[MSG from [0-9A-Fa-f]+\] PARK BETA' "$PARKED_LOG"
+    }
+
+    local seen=1 deadline
+    deadline=$(( $(date +%s) + budget_s ))
+    while :; do
+        if parked_markers_present; then
+            seen=0
+            break
+        fi
+        kill -0 "$pid" 2>/dev/null || break
+        [ "$(date +%s)" -lt "$deadline" ] || break
+        # 3s cadence, matching dm_suite: the check is a cheap grep here (no
+        # frame decoding), but a tighter loop would still steal CPU from the
+        # very nodes it waits on over a run this long.
+        sleep 3
+    done
+
+    # Snapshot the scenario window BEFORE any teardown signal: the death rule
+    # below judges only lines logged up to this point, so the suite's own
+    # kill cannot manufacture a "death" (see check_no_deaths).
+    local scenario_lines
+    scenario_lines="$(wc -l < "$PARKED_LOG")"
+
+    # Reap by PROCESS GROUP via the recorded pid, then any direct children:
+    # never a name-wide pkill (see the cleanup() comment at the top of this
+    # file for why that pattern is unsafe with concurrent suites on one host).
+    kill "$pid" 2>/dev/null || true
+    pkill -P "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+
+    # Final check in case the last marker landed in the frames flushed as
+    # gosim exited.
+    if [ "$seen" -ne 0 ] && parked_markers_present; then
+        seen=0
+    fi
+
+    # STRICT death rule: deaths fail the run regardless of assertions.
+    check_no_deaths "$PARKED_LOG" 2 "emu-parked-delivery" "$scenario_lines" || return 1
+
+    if [ "$seen" -eq 0 ]; then
+        green "PASS: emu-parked-delivery: both parked DMs delivered after park-b rejoined"
+        return 0
+    fi
+    red "FAIL: emu-parked-delivery: did not see both parked DMs delivered within ${budget_s}s"
+    dump_diagnostics "$PARKED_LOG" "emu-parked-delivery"
+    return 1
+}
+
 # Run the suites one after the other so only one scenario's firmware nodes
 # are on the host at a time (see the isolation note above).
 channel_suite; chan_rc=$?
@@ -577,11 +711,14 @@ gps_suite; gps_rc=$?
 echo
 location_suite; loc_rc=$?
 echo
+parked_suite; parked_rc=$?
+echo
 
 [ "$chan_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$dm_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$gps_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$loc_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
+[ "$parked_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 
 # --- verdict --------------------------------------------------------------
 if [ "$FAILURES" -eq 0 ]; then

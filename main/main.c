@@ -17,6 +17,10 @@
 #include "crypto_entropy.h"
 #ifndef CONFIG_IDF_TARGET_LINUX
 #include "bootloader_random.h"
+#else
+#include <stdlib.h>
+#include <libgen.h>
+#include <limits.h>
 #endif
 #include "secure_nvs.h"
 #include "esp_partition.h"
@@ -88,6 +92,74 @@ int emu_node_seed_location_share_from_env(void);
 #endif
 
 static const char* TAG = "bramble";
+
+/* ── Emulator-only test hooks (linux target, opt-in via env) ───────────
+ * Both hooks are no-ops unless a scenario explicitly sets the env var: the
+ * real esp32s3 build never compiles this block, and every existing scenario
+ * that leaves these vars unset boots exactly as before. Built for the
+ * parked-delivery scenario (emu-parked-delivery.json), which needs a
+ * receiver that is genuinely off the mesh (no beacon TX/RX at all) for a
+ * controlled window, and a sender that can target that receiver's real
+ * address without ever having heard a beacon from it: the address is
+ * randomly generated at first boot (identity_generate_and_save), so there
+ * is no way to know it ahead of scenario-authoring time. */
+#ifdef CONFIG_IDF_TARGET_LINUX
+
+/* Writes this node's own hex address to a small handoff file so a sibling
+ * firmware process in the same scenario run can target it without ever
+ * receiving a beacon from it. EMU_ADDR_HANDOFF_FILE names the file (a bare
+ * filename, never a path); it is written next to this node's own NODE_DIR,
+ * in the run's shared temp base directory, which gosim mktemp's fresh per
+ * invocation, so concurrent suites on one host can never collide on it. The
+ * write goes through a temp file plus rename so a sibling polling for the
+ * file never observes a partial one. No-op if the env var or NODE_DIR is
+ * unset (a standalone boot with no broker never writes anything). */
+static void emu_write_addr_handoff_file(uint32_t addr) {
+    const char* fname = getenv("EMU_ADDR_HANDOFF_FILE");
+    const char* node_dir = getenv("NODE_DIR");
+    if (!fname || !*fname || !node_dir || !*node_dir)
+        return;
+
+    char node_dir_copy[PATH_MAX];
+    snprintf(node_dir_copy, sizeof(node_dir_copy), "%s", node_dir);
+    char* base_dir = dirname(node_dir_copy); /* NODE_DIR's parent: the run's shared temp dir */
+
+    char final_path[PATH_MAX];
+    char tmp_path[PATH_MAX];
+    snprintf(final_path, sizeof(final_path), "%s/%s", base_dir, fname);
+    snprintf(tmp_path, sizeof(tmp_path), "%s/%s.tmp", base_dir, fname);
+
+    FILE* f = fopen(tmp_path, "w");
+    if (!f) {
+        ESP_LOGW(TAG, "emu: could not write addr handoff file %s", tmp_path);
+        return;
+    }
+    fprintf(f, "%08" PRIX32 "\n", addr);
+    fclose(f);
+    if (rename(tmp_path, final_path) != 0) {
+        ESP_LOGW(TAG, "emu: could not rename addr handoff file to %s", final_path);
+        return;
+    }
+    ESP_LOGI(TAG, "emu: wrote address handoff file %s", final_path);
+}
+
+/* Delays mesh_task_start (and therefore radio_init, which runs inside it) by
+ * EMU_MESH_START_DELAY_MS. Before this call the node has already generated
+ * its identity, logged its address, and attached to the emu-link broker, but
+ * it has initialized no radio at all: it transmits and receives nothing
+ * during the delay, a genuinely faithful "not on the mesh yet" rather than a
+ * timing trick that merely suppresses beacons. */
+static void emu_delay_mesh_start(void) {
+    const char* v = getenv("EMU_MESH_START_DELAY_MS");
+    if (!v || !*v)
+        return;
+    unsigned long delay_ms = strtoul(v, NULL, 10);
+    if (delay_ms == 0)
+        return;
+    ESP_LOGI(TAG, "emu: holding mesh_task_start for %lu ms", delay_ms);
+    vTaskDelay(pdMS_TO_TICKS(delay_ms));
+}
+#endif /* CONFIG_IDF_TARGET_LINUX */
 
 /* ── Layout constants derived from display size ─────────────────────── */
 
@@ -1330,6 +1402,7 @@ void app_main(void) {
         } else {
             ESP_LOGI(TAG, "emu-link: no broker (EMU_BROKER unset or unreachable)");
         }
+        emu_write_addr_handoff_file(my_addr);
     }
 #endif
 
@@ -1630,6 +1703,9 @@ void app_main(void) {
     ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task_start ===");
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
     show_boot_status("Radio: SX1262...");
+#endif
+#ifdef CONFIG_IDF_TARGET_LINUX
+    emu_delay_mesh_start();
 #endif
     mesh_task_start(&g_identity);
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL

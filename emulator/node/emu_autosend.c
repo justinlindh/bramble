@@ -12,10 +12,17 @@
  * Driven entirely by environment (a scenario sets these per node via the
  * firmware-node "env" map):
  *   EMU_AUTO_SEND            phase-1 message text; unset/blank => never sends
- *   EMU_AUTO_SEND_TO         DM target for BOTH phases:
- *                              "neighbor" => the first learned neighbor's addr
- *                              a hex addr => that node
- *                              unset      => channel broadcast
+ *   EMU_AUTO_SEND_TO         DM target for BOTH phases (also used by
+ *                            park_test_task below):
+ *                              "neighbor"   => the first learned neighbor's addr
+ *                              "file:<name>" => poll a handoff file a sibling
+ *                                              process wrote (see
+ *                                              resolve_dest_from_file); lets a
+ *                                              sender target a peer's real
+ *                                              address without ever having
+ *                                              heard a beacon from it
+ *                              a hex addr   => that node
+ *                              unset        => channel broadcast
  *   EMU_AUTO_SEND_DELAY_MS   delay before phase 1 (default 12000). Must clear
  *                            UI_MESSAGE_IDLE_THRESHOLD_MS (10s) on the receiver
  *                            so an inbound message auto-opens its Messages
@@ -46,10 +53,21 @@
  * kept as a general emulator primitive; the desync scenario prefers the
  * deterministic drop above.
  *
+ * Park test (EMU_PARK_TEST=1): built for the parked-delivery scenario
+ * (emu-parked-delivery.json). Runs park_test_task instead of autosend_task
+ * (see emu_node_start_autosend): sends EMU_AUTO_SEND then EMU_AUTO_SEND2 as
+ * two individually-timed DMs (EMU_PARK_MSG1_DELAY_MS / EMU_PARK_MSG2_DELAY_MS,
+ * default 2000/5000) to a peer resolved via EMU_AUTO_SEND_TO=file:<name>,
+ * waits for both to read MSG_STATUS_FAILED, then parks each individually
+ * (mesh_park_message) when EMU_AUTO_PARK=1, or leaves them FAILED otherwise
+ * (this scenario's negative control). See park_test_task's own comment for
+ * why it cannot share autosend_task's phase-1/phase-2 timing.
+ *
  * Host-only: built only by emulator/node (null_drivers) on the linux target and
  * started from app_main under a CONFIG_IDF_TARGET_LINUX guard; a real esp32s3
  * build never compiles or links it.
  */
+#include <libgen.h>
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -61,11 +79,16 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "msg_store.h"
 
 /* Public mesh API (main/mesh_task.h) plus the emulator neighbor helper, all
  * forward-declared rather than pulling in the main component's headers, mirroring
  * how emu_flash_persist_init is wired from main.c; the symbols live in libmain.a
- * and resolve at the final link. */
+ * and resolve at the final link. msg_store is a standalone lower-level
+ * component (like network_key/location, already REQUIRES'd below), not part
+ * of main, so its header is included directly rather than forward-declared:
+ * park_test_task below needs the real stored_msg_t layout, not just a
+ * function prototype. */
 extern int mesh_send_broadcast(const uint8_t* data, size_t len);
 extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len);
 extern void mesh_set_node_name(const char* name);
@@ -74,6 +97,7 @@ extern int emu_mesh_drop_dm_sessions(void);
 extern int emu_mesh_dm_session_count(void);
 extern uint32_t msg_store_total_incoming(void);
 extern uint32_t msg_store_count_outgoing_delivered(void);
+extern bool mesh_park_message(uint32_t uid);
 
 static const char* TAG = "emu_autosend";
 
@@ -89,13 +113,65 @@ static unsigned env_uint(const char* name, unsigned def) {
     return (unsigned)n;
 }
 
+/* Resolves a destination address a sibling process wrote via
+ * emu_write_addr_handoff_file (main.c): the file lives at NODE_DIR's parent
+ * (the run's shared temp base dir gosim mktemp's fresh per invocation) plus
+ * fname. Polls for it, the same event-driven shape as the "neighbor" wait
+ * below, since the sibling may not have written it yet. This is what lets a
+ * sender target a peer's real address WITHOUT ever having received a beacon
+ * from it, which "neighbor" cannot do (it blocks on an actual beacon by
+ * design, see below) -- needed for a scenario that must construct a
+ * genuinely never-yet-seen peer (mesh_flush_parked_for's rejoin trigger is
+ * an is_new_peer edge, which only fires the first time an address is
+ * admitted to the neighbor table; see mesh_beacon.c). */
+static uint32_t resolve_dest_from_file(const char* fname) {
+    const char* node_dir = getenv("NODE_DIR");
+    if (!node_dir || !*node_dir) {
+        ESP_LOGE(TAG, "EMU_AUTO_SEND_TO=file:%s but NODE_DIR is unset", fname);
+        return 0;
+    }
+    char node_dir_copy[PATH_MAX];
+    snprintf(node_dir_copy, sizeof(node_dir_copy), "%s", node_dir);
+    char* base_dir = dirname(node_dir_copy); /* NODE_DIR's parent: the run's shared temp dir */
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/%s", base_dir, fname);
+
+    for (int i = 0; i < 240; i++) {
+        FILE* f = fopen(path, "r");
+        if (f) {
+            char buf[32] = {0};
+            size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+            fclose(f);
+            if (n >= 8) {
+                uint32_t addr = (uint32_t)strtoul(buf, NULL, 16);
+                if (addr != 0) {
+                    ESP_LOGI(TAG, "resolved dest %08X from handoff file %s", (unsigned)addr, path);
+                    return addr;
+                }
+            }
+        }
+        if (i > 0 && i % 20 == 0)
+            ESP_LOGW(TAG, "still waiting for handoff file %s (%d tries)", path, i);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    ESP_LOGE(TAG,
+             "handoff file %s never appeared; falling back to broadcast "
+             "(scenario construction is likely broken)",
+             path);
+    return 0;
+}
+
 /* Resolves the DM destination from EMU_AUTO_SEND_TO: 0 means broadcast. For
  * "neighbor" it retries briefly so a just-started sender waits for its first
- * beacon exchange rather than falling back to broadcast. */
+ * beacon exchange rather than falling back to broadcast. "file:<name>" reads
+ * a handoff file instead of the live neighbor table (see
+ * resolve_dest_from_file above). */
 static uint32_t resolve_dest(void) {
     const char* to = getenv("EMU_AUTO_SEND_TO");
     if (!to || !*to)
         return 0; /* broadcast */
+    if (strncmp(to, "file:", 5) == 0)
+        return resolve_dest_from_file(to + 5);
     if (strcmp(to, "neighbor") == 0) {
         /* EVENT-DRIVEN, with a cap far beyond any plausible discovery time.
          * The old ~20s cap was calibrated in subjective (tick) time, and the
@@ -303,9 +379,113 @@ static void drop_session_task(void* arg) {
     vTaskDelete(NULL);
 }
 
+/* park_test_task: a self-contained alternative to autosend_task, built for
+ * the parked-delivery scenario (emu-parked-delivery.json). It does NOT share
+ * autosend_task's phase-1/phase-2 timing: phase 2 there waits for phase 1's
+ * CONFIRMED DELIVERY before proceeding (see autosend_task above), which
+ * would never happen here by design, since both sends in this task are
+ * meant to genuinely fail. Runs as its own task, mutually exclusive with
+ * autosend_task (see emu_node_start_autosend below), reusing EMU_AUTO_SEND /
+ * EMU_AUTO_SEND2 as its two message texts and EMU_AUTO_SEND_TO to resolve
+ * the destination (normally "file:<name>": see resolve_dest_from_file).
+ *
+ * Sends the two DMs a few seconds apart, to a peer that has, by
+ * construction, never beaconed to this node (that is the whole point of the
+ * file handoff instead of "neighbor" resolution): dest is not a neighbor,
+ * route discovery finds nothing, and each queued-for-route entry expires
+ * FAILED after the flat 60s route TTL, checked on mesh_task's 60s purge
+ * cadence (mesh_task.c, ~line 1594-1623), so worst case is just under two
+ * purge intervals if a send lands right after a tick fires. Once both rows
+ * read FAILED, EMU_AUTO_PARK=1 parks each individually via
+ * mesh_park_message; left unset, both stay FAILED, which is this
+ * scenario's negative control (mesh_flush_parked_for has nothing to
+ * redeliver on the peer's later rejoin, since msg_store_parked_uids_for_peer
+ * only ever selects MSG_STATUS_QUEUED rows). */
+static void park_test_task(void* arg) {
+    (void)arg;
+    const char* text1 = getenv("EMU_AUTO_SEND");
+    const char* text2 = getenv("EMU_AUTO_SEND2");
+    if (!text1 || !*text1 || !text2 || !*text2) {
+        ESP_LOGE(TAG, "EMU_PARK_TEST set but EMU_AUTO_SEND/EMU_AUTO_SEND2 missing");
+        vTaskDelete(NULL);
+        return;
+    }
+    bool do_park = env_uint("EMU_AUTO_PARK", 0) != 0;
+
+    uint32_t dest = resolve_dest();
+    if (dest == 0) {
+        ESP_LOGE(TAG, "park test: could not resolve a destination; aborting");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    unsigned delay1 = env_uint("EMU_PARK_MSG1_DELAY_MS", 2000);
+    unsigned delay2 = env_uint("EMU_PARK_MSG2_DELAY_MS", 5000);
+
+    vTaskDelay(pdMS_TO_TICKS(delay1));
+    send_one(text1, strlen(text1), dest, "park-test", 0, 2);
+    if (delay2 > delay1)
+        vTaskDelay(pdMS_TO_TICKS(delay2 - delay1));
+    send_one(text2, strlen(text2), dest, "park-test", 1, 2);
+
+    /* Wait for BOTH rows to read FAILED, event-driven with a wide budget
+     * (150 tries * 2s = 300s): the worst case derived above is just under
+     * 120s, so this leaves comfortable headroom for CPU-starvation slack
+     * without hard-coding a tight number. */
+    size_t text1_len = strlen(text1);
+    size_t text2_len = strlen(text2);
+    uint32_t uid1 = 0, uid2 = 0;
+    for (int i = 0; i < 150; i++) {
+        int n = msg_store_count();
+        for (int idx = 0; idx < n; idx++) {
+            stored_msg_t m;
+            if (!msg_store_get_copy(idx, &m))
+                continue;
+            if (m.direction != MSG_DIR_OUTGOING || m.channel_index >= 0 || m.peer_addr != dest ||
+                m.status != MSG_STATUS_FAILED)
+                continue;
+            if (uid1 == 0 && m.text_len == text1_len && memcmp(m.text, text1, text1_len) == 0) {
+                uid1 = m.uid;
+            } else if (uid2 == 0 && m.text_len == text2_len &&
+                      memcmp(m.text, text2, text2_len) == 0) {
+                uid2 = m.uid;
+            }
+        }
+        if (uid1 != 0 && uid2 != 0)
+            break;
+        if (i > 0 && i % 10 == 0)
+            ESP_LOGW(TAG, "park test: still waiting for both sends to fail (%d tries, uid1=%08X uid2=%08X)",
+                     i, (unsigned)uid1, (unsigned)uid2);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+
+    if (uid1 == 0 || uid2 == 0) {
+        ESP_LOGE(TAG, "park test: timed out waiting for both DMs to FAIL (uid1=%08X uid2=%08X)",
+                 (unsigned)uid1, (unsigned)uid2);
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGI(TAG, "park test: both DMs FAILED (uid1=%08X uid2=%08X)", (unsigned)uid1, (unsigned)uid2);
+
+    if (do_park) {
+        bool ok1 = mesh_park_message(uid1);
+        bool ok2 = mesh_park_message(uid2);
+        ESP_LOGI(TAG, "park test: parked uid=%08X ok=%d, uid=%08X ok=%d", (unsigned)uid1, ok1,
+                 (unsigned)uid2, ok2);
+    } else {
+        ESP_LOGI(TAG, "park test: EMU_AUTO_PARK not set, leaving both rows FAILED (negative control)");
+    }
+
+    vTaskDelete(NULL);
+}
+
 /* Starts the scripted-send task if EMU_AUTO_SEND is set, the reboot timer if
  * EMU_REBOOT_AT_MS is set, and the session-drop timer if
- * EMU_DROP_DM_SESSION_AT_MS is set. Returns 0 if any was started, -1 if none. */
+ * EMU_DROP_DM_SESSION_AT_MS is set. Returns 0 if any was started, -1 if none.
+ * EMU_PARK_TEST takes priority over the normal EMU_AUTO_SEND path (mutually
+ * exclusive, not merely by scenario convention): park_test_task reuses
+ * EMU_AUTO_SEND/EMU_AUTO_SEND2 as its own message texts, so starting
+ * autosend_task too would double-send against the same env vars. */
 int emu_node_start_autosend(void) {
     int started = -1;
 
@@ -316,7 +496,20 @@ int emu_node_start_autosend(void) {
     if (node_name && *node_name)
         mesh_set_node_name(node_name);
 
-    if (getenv("EMU_AUTO_SEND") && *getenv("EMU_AUTO_SEND")) {
+    bool park_test = getenv("EMU_PARK_TEST") && *getenv("EMU_PARK_TEST") &&
+                     strcmp(getenv("EMU_PARK_TEST"), "0") != 0;
+
+    if (park_test) {
+        /* 8 KB stack: same rationale as autosend_task below (the send path
+         * runs crypto (channel/DM encrypt + MAC) like the DM handshake
+         * worker). */
+        if (xTaskCreate(park_test_task, "emu_parktest", 8192, NULL, 5, NULL) == pdPASS) {
+            ESP_LOGI(TAG, "park test armed");
+            started = 0;
+        } else {
+            ESP_LOGW(TAG, "could not start park test task");
+        }
+    } else if (getenv("EMU_AUTO_SEND") && *getenv("EMU_AUTO_SEND")) {
         /* 8 KB stack: the send path runs crypto (channel/DM encrypt + MAC) like
          * the DM handshake worker, bumped to the same for its stack (PR #133). */
         if (xTaskCreate(autosend_task, "emu_autosend", 8192, NULL, 5, NULL) == pdPASS) {
