@@ -13,6 +13,9 @@
 #include "ble_server.h"
 #include "ble_redact.h"
 #include "ble_link_sec.h"
+#include "ble_pairing_policy.h"
+#include "ble_pairing_store.h"
+#include "crypto.h"
 #include "rpc_dispatcher.h"
 #include "rpc_auth.h"
 #include "ct_strcmp.h"
@@ -89,6 +92,8 @@ __attribute__((weak)) void bramble_boot_probe(unsigned stage, int rc) {
 }
 static bool s_ble_authenticated = false;
 static uint8_t s_auth_fail_count = 0;
+static ble_passkey_display_cb_t s_passkey_display_cb = NULL;
+static unsigned s_pairing_fail_count = 0; /* consecutive SMP failures, drives adv backoff */
 
 /* S21: rate-limit BLE auth attempts */
 #define BLE_AUTH_MAX_FAILS 5
@@ -398,6 +403,23 @@ static const struct ble_gatt_svc_def s_gatt_svcs[] = {
 static int gap_event_handler(struct ble_gap_event* event, void* arg);
 static void start_advertising(void);
 
+/* Uniform random passkey 0..999999 via rejection sampling (1000000 does not
+ * divide 2^32, so a bare modulo is biased). crypto_random fails closed
+ * before the entropy gate opens; a pairing attempt that early fails too. */
+static int random_passkey(uint32_t* out) {
+    for (int i = 0; i < 16; i++) {
+        uint32_t r;
+        if (crypto_random((uint8_t*)&r, sizeof(r)) != 0) {
+            return -1;
+        }
+        if (r < 4294000000u) { /* largest multiple of 1000000 <= 2^32 */
+            *out = r % 1000000u;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 /* Advertising restart retry. start_advertising used to be fire-and-forget:
  * called once per disconnect, and if the host returned any transient error
  * (busy during a host reset, EPREEMPTED, momentary pool pressure) the
@@ -424,7 +446,7 @@ static void schedule_adv_retry(void) {
      * host task and the timer task; NULL only if creation failed at init,
      * in which case the old fire-and-forget behavior is what remains. */
     if (s_adv_retry_timer != NULL) {
-        xTimerStart(s_adv_retry_timer, 0);
+        xTimerChangePeriod(s_adv_retry_timer, pdMS_TO_TICKS(BLE_ADV_RETRY_MS), 0);
     }
 }
 
@@ -526,7 +548,20 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
         s_auth_fail_count = 0;
         s_mtu = BLE_MTU_DEFAULT + 3;
         s_line_len = 0;
-        start_advertising();
+        if (s_passkey_display_cb != NULL) {
+            s_passkey_display_cb(0, false);
+        }
+        {
+            uint32_t backoff = ble_pairing_backoff_ms(s_pairing_fail_count);
+            if (backoff == 0) {
+                start_advertising();
+            } else if (s_adv_retry_timer != NULL) {
+                ESP_LOGW(TAG, "Pairing failures: delaying adv restart %ums", (unsigned)backoff);
+                xTimerChangePeriod(s_adv_retry_timer, pdMS_TO_TICKS(backoff), 0);
+            } else {
+                start_advertising();
+            }
+        }
         break;
 
     case BLE_GAP_EVENT_SUBSCRIBE:
@@ -545,6 +580,14 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
         } else {
             ESP_LOGW(TAG, "Encryption change: status=%d (conn lookup failed)",
                      event->enc_change.status);
+        }
+        if (s_passkey_display_cb != NULL) {
+            s_passkey_display_cb(0, false); /* pairing attempt over, hide code */
+        }
+        if (event->enc_change.status == 0) {
+            s_pairing_fail_count = 0;
+        } else {
+            s_pairing_fail_count++;
         }
         break;
     }
@@ -567,14 +610,38 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             return BLE_GAP_REPEAT_PAIRING_RETRY;
         }
 
-    case BLE_GAP_EVENT_PASSKEY_ACTION:
-        /* NO_INPUT_OUTPUT means Just Works, so the stack should never ask us
-         * for a passkey. If it does, the IO capability configuration and the
-         * board's actual capabilities have diverged: log loudly rather than
-         * silently accepting something we cannot show the user. */
-        ESP_LOGE(TAG, "Unexpected passkey action %d on a Just Works configuration",
-                 event->passkey.params.action);
+    case BLE_GAP_EVENT_PASSKEY_ACTION: {
+        if (event->passkey.params.action != BLE_SM_IOACT_DISP) {
+            /* DISPLAY_ONLY should only ever be asked to display. Anything
+             * else means the IO capability negotiation diverged from the
+             * policy; refuse rather than guess. */
+            ESP_LOGE(TAG, "Unsupported passkey action %d; terminating",
+                     event->passkey.params.action);
+            ble_gap_terminate(event->passkey.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            break;
+        }
+        struct ble_sm_io io = {.action = BLE_SM_IOACT_DISP};
+        uint32_t code;
+        if (s_passkey_display_cb != NULL) {
+            if (random_passkey(&code) != 0) {
+                ESP_LOGE(TAG, "No entropy for pairing code; terminating");
+                ble_gap_terminate(event->passkey.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+                break;
+            }
+            s_passkey_display_cb(code, true);
+        } else if (!ble_pairing_store_get(&code)) {
+            /* Static mode with an unreadable key: fail closed. */
+            ESP_LOGE(TAG, "Static passkey unavailable; terminating");
+            ble_gap_terminate(event->passkey.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            break;
+        }
+        io.passkey = code;
+        int prc = ble_sm_inject_io(event->passkey.conn_handle, &io);
+        if (prc != 0) {
+            ESP_LOGE(TAG, "ble_sm_inject_io failed: %d", prc);
+        }
         break;
+    }
 
     case BLE_GAP_EVENT_MTU:
         s_mtu = event->mtu.value;
@@ -646,6 +713,32 @@ static void set_default_device_name(void) {
     }
 }
 
+/* Map the pairing policy onto NimBLE's security manager. Called at init and
+ * again whenever the static passkey changes; ble_hs_cfg is read per pairing
+ * attempt, so updates apply to the next attempt without a restart. */
+static void apply_pairing_policy(void) {
+    ble_pairing_mode_t mode =
+        ble_pairing_mode_resolve(s_passkey_display_cb != NULL, ble_pairing_store_is_set());
+    if (mode == BLE_PAIRING_JUST_WORKS) {
+        ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
+        ble_hs_cfg.sm_mitm = 0;
+    } else {
+        ble_hs_cfg.sm_io_cap = BLE_HS_IO_DISPLAY_ONLY;
+        ble_hs_cfg.sm_mitm = 1;
+    }
+    ESP_LOGI(TAG, "BLE pairing mode: %s", ble_pairing_mode_name(mode));
+}
+
+void ble_server_pairing_config_changed(void) {
+    apply_pairing_policy();
+    /* Bonds created under the previous policy are not trustworthy under the
+     * new one; force every peer to re-pair with the current code. */
+    int rc = ble_store_clear();
+    if (rc != 0) {
+        ESP_LOGW(TAG, "ble_store_clear failed: %d", rc);
+    }
+}
+
 int ble_server_init(void) {
     /* Read node name for BLE device name */
     bool named = false;
@@ -705,23 +798,22 @@ int ble_server_init(void) {
      * Works is trivially recoverable from a sniffed exchange and a
      * downgrade to it would silently undo this whole change.
      *
-     * sm_io_cap=NO_IO gives Just Works. That is a deliberate choice, not an
-     * oversight: a passkey or numeric-comparison flow needs a display AND a
-     * confirm input on the peripheral, and the supported boards do not all
-     * have both (see docs/ and components/board_config). A flow that works
-     * on one profile and bricks BLE on another is worse than a uniform one.
-     * The residual is that an active MITM present at first-pairing time can
-     * still interpose; the passive sniffer in issue #73 cannot. Follow-up
-     * tracked separately.
+     * sm_io_cap and sm_mitm are set per board by apply_pairing_policy, which
+     * maps ble_pairing_mode_resolve's three modes (ble_pairing_policy.h)
+     * onto NimBLE: DISPLAY_PASSKEY and STATIC_PASSKEY both use
+     * BLE_HS_IO_DISPLAY_ONLY with MITM protection on, JUST_WORKS falls back
+     * to BLE_HS_IO_NO_INPUT_OUTPUT with MITM off when a board has neither a
+     * display callback nor an operator-set static passkey. An active MITM
+     * present at first-pairing time can still interpose against Just Works;
+     * the passkey modes close that gap on boards that support them.
      *
      * Bonding plus ENC|ID key distribution: the peer keeps the LTK so the
      * pairing prompt is once per device, and exchanging IRKs is the
      * groundwork for resolvable private addresses (the RPA gap noted in
      * on_sync).
      */
-    ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
     ble_hs_cfg.sm_sc = 1;
-    ble_hs_cfg.sm_mitm = 0;
+    apply_pairing_policy();
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
     ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
@@ -800,3 +892,7 @@ int ble_server_notify(const char* json, size_t len) {
     ble_notify_transport_cb(json, len, NULL);
     return 0;
 }
+
+void ble_server_set_passkey_display_cb(ble_passkey_display_cb_t cb) { s_passkey_display_cb = cb; }
+
+bool ble_server_has_passkey_display(void) { return s_passkey_display_cb != NULL; }

@@ -19,3 +19,7 @@ int ble_server_notify(const char* json, size_t len) {
     (void)len;
     return -1;
 }
+
+void ble_server_set_passkey_display_cb(ble_passkey_display_cb_t cb) { (void)cb; }
+bool ble_server_has_passkey_display(void) { return false; }
+void ble_server_pairing_config_changed(void) {}

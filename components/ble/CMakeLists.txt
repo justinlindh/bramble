@@ -20,7 +20,7 @@ if(${target} STREQUAL "linux")
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "../rpc/include"
         REQUIRES nvs_keys nvs_flash freertos
-        PRIV_REQUIRES rpc security main
+        PRIV_REQUIRES rpc security main crypto
     )
 else()
     idf_component_register(
@@ -28,6 +28,6 @@ else()
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "../rpc/include"
         REQUIRES nvs_keys bt nvs_flash freertos
-        PRIV_REQUIRES rpc security main
+        PRIV_REQUIRES rpc security main crypto
     )
 endif()

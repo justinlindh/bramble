@@ -797,3 +797,28 @@ esp_err_t esp_wifi_ap_get_sta_list(wifi_sta_list_t* list) {
     (void)list;
     return 1; /* ESP_FAIL */
 }
+
+/* BLE pairing (Task 4 contract tests drive these) */
+bool g_ble_has_passkey_display = false;
+int g_ble_pairing_config_changed_calls = 0;
+static uint32_t s_ble_passkey_value;
+static bool s_ble_passkey_set = false;
+
+bool ble_server_has_passkey_display(void) { return g_ble_has_passkey_display; }
+void ble_server_pairing_config_changed(void) { g_ble_pairing_config_changed_calls++; }
+int ble_pairing_store_set(uint32_t v) {
+    s_ble_passkey_value = v;
+    s_ble_passkey_set = true;
+    return 0;
+}
+int ble_pairing_store_clear(void) {
+    s_ble_passkey_set = false;
+    return 0;
+}
+bool ble_pairing_store_get(uint32_t* out) {
+    if (!s_ble_passkey_set)
+        return false;
+    *out = s_ble_passkey_value;
+    return true;
+}
+bool ble_pairing_store_is_set(void) { return s_ble_passkey_set; }
