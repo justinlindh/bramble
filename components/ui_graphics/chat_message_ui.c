@@ -19,6 +19,11 @@ chat_delivery_badge_t chat_message_delivery_badge(msg_status_t status) {
             .kind = CHAT_DELIVERY_BADGE_FAILED,
             .color_role = CHAT_DELIVERY_COLOR_FAILED,
         };
+    case MSG_STATUS_QUEUED:
+        return (chat_delivery_badge_t){
+            .kind = CHAT_DELIVERY_BADGE_QUEUED,
+            .color_role = CHAT_DELIVERY_COLOR_UNDELIVERED,
+        };
     default:
         return (chat_delivery_badge_t){
             .kind = CHAT_DELIVERY_BADGE_PENDING,
@@ -39,6 +44,11 @@ bool chat_message_is_retryable(bool is_outgoing, int16_t channel_index, msg_stat
      * likely to want to retry; gating on a packet id would hide the button
      * from exactly those messages. uid is the row identity and is never 0 for
      * a stored row, so it is what a resend reconciles against. */
+    return is_outgoing && channel_index < 0 && status == MSG_STATUS_FAILED && uid != 0;
+}
+
+bool chat_message_is_parkable(bool is_outgoing, int16_t channel_index, msg_status_t status,
+                              uint32_t uid) {
     return is_outgoing && channel_index < 0 && status == MSG_STATUS_FAILED && uid != 0;
 }
 

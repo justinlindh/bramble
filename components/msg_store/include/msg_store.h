@@ -42,6 +42,13 @@ typedef enum {
     MSG_STATUS_SENT = 1,      /* Transmitted over radio */
     MSG_STATUS_DELIVERED = 2, /* ACK received from recipient */
     MSG_STATUS_FAILED = 3,    /* Max retries exhausted */
+    /* Parked by the user: delivery is deferred until the peer rejoins the
+     * mesh. Deliberately an added VALUE and not a new field: the persistence
+     * backend validates record_size == sizeof(stored_msg_t) and rejects the
+     * file on mismatch, so widening the row would discard every device's
+     * message history on upgrade. Persistence of the parked state therefore
+     * costs nothing: msg_store already writes status changes back to flash. */
+    MSG_STATUS_QUEUED = 4,
 } msg_status_t;
 
 typedef struct {

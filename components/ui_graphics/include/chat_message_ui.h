@@ -11,6 +11,7 @@ typedef enum {
     CHAT_DELIVERY_BADGE_SINGLE_CHECK,
     CHAT_DELIVERY_BADGE_DOUBLE_CHECK,
     CHAT_DELIVERY_BADGE_FAILED,
+    CHAT_DELIVERY_BADGE_QUEUED,
 } chat_delivery_badge_kind_t;
 
 typedef enum {
@@ -36,6 +37,13 @@ bool chat_message_has_details_toggle(bool is_outgoing, uint32_t packet_id);
  * false, or the Retry button would have nowhere to live. */
 bool chat_message_is_retryable(bool is_outgoing, int16_t channel_index, msg_status_t status,
                                uint32_t uid);
+
+/* A failed outgoing DM can be parked for delivery when the peer returns.
+ * Keyed on the row uid for the same reason retry is: a message that never
+ * reached the air carries packet_id 0. A row that is already parked is not
+ * parkable again; its action is Cancel. */
+bool chat_message_is_parkable(bool is_outgoing, int16_t channel_index, msg_status_t status,
+                              uint32_t uid);
 
 /* Whether the expanded panel should draw a route line.
  *

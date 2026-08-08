@@ -59,6 +59,34 @@ void test_retryable_only_for_failed_outgoing_dms(void) {
     TEST_ASSERT_FALSE(chat_message_is_retryable(true, -1, MSG_STATUS_FAILED, 0));
 }
 
+void test_queued_badge_is_its_own_kind(void) {
+    /* Parked is not pending: a pending message is on the air and a parked one
+     * is deliberately waiting, and the row must not read as in flight. */
+    chat_delivery_badge_t badge = chat_message_delivery_badge(MSG_STATUS_QUEUED);
+    TEST_ASSERT_EQUAL(CHAT_DELIVERY_BADGE_QUEUED, badge.kind);
+    TEST_ASSERT_EQUAL(CHAT_DELIVERY_COLOR_UNDELIVERED, badge.color_role);
+}
+
+void test_parkable_only_for_failed_outgoing_dms(void) {
+    TEST_ASSERT_TRUE(chat_message_is_parkable(true, -1, MSG_STATUS_FAILED, 7));
+
+    /* Already parked: the offer is Cancel, not park again. */
+    TEST_ASSERT_FALSE(chat_message_is_parkable(true, -1, MSG_STATUS_QUEUED, 7));
+    /* Incoming, channel, broadcast, in flight, delivered, no uid. */
+    TEST_ASSERT_FALSE(chat_message_is_parkable(false, -1, MSG_STATUS_FAILED, 7));
+    TEST_ASSERT_FALSE(chat_message_is_parkable(true, 0, MSG_STATUS_FAILED, 7));
+    TEST_ASSERT_FALSE(chat_message_is_parkable(true, 3, MSG_STATUS_FAILED, 7));
+    TEST_ASSERT_FALSE(chat_message_is_parkable(true, -1, MSG_STATUS_SENT, 7));
+    TEST_ASSERT_FALSE(chat_message_is_parkable(true, -1, MSG_STATUS_DELIVERED, 7));
+    TEST_ASSERT_FALSE(chat_message_is_parkable(true, -1, MSG_STATUS_FAILED, 0));
+}
+
+void test_retryable_excludes_a_parked_message(void) {
+    /* A parked row is not offered Retry: its two actions are Cancel and the
+     * automatic flush. */
+    TEST_ASSERT_FALSE(chat_message_is_retryable(true, -1, MSG_STATUS_QUEUED, 7));
+}
+
 static void test_name_of(char* out, size_t out_len, uint32_t addr) {
     snprintf(out, out_len, "N%02X", (unsigned)(addr & 0xFF));
 }
@@ -151,6 +179,9 @@ int main(void) {
     RUN_TEST(test_details_toggle_available_for_any_outgoing_with_packet_id);
     RUN_TEST(test_retryable_for_a_failed_dm_that_never_reached_the_air);
     RUN_TEST(test_retryable_only_for_failed_outgoing_dms);
+    RUN_TEST(test_queued_badge_is_its_own_kind);
+    RUN_TEST(test_parkable_only_for_failed_outgoing_dms);
+    RUN_TEST(test_retryable_excludes_a_parked_message);
     RUN_TEST(test_receipt_summary_lists_all_when_few);
     RUN_TEST(test_receipt_summary_truncates_with_plus_n);
     RUN_TEST(test_receipt_summary_keeps_full_names);
