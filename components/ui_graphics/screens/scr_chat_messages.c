@@ -221,53 +221,46 @@ static void msg_bubble_click_cb(lv_event_t* e) {
     ui_defer(rerender_async, NULL);
 }
 
-static void format_compact_hop_name(char* out, size_t out_len, uint32_t hop_addr) {
+/* Resolves an address to a display name. The route line and the receipt list
+ * want the same self and unnamed-peer handling and differ only in width, so
+ * the lookup lives here once and the callers pick the width: two copies of
+ * this would have to be kept in sync by hand. */
+static void format_peer_name(char* out, size_t out_len, uint32_t addr, bool compact) {
     if (!out || out_len == 0) {
         return;
     }
 
     /* The local node is not in its own peer table, so a name lookup on it
      * fails and it would render as a bare hex fragment beside named peers.
-     * "You" is both shorter than the 4-char name budget and unambiguous. */
+     * "You" is both shorter than the 4-char compact budget and unambiguous. */
     uint32_t self_addr = 0;
     uint8_t self_pubkey[32];
-    if (mesh_get_identity(&self_addr, self_pubkey) == 0 && self_addr == hop_addr) {
+    if (mesh_get_identity(&self_addr, self_pubkey) == 0 && self_addr == addr) {
         snprintf(out, out_len, "You");
         return;
     }
 
-    const char* peer_name = mesh_get_peer_name(hop_addr);
-    if (peer_name && peer_name[0]) {
+    const char* peer_name = mesh_get_peer_name(addr);
+    if (!peer_name || !peer_name[0]) {
+        snprintf(out, out_len, "%04lX", (unsigned long)(addr & 0xFFFFUL));
+    } else if (compact) {
         /* Compact route UI uses up to 4 chars per hop, no ellipsis. */
         snprintf(out, out_len, "%.4s", peer_name);
     } else {
-        snprintf(out, out_len, "%04lX", (unsigned long)(hop_addr & 0xFFFFUL));
+        snprintf(out, out_len, "%s", peer_name);
     }
+}
+
+static void format_compact_hop_name(char* out, size_t out_len, uint32_t hop_addr) {
+    format_peer_name(out, out_len, hop_addr, true);
 }
 
 /* Receipt names are NOT compacted. The 4-char budget above exists so a
  * multi-hop route chain fits one line; a receipt list wraps and has
  * CHAT_RECEIPT_NAME_MAX of room per name, and "Delivered to 2: Shah, Thom"
- * reads as a bug when the peers are named Shahzad and Thomas. Self and
- * unnamed peers keep the same fallbacks as the compact form. */
+ * reads as a bug when the peers are named Shahzad and Thomas. */
 static void format_receipt_peer_name(char* out, size_t out_len, uint32_t peer_addr) {
-    if (!out || out_len == 0) {
-        return;
-    }
-
-    uint32_t self_addr = 0;
-    uint8_t self_pubkey[32];
-    if (mesh_get_identity(&self_addr, self_pubkey) == 0 && self_addr == peer_addr) {
-        snprintf(out, out_len, "You");
-        return;
-    }
-
-    const char* peer_name = mesh_get_peer_name(peer_addr);
-    if (peer_name && peer_name[0]) {
-        snprintf(out, out_len, "%s", peer_name);
-    } else {
-        snprintf(out, out_len, "%04lX", (unsigned long)(peer_addr & 0xFFFFUL));
-    }
+    format_peer_name(out, out_len, peer_addr, false);
 }
 
 /* Builds the receipts line for an expanded outgoing bubble from the delivery

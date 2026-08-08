@@ -81,7 +81,9 @@ static void full_name_of(char* out, size_t out_len, uint32_t addr) {
     if (addr == 0x11) {
         snprintf(out, out_len, "Shahzad");
     } else {
-        /* BRAMBLE_NODE_NAME_MAX-length worst case: 32 chars. */
+        /* The callback contract's ceiling: 32 chars, filling
+         * CHAT_RECEIPT_NAME_MAX. A beacon caps a peer name at 16, so this is
+         * the bound the formatter promises, not one the mesh produces. */
         snprintf(out, out_len, "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
     }
 }

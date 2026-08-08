@@ -47,10 +47,13 @@ bool chat_message_has_details_toggle(bool is_outgoing, uint32_t packet_id);
 bool chat_message_route_is_informative(bool is_outgoing, int16_t channel_index,
                                        uint8_t route_hop_count);
 
-/* Room the summary reserves per recipient name, sized for a full node name
- * (BRAMBLE_NODE_NAME_MAX is 32; mirrored as a literal so this header stays
- * free of mesh_task.h). Receipt names render whole: the label wraps, and a
- * name clipped to a fragment of a known peer reads as a defect, not economy. */
+/* Room the summary reserves per recipient name. Receipt names render whole:
+ * the label wraps, and a name clipped to a fragment of a known peer reads as
+ * a defect, not economy. The ceiling is the node-name ceiling the protocol
+ * allows (BRAMBLE_NODE_NAME_MAX is 32, mirrored as a literal so this header
+ * stays free of mesh_task.h), not the 16 characters a beacon carries, which
+ * is what bounds a peer name reaching this formatter today: the summary is
+ * then not the piece that has to change if beacon names ever widen. */
 #define CHAT_RECEIPT_NAME_MAX 33
 
 /* Formats a receipt summary like "Delivered to 3: Alice, Bob, Carl" or
