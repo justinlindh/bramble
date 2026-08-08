@@ -91,6 +91,11 @@ typedef struct {
 typedef struct {
     char id[NODE_ID_LEN];
     uint32_t addr;
+    /* This node's slot in the owning node_array_t, assigned once at
+     * node_array_add and stable for the node's life (a rejoin reuses the
+     * entry). It is what keys the radio's link table in link mode, where
+     * audibility is looked up per node pair rather than derived from x/y. */
+    int index;
     float x;
     float y;
     /* Original scenario position, captured at creation (issue #144): a

@@ -15,6 +15,13 @@
  * same way main/beacon_policy_calc.c is), so the storm scenario spreads
  * receipts with firmware's constants rather than a copy of them. */
 #include "../../main/broadcast_delivery_receipt.h"
+/* Mesh digital twin: the firmware's bramble.exportTopology document builder,
+ * compiled into the sim via all.c and called by bridge_export_topology below.
+ * cJSON comes from the engine's copy (../engine/cJSON.h, on the include path);
+ * freq_plan.h supplies the region the export reports. */
+#include "../../main/topology_export.h"
+#include "../../components/freq_plan/include/freq_plan.h"
+#include "cJSON.h"
 /* Note: mailbox.h, location.h,
  * channel_key.h, public_channel.h are all pulled in transitively via
  * bridge.h (Phase 6 headers). */
@@ -608,12 +615,17 @@ bool bridge_msg_track_confirm(msg_tracker_t* track, int count, uint32_t packet_i
 /* ─── Internal packet handlers ─────────────────────────────────────────── */
 
 static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_t rssi,
-                           uint64_t now_us, uint32_t now_ms, node_array_t* nodes) {
+                           int8_t snr, uint64_t now_us, uint32_t now_ms, node_array_t* nodes) {
     bramble_beacon_t beacon;
     if (bramble_beacon_deserialize(&beacon, buf, len) != ESP_OK)
         return;
 
-    neighbor_update(&rx->neighbors, beacon.src_addr, rssi, 0, beacon.pubkey_hash, now_ms);
+    /* Both link-quality figures the radio computed for this reception go into
+     * the neighbour table, matching firmware's handle_beacon
+     * (main/mesh_beacon.c), which passes the received rssi and snr straight to
+     * neighbor_update. The table is what bramble.exportTopology reports, so a
+     * dropped snr here would make every exported neighbour read 0 dB. */
+    neighbor_update(&rx->neighbors, beacon.src_addr, rssi, snr, beacon.pubkey_hash, now_ms);
 
     /* Phase 1 Task 1 (delivery-core plan): firmware's handle_beacon
      * (main/mesh_task.c) never installs a route on a heard beacon, only the
@@ -2384,7 +2396,8 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
 
     switch (hdr.type) {
     case PKT_TYPE_BEACON:
-        _handle_beacon(rx, buf, len, rssi, event->timestamp_us, now_ms, nodes);
+        _handle_beacon(rx, buf, len, rssi, event->data.packet.snr, event->timestamp_us, now_ms,
+                       nodes);
         break;
     case PKT_TYPE_RREQ:
         _handle_rreq(rx, buf, len, rssi, event->timestamp_us, now_ms, nodes, radio, rng, events,
@@ -3249,6 +3262,55 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
 /* ─── Duty-cycle cap (DES-8, Task 5) ────────────────────────────────────── */
 void bridge_apply_duty_cycle_cap(sim_node_t* node, uint8_t max_duty_cycle_pct) {
     airtime_budget_set_duty_cap(&node->airtime, max_duty_cycle_pct, true);
+}
+
+/* ─── Topology export (mesh digital twin) ───────────────────────────────── */
+char* bridge_export_topology(const sim_node_t* node, const radio_config_t* radio, uint64_t now_us) {
+    if (!node || !radio) {
+        return NULL;
+    }
+    const bramble_freq_plan_t* plan = freq_plan_get_default();
+
+    /* A simulated node names itself honestly: the twin importer never has to
+     * guess whether a document came off a device or out of gosim. The scenario
+     * id rides along as the node name, which is what lets a round-trip test
+     * follow one node across a re-import even though gosim re-derives an
+     * address from the id (node_array_add). */
+    topology_export_identity_t identity = {
+        .address = node->addr,
+        .name = node->id,
+        .firmware_version = "gosim",
+        .protocol_version = BRAMBLE_PROTOCOL_VERSION,
+        .hardware = "gosim",
+        .uptime_s = now_us / 1000000ULL,
+    };
+
+    /* The scenario's PHY, which is what priced every frame's time-on-air in
+     * the run being exported. The duty cycle is the scenario's cap when it set
+     * one (bridge_apply_duty_cycle_cap really enforced it on every node), and
+     * otherwise the compiled-in plan's, exactly as a device reports it. */
+    topology_export_phy_t phy = {
+        .frequency_mhz = plan->default_freq_mhz,
+        .sf = radio->sf,
+        .bw_hz = radio->bw_hz,
+        .coding_rate = radio->cr,
+        .tx_power_dbm = radio->tx_power_dbm,
+        .region = plan->name,
+        .regulatory = plan->regulatory,
+        .max_duty_cycle_pct =
+            radio->duty_cycle_set ? radio->duty_cycle_pct : plan->max_duty_cycle_pct,
+        .duty_cycle_enforced = radio->duty_cycle_set ? true : plan->duty_cycle_enforced,
+    };
+
+    cJSON* root = cJSON_CreateObject();
+    if (!root) {
+        return NULL;
+    }
+    topology_export_document(root, &identity, &phy, &node->neighbors, &node->routes,
+                             (uint32_t)(now_us / 1000ULL));
+    char* out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return out;
 }
 
 /* ─── Init relay path tracker + extended state ────────────────────────── */

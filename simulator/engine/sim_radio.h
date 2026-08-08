@@ -26,6 +26,7 @@ typedef struct {
 /* One transmission's occupancy of the shared medium */
 typedef struct {
     uint32_t tx_addr;
+    int tx_index; /* node_array index of the transmitter (link-mode audibility) */
     float tx_x;
     float tx_y;
     uint64_t start_us;
@@ -84,6 +85,29 @@ typedef struct radio_config {
      * mesh_task_start -> tx_gate_global_init -> tx_gate_init wiring. */
     bool duty_cycle_set;
     uint8_t duty_cycle_pct;
+
+    /* Link-graph mode (mesh digital twin, ../../docs/digital-twin.md).
+     *
+     * The default model derives who hears whom, and how strongly, from node
+     * positions and a path-loss gradient. An imported deployment has no
+     * positions: what a device reports is which neighbors it HEARD and at what
+     * RSSI/SNR, and solving positions back out of RSSI would invent
+     * propagation physics the export never measured. In link mode the radio
+     * reads audibility and received power straight from the explicit directed
+     * link table below, and node coordinates carry no physical meaning.
+     *
+     * Nothing else changes: time-on-air, collisions, capture, half-duplex and
+     * listen-before-talk all run exactly as in position mode, over the
+     * audibility this table defines.
+     *
+     * link_rssi[from][to] is the RSSI in dBm of transmissions by node index
+     * `from` as heard at node index `to`; link_snr is the matching SNR. Zero
+     * RSSI means no link: a real LoRa RSSI is always negative, so zero is free
+     * as the absent marker. The table is directed, because an observed mesh
+     * genuinely has one-way links. */
+    bool link_mode;
+    int8_t link_rssi[MAX_NODES][MAX_NODES];
+    int8_t link_snr[MAX_NODES][MAX_NODES];
 } radio_config_t;
 
 /* Listen-before-talk parameters, mirroring main/mesh_task.c transmit_packet
@@ -135,6 +159,34 @@ float radio_sensitivity_dbm(uint8_t sf, uint32_t bw_hz);
  * being a fixed disk independent of the radio's own settings.
  */
 float radio_derive_range(const radio_config_t* config);
+
+/*
+ * radio_link_set: declare that transmissions by node index `from` are heard at
+ * node index `to` at rssi dBm / snr dB, and switch the config into link mode.
+ * rssi must be nonzero (zero is the absent-link marker). Returns false, and
+ * changes nothing, for an out-of-range index or a zero RSSI.
+ */
+bool radio_link_set(radio_config_t* config, int from, int to, int8_t rssi, int8_t snr);
+
+/*
+ * radio_audible: can a frame transmitted by `tx` be detected at `rx` at all?
+ * The range disk in position mode, the imported link table in link mode. Pure
+ * RF audibility: it says nothing about whether either node is active, whether
+ * an interference zone covers the receiver, or whether random loss ate the
+ * frame; radio_can_receive layers those on top.
+ */
+bool radio_audible(const radio_config_t* config, const sim_node_t* tx, const sim_node_t* rx);
+
+/*
+ * radio_nodes_connected: can these two nodes exchange frames, i.e. is each
+ * audible to the other? The mesh-connectivity predicate, used by the partition
+ * detector (sim_anomaly.c) and the twin's node-criticality sweep. In position
+ * mode audibility is symmetric by construction, so this is the range-disk test
+ * the detector always used; in link mode it is deliberately strict, because a
+ * link observed in one direction only cannot carry a protocol exchange.
+ */
+bool radio_nodes_connected(const radio_config_t* config, const sim_node_t* a, const sim_node_t* b);
+
 bool radio_can_receive(const radio_config_t* config, const sim_node_t* tx, const sim_node_t* rx,
                        pcg32_state_t* rng);
 uint64_t radio_propagation_delay_us(const radio_config_t* config, float distance);

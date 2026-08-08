@@ -4,7 +4,7 @@ set(main_srcs
     "mesh_routing.c" "mesh_location.c" "mesh_mailbox.c" "mesh_persist.c"
     "mesh_channels.c" "mesh_rollcall.c"
     "broadcast_delivery_receipt.c" "delivery_event_ring.c"
-    "rpc_methods.c" "ws_server.c"
+    "rpc_methods.c" "topology_export.c" "ws_server.c"
     "rpc_token.c" "ws_origin.c" "ws_auth_credential.c"
     "secure_nvs.c" "board.c" "util.c" "rreq_pseudonym.c" "beacon_policy_calc.c"
     "probe_results.c" "probe_reply.c" "rerr_ack_fastfail.c")

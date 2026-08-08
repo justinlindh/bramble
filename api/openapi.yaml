@@ -305,6 +305,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/RoutesResponse'
 
+  /rpc/bramble.exportTopology:
+    post:
+      operationId: exportTopology
+      summary: Export this node's observed mesh state
+      description: >
+        Returns one node's view of the mesh as a single document: its identity,
+        the neighbours it hears with per-link RSSI and SNR, its routing table,
+        and the PHY and frequency-plan parameters that decide time-on-air. The
+        neighbours and routes arrays are the same shapes bramble.getNeighbors
+        and bramble.getRoutes return, written by the same emitters. Collect one
+        export per node and feed the files to the simulator's digital-twin
+        importer (docs/digital-twin.md) to reconstruct the deployment as a
+        runnable scenario.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Observed topology export
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopologyExportResponse'
+
   /rpc/bramble.getDmSessions:
     post:
       operationId: getDmSessions
@@ -2858,6 +2887,88 @@ components:
       type: object
       required: [routes]
       properties:
+        routes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Route'
+
+    TopologyExportResponse:
+      type: object
+      description: >
+        One node's observed mesh state, shaped for the simulator's digital-twin
+        importer. Observation only: every field is state the node already keeps,
+        read at the moment of the call.
+      required: [twin_schema, node, radio, neighbors, routes]
+      properties:
+        twin_schema:
+          type: integer
+          description: >
+            Document schema version. The importer refuses a version it does not
+            know rather than guessing at fields.
+        node:
+          type: object
+          required: [address, firmware_version, protocol_version, hardware, uptime_s]
+          properties:
+            address:
+              type: string
+              description: This node's address as 8-char uppercase hex.
+            name:
+              type: string
+              description: Configured node name (omitted when unset).
+            firmware_version:
+              type: string
+            protocol_version:
+              type: string
+            hardware:
+              type: string
+            uptime_s:
+              type: integer
+              description: Seconds since boot, the age bound on every observation below.
+        radio:
+          type: object
+          description: >
+            Runtime PHY plus the compiled-in frequency plan. sf, bw_hz and
+            coding_rate are what price a frame's time-on-air; the plan's duty
+            cycle bounds what the deployment may spend.
+          required:
+            - frequency_mhz
+            - sf
+            - bw_hz
+            - coding_rate
+            - tx_power_dbm
+            - region
+            - regulatory
+            - max_duty_cycle_pct
+            - duty_cycle_enforced
+          properties:
+            frequency_mhz:
+              type: number
+            sf:
+              type: integer
+            bw_hz:
+              type: integer
+            coding_rate:
+              type: integer
+              description: 1 to 4, meaning 4/5 through 4/8.
+            tx_power_dbm:
+              type: integer
+            region:
+              type: string
+              description: Frequency plan name, for example US915.
+            regulatory:
+              type: string
+              description: Regulatory regime the plan follows.
+            max_duty_cycle_pct:
+              type: integer
+              description: Plan duty-cycle ceiling; 100 means no limit.
+            duty_cycle_enforced:
+              type: boolean
+              description: Whether the ceiling is hard-enforced or advisory.
+        neighbors:
+          type: array
+          description: Nodes heard directly, with the link quality they were heard at.
+          items:
+            $ref: '#/components/schemas/Neighbor'
         routes:
           type: array
           items:

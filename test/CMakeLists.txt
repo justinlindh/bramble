@@ -1299,6 +1299,8 @@ add_executable(test_rpc_add_channel_contract
     stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1326,6 +1328,8 @@ add_executable(test_rpc_set_auth_token_contract
     stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1353,6 +1357,8 @@ add_executable(test_rpc_ble_security
     stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1380,6 +1386,8 @@ add_executable(test_rpc_get_config_channel_export
     stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1407,6 +1415,8 @@ add_executable(test_mesh_broadcast_delivery
     stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1562,6 +1572,8 @@ add_executable(test_rpc_anchor_contract
     stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1879,6 +1891,8 @@ add_executable(test_rpc_methods_firmware
     stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1949,6 +1963,8 @@ add_executable(test_rpc_scratch_isolation
     stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -2227,6 +2243,8 @@ add_executable(test_host_rpc_methods
     stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c

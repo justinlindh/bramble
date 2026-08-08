@@ -162,8 +162,25 @@ func anomalyInit(t *C.node_anomaly_tracker_t) {
 // anomalyCheckPartition runs the reachability sweep at virtual time nowUs.
 // Issue #144: this used to hardcode 0, so mesh_partition was the only
 // anomaly type whose emitted timestamp_us was not the detection time.
-func anomalyCheckPartition(nodes *C.node_array_t, radioRange float32, nowUs uint64) {
-	C.anomaly_check_partition(nodes, C.float(radioRange), C.uint64_t(nowUs), C.stdout)
+// The whole radio config, not just its range, because adjacency comes from
+// radio_nodes_connected: the range disk normally, the imported link graph for
+// a digital-twin scenario.
+func anomalyCheckPartition(nodes *C.node_array_t, radio *C.radio_config_t, nowUs uint64) {
+	C.anomaly_check_partition(nodes, radio, C.uint64_t(nowUs), C.stdout)
+}
+
+// partitionComponents labels every active node with its connected-component
+// index (-1 for inactive nodes), via the same anomaly_partition_components
+// traversal the mesh_partition detector runs on. Returns one entry per node in
+// node_array order plus the component count.
+func partitionComponents(nodes *C.node_array_t, radio *C.radio_config_t) ([]int, int) {
+	var comp [C.MAX_NODES]C.int
+	count := int(C.anomaly_partition_components(nodes, radio, &comp[0]))
+	out := make([]int, int(nodes.count))
+	for i := range out {
+		out[i] = int(comp[i])
+	}
+	return out, count
 }
 
 // --- RNG ---
@@ -197,13 +214,30 @@ type scenarioRunResult struct {
 // drainInstant core RunHeadless uses, so a duration-truncated scenario reports
 // identical sim_ended drops here as it does under the real headless binary.
 func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
+	return runScenarioCaptured(scenarioPath, true)
+}
+
+// runScenarioQuiet is runScenarioHeadless with the event stream captured and
+// nothing written to the process's own stdout. What the digital twin's capacity
+// probe (twin_analysis.go) runs on: it drives a scenario per offered rate and
+// then prints a report, and interleaving tens of thousands of simulation events
+// with that report would make it unreadable.
+func runScenarioQuiet(scenarioPath string) (*scenarioRunResult, error) {
+	return runScenarioCaptured(scenarioPath, false)
+}
+
+// runScenarioCaptured is the shared body. echoStdout is the sim's `headless`
+// flag, which decides only one thing (sim.go's emitRaw): whether every emitted
+// event is additionally written to the saved real stdout. Either way the caller
+// gets the full stream back in scenarioRunResult.Lines.
+func runScenarioCaptured(scenarioPath string, echoStdout bool) (*scenarioRunResult, error) {
 	var mu sync.Mutex
 	var lines []string
 	sim, err := NewSim("", func(b []byte) {
 		mu.Lock()
 		lines = append(lines, strings.TrimRight(string(b), "\n"))
 		mu.Unlock()
-	}, true)
+	}, echoStdout)
 	if err != nil {
 		return nil, err
 	}
