@@ -166,13 +166,6 @@ static void sleep_process_timer_cb(lv_timer_t* timer) {
     ui_pairing_poll();
 }
 
-static void tab_refresh_timer_cb(lv_timer_t* timer) {
-    (void)timer;
-    /* Intentionally empty: data screens show a snapshot; user switches
-     * tabs to refresh.  The old implementation called layout_set_tab()
-     * every 5 s, which destroyed scroll position and drill-down views. */
-}
-
 /* Timer callback to transition from splash to main UI */
 static void splash_timer_cb(lv_timer_t* timer) {
     ESP_LOGI(TAG, "Splash timeout, transitioning to main UI");
@@ -201,10 +194,16 @@ static void splash_timer_cb(lv_timer_t* timer) {
     s_layout = layout_create();
 
     /* Create periodic refresh timers. sleep_process_timer_cb (sleep drive +
-     * pairing poll) is created earlier, at LVGL init (see
-     * ui_graphics_init), not here. */
+     * pairing poll) is created earlier, at LVGL init (see ui_graphics_init),
+     * not here.
+     *
+     * There is no global tab-content tick: screens that need live data own
+     * their own timer (scr_nodes, scr_node_detail, scr_map, scr_traffic). An
+     * earlier global one called layout_set_tab() every 5 s and destroyed
+     * scroll position and drill-down views, and what replaced it was an empty
+     * callback that only survived in the docs as a refresh mechanism that did
+     * not exist. */
     lv_timer_create(status_refresh_timer_cb, 2000, NULL); /* Status bar: 2s */
-    lv_timer_create(tab_refresh_timer_cb, 5000, NULL);    /* Tab content: 5s */
 
     /* Initialize sleep manager for automatic display power saving */
     sleep_manager_init();

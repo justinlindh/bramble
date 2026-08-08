@@ -181,7 +181,9 @@ Inactive tabs: transparent background.
 | Timer | Period | Behavior |
 |-------|--------|----------|
 | Status refresh | 2s | Updates battery %, neighbor count in status bar; processes pending events (new messages) |
-| Tab refresh | 5s | Rebuilds content area if active tab is Stats or Nodes (live data refresh) |
+| Sleep drive | 0.5s | Runs the sleep manager's blocking display power-down off the esp_timer task, and polls the BLE pairing overlay |
+
+There is no global tab-content timer. A screen that needs live data owns its own; see Live Data Refresh under User Flows.
 
 ---
 
@@ -316,7 +318,7 @@ Keyboard focus is placed on the textarea immediately on open; physical keyboard 
 
 **Source:** `screens/scr_nodes.c`  
 **LVGL trigger:** `scr_nodes_create()` from `layout_set_tab(TAB_NODES)`  
-**Auto-refresh:** Every 5 seconds (rebuilds via `tab_refresh_timer_cb`)
+**Auto-refresh:** Every 1 second. The card list is rebuilt only when membership changes (a rolling hash of the neighbor addresses moves); otherwise each row's age, signal readout and recency styling are updated in place, so ages count up without the list reordering or focus jumping.
 
 ```text
 [Content Area: 320×180]
@@ -325,11 +327,11 @@ Keyboard focus is placed on the textarea immediately on open; physical keyboard 
 ├──────────────────────────────────────┤
 │ ┌────────────────────────────────┐   │
 │ │ NodeAlpha         ████░░  🟢   │   │  ← Card: name, signal bar, online dot
-│ │ -82dBm  SNR:7                  │   │
+│ │ -82dBm  SNR:7  12s             │   │
 │ └────────────────────────────────┘   │
 │ ┌────────────────────────────────┐   │
 │ │ 0A1B2C3D          ██░░░░  🟢   │   │  ← Card: hex addr (no name set)
-│ │ -95dBm  SNR:2                  │   │
+│ │ -95dBm  SNR:2  4m 12s          │   │
 │ └────────────────────────────────┘   │
 │ ...                                  │
 └──────────────────────────────────────┘
@@ -352,18 +354,21 @@ Keyboard focus is placed on the textarea immediately on open; physical keyboard 
 ```text
 ┌─────────────────────────────────────────┐
 │ {name or 8-char hex addr}    [bar] 🟢   │  y=0, name: Montserrat 14 TEXT
-│ {-XXdBm  SNR:X}                         │  y=20, Montserrat 12 TEXT_SEC
+│ {-XXdBm  SNR:X  {age}}                  │  y=20, Montserrat 12 TEXT_SEC
 └─────────────────────────────────────────┘
 ```
 
 | Element     | Details                                                               |
 |-------------|-----------------------------------------------------------------------|
 | Name/addr   | `n->name` if set, else `%08lX` hex addr; Montserrat 14, TEXT         |
-| Info row    | `"{rssi}dBm  SNR:{snr}"`, Montserrat 12, TEXT_SEC                   |
-| Signal bar  | `lv_bar`, 40×8 px, top-right; value = `(rssi + 120) * 100 / 70`, clamped 0–100; fill = SUCCESS green |
-| Status dot  | 8×8 circle, top-right +0,-6; SUCCESS green if age < 600s (10 min), TEXT_SEC gray if stale |
+| Info row    | `"{rssi}dBm  SNR:{snr}  {age}"`, Montserrat 12, TEXT_SEC             |
+| Age         | `node_format_age()`: `"12s"`, `"4m 12s"`, `"2h 14m"`, `"3d 4h"`. Seconds resolution below an hour, which is every age the 10 min neighbor expiry can actually hold, so the row visibly counts up between refreshes |
+| Signal bar  | `lv_bar`, 40×8 px, top-right; value = `node_signal_pct()`, which maps -120..-50 dBm onto 0-100 and clamps; fill = SUCCESS green. Shared with the detail card so the two screens cannot disagree |
+| Status dot  | 8×8 circle, top-right +0,-6; SUCCESS green while age < `NODE_STALE_AGE_S` (300s), TEXT_SEC gray at or past it. The name and signal bar dim on the same threshold |
 
-Cards are clickable (no action currently implemented).
+Rows are ordered most-recently-heard first, ties broken by address so the order is total and a row keeps its slot across rebuilds.
+
+Tapping a card opens the node detail screen (`screens/scr_node_detail.c`): peer name or address, signal bar, RSSI/SNR, "Last seen {age} ago", the peer's shared location and its age, and a single action row of Back / DM / Map / Share. It refreshes once a second from live mesh state on the same helpers as the list, so nothing on it is a frozen snapshot of the moment it was opened.
 
 ---
 
@@ -384,7 +389,7 @@ Displays node positions from the location manager (`mesh_get_location_state()`) 
 
 **Source:** `screens/scr_stats.c`  
 **LVGL trigger:** `scr_stats_create()` from `layout_set_tab(TAB_STATS)`  
-**Auto-refresh:** Every 5 seconds (rebuilds via `tab_refresh_timer_cb`)
+**Auto-refresh:** None. This screen is a snapshot taken on tab entry, deliberately: the `+N` / `-N` figures under each counter are the delta against the previous visit (`s_prev_snapshot`), which is a reading a per-second tick would destroy.
 
 ```text
 [Content Area: 320×180, vertical flex column, 8px padding, 6px row gap]
@@ -559,13 +564,18 @@ mesh_task receives packet
         └── layout_set_unread(count++) [show/update red badge on Chat tab]
 ```
 
-### Live Data Refresh (Nodes / Stats)
+### Live Data Refresh
+
+There is no global tab-content tick. A screen that needs live data owns a timer created by its own builder and deleted with its widgets, so it costs nothing while any other tab is open:
 
 ```text
-5s tab_refresh_timer_cb fires:
-  └── If active_tab == TAB_STATS or TAB_NODES:
-        └── layout_set_tab(active_tab)   [rebuild with fresh mesh state]
+scr_nodes         1s   ages, signal, recency styling in place; rebuild only on membership change
+scr_node_detail   1s   ages, signal readout, peer location
+scr_traffic       2s   captured event list
+scr_map           5s   peer markers
 ```
+
+Stats has no timer on purpose: its per-counter deltas are measured against the previous visit.
 
 ---
 

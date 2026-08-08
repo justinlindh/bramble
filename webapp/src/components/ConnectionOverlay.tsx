@@ -1,16 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { connect, refreshDevices } from '../store/actions';
 import { BLETransport } from '../transport/BLETransport';
 import { useStore } from '../store/index';
 import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
 import { isAuthError } from '../lib/errors';
-import { isEmbeddedShell } from '../utils/platform';
-import { LOCAL_LAN_UNAVAILABLE_REASON } from '../lib/connectionMode';
+import { isEmbeddedShell, describePlatform } from '../utils/platform';
+import {
+  describeTransports,
+  type GatedTransport,
+  type TransportAvailability,
+  type TransportUnavailable,
+} from '../lib/transportAvailability';
 import type { TransportType } from '../types/bramble';
 import { IconUsb, IconBluetooth, IconMonitor, IconWifi, IconWarning } from './Icons';
 import { DeviceList } from './DeviceList';
 import { NearbyNodes } from './NearbyNodes';
 import type { NearbyNode } from '../lib/nearbyNodes';
+import { TransportUnavailableNotice } from './TransportUnavailableNotice';
 import styles from './ConnectionOverlay.module.css';
 
 const WIFI_IP_KEY = 'bramble_wifi_ip';
@@ -87,6 +93,32 @@ function saveLastIp(ip: string): void {
   try { localStorage.setItem(WIFI_IP_KEY, ip); } catch { /* noop */ }
 }
 
+const TRANSPORT_CHOICES: Array<{
+  id: GatedTransport;
+  label: string;
+  Icon: typeof IconUsb;
+  title: string;
+}> = [
+  { id: 'serial', label: 'USB', Icon: IconUsb, title: 'Connect via USB cable' },
+  { id: 'ble', label: 'Bluetooth', Icon: IconBluetooth, title: 'Connect via Bluetooth Low Energy' },
+  { id: 'wifi', label: 'WiFi', Icon: IconWifi, title: 'Connect directly to your Bramble node over LAN WiFi' },
+];
+
+// Nothing is declared unavailable before the capabilities fetch resolves.
+// WiFi's verdict comes straight from that response, and every explainer's
+// "what does work here" sentence is derived from the whole set, so an earlier
+// paint would state a restriction the app has not determined yet.
+const UNDETERMINED: Record<GatedTransport, TransportAvailability> = {
+  serial: { available: true },
+  ble: { available: true },
+  wifi: { available: true },
+};
+
+/** Ties an unavailable transport's button to the caption naming the reason. */
+function captionId(id: GatedTransport): string {
+  return `transport-${id}-caption`;
+}
+
 export function ConnectionOverlay() {
   const savedIp = loadSavedIp();
   const [transportType, setTransportType] = useState<TransportType>(savedIp ? 'wifi' : 'serial');
@@ -103,6 +135,7 @@ export function ConnectionOverlay() {
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
   const connectionCapabilities = useStore(s => s.connectionCapabilities);
+  const capabilitiesLoaded = useStore(s => s.capabilitiesLoaded);
 
   const isConnecting = connectionState === 'connecting';
   const authError = isAuthError(connectionError);
@@ -171,18 +204,42 @@ export function ConnectionOverlay() {
     }
   };
 
-  // Check browser support
-  const hasSerial = 'serial' in navigator;
-  const hasBluetooth = 'bluetooth' in navigator;
-  const wifiAllowed = connectionCapabilities.localLanAllowed;
-  const wifiReason = connectionCapabilities.localLanReason || LOCAL_LAN_UNAVAILABLE_REASON;
+  const availability = useMemo(
+    () =>
+      capabilitiesLoaded
+        ? describeTransports({
+            capabilities: connectionCapabilities,
+            hasSerial: 'serial' in navigator,
+            hasBluetooth: 'bluetooth' in navigator,
+            platform: describePlatform(),
+          })
+        : UNDETERMINED,
+    [connectionCapabilities, capabilitiesLoaded],
+  );
+
   const runtimeBadge = connectionCapabilities.mode === 'local' ? 'Local LAN' : 'Hosted';
 
+  const selectedEntry = transportType === 'websocket' ? { available: true as const } : availability[transportType];
+  const selectedUnavailable: TransportUnavailable | null = selectedEntry.available ? null : selectedEntry;
+
+  // The default lands on something that works. A saved IP means the user has
+  // connected over WiFi before, so prefer it when WiFi is allowed. When
+  // nothing works, which is the iOS hosted case, fall back to USB so its
+  // explainer is on screen immediately: the mock node is never auto-selected.
+  // Until capabilities resolve there is nothing to pick against, and moving the
+  // selection off the user's saved preference on a guess is what made the card
+  // flip mid-paint.
+  const [userPicked, setUserPicked] = useState(false);
   useEffect(() => {
-    if (!wifiAllowed && transportType === 'wifi') {
-      setTransportType(hasSerial ? 'serial' : hasBluetooth ? 'ble' : 'websocket');
-    }
-  }, [wifiAllowed, transportType, hasSerial, hasBluetooth]);
+    if (userPicked || !capabilitiesLoaded) return;
+    const order: GatedTransport[] = savedIp ? ['wifi', 'serial', 'ble'] : ['serial', 'ble', 'wifi'];
+    setTransportType(order.find(t => availability[t].available) ?? 'serial');
+  }, [availability, capabilitiesLoaded, userPicked, savedIp]);
+
+  const pickTransport = (t: TransportType) => {
+    setUserPicked(true);
+    setTransportType(t);
+  };
 
   const hints: Record<TransportType, string> = {
     serial: 'Connect your Bramble node via USB cable, then click Connect.',
@@ -212,57 +269,45 @@ export function ConnectionOverlay() {
         )}
 
         <div className={styles.transportSelect}>
-          <div className={styles.transportOption}>
-            <button
-              className={`${styles.transportBtn} ${transportType === 'serial' ? styles.active : ''} ${!hasSerial ? styles.unsupportedBtn : ''}`}
-              onClick={() => hasSerial && setTransportType('serial')}
-              disabled={!hasSerial}
-              title={hasSerial ? 'Connect via USB cable' : 'Web Serial not supported in this browser. Use Chrome or Edge 120+.'}
-            >
-              <IconUsb size={16} /> USB
-            </button>
-            {!hasSerial && (
-              <span className={styles.unsupportedCaption}>Not supported in this browser</span>
-            )}
-          </div>
-          <div className={styles.transportOption}>
-            <button
-              className={`${styles.transportBtn} ${transportType === 'ble' ? styles.active : ''} ${!hasBluetooth ? styles.unsupportedBtn : ''}`}
-              onClick={() => hasBluetooth && setTransportType('ble')}
-              disabled={!hasBluetooth}
-              title={hasBluetooth ? 'Connect via Bluetooth Low Energy' : 'Web Bluetooth not supported in this browser. Use Chrome on Android, or enable Experimental Web Platform features in chrome://flags.'}
-            >
-              <IconBluetooth size={16} /> Bluetooth
-            </button>
-            {!hasBluetooth && (
-              <span className={styles.unsupportedCaption}>Not supported in this browser</span>
-            )}
-          </div>
-          <div className={styles.transportOption}>
-            <button
-              className={`${styles.transportBtn} ${transportType === 'wifi' ? styles.active : ''} ${!wifiAllowed ? styles.unsupportedBtn : ''}`}
-              onClick={() => wifiAllowed && setTransportType('wifi')}
-              disabled={!wifiAllowed}
-              title={wifiAllowed ? 'Connect directly to your Bramble node over LAN WiFi' : wifiReason}
-            >
-              <IconWifi size={16} /> WiFi
-            </button>
-            {!wifiAllowed && (
-              <span className={styles.unsupportedCaption}>Unavailable in hosted mode</span>
-            )}
-          </div>
+          {TRANSPORT_CHOICES.map(({ id, label, Icon, title }) => {
+            const entry = availability[id];
+            const unavailable = entry.available ? null : entry;
+            return (
+              <div className={styles.transportOption} key={id}>
+                {/* Not aria-disabled: the button IS operable, and pressing it
+                    is the only way to reach the explanation. Declaring it
+                    disabled tells a screen reader to skip the one control
+                    carrying the reason. The caption is the description
+                    instead, which also supersedes a title attribute. */}
+                <button
+                  type="button"
+                  className={`${styles.transportBtn} ${transportType === id ? styles.active : ''} ${unavailable ? styles.unsupportedBtn : ''}`}
+                  onClick={() => pickTransport(id)}
+                  aria-pressed={transportType === id}
+                  aria-describedby={unavailable ? captionId(id) : undefined}
+                  title={unavailable ? undefined : title}
+                >
+                  <Icon size={16} /> {label}
+                </button>
+                {unavailable && (
+                  <span id={captionId(id)} className={styles.unsupportedCaption}>{unavailable.caption}</span>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         <div className={styles.mockDivider}><span>or</span></div>
         <button
           className={`${styles.transportBtn} ${styles.mockBtn} ${transportType === 'websocket' ? styles.active : ''}`}
-          onClick={() => setTransportType('websocket')}
+          onClick={() => pickTransport('websocket')}
+          aria-pressed={transportType === 'websocket'}
         >
           <IconMonitor size={16} /> Mock Node (WebSocket)
         </button>
 
         {/* Bluetooth connection settings */}
-        {transportType === 'ble' && (
+        {transportType === 'ble' && !selectedUnavailable && (
           <div className={styles.wifiInput}>
             <div className={styles.field}>
               <label className={styles.wifiLabel}>Device</label>
@@ -349,7 +394,7 @@ export function ConnectionOverlay() {
         )}
 
         {/* WiFi connection settings */}
-        {transportType === 'wifi' && (
+        {transportType === 'wifi' && !selectedUnavailable && (
           <div className={styles.wifiInput}>
             <NearbyNodes onPickUnknown={(n: NearbyNode) => {
               setWifiIp(n.ip);
@@ -427,28 +472,34 @@ export function ConnectionOverlay() {
           </div>
         )}
 
+        {selectedUnavailable && <TransportUnavailableNotice info={selectedUnavailable} />}
+
         {connectionError && (
           <div className={styles.error}>
             <span><IconWarning size={14} /> {connectionError}</span>
           </div>
         )}
 
-        <button
-          className={styles.connectBtn}
-          onClick={handleConnect}
-          disabled={isConnecting || (transportType === 'wifi' && !wifiIp.trim())}
-        >
-          {isConnecting ? (
-            <span className={styles.spinner}>
-              {transportType === 'ble' && <span className={styles.spinnerIcon} aria-label="Scanning in progress" />}
-              {connectingLabelFor(transportType)}
-            </span>
-          ) : (
-            'Connect'
-          )}
-        </button>
+        {!selectedUnavailable && (
+          <>
+            <button
+              className={styles.connectBtn}
+              onClick={handleConnect}
+              disabled={isConnecting || (transportType === 'wifi' && !wifiIp.trim())}
+            >
+              {isConnecting ? (
+                <span className={styles.spinner}>
+                  {transportType === 'ble' && <span className={styles.spinnerIcon} aria-label="Scanning in progress" />}
+                  {connectingLabelFor(transportType)}
+                </span>
+              ) : (
+                'Connect'
+              )}
+            </button>
 
-        <p className={styles.hint}>{hints[transportType]}</p>
+            <p className={styles.hint}>{hints[transportType]}</p>
+          </>
+        )}
 
         {/* The flasher is a hosted sibling page (webapp/public/web-flasher/),
             so the relative link only makes sense in a real browser, not in the

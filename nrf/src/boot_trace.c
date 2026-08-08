@@ -1,13 +1,25 @@
-/* See boot_trace.h. Word writes go straight through nrfx_nvmc with a
- * busy-wait: the whole point is to work when nothing else does, including
- * from a fault handler with interrupts disabled. */
+/* See boot_trace.h. Flash access goes straight at the NVMC with a busy-wait:
+ * the whole point is to work when nothing else does, including before the
+ * scheduler exists and from a fault handler with interrupts disabled.
+ *
+ * Busy-wait, but never an unbounded one, and never through nrfx: every
+ * blocking nrfx_nvmc_* wrapper spins on READY forever if the controller does
+ * not answer (see nvmc_bounded.h). On this path that would hang the node
+ * before the reset the stamp exists to precede, which is the exact opposite
+ * of what this file is for. nvmc_bounded_* is used with no yield hook,
+ * because there is no scheduler to yield to here.
+ *
+ * Every flash operation below is allowed to fail. A flash failure cannot be
+ * reported by writing to flash, so the response is always to abandon the
+ * record and carry on booting: a boot trace is a diagnostic aid and must
+ * never be the reason a node fails to start. */
 #include "boot_trace.h"
 
 #include <nrfx.h>
-#include <nrfx_nvmc.h>
 
 #include "boot_trace_scan.h"
 #include "bramble_wdt.h"
+#include "nvmc_bounded.h"
 
 static uint32_t s_next = 1; /* next free word slot */
 static uint32_t s_last_tag;
@@ -17,11 +29,26 @@ static volatile bool s_adv_ok;
  * load. Volatile because the same words are written through the NVMC. */
 static const volatile uint32_t* const s_page = (const volatile uint32_t*)BOOT_TRACE_PAGE;
 
+/* The page erase is the unsliced 85ms kind, which is right here and nowhere
+ * else: slicing needs a scheduler to hand the CPU to between slices, and this
+ * runs before there is one. It is also rare, only on a virgin or corrupt page
+ * and when the page fills.
+ *
+ * If the erase does not finish, the page is left in an unknown state and no
+ * magic word is written, so the next boot's scan sees an invalid page and
+ * comes straight back here. That is the honest outcome: the trace is lost,
+ * the boot is not. */
 static void page_reset(uint32_t carry_failed_boots, uint32_t carry_dog_boots) {
-    nrfx_nvmc_page_erase(BOOT_TRACE_PAGE);
-    nrfx_nvmc_word_write(BOOT_TRACE_PAGE, BOOT_TRACE_MAGIC);
-    while (!nrfx_nvmc_write_done_check()) {
+    if (!nvmc_bounded_page_erase(BOOT_TRACE_PAGE, NVMC_PAGE_ERASE_POLLS)) {
+        s_next = BOOT_TRACE_PAGE_WORDS; /* park past the end: stamp nothing */
+        return;
     }
+    uint32_t magic = BOOT_TRACE_MAGIC;
+    if (!nvmc_bounded_words_write(BOOT_TRACE_PAGE, &magic, 1, NVMC_WRITE_POLLS, NULL)) {
+        s_next = BOOT_TRACE_PAGE_WORDS;
+        return;
+    }
+    (void)nvmc_bounded_ready(NVMC_WRITE_POLLS, NULL);
     s_next = 1;
     if (carry_failed_boots > 0) {
         boot_trace_mark(BT_BOOT_CARRY, carry_failed_boots);
@@ -79,10 +106,15 @@ void boot_trace_mark(uint32_t tag, uint32_t aux) {
     if (s_next + 1u >= BOOT_TRACE_PAGE_WORDS) {
         return;
     }
-    nrfx_nvmc_word_write(BOOT_TRACE_PAGE + 4u * s_next, BOOT_TRACE_TAG_MARKER | tag);
-    nrfx_nvmc_word_write(BOOT_TRACE_PAGE + 4u * (s_next + 1u), aux);
-    while (!nrfx_nvmc_write_done_check()) {
-    }
+    const uint32_t words[2] = {BOOT_TRACE_TAG_MARKER | tag, aux};
+    (void)nvmc_bounded_words_write(BOOT_TRACE_PAGE + 4u * s_next, words, 2, NVMC_WRITE_POLLS, NULL);
+    (void)nvmc_bounded_ready(NVMC_WRITE_POLLS, NULL);
+    /* Both returns are deliberately dropped and the slot is consumed either
+     * way: the two words may be partially written, so a slot whose contents
+     * are unknown is never reused, and there is nowhere to report a flash
+     * failure to from here. s_last_tag still advances because it is the RAM
+     * copy the sentinel reads, and it is accurate regardless of whether the
+     * flash word landed. */
     s_next += 2;
     s_last_tag = tag;
 }
@@ -126,14 +158,19 @@ void bramble_nrfx_assert_failed(uint32_t line) {
      * exists to eliminate. The flash stamp is the channel that survives. */
     __disable_irq();
 
-    /* Reentrancy guard, and it is load-bearing rather than defensive:
-     * boot_trace_mark() writes through nrfx_nvmc_word_write(), which carries
-     * NRFX_ASSERTs of its own (address validity and word alignment). Without
-     * this, an assert raised inside the stamping path would call straight
-     * back into here and recurse until the stack gave out, turning a silent
-     * lockup into a silent lockup with extra steps. A nested failure skips
-     * the flash write and resets anyway, so whatever the trace already holds
-     * (the clean boot stages) is still readable from DFU. */
+    /* Reentrancy guard. An assert raised anywhere inside the stamping path
+     * would call straight back into here and recurse until the stack gave
+     * out, turning a silent lockup into a silent lockup with extra steps. A
+     * nested failure skips the flash write and resets anyway, so whatever the
+     * trace already holds (the clean boot stages) is still readable from DFU.
+     *
+     * The stamping path itself no longer raises any: it goes through
+     * nvmc_bounded_*, which uses the nrfx HAL primitives directly and carries
+     * no NRFX_ASSERT. The addresses it is given are page constants plus a word
+     * index, so the validity and alignment checks the old nrfx driver call
+     * made could not have failed here either. The guard stays because it costs
+     * one byte and covers every future caller of this handler, not because
+     * this particular path is known to trip it. */
     static volatile bool s_stamping;
     if (!s_stamping) {
         s_stamping = true;

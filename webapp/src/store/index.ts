@@ -210,6 +210,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   connectionError: undefined,
   transport: null,
   connectionCapabilities: DEFAULT_CAPABILITIES,
+  capabilitiesLoaded: false,
   config: null,
   status: null,
   airtime: null,
@@ -238,7 +239,10 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   setTransport: (t) => set({ transport: t }),
 
-  setConnectionCapabilities: (c) => set({ connectionCapabilities: c }),
+  // Setting capabilities is what makes them known, whatever their source: the
+  // /api/capabilities response, its failure fallback, or an embedded shell's
+  // constants, which resolve with no network round trip.
+  setConnectionCapabilities: (c) => set({ connectionCapabilities: c, capabilitiesLoaded: true }),
 
   setConfig: (c) => set(state => {
     const names = new Map(state.peerNames);

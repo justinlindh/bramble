@@ -1,5 +1,6 @@
 import { ESPLoader, Transport } from 'esptool-js';
 import { buildWifiConfigCommands } from './wifi-config.js';
+import { parseNetworkKeyInput, networkKeyFingerprint } from './network-key.js';
 
 // Bramble Web Flasher: powered by esptool-js (Espressif official)
 // UI controller: connects to ESP32-S3 via Web Serial, flashes firmware from OTA releases
@@ -87,6 +88,7 @@ const BOARDS = {
     const wifiSsidInput     = document.getElementById('wifi-ssid');
     const wifiPasswordInput = document.getElementById('wifi-password');
     const wifiPasswordToggle = document.getElementById('wifi-password-toggle');
+    const networkKeyInput   = document.getElementById('network-key');
     const authTokenInput    = document.getElementById('auth-token');
     const authTokenToggle   = document.getElementById('auth-token-toggle');
     const authTokenGenerate = document.getElementById('auth-token-generate');
@@ -622,6 +624,21 @@ const BOARDS = {
                 commands.push('reboot');
             }
 
+            // Validate the network key before touching the device, so a typo
+            // fails the form rather than leaving a half-configured node.
+            const networkKeyRaw = String(networkKeyInput?.value || '').trim();
+            let networkKey = null;
+            if (networkKeyRaw) {
+                try {
+                    networkKey = parseNetworkKeyInput(networkKeyRaw);
+                } catch (e) {
+                    setWifiStatus(e.message);
+                    wifiConnectBtn.disabled = false;
+                    wifiSkipBtn.disabled = false;
+                    return;
+                }
+            }
+
             // Set auth token via JSON-RPC if user provided one
             const authToken = String(authTokenInput?.value || '').trim();
             if (authToken && authToken.length < 16) {
@@ -632,6 +649,15 @@ const BOARDS = {
             if (authToken) {
                 setWifiStatus('Setting auth token…');
                 await sendSerialRPC('bramble.setAuthToken', { token: authToken });
+            }
+
+            // Provision the network key before the reboot below: this is what
+            // takes the node from inert to meshing.
+            let networkKeyFp = null;
+            if (networkKey) {
+                setWifiStatus('Provisioning network key…');
+                await sendSerialRPC('bramble.setNetworkKey', { key: networkKey });
+                networkKeyFp = await networkKeyFingerprint(networkKey);
             }
 
             setWifiStatus('Configuring device…');
@@ -648,9 +674,15 @@ const BOARDS = {
                 ? `\n\nYour auth token: ${authToken}\nSave this: you'll need it to connect wirelessly.`
                 : `\n\nNo token entered: the device generates its own on first boot.\nRetrieve it with: bramble pair`;
 
+            // Say plainly whether this node can actually mesh yet. A node that
+            // looks "configured" but is silently inert is the worst outcome.
+            const keyNote = networkKeyFp
+                ? `\n\nNetwork key provisioned (fingerprint ${networkKeyFp}).\nConfirm your other nodes report this same fingerprint.`
+                : `\n\nNO NETWORK KEY: this node is UNPROVISIONED and inert, so it will not mesh yet.\nOpen the Bramble web app and use Config -> Network Key to found a network or join one.`;
+
             showDone({
                 title: 'Device Configured!',
-                message: `${parts.join(' and ')}. You can now close this page.${tokenNote}`
+                message: `${parts.join(' and ')}. You can now close this page.${tokenNote}${keyNote}`
             });
         } catch (err) {
             setWifiStatus(`Setup failed: ${err.message || 'unknown error'}. You can configure these settings later from the Bramble web app.`);
@@ -661,9 +693,15 @@ const BOARDS = {
 
     // ── WiFi: Skip button ───────────────────────────────────
     wifiSkipBtn.addEventListener('click', () => {
+        // Skipping setup leaves the node without a network key, which means it
+        // cannot mesh. Say so rather than implying the job is finished.
         showDone({
-            title: "You're all set!",
-            message: 'Flash complete. You can configure WiFi later by connecting to the device with the Bramble web app.'
+            title: 'Flash complete: node not yet on a mesh',
+            message: 'The firmware is installed, but this node has NO NETWORK KEY, so it is '
+                + 'UNPROVISIONED and inert: it will not mesh until you give it one.\n\n'
+                + 'Connect to it with the Bramble web app over USB or Bluetooth, then use '
+                + 'Config -> Network Key to found a new network or join an existing one. '
+                + 'You can set WiFi and an auth token from there too.'
         });
     });
 

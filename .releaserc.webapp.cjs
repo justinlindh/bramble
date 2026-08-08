@@ -30,6 +30,14 @@ const wrapped = {
 //     only webapp/src/**; the sixth is docs-only (docs/trust-anchor.md).
 //     Zero commits touch device code.
 //   - electron: webapp/electron/main.ts, the desktop shell.
+//   - mock: webapp/mock is NOT dev-only. webapp/Dockerfile copies it into the
+//     runtime image and server/unified-server.mjs, the image's CMD, serves it
+//     at /ws as the "Mock Node (WebSocket)" demo the hosted client offers, so
+//     a mock change reaches users and must cut a release to be published.
+//   - web-flasher: the top-level web-flasher/ tree is staged into
+//     webapp/public/web-flasher/ before the image build (see the staging step
+//     shared by webapp-build-publish.yml and quality.yml), so the flasher
+//     ships inside the webapp image and reaches users the same way.
 // A second group is genuinely dual-scoped between webapp and firmware (a
 // single commit changing both a webapp screen and the on-device code it
 // talks to): chat, channels, dm, nodes, map, ota, persistence, probe, rpc,
@@ -46,7 +54,7 @@ const wrapped = {
 const WEBAPP_SCOPES = [
   'webapp',
   // Pure webapp features.
-  'anchor', 'electron',
+  'anchor', 'electron', 'mock', 'web-flasher',
   // Dual-scoped: also released by .releaserc.firmware.cjs when the same
   // commit changes on-device code.
   'chat', 'channels', 'dm', 'map', 'nodes', 'ota', 'persistence', 'probe',

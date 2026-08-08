@@ -12,6 +12,15 @@
  * slicing IS the coordination.
  *
  * Reads are plain memcpy: internal flash is memory-mapped.
+ *
+ * Every wait in here is bounded, which is why none of the nrfx_nvmc_* blocking
+ * wrappers are used: each of them spins on the READY flag with no bound of its
+ * own, including inside the sliced partial-erase call. nvmc_bounded.h explains
+ * that in full and provides the replacements. This block device runs under the
+ * NVS shim's global recursive lock, the one lock every other lock in the
+ * firmware sits above (nrf/shim/nvs_lfs.c), so an unbounded spin blocks every
+ * NVS consumer at once, and an unbounded spin that also never yields starves
+ * every task below the one holding it.
  */
 #include "lfs_nvmc.h"
 
@@ -20,10 +29,9 @@
 #include <FreeRTOS.h>
 #include <task.h>
 
-#include <nrfx_nvmc.h>
-
 #include "esp_log.h"
 #include "lfs.h"
+#include "nvmc_bounded.h"
 
 static const char* TAG = "lfs_nvmc";
 
@@ -39,6 +47,12 @@ static const char* TAG = "lfs_nvmc";
 static uint32_t s_base;
 static uint32_t s_size;
 
+/* Yield hook for the bounded waits. It only fires once a wait has already run
+ * long past the datasheet time for the operation, so the normal case never
+ * reaches it; when it does fire, this task is holding the global NVS lock and
+ * everything below it would otherwise be starved outright. */
+static void prog_yield(void) { taskYIELD(); }
+
 int lfs_nvmc_read(const struct lfs_config* c, lfs_block_t block, lfs_off_t off, void* buffer,
                   lfs_size_t size) {
     (void)c;
@@ -52,21 +66,42 @@ int lfs_nvmc_prog(const struct lfs_config* c, lfs_block_t block, lfs_off_t off, 
     uint32_t addr = s_base + block * c->block_size + off;
     /* prog_size is 4 and littlefs honors it, so this is always word-aligned
      * and word-sized; a word write is ~41us and needs no slicing. */
-    nrfx_nvmc_words_write(addr, buffer, size / sizeof(uint32_t));
-    while (!nrfx_nvmc_write_done_check()) {
+    if (!nvmc_bounded_words_write(addr, (const uint32_t*)buffer, size / sizeof(uint32_t),
+                                  NVMC_WRITE_POLLS, prog_yield)) {
+        ESP_LOGE(TAG, "word program did not start at 0x%08lx", (unsigned long)addr);
+        return LFS_ERR_IO;
+    }
+    /* The last word is still in flight: nvmc_bounded_words_write drops write
+     * mode immediately after the store, exactly as nrfx does, so completion is
+     * this wait.
+     *
+     * LFS_ERR_IO and not LFS_ERR_CORRUPT, deliberately: CORRUPT tells littlefs
+     * the block is bad and asks it to relocate, which is another page erase
+     * plus a whole block of programs. If the controller is not completing
+     * writes at all, that turns one expired wait into hundreds, every one of
+     * them still holding the global NVS lock. IO fails the operation
+     * immediately and hands the decision to the caller. */
+    if (!nvmc_bounded_ready(NVMC_WRITE_POLLS, prog_yield)) {
+        ESP_LOGE(TAG, "word program did not complete at 0x%08lx", (unsigned long)addr);
+        return LFS_ERR_IO;
     }
     return LFS_ERR_OK;
 }
 
 int lfs_nvmc_erase(const struct lfs_config* c, lfs_block_t block) {
     uint32_t addr = s_base + block * c->block_size;
-    if (nrfx_nvmc_page_partial_erase_init(addr, LFS_ERASE_SLICE_MS) != NRFX_SUCCESS) {
+    if (!nvmc_bounded_partial_erase_init(addr, LFS_ERASE_SLICE_MS)) {
         ESP_LOGE(TAG, "partial erase init failed at 0x%08lx", (unsigned long)addr);
         return LFS_ERR_IO;
     }
     for (int i = 0; i < LFS_ERASE_MAX_SLICES; i++) {
-        if (nrfx_nvmc_page_partial_erase_continue()) {
+        nvmc_slice_result_t r = nvmc_bounded_partial_erase_slice(NVMC_SLICE_POLLS);
+        if (r == NVMC_SLICE_DONE) {
             return LFS_ERR_OK; /* page fully erased */
+        }
+        if (r == NVMC_SLICE_TIMEOUT) {
+            ESP_LOGE(TAG, "erase slice %d timed out at 0x%08lx", i, (unsigned long)addr);
+            return LFS_ERR_IO;
         }
         /* Let the radios and the mesh run between slices. */
         taskYIELD();
