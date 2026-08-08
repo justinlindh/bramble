@@ -511,18 +511,46 @@ static void render_main_screen(const ui_state_t* ui) {
     }
     display_draw_text(2, y, line);
 
-    display_flush();
+    /* render_screen()'s single-flush-per-frame rule (see the comment on
+     * render_ble_passkey_overlay): skip the flush here when the overlay is
+     * about to draw on top, since the overlay does the one flush for this
+     * frame instead. render_main_screen() is also called standalone by the
+     * periodic uptime tick, which never calls it while the overlay is
+     * active, so this stays a plain unconditional flush on that path. */
+    if (!ui->ble_passkey_active)
+        display_flush();
 }
 
 /* BLE pairing overlay: drawn on top of whatever screen render_screen() just
  * finished, so a pairing request interrupts without any per-screen case
  * needing to know about it. Framed by two hlines like the header divider
  * every other screen already draws; there is no filled-rect primitive in
- * display.h, so the "panel" is this bordered text block, not an opaque box.
+ * display.h, so the "panel" is this bordered text block. The rect it
+ * occupies is blanked first (display_pixel(..., false)) so it reads as a
+ * clean panel instead of garbling over whatever text was already lit
+ * underneath.
+ *
+ * render_screen() flushes once per frame: every case's own display_flush()
+ * is skipped whenever this overlay is about to draw (see the
+ * ble_passkey_active checks throughout render_screen() and
+ * render_main_screen()), and this function does the frame's one flush
+ * instead. That keeps e-paper boards from double-flushing (a full SSD1680
+ * refresh blocks and wears the panel; see the ghosting-policy comment at
+ * the top of render_screen()).
+ *
  * The passkey itself is never logged, only rendered. */
 static void render_ble_passkey_overlay(const ui_state_t* ui) {
     int y = (DISPLAY_HEIGHT - (LINE_H * 3)) / 2;
-    display_hline(0, y - 2, DISPLAY_WIDTH);
+    int panel_top = y - 2;
+    int panel_bottom = y + LINE_H * 3;
+
+    for (int py = panel_top; py <= panel_bottom; py++) {
+        for (int px = 0; px < DISPLAY_WIDTH; px++) {
+            display_pixel(px, py, false);
+        }
+    }
+
+    display_hline(0, panel_top, DISPLAY_WIDTH);
 
     const char* title = "BLE PAIRING";
     display_draw_text((DISPLAY_WIDTH - (int)strlen(title) * FONT_W) / 2, y, title);
@@ -538,7 +566,7 @@ static void render_ble_passkey_overlay(const ui_state_t* ui) {
     display_draw_text((DISPLAY_WIDTH - (int)strlen(hint) * FONT_W) / 2, y, hint);
     y += LINE_H;
 
-    display_hline(0, y, DISPLAY_WIDTH);
+    display_hline(0, panel_bottom, DISPLAY_WIDTH);
     display_flush();
 }
 
@@ -640,7 +668,8 @@ static void render_screen(ui_state_t* ui) {
         else
             display_draw_text(2, FOOTER_Y, "[hold]older reply:app");
 #endif
-        display_flush();
+        if (!ui->ble_passkey_active)
+            display_flush();
         break;
     }
     case SCREEN_NODES: {
@@ -791,7 +820,8 @@ static void render_screen(ui_state_t* ui) {
             display_draw_text(2, FOOTER_Y, "[hold] verify contacts");
 #endif
         }
-        display_flush();
+        if (!ui->ble_passkey_active)
+            display_flush();
         break;
     }
     case SCREEN_SETTINGS: {
@@ -916,7 +946,8 @@ static void render_screen(ui_state_t* ui) {
             display_draw_text(2, FOOTER_Y, "[hold]edit [2x]exit");
 #endif
         }
-        display_flush();
+        if (!ui->ble_passkey_active)
+            display_flush();
         break;
     }
     case SCREEN_COMPOSE: {
@@ -1018,7 +1049,8 @@ static void render_screen(ui_state_t* ui) {
         display_draw_text(2, FOOTER_Y, "*pend +ok ++mh x fail");
 #endif
 
-        display_flush();
+        if (!ui->ble_passkey_active)
+            display_flush();
         break;
     }
     case SCREEN_GPS: {
@@ -1084,13 +1116,15 @@ static void render_screen(ui_state_t* ui) {
         }
 
         display_draw_text(2, FOOTER_Y, "[press] next screen");
-        display_flush();
+        if (!ui->ble_passkey_active)
+            display_flush();
         break;
     }
     default:
         display_clear();
         display_draw_text(0, 28, "Unknown screen");
-        display_flush();
+        if (!ui->ble_passkey_active)
+            display_flush();
         break;
     }
 
