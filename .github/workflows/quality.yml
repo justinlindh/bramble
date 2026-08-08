@@ -571,6 +571,25 @@ jobs:
           path: ${{ runner.temp }}/emu-scenario-logs/
           retention-days: 7
           if-no-files-found: ignore
+      - name: Upload E2E evidence on failure
+        # The browser suite's own evidence, for the same reason as the step
+        # above: Playwright's trace, screenshots and error context, plus the
+        # gosim log for the scenario the specs drove, all live inside the
+        # workspace and die with the pod. Without this, a rare E2E failure
+        # leaves only the assertion text, and the specs resolve nodes by
+        # per-boot-random mesh address, so the log is the only thing that says
+        # which node an id referred to. Diagnosing the card-resolution race
+        # (job 93089815971) had to be done from source rather than evidence
+        # precisely because this was not collected.
+        if: steps.e2e.outcome != 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: emu-e2e-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            emulator/e2e/.run/test-results/
+            emulator/e2e/.run/gosim.log
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Fail if any suite failed
         # The terminal gate for the collect-then-fail pattern above: the two
         # suite steps never fail the job directly (so both always report), and

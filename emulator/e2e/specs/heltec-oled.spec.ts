@@ -172,6 +172,23 @@ test.describe('heltec OLED per-screen capture', () => {
     // The scenario has three nodes (Alice + neighbors Bob and Carol); only
     // Alice runs the OLED profile, so she is the unique card with an
     // oled-canvas. Resolve her node id from that card's testid.
+    //
+    // Wait for the faces to settle first. This spec is not exposed to the
+    // boot-time face swap the way pager-screens is, because a card only ever
+    // shows the OLED face after a real 128x64 frame has landed, never as the
+    // e-paper default it is created with. It IS exposed to the other funnel:
+    // gosim's socket carries no replay on connect, but a device_fb from the
+    // still-running previous scenario can materialize a card on this page
+    // before this spec's own sim_reset wipes it, and in the pager scenario the
+    // neighbors are the OLED profile. Latching one of those would resolve a
+    // node id that the reset then deletes. Gating on the steady-state counts
+    // (Alice's one OLED face, the two e-paper neighbors) is false while any
+    // such leftover is present.
+    const oledCanvases = page.locator('canvas[data-testid="oled-canvas"]');
+    const epaperCanvases = page.locator('canvas[data-testid="epaper-canvas"]');
+    await expect(oledCanvases).toHaveCount(1, { timeout: 30_000 });
+    await expect(epaperCanvases).toHaveCount(2, { timeout: 30_000 });
+
     const oledCard = page
       .locator('[data-testid^="device-card-"]:has(canvas[data-testid="oled-canvas"])')
       .first();
