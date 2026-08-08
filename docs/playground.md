@@ -92,8 +92,13 @@ The fleet boots **unprovisioned**. It is the only emulator scenario that does,
 and it is deliberate: every other `emu-*` scenario hands each node a network
 key at boot because a headless assertion needs a meshing fleet immediately,
 while here the fail-closed state is the first thing the tour has to show. No
-node has `EMU_AUTO_SEND` either, so every frame on the ether is one you asked
-for.
+node has `EMU_AUTO_SEND` either, so every message on the ether is one you
+originated. What a keyed node sends without being asked is the firmware's own
+control plane on its shipped cadence: a beacon every 15 s, and an identity
+attestation once it has a key and every fifteen minutes after that
+(`main/mesh_beacon.c`). The emulator control path schedules nothing of its own,
+so a provisioned playground node behaves exactly like a bench node keyed over
+the `bramble.setNetworkKey` RPC.
 
 ## What each tour step demonstrates
 

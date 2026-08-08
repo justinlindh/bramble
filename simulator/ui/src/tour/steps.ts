@@ -129,7 +129,7 @@ export const TOUR_STEPS: TourStep[] = [
     body: [
       'A direct message is not a channel message. ALPHA and BRAVO run a key exchange first and then talk inside a session only those two can read. The handshake goes out at Critical tier, the most persistent of Bramble\'s three reliability tiers (Broadcast, Normal, Critical): eight retries from a 3 s base, because losing a handshake frame stalls the whole conversation.',
       'Encryption alone does not tell you who is on the other end. Bramble derives a 7-digit safety number from both identities, and comparing it out of band is what turns "encrypted" into "encrypted to the person I mean".',
-      'A node can only derive that number for a peer whose identity it has PINNED, and a pin comes from an identity attestation: the peer announcing its keys, signed. Nodes announce on their own every fifteen minutes, so ask ALPHA to announce now rather than waiting for the cadence.',
+      'A node can only derive that number for a peer whose identity it has PINNED, and a pin comes from an identity attestation: the peer announcing its keys, signed. A node announces once it has a network key and every fifteen minutes after that, and the announcement is an ordinary broadcast that can be lost. Ask ALPHA to announce now rather than waiting on that cadence, and ask again if BRAVO\'s peer screen still says it has no session.',
       'Then do the verification on the device: on BRAVO\'s face press DOWN until the header reads Nodes, press SELECT to open the peer list, DOWN until the cursor sits on ALPHA, and SELECT to open it. The 7 digits are the safety number. SELECT arms the confirmation and one more SELECT commits it, and the peer is marked VERIFIED.',
     ],
     view: 'devices',

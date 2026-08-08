@@ -55,7 +55,8 @@ then load a scenario from the dropdown:
   no traffic).
 - `emu-dm-desync`: the DM session desync repro and its self-heal.
 - `emu-playground`: three unprovisioned pagers in a line, two of them out of
-  range of each other, driven entirely by hand. This is what `make playground`
+  range of each other, with every provision and every message driven by hand.
+  This is what `make playground`
   loads; add `?tour=1` to the URL to get the guided tour on a stack started
   with `make run`.
 
@@ -77,8 +78,10 @@ your machine. Note that the local simulator (`simulator/gosim`) also defaults
 to `3000`, so running both at once needs one of them moved. The Docker
 variants do not collide: the simulator publishes 3003 and the emulator 3004.
 
-ESP-IDF location defaults to `~/src/esp-idf`; override with `IDF_PATH=...`
-if yours lives elsewhere (e.g. `make run IDF_PATH=/opt/esp-idf`). The
+ESP-IDF is located by `scripts/ci-source-idf.sh`, the helper CI uses: an
+`idf.py` already on your `PATH`, else the install locations that script lists.
+Point it somewhere else with `IDF_PATH=...` (e.g. `make run
+IDF_PATH=/opt/esp-idf`), which it honours ahead of everything else. The
 emulator needs ESP-IDF's **linux** target
 (`"$IDF_PATH"/install.sh linux`), which is a separate install from the
 `esp32s3` one used for real boards; `make check` will tell you if it is

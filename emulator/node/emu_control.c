@@ -35,17 +35,15 @@
  * copy the request into a pthread-mutex-guarded ring; emu_control_task, a real
  * FreeRTOS task, drains it and makes every mesh/NVS call from task context.
  *
- * ATTESTATION AFTER PROVISIONING. A peer's 7-digit SAS is derived from its
- * pinned identity, and pins come from identity attestations, which an
- * unprovisioned node neither sends nor accepts. Boot attestation therefore
- * fails on an inert fleet and reschedules 60 s out, and a fleet provisioned
- * one node at a time can have the first announcement land on peers that are
- * still inert. So a provision schedules two attestations of its own (see
- * ATTEST_FIRST_MS / ATTEST_SECOND_MS): the delay lets every node in the fleet
- * take its key first, and the second announcement covers a collision with the
- * first, which would otherwise leave a hole until the 15-minute periodic
- * attestation. mesh_trigger_attestation is the same public call the
- * setEndorsement RPC uses, and it is budget-gated like every attestation.
+ * NOTHING IS SCHEDULED HERE. A provision does what rpc_set_network_key does on
+ * a real device and stops there: take the key, rederive the beacon subkey. The
+ * attestation cadence a keyed node then follows is the firmware's own
+ * (mesh_beacon.c: the post-boot announcement, which fails closed while inert
+ * and retries 60 s out, then ATTESTATION_INTERVAL_MS thereafter), so a
+ * playground node behaves exactly like a bench node that was keyed over RPC.
+ * An operator who wants an announcement sooner than that cadence asks for one
+ * with {"t":"attest"}, which is the honest shape for a path whose whole point
+ * is that the operator originates the traffic.
  *
  * Host-only: built only by emulator/node (null_drivers) on the linux target
  * and started from app_main under a CONFIG_IDF_TARGET_LINUX guard, so a real
@@ -83,10 +81,6 @@ static const char* TAG = "emu_control";
 /* Drain cadence. Fast enough that a click feels immediate, slow enough to cost
  * nothing on a CPU-shared runner. */
 #define EMU_CTL_TICK_MS 100
-
-/* Attestation schedule after a provision; see the header comment. */
-#define ATTEST_FIRST_MS 4000u
-#define ATTEST_SECOND_MS 20000u
 
 typedef enum {
     EMU_CTL_OP_PROVISION = 1,
@@ -171,8 +165,7 @@ static void send_handler(const cJSON* msg, void* ctx) {
 }
 
 /* Applies one provision request from task context. */
-static void apply_provision(const emu_ctl_cmd_t* cmd, uint32_t now_ms, uint32_t* attest_1_at,
-                            uint32_t* attest_2_at) {
+static void apply_provision(const emu_ctl_cmd_t* cmd) {
     if (network_key_set_from_hex(cmd->key_hex) != 0) {
         ESP_LOGW(TAG, "provision rejected: malformed network key");
         return;
@@ -183,9 +176,6 @@ static void apply_provision(const emu_ctl_cmd_t* cmd, uint32_t now_ms, uint32_t*
     network_key_fingerprint(fp);
     ESP_LOGI(TAG, "network key provisioned over emu-link (fingerprint %02X%02X%02X%02X)", fp[0],
              fp[1], fp[2], fp[3]);
-
-    *attest_1_at = now_ms + ATTEST_FIRST_MS;
-    *attest_2_at = now_ms + ATTEST_SECOND_MS;
 }
 
 /* Applies one send request from task context.
@@ -224,15 +214,13 @@ static void apply_send(const emu_ctl_cmd_t* cmd) {
  * is safe from the emu_link reader thread under the IDF-linux FreeRTOS port. */
 static void emu_control_task(void* arg) {
     (void)arg;
-    uint32_t elapsed_ms = 0;
-    uint32_t attest_1_at = 0, attest_2_at = 0; /* 0 = nothing scheduled */
 
     for (;;) {
         emu_ctl_cmd_t cmd;
         while (dequeue(&cmd)) {
             switch (cmd.op) {
             case EMU_CTL_OP_PROVISION:
-                apply_provision(&cmd, elapsed_ms, &attest_1_at, &attest_2_at);
+                apply_provision(&cmd);
                 break;
             case EMU_CTL_OP_SEND:
                 apply_send(&cmd);
@@ -248,17 +236,7 @@ static void emu_control_task(void* arg) {
             }
         }
 
-        if (attest_1_at != 0 && elapsed_ms >= attest_1_at) {
-            attest_1_at = 0;
-            mesh_trigger_attestation();
-        }
-        if (attest_2_at != 0 && elapsed_ms >= attest_2_at) {
-            attest_2_at = 0;
-            mesh_trigger_attestation();
-        }
-
         vTaskDelay(pdMS_TO_TICKS(EMU_CTL_TICK_MS));
-        elapsed_ms += EMU_CTL_TICK_MS;
     }
 }
 
