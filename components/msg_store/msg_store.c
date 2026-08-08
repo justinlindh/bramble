@@ -385,21 +385,49 @@ static bool is_parked_dm(const stored_msg_t* m) {
            m->status == MSG_STATUS_QUEUED && m->uid != 0;
 }
 
-/* Has this parked row been waiting longer than the node is willing to keep
- * retrying it (MSG_STORE_PARK_TTL_S)?
+/* Is this row past the park window, measured from when it was STORED?
+ *
+ * Not "how long it has been parked": timestamp_s is stamped once by
+ * msg_store_add_full and nothing restamps it, so this is the message's age. Two
+ * callers depend on that being the same question. A row already parked is asked
+ * whether to keep retrying it, and a row about to be parked is asked whether
+ * parking it could achieve anything, and the second only works because both
+ * measure from the same origin. Parking a row that is already past the window
+ * would otherwise promise a retry the expiry pass cancels minutes later without
+ * ever attempting it.
  *
  * Exactly at the TTL is still inside it, so the window means what it says.
  *
- * A row stamped ahead of now_s is treated as NOT expired rather than as
+ * A row stamped ahead of now_s is treated as NOT past the window rather than as
  * enormously old. Unsigned subtraction would turn that into a huge age and
  * expire a message the user just parked, which is the worse direction to be
  * wrong in by far. It should not arise (restored rows are zeroed on load and a
  * fresh stamp cannot exceed a later read of the same clock), so this is a guard
  * against a future clock change, not a live case. */
-static bool parked_row_expired(const stored_msg_t* m, uint32_t now_s) {
+static bool past_park_window(const stored_msg_t* m, uint32_t now_s) {
     if (now_s < m->timestamp_s)
         return false;
     return (now_s - m->timestamp_s) > MSG_STORE_PARK_TTL_S;
+}
+
+bool msg_store_park_window_open(uint32_t uid, uint32_t now_s) {
+    if (uid == 0)
+        return false;
+    msg_store_ensure_alloc();
+    if (!s_msgs)
+        return false;
+    bool open = false;
+    MSG_LOCK();
+    int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+    for (int i = s_count - 1; i >= 0; i--) {
+        int idx = (start + i) % MSG_STORE_MAX;
+        if (s_msgs[idx].uid == uid) {
+            open = !past_park_window(&s_msgs[idx], now_s);
+            break;
+        }
+    }
+    MSG_UNLOCK();
+    return open;
 }
 
 int msg_store_expire_parked(uint32_t now_s) {
@@ -423,7 +451,7 @@ int msg_store_expire_parked(uint32_t now_s) {
         for (int i = 0; i < s_count; i++) {
             int idx = (start + i) % MSG_STORE_MAX;
             stored_msg_t* m = &s_msgs[idx];
-            if (!is_parked_dm(m) || !parked_row_expired(m, now_s)) {
+            if (!is_parked_dm(m) || !past_park_window(m, now_s)) {
                 continue;
             }
             /* The same door msg_store_unpark uses, and for the same reason:
@@ -466,11 +494,7 @@ int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int m
              * is what makes an overdue row visibly failed. Skipping here too
              * means the beacon path cannot re-send one in the window between
              * its TTL passing and the next expiry pass. */
-            /* Skipped, not rewritten: this is a read. msg_store_expire_parked
-             * is what makes an overdue row visibly failed. Skipping here too
-             * means the beacon path cannot re-send one in the window between
-             * its TTL passing and the next expiry pass. */
-            if (parked_row_expired(m, now_s)) {
+            if (past_park_window(m, now_s)) {
                 continue;
             }
             out_uids[n++] = m->uid;
@@ -481,7 +505,6 @@ int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int m
 }
 
 bool msg_store_next_parked_peer(uint32_t after_peer_addr, uint32_t* out_peer_addr, uint32_t now_s) {
-    (void)now_s;
     if (!out_peer_addr) {
         return false;
     }
@@ -494,7 +517,7 @@ bool msg_store_next_parked_peer(uint32_t after_peer_addr, uint32_t* out_peer_add
         int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
         for (int i = 0; i < s_count; i++) {
             const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
-            if (!is_parked_dm(m) || parked_row_expired(m, now_s)) {
+            if (!is_parked_dm(m) || past_park_window(m, now_s)) {
                 continue;
             }
             if (!found_any || m->peer_addr < lowest) {

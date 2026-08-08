@@ -402,6 +402,29 @@ void test_expire_parked_leaves_everything_that_is_not_an_overdue_park_alone(void
     TEST_ASSERT_EQUAL(MSG_STATUS_FAILED, out.status);
 }
 
+/* The park window runs from when the message was STORED, so a DM that failed
+ * and then sat unattended past the TTL has none of it left. Parking it would
+ * show a queued badge and promise a retry that the expiry pass cancels within
+ * one sweep interval, having never attempted it once: the promise this whole
+ * feature exists to stop the node making. So it must be refused up front. */
+void test_park_window_is_closed_for_a_message_already_past_the_ttl(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "this morning", 12, 0, 0, 0, MSG_STATUS_FAILED,
+                         1);
+
+    TEST_ASSERT_TRUE_MESSAGE(msg_store_park_window_open(1, MSG_STORE_PARK_TTL_S),
+                             "a message still inside the window must be parkable, or the guard "
+                             "has switched the feature off");
+    TEST_ASSERT_FALSE_MESSAGE(msg_store_park_window_open(1, MSG_STORE_PARK_TTL_S + 1),
+                              "a message older than the park window was accepted for parking, so "
+                              "the user is promised a retry that expiry cancels before a single "
+                              "attempt is made");
+
+    /* Unknown rows and uid 0 are refused rather than treated as fresh. */
+    TEST_ASSERT_FALSE(msg_store_park_window_open(0, 0));
+    TEST_ASSERT_FALSE(msg_store_park_window_open(999, 0));
+}
+
 void test_next_parked_peer_survives_ring_wrap(void) {
     msg_store_init();
     for (int i = 0; i < 2 * MSG_STORE_MAX - 1; i++) {
@@ -599,6 +622,7 @@ int main(void) {
     RUN_TEST(test_parked_row_inside_the_ttl_is_still_selected);
     RUN_TEST(test_expire_parked_makes_an_overdue_row_visibly_failed);
     RUN_TEST(test_expire_parked_leaves_everything_that_is_not_an_overdue_park_alone);
+    RUN_TEST(test_park_window_is_closed_for_a_message_already_past_the_ttl);
     RUN_TEST(test_next_parked_peer_survives_ring_wrap);
     RUN_TEST(test_update_by_uid_refuses_queued_to_failed);
     RUN_TEST(test_update_by_uid_refuses_queued_to_sent_but_still_stamps_the_packet_id);

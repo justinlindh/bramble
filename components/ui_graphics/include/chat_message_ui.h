@@ -42,6 +42,15 @@ bool chat_message_is_retryable(bool is_outgoing, int16_t channel_index, msg_stat
  * Keyed on the row uid for the same reason retry is: a message that never
  * reached the air carries packet_id 0. A row that is already parked is not
  * parkable again; its action is Cancel. */
+/* A parked outgoing DM, the state chat_message_is_parkable leads to. Its action
+ * is Cancel, and it can expand to reach that button even when nothing else
+ * about the row is expandable. Here rather than open-coded at the one call site
+ * because the whole gating partition of a bubble (retryable, parkable, parked)
+ * then sits in one host-tested file, and scr_chat_messages.c cannot be
+ * host-compiled at all. */
+bool chat_message_is_parked(bool is_outgoing, int16_t channel_index, msg_status_t status,
+                            uint32_t uid);
+
 bool chat_message_is_parkable(bool is_outgoing, int16_t channel_index, msg_status_t status,
                               uint32_t uid);
 

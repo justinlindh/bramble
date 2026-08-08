@@ -2583,8 +2583,24 @@ uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len
     return mesh_send_message_uid(dest_addr, data, len, uid);
 }
 
+bool mesh_park_window_open(uint32_t uid) { return msg_store_park_window_open(uid, now_uptime_s()); }
+
 bool mesh_park_message(uint32_t uid) {
     if (uid == 0)
+        return false;
+    /* Refuse a message that is already too old to be retried, BEFORE moving it
+     * to QUEUED. The park window runs from when the message was stored, so a
+     * DM that failed and then sat unattended past the TTL has none of it left,
+     * and parking it would show the user a queued badge and a promise of a
+     * retry that the next expiry pass cancels within one sweep interval,
+     * having never attempted it once. Reaching that needs nothing unusual: fail
+     * a DM, leave the device for an afternoon, open the thread and tap Queue.
+     *
+     * Checked here rather than only in the UI so no caller can make that
+     * promise: the emulator's park hook goes straight through this function,
+     * and so would any future RPC method. The UI asks mesh_park_window_open
+     * first purely so it can say WHY it refused. */
+    if (!mesh_park_window_open(uid))
         return false;
     if (!msg_store_update_by_uid(uid, 0, MSG_STATUS_QUEUED))
         return false;
@@ -2710,7 +2726,8 @@ int mesh_flush_parked_for(uint32_t peer_addr) {
          * reaches the air is NOT marked SENT here, so when its ACK never comes
          * and the retry tick reports FAILED against its packet_id, the row is
          * still QUEUED and still protected. The row leaves the parked state
-         * only by being delivered or by the user cancelling it. */
+         * only by being delivered, by the user cancelling it, or by ageing out
+         * of the park window (msg_store_expire_parked). */
         uint32_t pkt =
             mesh_resend_message(msg.peer_addr, (const uint8_t*)msg.text, msg.text_len, msg.uid);
         ESP_LOGI(TAG, "Parked uid=%" PRIu32 " -> pkt=%08" PRIX32, msg.uid, pkt);

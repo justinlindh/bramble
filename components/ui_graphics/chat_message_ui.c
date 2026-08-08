@@ -52,6 +52,11 @@ bool chat_message_is_parkable(bool is_outgoing, int16_t channel_index, msg_statu
     return is_outgoing && channel_index < 0 && status == MSG_STATUS_FAILED && uid != 0;
 }
 
+bool chat_message_is_parked(bool is_outgoing, int16_t channel_index, msg_status_t status,
+                            uint32_t uid) {
+    return is_outgoing && channel_index < 0 && status == MSG_STATUS_QUEUED && uid != 0;
+}
+
 bool chat_message_route_is_informative(bool is_outgoing, int16_t channel_index,
                                        uint8_t route_hop_count) {
     return is_outgoing && channel_index < 0 && route_hop_count > 2;

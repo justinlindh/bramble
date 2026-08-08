@@ -81,6 +81,35 @@ void test_parkable_only_for_failed_outgoing_dms(void) {
     TEST_ASSERT_FALSE(chat_message_is_parkable(true, -1, MSG_STATUS_FAILED, 0));
 }
 
+/* The third state in the bubble's gating partition, and the counterpart of
+ * parkable: a parked row offers Cancel and must be able to expand to reach it.
+ * The three predicates have to stay disjoint on status, because the button
+ * array is sized for at most two offers at once. */
+void test_parked_only_for_queued_outgoing_dms(void) {
+    TEST_ASSERT_TRUE(chat_message_is_parked(true, -1, MSG_STATUS_QUEUED, 7));
+
+    /* Not yet parked: the offer is Retry or Queue. */
+    TEST_ASSERT_FALSE(chat_message_is_parked(true, -1, MSG_STATUS_FAILED, 7));
+    /* Incoming, channel, broadcast, in flight, delivered, no uid. */
+    TEST_ASSERT_FALSE(chat_message_is_parked(false, -1, MSG_STATUS_QUEUED, 7));
+    TEST_ASSERT_FALSE(chat_message_is_parked(true, 0, MSG_STATUS_QUEUED, 7));
+    TEST_ASSERT_FALSE(chat_message_is_parked(true, 3, MSG_STATUS_QUEUED, 7));
+    TEST_ASSERT_FALSE(chat_message_is_parked(true, -1, MSG_STATUS_SENT, 7));
+    TEST_ASSERT_FALSE(chat_message_is_parked(true, -1, MSG_STATUS_DELIVERED, 7));
+    TEST_ASSERT_FALSE(chat_message_is_parked(true, -1, MSG_STATUS_QUEUED, 0));
+
+    /* Disjoint from the other two for every status, which is what bounds the
+     * button array at two. */
+    for (int s = MSG_STATUS_NONE; s <= MSG_STATUS_QUEUED; s++) {
+        msg_status_t st = (msg_status_t)s;
+        int offers = (chat_message_is_retryable(true, -1, st, 7) ? 1 : 0) +
+                     (chat_message_is_parkable(true, -1, st, 7) ? 1 : 0) +
+                     (chat_message_is_parked(true, -1, st, 7) ? 1 : 0);
+        TEST_ASSERT_TRUE_MESSAGE(offers <= 2, "a single status offers more buttons than the "
+                                              "bubble's button array can hold");
+    }
+}
+
 void test_retryable_excludes_a_parked_message(void) {
     /* A parked row is not offered Retry: its two actions are Cancel and the
      * automatic flush. */
@@ -181,6 +210,7 @@ int main(void) {
     RUN_TEST(test_retryable_only_for_failed_outgoing_dms);
     RUN_TEST(test_queued_badge_is_its_own_kind);
     RUN_TEST(test_parkable_only_for_failed_outgoing_dms);
+    RUN_TEST(test_parked_only_for_queued_outgoing_dms);
     RUN_TEST(test_retryable_excludes_a_parked_message);
     RUN_TEST(test_receipt_summary_lists_all_when_few);
     RUN_TEST(test_receipt_summary_truncates_with_plus_n);

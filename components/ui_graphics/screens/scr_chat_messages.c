@@ -100,6 +100,9 @@ extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_
 extern uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len,
                                     uint32_t uid);
 extern bool mesh_park_message(uint32_t uid);
+/* Only so the refusal can name its reason; mesh_park_message enforces the
+ * window itself. See main/mesh_task.h. */
+extern bool mesh_park_window_open(uint32_t uid);
 extern bool mesh_cancel_parked_message(uint32_t uid);
 extern bool mesh_route_is_usable(uint32_t dest_addr);
 extern bool mesh_get_neighbor(uint32_t addr, neighbor_entry_t* out);
@@ -405,6 +408,19 @@ static void park_async(void* arg) {
         ESP_LOGW(TAG, "park uid=%lu: found=%d no longer a parkable DM", (unsigned long)uid,
                  (int)found);
         ui_toast_show("Nothing to queue");
+        render_messages_for_target(false);
+        return;
+    }
+
+    /* Asked before parking so the refusal can say which refusal it is. A
+     * message past the park window is not "nothing to queue": it is right
+     * there, the user is looking at it, and it is simply too old to be worth
+     * retrying. Telling them nothing was found would read as a broken button
+     * on a message they can see. mesh_park_message refuses it anyway; this is
+     * only about which words the user gets. */
+    if (!mesh_park_window_open(uid)) {
+        ESP_LOGW(TAG, "park uid=%lu: past the park window", (unsigned long)uid);
+        ui_toast_show("Too old to retry");
         render_messages_for_target(false);
         return;
     }
@@ -719,6 +735,11 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         chat_delivery_badge_t badge = chat_message_delivery_badge(msg->status);
         const char* badge_sym = LV_SYMBOL_BULLET;
 
+        /* Adding a badge kind means adding a branch HERE too. This is a chain,
+         * not a switch, so a new kind falls through to the bullet silently with
+         * no compiler warning, which is exactly how the QUEUED badge shipped
+         * without a renderer. test_chat_message_ui.c pins each kind's symbol
+         * and colour role; keep adding a case there with every new kind. */
         if (badge.kind == CHAT_DELIVERY_BADGE_SINGLE_CHECK) {
             badge_sym = LV_SYMBOL_OK;
         } else if (badge.kind == CHAT_DELIVERY_BADGE_DOUBLE_CHECK) {
@@ -779,8 +800,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
      * (chat_message_is_retryable), independent of having a packet id. */
     bool can_retry = chat_message_is_retryable(is_mine, msg->channel_index, msg->status, msg->uid);
     bool can_park = chat_message_is_parkable(is_mine, msg->channel_index, msg->status, msg->uid);
-    bool is_parked =
-        is_mine && msg->channel_index < 0 && msg->status == MSG_STATUS_QUEUED && msg->uid != 0;
+    bool is_parked = chat_message_is_parked(is_mine, msg->channel_index, msg->status, msg->uid);
     bool can_expand =
         chat_message_has_details_toggle(is_mine, msg->packet_id) || can_retry || is_parked;
     bool route_expanded = can_expand && msg->uid != 0 && msg->uid == s_selected_uid;

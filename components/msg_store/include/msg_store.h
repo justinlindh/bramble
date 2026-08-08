@@ -51,8 +51,16 @@ typedef enum {
     MSG_STATUS_QUEUED = 4,
 } msg_status_t;
 
-/* How long a message may stay parked before the node gives up on it, in
+/* How old a message may get before the node stops trying to deliver it, in
  * seconds of uptime.
+ *
+ * Measured from when the message was STORED, not from when it was parked:
+ * timestamp_s is stamped once by msg_store_add_full and nothing restamps it.
+ * So this bounds the whole life of a message that will not go through, which
+ * is the interval that matters for the peer's thread and for airtime, and a
+ * row parked late gets whatever is left of the window rather than a fresh one.
+ * msg_store_park_window_open exists so a row with nothing left cannot be
+ * parked at all, instead of being parked and cancelled minutes later.
  *
  * A parked row is retried once per PARKED_RETRY_COOLDOWN_MS (main/parked_retry.h,
  * 300s) for as long as it stays parked, and every retry that reaches the peer
@@ -197,8 +205,11 @@ void msg_store_add_dm_uid(uint32_t peer_addr, msg_direction_t dir, const char* t
  * Parked is sticky: MSG_STATUS_DELIVERED is the ONLY status a row currently
  * MSG_STATUS_QUEUED will accept. Anything else, including MSG_STATUS_SENT, is
  * refused and the row stays QUEUED. A parked message therefore leaves the
- * parked state exactly two ways: it is genuinely delivered, or the user
- * cancels it via msg_store_unpark().
+ * parked state exactly three ways: it is genuinely delivered, the user cancels
+ * it via msg_store_unpark(), or it ages out of the park window and
+ * msg_store_expire_parked() gives up on it. The last two write the row's status
+ * directly rather than coming through here, which is what keeps this rule from
+ * blocking the two deliberate exits.
  *
  * SENT is refused rather than allowed, which is the part that is easy to get
  * wrong. Marking a parked row SENT looks like honest progress, and it is fatal:
@@ -307,12 +318,31 @@ bool msg_store_next_parked_peer(uint32_t after_peer_addr, uint32_t* out_peer_add
  * A failed row is the right end state, since it is still retryable and still
  * re-parkable by hand.
  *
- * Uses the same door msg_store_unpark uses, so it is not blocked by the sticky
+ * Writes the row's status directly, as msg_store_unpark does, so it is not
+ * blocked by the sticky
  * rule that (correctly) refuses QUEUED -> FAILED from a send path.
  *
  * Call it on a periodic tick, not per packet: it walks the ring.
  */
 int msg_store_expire_parked(uint32_t now_s);
+
+/**
+ * Could parking the row carrying this uid still achieve anything: is it inside
+ * the park window measured from when the message was stored? False for uid 0
+ * and for an unknown uid.
+ *
+ * Ask BEFORE parking. The window runs from the message's own age, not from the
+ * moment it is parked, so a message that failed and then sat unattended for
+ * longer than MSG_STORE_PARK_TTL_S is already past it. Parking such a row would
+ * promise a retry that the next expiry pass cancels within one sweep interval,
+ * having never selected it once: the exact "we said we would send it" failure
+ * this whole feature exists to remove, arriving through a new door. Refusing up
+ * front lets the caller say something true instead.
+ *
+ * This is about age alone. Whether the row is a failed outgoing DM at all is
+ * the UI's question (chat_message_is_parkable).
+ */
+bool msg_store_park_window_open(uint32_t uid, uint32_t now_s);
 
 /**
  * Update delivery status for a message by packet_id.

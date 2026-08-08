@@ -100,10 +100,28 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len);
 uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len, uint32_t uid);
 
 /**
+ * Is there any point parking the row carrying this uid: is it still inside the
+ * park window (msg_store.h, MSG_STORE_PARK_TTL_S)? Age only; whether the row is
+ * a failed outgoing DM at all is the caller's question.
+ *
+ * mesh_park_message refuses an out-of-window row by itself, so this is not a
+ * required precondition. It exists so a UI can tell the user WHY the message
+ * was refused rather than reporting that there was nothing to queue.
+ */
+bool mesh_park_window_open(uint32_t uid);
+
+/**
  * Park a failed direct message for delivery when its peer is next reachable.
  * Moves the row identified by uid to MSG_STATUS_QUEUED, which msg_store
- * persists, so the parked state survives a reboot. Returns false if no row
- * carries that uid.
+ * persists, so the parked state survives a reboot.
+ *
+ * Returns false if no row carries that uid, or if the message is already past
+ * the park window. The window is measured from when the message was STORED, so
+ * a DM that failed and then sat unattended for longer than
+ * MSG_STORE_PARK_TTL_S has none of it left: parking it would promise a retry
+ * that the expiry pass cancels within one sweep interval without ever
+ * attempting it. A caller that wants to distinguish the two refusals asks
+ * mesh_park_window_open first.
  *
  * Also arms the peer's neighbor entry (parked_retry.h) when the peer is
  * already in the table, which is what gives the message a delivery trigger:
@@ -127,10 +145,18 @@ bool mesh_cancel_parked_message(uint32_t uid);
  * waiting. The sweep covers what no beacon can reach, a peer that is not a
  * neighbor. Transmits, so it must be called with no lock held.
  *
- * A send that fails leaves the row parked for the next attempt: the resend
- * pipeline's failure paths all report MSG_STATUS_FAILED through
- * msg_store_update_by_uid, whose QUEUED -> FAILED transition is sticky-
- * refused, so a failed attempt here cannot un-park the row on its own.
+ * A send that fails leaves the row parked for the next attempt, and what
+ * guarantees that is msg_store refusing every transition out of QUEUED except
+ * MSG_STATUS_DELIVERED. Both entry points enforce it, which matters because the
+ * failure paths do not share one: the synchronous ones report by uid through
+ * msg_store_update_by_uid, while the two that matter most report by packet_id
+ * through msg_store_update_status, namely the ACK retry tick and
+ * rerr_ack_fastfail.c. Refusing SENT is the load-bearing half rather than
+ * refusing FAILED: a parked row marked SENT by its own transmit would no longer
+ * be QUEUED when that transmit's ACK never arrived, and the FAILED report would
+ * then land on an unprotected row and strand the message after one attempt.
+ * Only delivery, the user's Cancel (msg_store_unpark) and the park TTL
+ * (msg_store_expire_parked) take a row out of QUEUED.
  */
 int mesh_flush_parked_for(uint32_t peer_addr);
 
