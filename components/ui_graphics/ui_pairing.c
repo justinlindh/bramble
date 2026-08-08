@@ -1,38 +1,23 @@
 #include "ui_pairing.h"
+#include "ble_pairing_policy.h"
 #include "sleep_manager.h"
 #include "ui_focus.h"
 #include "theme/bramble_theme.h"
 #include "lvgl.h"
-#include <stdio.h>
 
 /* Cross-task handoff: ui_pairing_passkey_cb runs on the NimBLE host task
- * (see ble_server.h) and this module's lv_timer polls on the LVGL task.
- * The request (passkey + show/hide) is packed into a single uint32 rather
- * than separate fields: a 32-bit aligned load/store is one instruction on
- * Xtensa, so it cannot tear, whereas writing passkey/show/valid as three
- * separate variables could let the timer observe a valid flag with a
- * stale or half-written passkey next to it. __atomic_store_n/exchange_n
- * add the acquire/release ordering the plain load/store instruction alone
- * doesn't guarantee, matching ui_graphics.c's s_pending_events handoff for
- * its own other-task-to-LVGL-task notifications. Single producer (the
- * NimBLE host task calls in are already serialized by the BLE stack),
- * single consumer (this module's timer): a newer request simply replaces
- * an unread older one, which matches "a fresh code per pairing attempt". */
-#define PAIRING_VALID_BIT (1u << 31)
-#define PAIRING_SHOW_BIT (1u << 30)
-#define PAIRING_CODE_MASK 0x000FFFFFu /* passkey is 0..999999, fits in 20 bits */
-
+ * (see ble_server.h) and ui_pairing_poll() below drains it on the LVGL
+ * task. Packed into one word (bit layout in ble_pairing_policy.h) with
+ * atomic store/exchange (acquire/release) rather than separate variables:
+ * a newer request simply replaces an unread older one, which matches "a
+ * fresh code per pairing attempt". */
 static uint32_t s_pending;
 
-static lv_obj_t* s_modal; /* NULL when hidden */
+static lv_obj_t* s_modal;   /* NULL when hidden */
 static bool s_pushed_focus; /* true if show_modal pushed the modal focus group itself */
 
 void ui_pairing_passkey_cb(uint32_t passkey, bool show) {
-    uint32_t req = PAIRING_VALID_BIT | (passkey & PAIRING_CODE_MASK);
-    if (show) {
-        req |= PAIRING_SHOW_BIT;
-    }
-    __atomic_store_n(&s_pending, req, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_pending, ble_pairing_pending_pack(passkey, show), __ATOMIC_RELEASE);
 }
 
 static void hide_modal(void) {
@@ -130,17 +115,9 @@ static void show_modal(uint32_t code) {
     /* code is 0..999999 (see ble_server.h); grouped as "NNN NNN" for
      * readability, same digit-grouping idea as scr_sas_verify.c's SAS
      * code. Digits and spaces are plain ASCII, so the glyph check has
-     * nothing to flag regardless of font size.
-     *
-     * The buffer is sized for GCC's -Wformat-truncation worst case, not
-     * the real one: it does not track that code/1000u and code%1000u are
-     * both well under 1000, so it assumes each %03u could print a full
-     * unsigned int (10 digits). Worst case is 10 + 1 (space) + 10 + 1
-     * (nul) = 22; 24 leaves a little slack rather than sizing to the
-     * exact byte. */
+     * nothing to flag regardless of font size. */
     char grouped[24];
-    snprintf(grouped, sizeof(grouped), "%03u %03u", (unsigned)(code / 1000u),
-              (unsigned)(code % 1000u));
+    ble_pairing_format_code(code, grouped, sizeof(grouped));
     lv_obj_t* code_lbl = lv_label_create(panel);
     lv_label_set_text(code_lbl, grouped);
     /* montserrat_18 is the largest Montserrat size already compiled into
@@ -152,20 +129,16 @@ static void show_modal(uint32_t code) {
     lv_obj_set_style_text_color(code_lbl, BR_COLOR_PRIMARY, 0);
 }
 
-static void pairing_timer_cb(lv_timer_t* t) {
-    (void)t;
+void ui_pairing_poll(void) {
     uint32_t req = __atomic_exchange_n(&s_pending, 0, __ATOMIC_ACQ_REL);
-    if ((req & PAIRING_VALID_BIT) == 0) {
+    uint32_t passkey;
+    bool show;
+    if (!ble_pairing_pending_unpack(req, &passkey, &show)) {
         return;
     }
-    if (req & PAIRING_SHOW_BIT) {
-        show_modal(req & PAIRING_CODE_MASK);
+    if (show) {
+        show_modal(passkey);
     } else {
         hide_modal();
     }
-}
-
-void ui_pairing_init(void) {
-    /* Runs for the app's lifetime; no need to keep the handle around. */
-    lv_timer_create(pairing_timer_cb, 100, NULL);
 }

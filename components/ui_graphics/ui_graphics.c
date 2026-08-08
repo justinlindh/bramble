@@ -139,10 +139,21 @@ static void status_refresh_timer_cb(lv_timer_t* timer) {
 
 /* Drive the sleep manager's blocking display power-down on the UI task. The
  * inactivity esp_timer only raises a flag; the actual SPI work happens here so
- * it never stalls the esp_timer service task (and the 1 ms lv_tick). */
+ * it never stalls the esp_timer service task (and the 1 ms lv_tick). Also
+ * drains any pending BLE pairing show/hide request (ui_pairing.c): sharing
+ * this cadence rather than running a dedicated 100ms timer for pairing lets
+ * the LVGL task actually sleep between ticks when idle, and 500ms worst-case
+ * latency is negligible against NimBLE's ~30s SM pairing timeout.
+ * sleep_manager_process() below is a no-op until sleep_manager_init() runs
+ * (see its own initialized guard), so it is safe for this timer to start
+ * ticking before that, which matters for ui_pairing_poll(): pairing can
+ * start before the splash timeout, so this timer is created at LVGL init
+ * (see ui_graphics_init) rather than deferred to splash_timer_cb with the
+ * other overlay-adjacent subsystems. */
 static void sleep_process_timer_cb(lv_timer_t* timer) {
     (void)timer;
     sleep_manager_process();
+    ui_pairing_poll();
 }
 
 static void tab_refresh_timer_cb(lv_timer_t* timer) {
@@ -179,10 +190,11 @@ static void splash_timer_cb(lv_timer_t* timer) {
 
     s_layout = layout_create();
 
-    /* Create periodic refresh timers */
+    /* Create periodic refresh timers. sleep_process_timer_cb (sleep drive +
+     * pairing poll) is created earlier, at LVGL init (see
+     * ui_graphics_init), not here. */
     lv_timer_create(status_refresh_timer_cb, 2000, NULL); /* Status bar: 2s */
     lv_timer_create(tab_refresh_timer_cb, 5000, NULL);    /* Tab content: 5s */
-    lv_timer_create(sleep_process_timer_cb, 500, NULL);   /* Sleep drive: 0.5s */
 
     /* Initialize sleep manager for automatic display power saving */
     sleep_manager_init();
@@ -224,10 +236,12 @@ int ui_graphics_init(void) {
     /* Create one-shot timer to transition to main UI after 2 seconds */
     lv_timer_create(splash_timer_cb, 2000, NULL);
 
-    /* BLE pairing can start before the splash timeout, so its handoff timer
-     * must exist as soon as LVGL itself does, not deferred to
-     * splash_timer_cb with the other overlay-adjacent subsystems. */
-    ui_pairing_init();
+    /* BLE pairing can start before the splash timeout, so the timer that
+     * drains its handoff (sleep_process_timer_cb, which also polls
+     * ui_pairing_poll(); see its own comment) must exist as soon as LVGL
+     * itself does, not deferred to splash_timer_cb with the other
+     * overlay-adjacent subsystems. */
+    lv_timer_create(sleep_process_timer_cb, 500, NULL);
 
     ESP_LOGI(TAG, "LVGL initialized with splash screen");
     return 0;

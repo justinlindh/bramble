@@ -36,6 +36,7 @@
 #include "mdns.h"
 #endif
 #include "ble_server.h"
+#include "ble_pairing_policy.h"
 #if CONFIG_BT_ENABLED
 /* esp_bt_mem_release: reclaim the unused BT controller RAM on WiFi boots. */
 #include "esp_bt.h"
@@ -511,15 +512,10 @@ static void render_main_screen(const ui_state_t* ui) {
         snprintf(line, sizeof(line), "Reach:%d (%d direct)", total, direct);
     }
     display_draw_text(2, y, line);
-
-    /* render_screen()'s single-flush-per-frame rule (see the comment on
-     * render_ble_passkey_overlay): skip the flush here when the overlay is
-     * about to draw on top, since the overlay does the one flush for this
-     * frame instead. render_main_screen() is also called standalone by the
-     * periodic uptime tick, which never calls it while the overlay is
-     * active, so this stays a plain unconditional flush on that path. */
-    if (!ui->ble_passkey_active)
-        display_flush();
+    /* No flush here: render_screen() does the frame's one flush after
+     * drawing this and, if active, the pairing overlay on top of it. The
+     * standalone periodic-uptime-tick caller (never invoked while the
+     * overlay is active) flushes explicitly right after its call. */
 }
 
 /* BLE pairing overlay: drawn on top of whatever screen render_screen() just
@@ -531,13 +527,11 @@ static void render_main_screen(const ui_state_t* ui) {
  * clean panel instead of garbling over whatever text was already lit
  * underneath.
  *
- * render_screen() flushes once per frame: every case's own display_flush()
- * is skipped whenever this overlay is about to draw (see the
- * ble_passkey_active checks throughout render_screen() and
- * render_main_screen()), and this function does the frame's one flush
- * instead. That keeps e-paper boards from double-flushing (a full SSD1680
- * refresh blocks and wears the panel; see the ghosting-policy comment at
- * the top of render_screen()).
+ * render_screen() flushes once per frame, after this overlay (when active)
+ * draws on top of whatever case just ran; see the comment at the end of
+ * render_screen(). That keeps e-paper boards from double-flushing (a full
+ * SSD1680 refresh blocks and wears the panel; see the ghosting-policy
+ * comment at the top of render_screen()).
  *
  * The passkey itself is never logged, only rendered. */
 static void render_ble_passkey_overlay(const ui_state_t* ui) {
@@ -558,8 +552,7 @@ static void render_ble_passkey_overlay(const ui_state_t* ui) {
     y += LINE_H;
 
     char code[16];
-    snprintf(code, sizeof(code), "%03u %03u", (unsigned)(ui->ble_passkey / 1000),
-             (unsigned)(ui->ble_passkey % 1000));
+    ble_pairing_format_code(ui->ble_passkey, code, sizeof(code));
     display_draw_text((DISPLAY_WIDTH - (int)strlen(code) * FONT_W) / 2, y, code);
     y += LINE_H;
 
@@ -568,7 +561,6 @@ static void render_ble_passkey_overlay(const ui_state_t* ui) {
     y += LINE_H;
 
     display_hline(0, panel_bottom, DISPLAY_WIDTH);
-    display_flush();
 }
 
 static void render_screen(ui_state_t* ui) {
@@ -669,8 +661,6 @@ static void render_screen(ui_state_t* ui) {
         else
             display_draw_text(2, FOOTER_Y, "[hold]older reply:app");
 #endif
-        if (!ui->ble_passkey_active)
-            display_flush();
         break;
     }
     case SCREEN_NODES: {
@@ -821,8 +811,6 @@ static void render_screen(ui_state_t* ui) {
             display_draw_text(2, FOOTER_Y, "[hold] verify contacts");
 #endif
         }
-        if (!ui->ble_passkey_active)
-            display_flush();
         break;
     }
     case SCREEN_SETTINGS: {
@@ -947,8 +935,6 @@ static void render_screen(ui_state_t* ui) {
             display_draw_text(2, FOOTER_Y, "[hold]edit [2x]exit");
 #endif
         }
-        if (!ui->ble_passkey_active)
-            display_flush();
         break;
     }
     case SCREEN_COMPOSE: {
@@ -1050,8 +1036,6 @@ static void render_screen(ui_state_t* ui) {
         display_draw_text(2, FOOTER_Y, "*pend +ok ++mh x fail");
 #endif
 
-        if (!ui->ble_passkey_active)
-            display_flush();
         break;
     }
     case SCREEN_GPS: {
@@ -1117,21 +1101,25 @@ static void render_screen(ui_state_t* ui) {
         }
 
         display_draw_text(2, FOOTER_Y, "[press] next screen");
-        if (!ui->ble_passkey_active)
-            display_flush();
         break;
     }
     default:
         display_clear();
         display_draw_text(0, 28, "Unknown screen");
-        if (!ui->ble_passkey_active)
-            display_flush();
         break;
     }
 
     if (ui->ble_passkey_active) {
         render_ble_passkey_overlay(ui);
     }
+    /* Single flush per rendered frame, overlay or not: every case above
+     * only draws, and render_ble_passkey_overlay() (if the overlay is
+     * active) draws on top of whatever the case just finished, so this is
+     * the one place in the function that actually pushes pixels. Keeps
+     * e-paper boards from double-flushing (a full SSD1680 refresh blocks
+     * and wears the panel; see the ghosting-policy comment at the top of
+     * this function). */
+    display_flush();
 }
 
 /* ── Main ───────────────────────────────────────────────────────────── */
@@ -1163,20 +1151,16 @@ static bool board_has_display_for_pairing(void) {
 
 /* Marshals the NimBLE-task passkey callback into the text UI state machine.
  * The UI state is owned by the main loop task; latch here, apply there.
- * Packed into one word with atomic store/exchange (acquire/release) rather
- * than separate volatiles, matching ui_pairing.c's s_pending / ui_graphics.c's
- * s_pending_events cross-task handoff idiom: a plain aligned load/store
- * cannot tear, but only the atomic ops add the ordering guarantee. */
-#define BLE_PASSKEY_PENDING_VALID_BIT (1u << 31)
-#define BLE_PASSKEY_PENDING_SHOW_BIT (1u << 30)
-#define BLE_PASSKEY_PENDING_CODE_MASK 0x000FFFFFu /* passkey is 0..999999, fits in 20 bits */
+ * Packed into one word (bit layout in ble_pairing_policy.h) with atomic
+ * store/exchange (acquire/release) rather than separate volatiles, matching
+ * ui_pairing.c's s_pending cross-task handoff idiom: a plain aligned
+ * load/store cannot tear, but only the atomic ops add the ordering
+ * guarantee. */
 static uint32_t s_ble_passkey_pending;
 
 static void main_ble_passkey_cb(uint32_t passkey, bool show) {
-    uint32_t packed = BLE_PASSKEY_PENDING_VALID_BIT | (passkey & BLE_PASSKEY_PENDING_CODE_MASK);
-    if (show)
-        packed |= BLE_PASSKEY_PENDING_SHOW_BIT;
-    __atomic_store_n(&s_ble_passkey_pending, packed, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ble_passkey_pending, ble_pairing_pending_pack(passkey, show),
+                     __ATOMIC_RELEASE);
 }
 #endif
 
@@ -1980,9 +1964,11 @@ void app_main(void) {
          * / ui_clear_ble_passkey single-threaded. */
         uint32_t ble_passkey_pending =
             __atomic_exchange_n(&s_ble_passkey_pending, 0, __ATOMIC_ACQ_REL);
-        if (ble_passkey_pending & BLE_PASSKEY_PENDING_VALID_BIT) {
-            if (ble_passkey_pending & BLE_PASSKEY_PENDING_SHOW_BIT) {
-                ui_show_ble_passkey(&ui, ble_passkey_pending & BLE_PASSKEY_PENDING_CODE_MASK);
+        uint32_t pending_passkey;
+        bool pending_show;
+        if (ble_pairing_pending_unpack(ble_passkey_pending, &pending_passkey, &pending_show)) {
+            if (pending_show) {
+                ui_show_ble_passkey(&ui, pending_passkey);
             } else {
                 ui_clear_ble_passkey(&ui);
             }
@@ -2010,8 +1996,11 @@ void app_main(void) {
             /* render_main_screen() draws straight to the display, bypassing
              * render_screen() and the pairing overlay it draws on top; skip
              * this tick while the overlay is up so it is not erased a second
-             * after appearing. */
+             * after appearing. render_main_screen() itself no longer
+             * flushes (render_screen() owns the single flush per frame for
+             * its own callers), so this standalone caller flushes here. */
             render_main_screen(&ui);
+            display_flush();
         }
 
         /* Alert outputs: advance the beep/vibra pattern and keep the
