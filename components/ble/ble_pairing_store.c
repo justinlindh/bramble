@@ -24,7 +24,7 @@ int ble_pairing_store_clear(void) {
         return -1;
     }
     err = nvs_erase_key(nvs, NVS_KEY_BLE_PASSKEY);
-    if (err == ESP_ERR_NVS_NOT_FOUND || err == ESP_FAIL) {
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
         err = ESP_OK; /* clearing an unset key is success */
     }
     if (err == ESP_OK) {
