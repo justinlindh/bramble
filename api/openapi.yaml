@@ -552,6 +552,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/SetNodeNameResponse'
 
+  /rpc/bramble.getBleSecurity:
+    post:
+      operationId: getBleSecurity
+      summary: Report the BLE pairing security posture
+      description: >
+        Returns the SMP pairing mode: passkey-display (board shows a random
+        code per pairing), static-passkey (operator-set code on displayless
+        boards), or just-works (bootstrap, no code set). The static passkey
+        value is write-only and never returned.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '200':
+          description: Current BLE security posture
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetBleSecurityResponse'
+
+  /rpc/bramble.setBlePasskey:
+    post:
+      operationId: setBlePasskey
+      summary: Set or clear the static BLE pairing passkey
+      description: >
+        Sets the 6-digit SMP passkey used for BLE pairing on boards without
+        a display path; null or an empty string clears it, returning the
+        board to Just Works. Rejected on boards that display a random code.
+        Any change wipes stored BLE bonds, so every client re-pairs with the
+        current code.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetBlePasskeyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Passkey updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetBlePasskeyResponse'
+
   /rpc/bramble.getTimezone:
     post:
       operationId: getTimezone
@@ -3027,6 +3076,40 @@ components:
         name:
           type: string
           description: The applied node name.
+
+    GetBleSecurityResponse:
+      type: object
+      required: [mode, staticPasskeySet]
+      properties:
+        mode:
+          type: string
+          enum: [passkey-display, static-passkey, just-works]
+        staticPasskeySet:
+          type: boolean
+    SetBlePasskeyParams:
+      type: object
+      required: [passkey]
+      properties:
+        passkey:
+          type: string
+          nullable: true
+          pattern: '^[0-9]{6}$'
+          description: >
+            6-digit passkey to set; explicit null or an empty string clears
+            it. The member itself is required: omitting it entirely is a
+            bad-request error, not a clear, so a caller cannot silently wipe
+            a configured passkey by forgetting the parameter.
+    SetBlePasskeyResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        mode:
+          type: string
+          enum: [passkey-display, static-passkey, just-works]
+        error:
+          type: string
 
     TimezonePreset:
       type: object

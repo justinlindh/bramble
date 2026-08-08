@@ -254,7 +254,7 @@ esp_err_t nvs_erase_key(nvs_handle_t h, const char* key) {
         return ESP_FAIL;
     nvs_fake_entry_t* e = find_entry(ns, key);
     if (!e)
-        return ESP_FAIL;
+        return ESP_ERR_NVS_NOT_FOUND;
     memset(e, 0, sizeof(*e));
     return ESP_OK;
 }

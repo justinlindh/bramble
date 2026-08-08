@@ -2,23 +2,23 @@
   "_comment": "Committed app-flash and static-DRAM ceilings (bytes) per board, measured on the runner's pinned ESP-IDF (see .esp-idf-version). flash_bytes is the UNPADDED app flash footprint (flash_code + flash_rodata + flash_other from idf.py size), not the bramble.bin image: the image is padded up to 64 KiB ESP32-S3 MMU pages, so its size jumps a whole page at a boundary and can differ by 64 KiB between ESP-IDF patch versions, which is not a precise regression signal (partition fit is already enforced by the ESP-IDF build). CI fails a board when app flash or static DRAM (data + bss) grows more than tolerance_bytes above the ceiling. This file NEVER auto-drifts: a developer updates it deliberately with scripts/ci/update-size-baseline.sh (run under the CI toolchain via scripts/ci-source-idf.sh) when a change legitimately grows the binary, with the reason in the PR. tolerance_bytes (8 KiB) absorbs run-to-run and minor toolchain noise while still catching the tens-of-KiB regressions this gate exists to stop.",
   "boards": {
     "heltec-v3": {
-      "flash_bytes": 1393062,
-      "static_ram_bytes": 116660,
+      "flash_bytes": 1392390,
+      "static_ram_bytes": 116404,
       "tolerance_bytes": 8192
     },
     "tdeck-plus": {
-      "flash_bytes": 2049002,
-      "static_ram_bytes": 144080,
+      "flash_bytes": 2050974,
+      "static_ram_bytes": 144104,
       "tolerance_bytes": 8192
     },
     "heltec-v4": {
-      "flash_bytes": 1568158,
-      "static_ram_bytes": 130212,
+      "flash_bytes": 1569294,
+      "static_ram_bytes": 130220,
       "tolerance_bytes": 8192
     },
     "bramble-pager": {
-      "flash_bytes": 1374926,
-      "static_ram_bytes": 127452,
+      "flash_bytes": 1373918,
+      "static_ram_bytes": 127196,
       "tolerance_bytes": 8192
     }
   }

@@ -95,6 +95,14 @@ function authRequired() { return authToken.length > 0; }
 
 // Allowed-origins and OTA origin allowlist (issue #96, mirrors PR #83 / #85).
 let allowedOrigins = [];
+
+/* BLE pairing posture (bramble.getBleSecurity / bramble.setBlePasskey). The
+ * demo node presents itself as a board with no display, so the passkey
+ * controls render; MOCK_BLE_MODE=passkey-display demos a board that shows a
+ * random code on its own screen and therefore refuses a static passkey. */
+let blePasskey = '';
+const bleDisplayBoard =
+  (typeof process !== 'undefined' && process.env?.MOCK_BLE_MODE) === 'passkey-display';
 // The mock's OTA origin must be fetchable by fetchOtaIndex, which does a real
 // fetch() against it. 'https://mock.local/ota/' resolves nowhere, so the
 // index.json GET always failed and the version picker never rendered in the
@@ -663,6 +671,32 @@ export const handlers = {
 
   'bramble.getAuthToken'(_params) {
     return { token: authToken, enabled: authRequired() };
+  },
+
+  'bramble.getBleSecurity'(_params) {
+    return {
+      mode: bleDisplayBoard ? 'passkey-display' : blePasskey ? 'static-passkey' : 'just-works',
+      staticPasskeySet: !bleDisplayBoard && blePasskey !== '',
+    };
+  },
+
+  'bramble.setBlePasskey'(params) {
+    // Same answers the firmware gives (main/rpc_methods.c), so the demo
+    // exercises the real client paths including the rejections.
+    if (bleDisplayBoard) {
+      return { ok: false, error: 'board shows a random pairing code; static passkey unsupported' };
+    }
+    const pk = params?.passkey;
+    if (pk === undefined) return { ok: false, error: 'missing passkey parameter' };
+    if (pk === null || pk === '') {
+      blePasskey = '';
+      return { ok: true, mode: 'just-works' };
+    }
+    if (typeof pk !== 'string' || !/^[0-9]{6}$/.test(pk)) {
+      return { ok: false, error: 'passkey must be exactly 6 digits' };
+    }
+    blePasskey = pk;
+    return { ok: true, mode: 'static-passkey' };
   },
 
   'bramble.setAllowedOrigins'(params) {
