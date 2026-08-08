@@ -27,6 +27,11 @@ static FILE* s_msg_file = NULL;
 static msg_file_header_t s_header;
 static bool s_initialized = false;
 
+/* One record of scratch for the read-modify-write in msg_store_spiffs_update.
+ * Static, not stack: a record is ~700 bytes and the callers run on the mesh
+ * task alongside the radio. Writers are single-task, so no two uses overlap. */
+static stored_msg_t s_record_scratch;
+
 int msg_store_spiffs_init(void) {
     /* Check if SPIFFS is mounted. Must be esp_spiffs_mounted(), never
      * stat("/spiffs"): SPIFFS is flat, the VFS has no root directory entry,
@@ -157,6 +162,50 @@ int msg_store_spiffs_save(const stored_msg_t* msg) {
     return 0;
 }
 
+int msg_store_spiffs_update(int from_end, const stored_msg_t* msg) {
+    if (!s_initialized || !s_msg_file || !msg) {
+        return -1;
+    }
+    if (from_end < 0 || (uint32_t)from_end >= s_header.record_count) {
+        return -1;
+    }
+
+    long index = (long)s_header.record_count - 1 - (long)from_end;
+    long offset = (long)sizeof(msg_file_header_t) + index * (long)sizeof(stored_msg_t);
+
+    /* Read the record back and confirm it is the message the caller means
+     * before overwriting it: see msg_store_spiffs_update's contract. */
+    if (fseek(s_msg_file, offset, SEEK_SET) != 0 ||
+        fread(&s_record_scratch, sizeof(s_record_scratch), 1, s_msg_file) != 1) {
+        ESP_LOGW(TAG, "Update: record %ld unreadable", index);
+        return -1;
+    }
+    if (!msg_store_record_matches(&s_record_scratch, msg)) {
+        ESP_LOGW(TAG, "Update: record %ld is a different message, skipping", index);
+        return -1;
+    }
+
+    uint32_t persisted_ts = s_record_scratch.timestamp_s;
+    s_record_scratch = *msg;
+    s_record_scratch.timestamp_s = persisted_ts;
+
+    if (fseek(s_msg_file, offset, SEEK_SET) != 0 ||
+        fwrite(&s_record_scratch, sizeof(s_record_scratch), 1, s_msg_file) != 1) {
+        ESP_LOGE(TAG, "Update: failed to rewrite record %ld", index);
+        return -1;
+    }
+
+    /* The record count does not change, so the header needs no update; only
+     * the record itself has to reach flash. fsync for the same reason
+     * msg_store_spiffs_save does: fflush alone leaves it in the write cache. */
+    fflush(s_msg_file);
+    if (fsync(fileno(s_msg_file)) != 0) {
+        ESP_LOGE(TAG, "Update: fsync failed");
+        return -1;
+    }
+    return 0;
+}
+
 int msg_store_spiffs_get_count(void) { return s_initialized ? s_header.record_count : 0; }
 
 int msg_store_spiffs_load_recent(stored_msg_t* msgs, int max_count) {
@@ -273,6 +322,11 @@ void msg_store_spiffs_clear(void) {
 
 int msg_store_spiffs_init(void) { return -1; }
 int msg_store_spiffs_save(const stored_msg_t* msg) {
+    (void)msg;
+    return -1;
+}
+int msg_store_spiffs_update(int from_end, const stored_msg_t* msg) {
+    (void)from_end;
     (void)msg;
     return -1;
 }

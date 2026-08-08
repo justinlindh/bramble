@@ -417,6 +417,17 @@ target_include_directories(test_dedup PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
 )
 
+# Boot-trace page walking (nRF consoleless boards); the NVMC half stays on
+# the device, this is the decision logic it drives.
+add_executable(test_boot_trace
+    test_boot_trace.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src/boot_trace_scan.c
+    unity/unity.c
+)
+target_include_directories(test_boot_trace PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/src
+)
+
 # Battery percentage curve (shared by the device and virtual drivers)
 add_executable(test_battery
     test_battery.c
@@ -424,6 +435,16 @@ add_executable(test_battery
 )
 target_include_directories(test_battery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+)
+
+# T1000-E battery conversion math (SAADC raw -> cell mV, divider, average)
+add_executable(test_battery_t1000e
+    test_battery_t1000e.c
+    unity/unity.c
+)
+target_include_directories(test_battery_t1000e PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nrf/shim/include
 )
 
 # Radio airtime tests
@@ -1148,6 +1169,23 @@ target_include_directories(test_location PRIVATE
 target_compile_definitions(test_location PRIVATE NVS_STUBS_ENABLE=1)
 target_link_libraries(test_location m)
 
+# Peer-location persistence. Links stubs/nvs_fake.c instead of esp_stubs.c's
+# no-op NVS block (they define the same symbols, so never both): a store test
+# has to read back what it wrote and walk the namespace directory.
+add_executable(test_location_store
+    test_location_store.c
+    unity/unity.c
+    stubs/nvs_fake.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+)
+target_include_directories(test_location_store PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+)
+target_link_libraries(test_location_store m)
+
 # Public channel tests (includes .c directly, needs OpenSSL)
 add_executable(test_public_channel
     test_public_channel.c
@@ -1209,12 +1247,15 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
 )
 add_executable(test_rpc_set_auth_token_contract
     test_rpc_set_auth_token_contract.c
@@ -1231,12 +1272,40 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
+)
+add_executable(test_rpc_ble_security
+    test_rpc_ble_security.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    stubs/cJSON.c
+    stubs/rpc_methods_link_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
 )
 add_executable(test_rpc_get_config_channel_export
     test_rpc_get_config_channel_export.c
@@ -1253,12 +1322,15 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
 )
 add_executable(test_mesh_broadcast_delivery
     test_mesh_broadcast_delivery.c
@@ -1275,12 +1347,15 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
 )
 
 add_executable(test_broadcast_delivery_receipt
@@ -1319,6 +1394,8 @@ target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
 target_compile_definitions(test_rpc_add_channel_contract PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1354,6 +1431,8 @@ target_include_directories(test_rpc_set_auth_token_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
 target_compile_definitions(test_rpc_set_auth_token_contract PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1362,6 +1441,43 @@ target_compile_options(test_rpc_set_auth_token_contract PRIVATE
     -Wno-error=unused-parameter
 )
 target_link_libraries(test_rpc_set_auth_token_contract m ssl crypto)
+
+target_include_directories(test_rpc_ble_security PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+)
+target_compile_definitions(test_rpc_ble_security PRIVATE
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=96
+)
+target_compile_options(test_rpc_ble_security PRIVATE
+    -Wno-error=unused-parameter
+)
+target_link_libraries(test_rpc_ble_security m ssl crypto)
 
 # Trust-anchor RPC surface (P0): setAnchor / getAnchorStatus / getIdentity
 # ed25519_pub, driven through the real rpc_methods.c + the real identity.c
@@ -1381,12 +1497,15 @@ add_executable(test_rpc_anchor_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
 )
 target_include_directories(test_rpc_anchor_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -1414,6 +1533,8 @@ target_include_directories(test_rpc_anchor_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
 target_compile_definitions(test_rpc_anchor_contract PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1449,9 +1570,15 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
+# ESP_TIMER_CUSTOM_IMPL lets the peer-location cases drive the clock: whether a
+# persisted position reads as current depends on where "now" sits relative to
+# the stored uptime, so a clock frozen at 0 cannot express the difference.
 target_compile_definitions(test_rpc_get_config_channel_export PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
+    ESP_TIMER_CUSTOM_IMPL=1
 )
 target_compile_options(test_rpc_get_config_channel_export PRIVATE
     -Wno-error=unused-parameter
@@ -1484,6 +1611,8 @@ target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
 target_compile_definitions(test_mesh_broadcast_delivery PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1575,6 +1704,25 @@ target_include_directories(test_msg_pipeline_uid PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
 
+# Delivery status surviving a reboot: the RAM store pushing a later status
+# change back into the already-written record. Built with persistence ON and a
+# deliberately tiny ring (4 rows against an 8-record file) so ring wrap and
+# rollover both happen, which is where the ring-to-file mapping could break.
+add_executable(test_msg_store_persist_status
+    test_msg_store_persist_status.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/msg_store.c
+)
+target_compile_definitions(test_msg_store_persist_status PRIVATE
+    CONFIG_BRAMBLE_MSG_STORE_CAP=4
+    CONFIG_BRAMBLE_MSG_PERSIST_ENABLED=1
+    CONFIG_BRAMBLE_MSG_PERSIST_MAX=8
+    CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT=75
+)
+target_include_directories(test_msg_store_persist_status PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
+
 # Message store SPIFFS persistence tests
 add_executable(test_msg_store_spiffs
     test_msg_store_spiffs.c
@@ -1661,6 +1809,8 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1668,6 +1818,7 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
 )
 target_include_directories(test_rpc_methods_firmware PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -1695,6 +1846,8 @@ target_include_directories(test_rpc_methods_firmware PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
 target_compile_definitions(test_rpc_methods_firmware PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1723,6 +1876,8 @@ add_executable(test_rpc_scratch_isolation
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1730,6 +1885,7 @@ add_executable(test_rpc_scratch_isolation
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
 )
 target_include_directories(test_rpc_scratch_isolation PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -1757,6 +1913,8 @@ target_include_directories(test_rpc_scratch_isolation PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
 target_compile_definitions(test_rpc_scratch_isolation PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1775,6 +1933,16 @@ add_executable(test_chat_message_ui
 target_include_directories(test_chat_message_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
+
+# Map zoom ladder: step/clamp arithmetic and the on-screen readout (pure, no LVGL)
+add_executable(test_map_zoom
+    test_map_zoom.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/map_zoom.c
+)
+target_include_directories(test_map_zoom PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
 )
 
 # GNSS three-way state classifier and formatters (pure, no LVGL, no driver)
@@ -1971,6 +2139,8 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
@@ -1978,6 +2148,7 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
 )
 target_include_directories(test_host_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -2005,6 +2176,8 @@ target_include_directories(test_host_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
 target_compile_definitions(test_host_rpc_methods PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -2024,6 +2197,16 @@ target_include_directories(test_mailbox_wrappers PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/mailbox/include
 )
 add_test(NAME test_mailbox_wrappers COMMAND test_mailbox_wrappers)
+
+# POSIX TZ local-time conversion tests (pure, no ESP deps)
+add_executable(test_timezone
+    test_timezone.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+)
+target_include_directories(test_timezone PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+)
 
 # OTA URL policy tests (pure, no ESP deps)
 add_executable(test_ota_url
@@ -2097,6 +2280,29 @@ target_include_directories(test_ble_link_sec PRIVATE
 )
 target_compile_definitions(test_ble_link_sec PRIVATE
     SDKCONFIG_DEFAULTS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../sdkconfig.defaults"
+)
+
+# BLE pairing mode policy, passkey validation, pairing-failure backoff
+add_executable(test_ble_pairing_policy
+    test_ble_pairing_policy.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
+)
+target_include_directories(test_ble_pairing_policy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+)
+
+# Static BLE passkey persistence (displayless boards)
+add_executable(test_ble_pairing_store
+    test_ble_pairing_store.c
+    unity/unity.c
+    stubs/nvs_fake.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_store.c
+)
+target_include_directories(test_ble_pairing_store PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 
 # WS credential parser: header-only auth, no query string (NEW-SEC-6)
@@ -2237,6 +2443,20 @@ target_include_directories(test_gps_virt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
 )
 target_link_libraries(test_gps_virt pthread)
+
+# Virtual battery driver: charging-aware emu-link mapping (whitebox include
+# of battery_virt.c + battery_pct.c + emu_link.c)
+add_executable(test_battery_virt
+    test_battery_virt.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_battery_virt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+)
+target_link_libraries(test_battery_virt pthread)
 
 # Virtual indicators driver: full-state ind emission per change
 # (Task 6; whitebox include of indicator_virt.c + emu_link.c)

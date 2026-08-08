@@ -26,6 +26,8 @@
 #include "ota_progress.h"
 #include "ota_rollback.h"
 #include "ota_url.h"
+#include "bramble_tz.h"
+#include "tz_store.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "board_config.h"
@@ -36,6 +38,9 @@
 #include "location.h"
 #include "wifi_manager.h"
 #include "ws_server.h"
+#include "ble_server.h"
+#include "ble_pairing_policy.h"
+#include "ble_pairing_store.h"
 #include "network_key.h"
 /* Deep sleep, GPIO wake, esp_wifi and mDNS exist only on the ESP32 targets:
  * not on the POSIX/Linux simulator, and not on the nRF52840 (which has no
@@ -66,14 +71,10 @@ static const char* TAG = "rpc_methods";
 static bramble_identity_t* s_identity;
 
 #define LOCATION_SOURCE_KEY "source"
-#define LOCATION_CONTACT_RULE_PREFIX "lcr_"
-#define LOCATION_CHANNEL_RULE_PREFIX "lch_"
-
-typedef struct {
-    bool enabled;
-    uint8_t tier;
-    uint16_t interval_s;
-} rpc_location_rule_t;
+/* LOCATION_CONTACT_RULE_PREFIX, LOCATION_CHANNEL_RULE_PREFIX and the rule
+   string codec come from location.h: the send path reads exactly the keys
+   this file writes, so they share one definition rather than two that agree
+   by inspection. */
 
 static const char* bramble_hardware(void) {
     const bramble_board_config_t* board = board_get_config();
@@ -92,18 +93,6 @@ static void bytes_to_hex(const uint8_t* in, size_t n, char* out) {
     }
     out[2 * n] = '\0';
 }
-
-typedef struct __attribute__((packed)) {
-    int32_t latitude_e7;
-    int32_t longitude_e7;
-    int16_t altitude_m;
-    uint8_t accuracy_m;
-    uint8_t speed_kmh;
-    uint8_t heading_deg2;
-    uint32_t timestamp;
-    uint32_t received_ms;
-    uint8_t tier;
-} persisted_peer_location_t;
 
 /* ── Query handlers (pre-existing) ─────────────────────────────────── */
 
@@ -131,6 +120,20 @@ typedef struct __attribute__((packed)) {
  * Allocation failure returns RPC_ERR_INTERNAL, which is the honest answer: a
  * node too low on heap to snapshot its own state cannot report that state.
  */
+
+/* Wire string for the RPC-visible charging enum. Additive fields on
+ * getBattery/getStatus; see api/openapi.yaml. */
+static const char* battery_charging_str(battery_charging_t charging) {
+    switch (charging) {
+    case BATTERY_CHG_YES:
+        return "yes";
+    case BATTERY_CHG_NO:
+        return "no";
+    case BATTERY_CHG_UNKNOWN:
+    default:
+        return "unknown";
+    }
+}
 
 /* One GNSS snapshot shared by getStatus and getGpsPosition. gps_get_stats
  * takes the driver lock, so callers take exactly one snapshot per response. */
@@ -177,8 +180,12 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
     free(st);
     cJSON_AddNumberToObject(result, "uptime_s", (double)(esp_timer_get_time() / 1000000));
     cJSON_AddNumberToObject(result, "free_heap", (double)esp_get_free_heap_size());
-    cJSON_AddNumberToObject(result, "battery_mv", battery_read_mv());
-    cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
+    battery_status_t bstat;
+    battery_get_status(&bstat);
+    cJSON_AddNumberToObject(result, "battery_mv", bstat.mv);
+    cJSON_AddNumberToObject(result, "battery_pct", bstat.pct);
+    cJSON_AddStringToObject(result, "charging", battery_charging_str(bstat.charging));
+    cJSON_AddBoolToObject(result, "present", bstat.present);
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
     cJSON_AddBoolToObject(result, "gps_enabled", gps_pref_get());
 
@@ -627,6 +634,54 @@ static int handle_get_routes(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* bramble.getDmSessions
+ *
+ * Whether a peer has an established DM session is observable state that
+ * nothing else reports, and its absence is a silent failure mode: a directed
+ * send (a chat DM, or a per-contact location share) needs an ACTIVE session
+ * and is dropped without one, logging only to the serial console. A node can
+ * therefore be configured to share location with a peer, report that config
+ * back through bramble.getConfig, and transmit nothing, with no way to tell
+ * from the outside. This returns the session table's metadata so a diagnostic
+ * can name the peer that has no session.
+ *
+ * Key material is not exposed: mesh_get_dm_sessions copies only the fields
+ * below out of dm_session_t, never session_key, peer_id_pub or the ratchet
+ * chain keys. */
+static int handle_get_dm_sessions(const cJSON* params, cJSON* result) {
+    (void)params;
+
+    size_t cap = mesh_dm_session_capacity();
+    mesh_dm_session_info_t* sessions = calloc(cap, sizeof(*sessions));
+    if (!sessions) {
+        ESP_LOGE(TAG, "getDmSessions: out of memory for session snapshot");
+        return RPC_ERR_INTERNAL;
+    }
+    size_t count = mesh_get_dm_sessions(sessions, cap);
+
+    cJSON* arr = cJSON_AddArrayToObject(result, "sessions");
+    char buf[12];
+    for (size_t i = 0; i < count; i++) {
+        const mesh_dm_session_info_t* s = &sessions[i];
+        cJSON* obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(obj, "address", addr_hex(s->peer_addr, buf, sizeof(buf)));
+        cJSON_AddStringToObject(obj, "state",
+                                s->state == MESH_DM_SESSION_ACTIVE        ? "active"
+                                : s->state == MESH_DM_SESSION_HANDSHAKING ? "handshaking"
+                                                                          : "none");
+        cJSON_AddBoolToObject(obj, "verified", s->verified);
+        cJSON_AddBoolToObject(obj, "ratchet_valid", s->ratchet_valid);
+        cJSON_AddNumberToObject(obj, "msg_count", s->msg_count);
+        cJSON_AddNumberToObject(obj, "ke_epoch", s->ke_epoch);
+        cJSON_AddNumberToObject(obj, "established_ms_ago", s->established_ms_ago);
+        cJSON_AddNumberToObject(obj, "last_active_ms_ago", s->last_active_ms_ago);
+        cJSON_AddItemToArray(arr, obj);
+    }
+    cJSON_AddNumberToObject(result, "capacity", (double)cap);
+    free(sessions);
+    return 0;
+}
+
 /* bramble.getAirtime */
 static int handle_get_airtime(const cJSON* params, cJSON* result) {
     (void)params;
@@ -968,6 +1023,87 @@ static int handle_set_radio(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* bramble.getBleSecurity: current SMP pairing posture. The passkey value is
+ * write-only and never reported. */
+static int handle_get_ble_security(const cJSON* params, cJSON* result) {
+    (void)params;
+    bool static_set = ble_pairing_store_is_set();
+    ble_pairing_mode_t mode =
+        ble_pairing_mode_resolve(ble_server_has_passkey_display(), static_set);
+    cJSON_AddStringToObject(result, "mode", ble_pairing_mode_name(mode));
+    cJSON_AddBoolToObject(result, "staticPasskeySet", static_set);
+    return 0;
+}
+
+/* bramble.setBlePasskey: {"passkey":"123456"} sets, explicit null or "" clears.
+ * The "passkey" member itself must be present: an omitted parameter is a
+ * distinct error, not a clear, so a caller that forgets it cannot silently
+ * wipe a configured passkey.
+ * Displayless boards only; display boards generate a random code per
+ * pairing and reject static configuration.
+ * Any change must wipe stored bonds first (bonds created under the previous
+ * policy would otherwise stay trusted, making a freshly set passkey theater
+ * for already-bonded peers): ble_server_wipe_bonds() runs before the store
+ * is touched, and this handler only persists the change and reports ok:true
+ * if that wipe actually succeeded. */
+static int handle_set_ble_passkey(const cJSON* params, cJSON* result) {
+    if (ble_server_has_passkey_display()) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error",
+                                "board shows a random pairing code; static passkey unsupported");
+        return 0;
+    }
+    if (!params || !cJSON_HasObjectItem(params, "passkey")) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "missing passkey parameter");
+        return 0;
+    }
+    const cJSON* pk = cJSON_GetObjectItem(params, "passkey");
+    bool clearing = cJSON_IsNull(pk) || (cJSON_IsString(pk) && pk->valuestring[0] == '\0');
+    uint32_t value = 0;
+    if (!clearing && (!cJSON_IsString(pk) || !ble_pairing_passkey_parse(pk->valuestring, &value))) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "passkey must be exactly 6 digits");
+        return 0;
+    }
+
+    /* Wipe first, before persisting anything. This RPC is only reachable
+     * here on displayless boards (the passkey-display check above already
+     * rejected display boards): on the nRF target the BLE host is always up
+     * by the time RPCs run, and the linux emulator's stub has no bonds to
+     * begin with, so there is no boot window where a pending wipe could be
+     * lost and no cross-boot pending-wipe machinery is needed. */
+    if (ble_server_wipe_bonds() != 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error",
+                                "failed to invalidate existing pairings; passkey unchanged");
+        return 0;
+    }
+
+    if (clearing) {
+        if (ble_pairing_store_clear() != 0) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error", "failed to clear passkey");
+            return 0;
+        }
+    } else {
+        if (ble_pairing_store_set(value) != 0) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error", "failed to persist passkey");
+            return 0;
+        }
+    }
+    ble_server_pairing_config_changed();
+    /* clearing already says whether the store now holds a passkey; no need
+     * to reopen NVS via ble_pairing_store_is_set() to rederive it. This
+     * handler is only reachable without a passkey-display cb registered
+     * (checked above), so the resolve table collapses to these two modes. */
+    ble_pairing_mode_t mode = clearing ? BLE_PAIRING_JUST_WORKS : BLE_PAIRING_STATIC_PASSKEY;
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "mode", ble_pairing_mode_name(mode));
+    return 0;
+}
+
 /* bramble.setNodeName: params: {"name":"..."}, persists to NVS */
 static int handle_set_node_name(const cJSON* params, cJSON* result) {
     const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(params, "name"));
@@ -1008,6 +1144,67 @@ static int handle_set_node_name(const cJSON* params, cJSON* result) {
     ESP_LOGI(TAG, "Node name set to: %s", name);
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "name", name);
+    return 0;
+}
+
+/* bramble.getTimezone: the zone the status-bar clock renders in, plus the
+ * named zones the on-device picker offers. Clients read the preset list from
+ * here rather than carrying their own copy of the specs. */
+static int handle_get_timezone(const cJSON* params, cJSON* result) {
+    (void)params;
+
+    char spec[BRAMBLE_TZ_SPEC_MAX];
+    tz_store_get(spec, sizeof(spec));
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "timezone", spec);
+    cJSON_AddStringToObject(result, "default_timezone", BRAMBLE_TZ_DEFAULT_SPEC);
+    cJSON_AddBoolToObject(result, "configured", tz_store_is_configured());
+
+    cJSON* presets = cJSON_AddArrayToObject(result, "presets");
+    if (presets) {
+        for (size_t i = 0; i < bramble_tz_preset_count(); i++) {
+            const bramble_tz_preset_t* p = bramble_tz_preset(i);
+            cJSON* entry = cJSON_CreateObject();
+            if (!entry) {
+                break;
+            }
+            cJSON_AddStringToObject(entry, "label", p->label);
+            cJSON_AddStringToObject(entry, "spec", p->spec);
+            cJSON_AddItemToArray(presets, entry);
+        }
+    }
+    return 0;
+}
+
+/* bramble.setTimezone: persist a POSIX TZ specification, e.g.
+ * "PST8PDT,M3.2.0,M11.1.0". UTC remains the internal source of truth; the
+ * zone is applied only when a clock is rendered. */
+static int handle_set_timezone(const cJSON* params, cJSON* result) {
+    const char* spec = cJSON_GetStringValue(cJSON_GetObjectItem(params, "timezone"));
+    if (!spec || spec[0] == '\0') {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    int rc = tz_store_set(spec);
+    if (rc == -1) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error",
+                                "not a POSIX TZ specification (for example "
+                                "PST8PDT,M3.2.0,M11.1.0); a daylight name requires "
+                                "explicit transition rules");
+        return 0;
+    }
+    if (rc != 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "failed to persist timezone");
+        return 0;
+    }
+
+    char now[BRAMBLE_TZ_SPEC_MAX];
+    tz_store_get(now, sizeof(now));
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "timezone", now);
     return 0;
 }
 
@@ -1671,47 +1868,14 @@ static const char* rpc_location_source_normalize(const char* source) {
     return "hybrid";
 }
 
-static bool rpc_location_parse_rule_string(const char* raw, rpc_location_rule_t* rule) {
-    if (!raw || !rule)
-        return false;
-
-    int enabled = 1;
-    char tier[16] = {0};
-    int interval_s = LOCATION_DEFAULT_INTERVAL_S;
-    int scanned = sscanf(raw, "%d|%15[^|]|%d", &enabled, tier, &interval_s);
-    if (scanned >= 2) {
-        rule->enabled = (enabled != 0);
-        rule->tier = location_tier_from_string(tier);
-        if (scanned >= 3 && interval_s > 0) {
-            rule->interval_s = location_policy_clamp_interval_s((uint16_t)interval_s);
-        } else {
-            rule->interval_s = LOCATION_DEFAULT_INTERVAL_S;
-        }
-        return true;
-    }
-
-    rule->enabled = true;
-    rule->tier = location_tier_from_string(raw);
-    rule->interval_s = LOCATION_DEFAULT_INTERVAL_S;
-    return true;
-}
-
-static void rpc_location_write_rule_string(char* out, size_t out_len,
-                                           const rpc_location_rule_t* rule) {
-    if (!out || out_len == 0 || !rule)
-        return;
-    snprintf(out, out_len, "%d|%s|%u", rule->enabled ? 1 : 0, location_tier_to_string(rule->tier),
-             (unsigned)rule->interval_s);
-}
-
 /* Build a per-target location rule from a request JSON entry, starting from the
    node policy's default tier and interval and letting the entry override any of
    enabled/tier/interval_s. Shared by the contact_rules and channel_targets
    write loops in set_location_config, which differ only in how the rule is
    keyed into NVS. */
-static rpc_location_rule_t rpc_location_rule_from_json(const cJSON* entry,
-                                                       const location_policy_t* policy) {
-    rpc_location_rule_t rule = {
+static location_rule_t rpc_location_rule_from_json(const cJSON* entry,
+                                                   const location_policy_t* policy) {
+    location_rule_t rule = {
         .enabled = true,
         .tier = policy->default_tier,
         .interval_s = policy->interval_s,
@@ -1736,15 +1900,15 @@ static rpc_location_rule_t rpc_location_rule_from_json(const cJSON* entry,
 
 /* Parse a stored rule string and append its enabled/tier/interval_s fields to a
    response entry. The caller adds the identifying field (address or channel)
-   first. Shared by the contact_rules and channel_targets read loops in
-   get_location_config. */
+   first. Shared by the contact_rules and channel_targets read loops that
+   handle_get_config runs to emit the location block. */
 static void rpc_location_rule_emit_fields(cJSON* entry, const char* raw) {
-    rpc_location_rule_t rule = {
+    location_rule_t rule = {
         .enabled = true,
         .tier = LOCATION_TIER_COARSE,
         .interval_s = LOCATION_DEFAULT_INTERVAL_S,
     };
-    rpc_location_parse_rule_string(raw, &rule);
+    location_rule_parse(raw, &rule);
     cJSON_AddBoolToObject(entry, "enabled", rule.enabled);
     cJSON_AddStringToObject(entry, "tier", location_tier_to_string(rule.tier));
     cJSON_AddNumberToObject(entry, "interval_s", rule.interval_s);
@@ -1753,6 +1917,36 @@ static void rpc_location_rule_emit_fields(cJSON* entry, const char* raw) {
 static int handle_set_location_config(const cJSON* params, cJSON* result) {
     if (!params)
         return RPC_ERR_INVALID_PARAMS;
+
+    /* Validate every channel target before writing any of this config. A
+       channel index outside the key space resolves to no target at all, and
+       accepting it would leave the caller with a policy that reads back as
+       configured while the send path has nothing to send to. The public
+       channel is rejected outright: its PSK is well known, so a target on it
+       broadcasts exact coordinates in the clear to anyone in range, and the
+       shared replay window is deliberately skipped there. Rejecting up front
+       also keeps the write below all-or-nothing, so no part of a request
+       carrying a bad target is applied. */
+    const cJSON* proposed_targets = cJSON_GetObjectItem(params, "channel_targets");
+    if (proposed_targets && cJSON_IsArray(proposed_targets)) {
+        const cJSON* proposed = NULL;
+        cJSON_ArrayForEach(proposed, proposed_targets) {
+            const cJSON* channel = cJSON_GetObjectItem(proposed, "channel");
+            char probe[LOCATION_TARGET_KEY_SIZE];
+            if (!cJSON_IsNumber(channel) ||
+                !location_channel_key(probe, sizeof(probe), channel->valueint)) {
+                return RPC_ERR_INVALID_PARAMS;
+            }
+            if (!location_channel_target_is_permitted(channel->valueint)) {
+                cJSON_AddStringToObject(
+                    result, "error",
+                    "channel 0 is the public channel and cannot carry location: its key is "
+                    "well known, so a target on it would broadcast coordinates in the clear. "
+                    "Create a channel with a PSK and target that instead.");
+                return RPC_ERR_INVALID_PARAMS;
+            }
+        }
+    }
 
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
@@ -1810,12 +2004,12 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
             if (!cJSON_IsString(address) || !address->valuestring)
                 continue;
 
-            rpc_location_rule_t rule = rpc_location_rule_from_json(entry, &policy);
+            location_rule_t rule = rpc_location_rule_from_json(entry, &policy);
 
             char key[20];
             char val[48];
             snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", address->valuestring);
-            rpc_location_write_rule_string(val, sizeof(val), &rule);
+            location_rule_format(val, sizeof(val), &rule);
             if (err == ESP_OK)
                 err = nvs_set_str(nvs, key, val);
         }
@@ -1826,15 +2020,15 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
         const cJSON* entry = NULL;
         cJSON_ArrayForEach(entry, channel_targets) {
             const cJSON* channel = cJSON_GetObjectItem(entry, "channel");
-            if (!cJSON_IsNumber(channel))
+            char key[LOCATION_TARGET_KEY_SIZE];
+            /* Range-checked above, before anything was written. */
+            if (!location_channel_key(key, sizeof(key), channel->valueint))
                 continue;
 
-            rpc_location_rule_t rule = rpc_location_rule_from_json(entry, &policy);
+            location_rule_t rule = rpc_location_rule_from_json(entry, &policy);
 
-            char key[20];
             char val[48];
-            snprintf(key, sizeof(key), LOCATION_CHANNEL_RULE_PREFIX "%02d", channel->valueint);
-            rpc_location_write_rule_string(val, sizeof(val), &rule);
+            location_rule_format(val, sizeof(val), &rule);
             if (err == ESP_OK)
                 err = nvs_set_str(nvs, key, val);
         }
@@ -1875,7 +2069,7 @@ static int handle_set_location_contact(const cJSON* params, cJSON* result) {
         return 0;
     }
 
-    rpc_location_rule_t rule = {
+    location_rule_t rule = {
         .enabled = true,
         .tier = tier ? location_tier_from_string(tier) : LOCATION_TIER_COARSE,
         .interval_s = LOCATION_DEFAULT_INTERVAL_S,
@@ -1890,7 +2084,7 @@ static int handle_set_location_contact(const cJSON* params, cJSON* result) {
 
     char key[20];
     char rule_buf[48];
-    rpc_location_write_rule_string(rule_buf, sizeof(rule_buf), &rule);
+    location_rule_format(rule_buf, sizeof(rule_buf), &rule);
     snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", addr_str);
     err = nvs_set_str(nvs, key, rule_buf);
     err = rpc_nvs_commit_close(nvs, err);
@@ -2117,33 +2311,56 @@ static int handle_get_peer_locations(const cJSON* params, cJSON* result) {
                     nvs_entry_info_t info;
                     nvs_entry_info(it, &info);
 
-                    if (strncmp(info.key, "lp_", 3) == 0) {
-                        persisted_peer_location_t stored = {0};
-                        size_t len = sizeof(stored);
-                        if (nvs_get_blob(nvs, info.key, &stored, &len) == ESP_OK &&
-                            len == sizeof(stored)) {
+                    uint32_t peer_addr = 0;
+                    if (peer_location_key_parse(info.key, &peer_addr)) {
+                        persisted_peer_location_t blob;
+                        size_t len = sizeof(blob);
+                        peer_location_record_t stored;
+                        if (nvs_get_blob(nvs, info.key, &blob, &len) == ESP_OK &&
+                            peer_location_record_decode(&blob, len, location_store_boot_id(),
+                                                        &stored) == 0) {
                             cJSON* peer = cJSON_CreateObject();
-                            uint32_t freshness_ms =
-                                (now_ms >= stored.received_ms) ? (now_ms - stored.received_ms) : 0;
 
-                            cJSON* position = cJSON_CreateObject();
-                            cJSON_AddNumberToObject(position, "lat", stored.latitude_e7 / 1e7);
-                            cJSON_AddNumberToObject(position, "lon", stored.longitude_e7 / 1e7);
-                            cJSON_AddNumberToObject(position, "alt", stored.altitude_m);
-                            cJSON_AddNumberToObject(position, "accuracy", stored.accuracy_m);
-                            cJSON_AddNumberToObject(position, "speed", stored.speed_kmh);
-                            cJSON_AddNumberToObject(position, "heading", stored.heading_deg2 * 2);
-                            cJSON_AddNumberToObject(position, "timestampMs",
-                                                    (double)stored.timestamp * 1000.0);
+                            /* Only a coordinate-bearing tier gets a position.
+                             * A PRESENCE record stores an all-zero position
+                             * (location_deserialize_for_tier zeroes it and
+                             * keeps only the valid bit), so emitting one here
+                             * would report a peer who deliberately shares no
+                             * coordinates as sitting at 0,0. The in-RAM cache
+                             * applies the same rule; this is the other surface
+                             * reading the same records, and it has to agree. */
+                            if (location_tier_has_coordinates(stored.tier)) {
+                                cJSON* position = cJSON_CreateObject();
+                                cJSON_AddNumberToObject(position, "lat",
+                                                        stored.pos.latitude_e7 / 1e7);
+                                cJSON_AddNumberToObject(position, "lon",
+                                                        stored.pos.longitude_e7 / 1e7);
+                                cJSON_AddNumberToObject(position, "alt", stored.pos.altitude_m);
+                                cJSON_AddNumberToObject(position, "accuracy",
+                                                        stored.pos.accuracy_m);
+                                cJSON_AddNumberToObject(position, "speed", stored.pos.speed_kmh);
+                                cJSON_AddNumberToObject(position, "heading",
+                                                        stored.pos.heading_deg2 * 2);
+                                cJSON_AddNumberToObject(position, "timestampMs",
+                                                        (double)stored.pos.timestamp * 1000.0);
+                                cJSON_AddItemToObject(peer, "position", position);
+                            }
 
-                            cJSON_AddStringToObject(peer, "addr", info.key + 3);
+                            cJSON_AddStringToObject(peer, "addr",
+                                                    info.key + PEER_LOCATION_KEY_PREFIX_LEN);
                             cJSON_AddStringToObject(peer, "name", "");
                             cJSON_AddStringToObject(peer, "tier",
                                                     location_tier_to_string(stored.tier));
-                            cJSON_AddItemToObject(peer, "position", position);
                             cJSON_AddBoolToObject(peer, "online",
-                                                  freshness_ms < LOCATION_CACHE_TTL_MS);
-                            cJSON_AddNumberToObject(peer, "lastUpdatedMs", stored.received_ms);
+                                                  location_age_is_fresh(stored.age_known,
+                                                                        stored.received_ms,
+                                                                        now_ms));
+                            /* An uptime reading from a previous boot cannot be
+                             * expressed on this boot's clock, so report 0
+                             * ("unknown") rather than a number that reads as a
+                             * plausible, and wrong, moment in this boot. */
+                            cJSON_AddNumberToObject(peer, "lastUpdatedMs",
+                                                    stored.age_known ? stored.received_ms : 0);
 
                             cJSON_AddItemToArray(peer_locations, peer);
                         }
@@ -2337,13 +2554,23 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
 
                 if (strncmp(info.key, LOCATION_CHANNEL_RULE_PREFIX,
                             strlen(LOCATION_CHANNEL_RULE_PREFIX)) == 0) {
+                    /* Report only what the send path would act on. A stale
+                       lch_00 written by a build predating the public-channel
+                       rejection still sits in NVS after an upgrade, and the
+                       send path now refuses it; emitting it here would tell
+                       the client a target is configured and enabled while
+                       nothing is ever transmitted to it, which is the silent
+                       disagreement between reported and actual state that this
+                       guard exists to prevent. The contact loop above filters
+                       its own legacy keys for the same reason. */
+                    const char* chan_suffix = info.key + strlen(LOCATION_CHANNEL_RULE_PREFIX);
+                    int chan_index = location_channel_index_from_suffix(chan_suffix);
                     char raw[64] = {0};
                     size_t raw_len = sizeof(raw);
-                    if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
+                    if (chan_index >= 0 && location_channel_target_is_permitted(chan_index) &&
+                        nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
                         cJSON* entry = cJSON_CreateObject();
-                        cJSON_AddNumberToObject(
-                            entry, "channel",
-                            atoi(info.key + strlen(LOCATION_CHANNEL_RULE_PREFIX)));
+                        cJSON_AddNumberToObject(entry, "channel", chan_index);
                         rpc_location_rule_emit_fields(entry, raw);
                         cJSON_AddItemToArray(channel_targets, entry);
                     }
@@ -2679,11 +2906,15 @@ static int handle_sleep(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getBattery: returns battery voltage and percentage */
+/* bramble.getBattery: returns battery voltage, percentage, and charging state */
 static int handle_get_battery(const cJSON* params, cJSON* result) {
     (void)params;
-    cJSON_AddNumberToObject(result, "voltage_mv", battery_read_mv());
-    cJSON_AddNumberToObject(result, "percentage", battery_read_pct());
+    battery_status_t bstat;
+    battery_get_status(&bstat);
+    cJSON_AddNumberToObject(result, "voltage_mv", bstat.mv);
+    cJSON_AddNumberToObject(result, "percentage", bstat.pct);
+    cJSON_AddStringToObject(result, "charging", battery_charging_str(bstat.charging));
+    cJSON_AddBoolToObject(result, "present", bstat.present);
     return 0;
 }
 
@@ -3273,13 +3504,8 @@ static int handle_get_beacon_policy(const cJSON* params, cJSON* result) {
  * RPC surface's binary encoding and keeps the firmware free of a base64 dep. */
 static void phy_emit_frame_notify(const uint8_t* data, uint8_t len, const radio_rx_info_t* info,
                                   uint32_t freq_hz) {
-    static const char hexd[] = "0123456789abcdef";
     char frame_hex[2 * 255 + 1];
-    for (uint8_t i = 0; i < len; i++) {
-        frame_hex[i * 2] = hexd[(data[i] >> 4) & 0xF];
-        frame_hex[i * 2 + 1] = hexd[data[i] & 0xF];
-    }
-    frame_hex[len * 2] = '\0';
+    bytes_to_hex(data, len, frame_hex);
 
     cJSON* params = cJSON_CreateObject();
     if (!params) {
@@ -3436,6 +3662,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.getDeliveryEvents", handle_get_delivery_events);
     rpc_register("bramble.getNeighbors", handle_get_neighbors);
     rpc_register("bramble.getRoutes", handle_get_routes);
+    rpc_register("bramble.getDmSessions", handle_get_dm_sessions);
     rpc_register("bramble.getAirtime", handle_get_airtime);
     rpc_register("bramble.ping", handle_ping);
     rpc_register("bramble.getConfig", handle_get_config);
@@ -3450,6 +3677,10 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.sendProbe", handle_send_probe);
     rpc_register("bramble.setRadio", handle_set_radio);
     rpc_register("bramble.setNodeName", handle_set_node_name);
+    rpc_register("bramble.getBleSecurity", handle_get_ble_security);
+    rpc_register("bramble.setBlePasskey", handle_set_ble_passkey);
+    rpc_register("bramble.getTimezone", handle_get_timezone);
+    rpc_register("bramble.setTimezone", handle_set_timezone);
     rpc_register("bramble.setPeerVerified", handle_set_peer_verified);
     rpc_register("bramble.setAuthToken", rpc_set_auth_token);
     rpc_register("bramble.getAuthToken", rpc_get_auth_token);

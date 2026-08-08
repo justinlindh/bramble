@@ -1,13 +1,120 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   getAuthToken, setAuthToken,
   getAllowedOrigins, setAllowedOrigins,
   getOtaOrigin, setOtaOrigin, resetOtaOrigin,
-  type OtaOriginInfo,
+  getBleSecurity, setBlePasskey,
+  type OtaOriginInfo, type BleSecurityInfo,
 } from '../../store/actions';
 import { friendlyErrorFrom } from '../../lib/errors';
 import { FirmwareUpdateCard } from './FirmwareUpdateCard';
 import styles from './DeviceManagementSection.module.css';
+
+const REPAIR_NOTICE = 'Saved. All paired devices were unpaired and must pair again with the new code.';
+const CLEARED_NOTICE =
+  'Cleared. All paired devices were unpaired and must pair again, and this node no longer asks for a code.';
+
+// BLE pairing security: how new clients pair over Bluetooth. Some boards
+// display a random code on their own screen (nothing to configure here);
+// others need a fixed passkey set here since they have no display to show
+// one. Self-loads on mount so it works standalone within the section's
+// load-on-expand gate, mirroring the getAuthToken load flow above.
+export function BleSecurityCard() {
+  const [info, setInfo] = useState<BleSecurityInfo | null>(null);
+  const [passkey, setPasskeyDraft] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const i = await getBleSecurity();
+      setInfo(i);
+    } catch (e) {
+      setError(friendlyErrorFrom(e));
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const applyPasskey = async (next: string | null) => {
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await setBlePasskey(next);
+      if (!r.ok) { setError(r.error ?? 'Could not set passkey.'); return; }
+      await load();
+      setNotice(next === null ? CLEARED_NOTICE : REPAIR_NOTICE);
+      setPasskeyDraft('');
+    } catch (e) {
+      setError(friendlyErrorFrom(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!info) {
+    return (
+      <div className={styles.subsection}>
+        <h3 className={styles.subheading}>Bluetooth Pairing</h3>
+        {error && <p className={styles.error}>{error}</p>}
+      </div>
+    );
+  }
+
+  const validPasskey = /^[0-9]{6}$/.test(passkey);
+
+  return (
+    <div className={styles.subsection}>
+      <h3 className={styles.subheading}>Bluetooth Pairing</h3>
+      {info.mode === 'passkey-display' ? (
+        <p className={styles.hint}>
+          This device shows a random pairing code on its screen when a new client pairs.
+          Nothing to configure.
+        </p>
+      ) : (
+        <>
+          <p className={styles.hint}>
+            {info.staticPasskeySet
+              ? 'A fixed passkey is set. New devices pair using it.'
+              : 'No fixed passkey is set. New devices pair without confirmation.'}
+          </p>
+          <div className={styles.row}>
+            <span className={styles.label}>New passkey</span>
+            <input
+              className={styles.input}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              value={passkey}
+              onChange={(e) => setPasskeyDraft(e.target.value)}
+              placeholder="6 digits"
+              autoComplete="off"
+            />
+          </div>
+          <div className={styles.row}>
+            <button
+              className={styles.primaryBtn}
+              onClick={() => applyPasskey(passkey)}
+              disabled={loading || !validPasskey}
+            >
+              Save passkey
+            </button>
+            {info.staticPasskeySet && (
+              <button className={styles.ghostBtn} onClick={() => applyPasskey(null)} disabled={loading}>
+                Clear
+              </button>
+            )}
+          </div>
+        </>
+      )}
+      {notice && <p className={styles.notice}>{notice}</p>}
+      {error && <p className={styles.error}>{error}</p>}
+    </div>
+  );
+}
 
 // Issue #95: the web client had no UI for the device auth token, the WS Origin
 // allowlist, or OTA, even though the firmware exposes RPCs for all three. This
@@ -212,6 +319,8 @@ export function DeviceManagementSection() {
           <button className={styles.primaryBtn} onClick={handleAddOrigin} disabled={loading || !newOrigin.trim()}>Add</button>
         </div>
       </div>
+
+      <BleSecurityCard />
 
       {/* Firmware update */}
       {ota && (

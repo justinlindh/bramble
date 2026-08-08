@@ -12,7 +12,7 @@ describe('RelayPathDisplay', () => {
       { addr: 0x3333, rssi: -95 },
     ];
 
-    render(<RelayPathDisplay path={path} myAddr={0x1111} />);
+    render(<RelayPathDisplay path={path} />);
 
     const strong = screen.getByText('-65 dBm');
     const fair = screen.getByText('-80 dBm');

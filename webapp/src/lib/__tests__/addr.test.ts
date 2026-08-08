@@ -40,6 +40,11 @@ describe('tryParseAddr', () => {
     expect(tryParseAddr('zzz')).toBeNull();
   });
 
+  it('rejects trailing non-hex garbage rather than truncating it', () => {
+    expect(tryParseAddr('abcz')).toBeNull();
+    expect(tryParseAddr('12g')).toBeNull();
+  });
+
   it('returns null for addresses beyond the 32-bit range', () => {
     expect(tryParseAddr('100000000')).toBeNull();
     expect(tryParseAddr('FFFFFFFFF')).toBeNull();

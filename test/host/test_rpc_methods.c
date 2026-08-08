@@ -15,6 +15,7 @@
 #include "cJSON.h"
 #include "rpc_dispatcher.h"
 #include "rpc_methods.h"
+#include "mesh_task.h"
 #include <string.h>
 #include <stdbool.h>
 
@@ -27,6 +28,9 @@ extern int g_mesh_default_channel;
 extern char g_mesh_channel_names[8][20];
 extern bool g_mesh_channel_has_psk[8];
 extern uint16_t g_mesh_channel_epoch[8];
+extern mesh_dm_session_info_t g_stub_dm_sessions[8];
+extern size_t g_stub_dm_session_count;
+extern size_t g_stub_dm_session_capacity;
 
 /* ── Extra stubs: symbols not covered by rpc_methods_test_stubs.c ──── */
 
@@ -70,6 +74,10 @@ void setUp(void) {
     strncpy(g_mesh_channel_names[0], "Broadcast", sizeof(g_mesh_channel_names[0]) - 1);
     g_mesh_channel_has_psk[0] = false;
     g_mesh_channel_epoch[0] = 0;
+
+    memset(g_stub_dm_sessions, 0, sizeof(g_stub_dm_sessions));
+    g_stub_dm_session_count = 0;
+    g_stub_dm_session_capacity = 32;
 }
 
 void tearDown(void) {}
@@ -573,6 +581,121 @@ void test_set_auth_token_127_char_token_accepted(void) {
     cJSON_Delete(resp);
 }
 
+/* ── bramble.getDmSessions ─────────────────────────────────────────────
+ * The point of this method is telling a diagnostic which peer has no usable
+ * session, so the tests pin the two things a caller acts on: the state string
+ * and the fact that only used slots are reported. They also pin the negative
+ * that makes the method safe to expose, which is that no key material appears
+ * in the response.
+ * ──────────────────────────────────────────────────────────────────── */
+
+static cJSON* dispatch_dm_sessions(void) {
+    return dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"bramble.getDmSessions\",\"params\":{}}");
+}
+
+void test_get_dm_sessions_empty_table_returns_empty_array(void) {
+    cJSON* resp = dispatch_dm_sessions();
+    cJSON* r = assert_result(resp);
+    cJSON* sessions = cJSON_GetObjectItem(r, "sessions");
+    TEST_ASSERT_NOT_NULL(sessions);
+    TEST_ASSERT_TRUE(cJSON_IsArray(sessions));
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(sessions));
+    cJSON_Delete(resp);
+}
+
+void test_get_dm_sessions_reports_capacity(void) {
+    g_stub_dm_session_capacity = 32;
+    cJSON* resp = dispatch_dm_sessions();
+    cJSON* r = assert_result(resp);
+    cJSON* cap = cJSON_GetObjectItem(r, "capacity");
+    TEST_ASSERT_NOT_NULL(cap);
+    TEST_ASSERT_EQUAL_INT(32, cap->valueint);
+    cJSON_Delete(resp);
+}
+
+void test_get_dm_sessions_active_entry_is_fully_described(void) {
+    g_stub_dm_sessions[0].peer_addr = 0xDEADBEEF;
+    g_stub_dm_sessions[0].state = MESH_DM_SESSION_ACTIVE;
+    g_stub_dm_sessions[0].verified = true;
+    g_stub_dm_sessions[0].ratchet_valid = true;
+    g_stub_dm_sessions[0].msg_count = 7;
+    g_stub_dm_sessions[0].ke_epoch = 2;
+    g_stub_dm_sessions[0].established_ms_ago = 60000;
+    g_stub_dm_sessions[0].last_active_ms_ago = 1500;
+    g_stub_dm_session_count = 1;
+
+    cJSON* resp = dispatch_dm_sessions();
+    cJSON* r = assert_result(resp);
+    cJSON* sessions = cJSON_GetObjectItem(r, "sessions");
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetArraySize(sessions));
+
+    cJSON* e = cJSON_GetArrayItem(sessions, 0);
+    TEST_ASSERT_EQUAL_STRING("DEADBEEF", cJSON_GetObjectItem(e, "address")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("active", cJSON_GetObjectItem(e, "state")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(e, "verified")));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(e, "ratchet_valid")));
+    TEST_ASSERT_EQUAL_INT(7, cJSON_GetObjectItem(e, "msg_count")->valueint);
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItem(e, "ke_epoch")->valueint);
+    TEST_ASSERT_EQUAL_INT(60000, cJSON_GetObjectItem(e, "established_ms_ago")->valueint);
+    TEST_ASSERT_EQUAL_INT(1500, cJSON_GetObjectItem(e, "last_active_ms_ago")->valueint);
+    cJSON_Delete(resp);
+}
+
+void test_get_dm_sessions_handshaking_entry_is_not_reported_active(void) {
+    /* A handshaking session cannot carry a directed send, so a diagnostic that
+       treated it as active would clear the exact failure it exists to find. */
+    g_stub_dm_sessions[0].peer_addr = 0x0000000A;
+    g_stub_dm_sessions[0].state = MESH_DM_SESSION_HANDSHAKING;
+    g_stub_dm_sessions[0].verified = false;
+    g_stub_dm_sessions[0].ratchet_valid = false;
+    g_stub_dm_session_count = 1;
+
+    cJSON* resp = dispatch_dm_sessions();
+    cJSON* r = assert_result(resp);
+    cJSON* e = cJSON_GetArrayItem(cJSON_GetObjectItem(r, "sessions"), 0);
+    TEST_ASSERT_EQUAL_STRING("0000000A", cJSON_GetObjectItem(e, "address")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("handshaking", cJSON_GetObjectItem(e, "state")->valuestring);
+    TEST_ASSERT_FALSE(cJSON_IsTrue(cJSON_GetObjectItem(e, "verified")));
+    TEST_ASSERT_FALSE(cJSON_IsTrue(cJSON_GetObjectItem(e, "ratchet_valid")));
+    cJSON_Delete(resp);
+}
+
+void test_get_dm_sessions_reports_every_used_slot(void) {
+    g_stub_dm_sessions[0].peer_addr = 0x00000001;
+    g_stub_dm_sessions[0].state = MESH_DM_SESSION_ACTIVE;
+    g_stub_dm_sessions[1].peer_addr = 0x00000002;
+    g_stub_dm_sessions[1].state = MESH_DM_SESSION_HANDSHAKING;
+    g_stub_dm_sessions[2].peer_addr = 0x00000003;
+    g_stub_dm_sessions[2].state = MESH_DM_SESSION_ACTIVE;
+    g_stub_dm_session_count = 3;
+
+    cJSON* resp = dispatch_dm_sessions();
+    cJSON* r = assert_result(resp);
+    cJSON* sessions = cJSON_GetObjectItem(r, "sessions");
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(sessions));
+    TEST_ASSERT_EQUAL_STRING(
+        "00000002", cJSON_GetObjectItem(cJSON_GetArrayItem(sessions, 1), "address")->valuestring);
+    cJSON_Delete(resp);
+}
+
+void test_get_dm_sessions_response_carries_no_key_material(void) {
+    g_stub_dm_sessions[0].peer_addr = 0xCAFEBABE;
+    g_stub_dm_sessions[0].state = MESH_DM_SESSION_ACTIVE;
+    g_stub_dm_sessions[0].verified = true;
+    g_stub_dm_sessions[0].ratchet_valid = true;
+    g_stub_dm_session_count = 1;
+
+    cJSON* resp = dispatch_dm_sessions();
+    cJSON* r = assert_result(resp);
+    cJSON* e = cJSON_GetArrayItem(cJSON_GetObjectItem(r, "sessions"), 0);
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(e, "session_key"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(e, "peer_id_pub"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(e, "rk"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(e, "ck"));
+    cJSON_Delete(resp);
+}
+
 /* ── main ─────────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -626,6 +749,14 @@ int main(void) {
     RUN_TEST(test_set_auth_token_below_entropy_floor_rejected);
     RUN_TEST(test_set_auth_token_empty_string_clears_token);
     RUN_TEST(test_set_auth_token_127_char_token_accepted);
+
+    /* getDmSessions */
+    RUN_TEST(test_get_dm_sessions_empty_table_returns_empty_array);
+    RUN_TEST(test_get_dm_sessions_reports_capacity);
+    RUN_TEST(test_get_dm_sessions_active_entry_is_fully_described);
+    RUN_TEST(test_get_dm_sessions_handshaking_entry_is_not_reported_active);
+    RUN_TEST(test_get_dm_sessions_reports_every_used_slot);
+    RUN_TEST(test_get_dm_sessions_response_carries_no_key_material);
 
     return UNITY_END();
 }

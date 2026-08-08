@@ -47,10 +47,20 @@ bool chat_message_has_details_toggle(bool is_outgoing, uint32_t packet_id);
 bool chat_message_route_is_informative(bool is_outgoing, int16_t channel_index,
                                        uint8_t route_hop_count);
 
-/* Formats a receipt summary like "Delivered to 3: Alic, Bob, Carl" or
- * "Delivered to 5: Alic, Bob, Carl, Dave, +1". addrs holds the first
+/* Room the summary reserves per recipient name. Receipt names render whole:
+ * the label wraps, and a name clipped to a fragment of a known peer reads as
+ * a defect, not economy. The ceiling is the node-name ceiling the protocol
+ * allows (BRAMBLE_NODE_NAME_MAX is 32, mirrored as a literal so this header
+ * stays free of mesh_task.h), not the 16 characters a beacon carries, which
+ * is what bounds a peer name reaching this formatter today: the summary is
+ * then not the piece that has to change if beacon names ever widen. */
+#define CHAT_RECEIPT_NAME_MAX 33
+
+/* Formats a receipt summary like "Delivered to 3: Alice, Bob, Carl" or
+ * "Delivered to 5: Alice, Bob, Carl, Dave, +1". addrs holds the first
  * shown_count unique recipients; total is the full unique-recipient count
- * (>= shown_count). name_of writes a short display name for an address.
+ * (>= shown_count). name_of writes a display name for an address into a
+ * buffer of CHAT_RECEIPT_NAME_MAX bytes, so a full node name fits untruncated.
  * Returns characters written. */
 typedef void (*chat_receipt_name_fn)(char* out, size_t out_len, uint32_t addr);
 int chat_format_receipt_summary(char* out, size_t out_len, const uint32_t* addrs,

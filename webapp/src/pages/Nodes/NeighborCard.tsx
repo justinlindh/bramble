@@ -41,9 +41,18 @@ interface NeighborCardProps {
   onShowOnMap?: (addr: number) => void;
 }
 
-/** Check if a peer location is still fresh (not older than 30 minutes) */
+/**
+ * Whether a peer location is recent enough to show as current.
+ *
+ * The node decides this, not the client: `lastUpdatedMs` is a device UPTIME
+ * reading, not a wall-clock instant, so subtracting it from Date.now() is not
+ * a duration in any sense. Only the device holds the clock those readings were
+ * taken on, and only the device knows whether a stored position predates its
+ * current boot (in which case it has no computable age at all). It answers
+ * both questions in `online`.
+ */
 function isLocationFresh(loc: PeerLocation): boolean {
-  return Date.now() - loc.lastUpdatedMs < 30 * 60 * 1000;
+  return loc.online;
 }
 
 const STALE_NEIGHBOR_THRESHOLD_MS = 10 * 60 * 1000;

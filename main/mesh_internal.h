@@ -351,6 +351,7 @@ void mesh_pin_store_save(void);
 void mesh_pin_store_load(void);
 void mesh_replay_store_save(bool force);
 void mesh_replay_store_load(void);
+void mesh_peer_location_restore(void);
 void mesh_load_network_key(void);
 
 /* ── mesh_channels.c ────────────────────────────────────────────────── */

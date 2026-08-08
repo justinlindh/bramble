@@ -121,3 +121,26 @@ export function subscribeOtaEvents(cb: (e: OtaStatus) => void): () => void {
   if (!session.client) return () => {};
   return session.client.subscribe('bramble.onOtaEvent', (params) => cb(otaStatusFrom((params ?? {}) as OtaStatusWire)));
 }
+
+// ─── BLE pairing security (passkey display / static passkey / just works) ──
+
+export type BlePairingMode = 'passkey-display' | 'static-passkey' | 'just-works';
+
+export interface BleSecurityInfo {
+  mode: BlePairingMode;
+  staticPasskeySet: boolean;
+}
+
+export async function getBleSecurity(): Promise<BleSecurityInfo> {
+  const client = requireClient();
+  const r = await client.rpc('bramble.getBleSecurity');
+  const mode: BlePairingMode =
+    r.mode === 'passkey-display' || r.mode === 'static-passkey' ? r.mode : 'just-works';
+  return { mode, staticPasskeySet: !!r.staticPasskeySet };
+}
+
+export async function setBlePasskey(passkey: string | null): Promise<{ ok: boolean; error?: string }> {
+  const client = requireClient();
+  const r = await client.rpc('bramble.setBlePasskey', { passkey });
+  return { ok: !!r.ok, error: r.error };
+}

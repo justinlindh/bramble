@@ -143,6 +143,8 @@ export interface NodeStatus {
   gpsFixQuality?: number;   // GGA fix quality digit
   batteryMv?: number;       // battery voltage in millivolts
   batteryPct?: number;      // battery percentage 0-100
+  charging?: 'unknown' | 'no' | 'yes'; // hardware-informed charging state; "yes" includes plugged-in-and-full
+  present?: boolean;        // whether battery-sensing hardware initialized; false means batteryMv/batteryPct are not meaningful
   hardware?: string;        // hardware profile (e.g. "heltec_v4")
 }
 
@@ -196,6 +198,20 @@ export interface PeerLocation {
   gridSquare?: string;          // set for coarse tier
   online: boolean;
   lastUpdatedMs: number;
+}
+
+/** A named zone the node offers in its on-device picker. */
+export interface TimezonePreset {
+  label: string;
+  spec: string;
+}
+
+/** The zone the node renders its own clock in, as reported by getTimezone. */
+export interface TimezoneInfo {
+  timezone: string;
+  defaultTimezone: string;
+  configured: boolean;
+  presets: TimezonePreset[];
 }
 
 export interface LocationConfig {

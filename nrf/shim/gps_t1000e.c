@@ -41,8 +41,10 @@
  * task's fate (wait for its own confirmation, or force-delete it), then
  * nrfx_uarte_uninit(). Gating first means the ISR can never notify a
  * mid-deletion or freed TCB; uninit last means a still-live task can never
- * reach a de-initialized nrfx driver, whose NRFX_ASSERT is a hard lockup in
- * this build. See the comments in gps_deinit() for the per-step reasoning.
+ * reach a de-initialized nrfx driver, whose NRFX_ASSERT drops the node out
+ * of the mesh: config/nrfx_glue.h routes it to bramble_nrfx_assert_failed(),
+ * which stamps BT_FAIL_NRFX and reboots into the bootloader. See the
+ * comments in gps_deinit() for the per-step reasoning.
  *
  * P1.06 (Meshtastic's PIN_3V3_EN, "Power to Sensors") is deliberately NOT
  * driven here. Bench testing on the physical T1000-E confirmed GNSS runs
@@ -691,6 +693,17 @@ bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
     }
     xSemaphoreTake(mu, portMAX_DELAY);
     bool ok = gps_feed_get_utc_hm(&s_feed, now_ms(), hour, min);
+    xSemaphoreGive(mu);
+    return ok;
+}
+
+bool gps_get_utc_date(uint16_t* year, uint8_t* month, uint8_t* day) {
+    SemaphoreHandle_t mu = s_mu;
+    if (!mu) {
+        return false;
+    }
+    xSemaphoreTake(mu, portMAX_DELAY);
+    bool ok = gps_feed_get_utc_date(&s_feed, now_ms(), year, month, day);
     xSemaphoreGive(mu);
     return ok;
 }

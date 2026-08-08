@@ -85,6 +85,13 @@ function gnssRows(status: NodeStatus): Row[] {
 function hasBattery(status: NodeStatus): boolean {
   // Boards without a battery commonly report 0mV / 0%.
   if (status.batteryMv === undefined && status.batteryPct === undefined) return false;
+  // `present` is hardware-verified; prefer it when the firmware reports it.
+  // present alone is not enough: it stays true even when every ADC sample
+  // in a read failed (present describes ADC init success, not this
+  // particular read's outcome), and firmware's mv === 0 is the "no
+  // reading" sentinel for that case, so both must hold. Older firmware
+  // omits present, so fall back to the voltage guess.
+  if (status.present !== undefined) return status.present && (status.batteryMv ?? 0) > 0;
   return (status.batteryMv ?? 0) > 1000;
 }
 
@@ -133,14 +140,24 @@ export function SystemInfo({ status, config }: Props) {
     ...((status.batteryPct !== undefined || status.batteryMv !== undefined)
       ? [{
           label: 'Battery',
-          value: hasBattery(status) ? `${status.batteryPct ?? '?'}% (${status.batteryMv ?? '?'} mV)` : 'N/A',
-          color: hasBattery(status)
-            ? (status.batteryPct ?? 100) < 10
-              ? ('danger' as const)
-              : (status.batteryPct ?? 100) < 25
-                ? ('warning' as const)
-                : undefined
-            : ('muted' as const),
+          // While charging, battery_pct is derived from the charge rail
+          // rather than the cell, so it is not a real level: hide it. The
+          // mV reading is still a real measurement, just of the rail rather
+          // than the cell, so it stays visible labeled as such.
+          value: !hasBattery(status)
+            ? 'N/A'
+            : status.charging === 'yes'
+              ? `⚡ Charging (${status.batteryMv ?? '?'} mV rail)`
+              : `${status.batteryPct ?? '?'}% (${status.batteryMv ?? '?'} mV)`,
+          color: !hasBattery(status)
+            ? ('muted' as const)
+            : status.charging === 'yes'
+              ? undefined
+              : (status.batteryPct ?? 100) < 10
+                ? ('danger' as const)
+                : (status.batteryPct ?? 100) < 25
+                  ? ('warning' as const)
+                  : undefined,
         }]
       : []),
     ...gnssRows(status),

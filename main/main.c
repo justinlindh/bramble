@@ -36,6 +36,7 @@
 #include "mdns.h"
 #endif
 #include "ble_server.h"
+#include "ble_pairing_policy.h"
 #if CONFIG_BT_ENABLED
 /* esp_bt_mem_release: reclaim the unused BT controller RAM on WiFi boots. */
 #include "esp_bt.h"
@@ -65,6 +66,10 @@ void emu_node_flash_persist_init(void);
 /* Scripted-send hook (emu_autosend.c): originates a message on cue in a
  * scenario. No-op unless EMU_AUTO_SEND is set. */
 int emu_node_start_autosend(void);
+/* Location-share seed (emu_provision.c): writes a channel share target into
+ * the location namespace so the real policy tick drives a scenario. No-op
+ * unless EMU_LOCATION_CHANNEL is set. */
+int emu_node_seed_location_share_from_env(void);
 #endif
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
@@ -79,6 +84,7 @@ int emu_node_start_autosend(void);
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
 /* lvgl.h not directly included, use ui_graphics API */
 #include "ui_graphics.h"
+#include "ui_pairing.h"
 #endif
 
 static const char* TAG = "bramble";
@@ -397,15 +403,31 @@ static void render_main_screen(const ui_state_t* ui) {
 
     /* Header: name + battery, right-aligned battery */
     {
-        uint8_t bpct = battery_read_pct();
+        battery_status_t bstat;
+        battery_get_status(&bstat);
         char name[] = "Bramble";
         display_draw_text(2, HEADER_Y, name);
 
         char batt[16];
-        if (bpct > 0)
-            snprintf(batt, sizeof(batt), "%3u%%", bpct);
-        else
-            snprintf(batt, sizeof(batt), "USB");
+        if (bstat.charging == BATTERY_CHG_YES) {
+            /* Confirmed charging: the cell voltage is not meaningful while
+             * the charge rail is driving it, so show a charge indicator
+             * instead of a fabricated percentage. */
+            snprintf(batt, sizeof(batt), "CHG");
+        } else if (!battery_reading_available(&bstat)) {
+            /* Honest "no reading" affordance. This replaces the old "USB"
+             * guess, which claimed a specific power state that a bare 0 mV
+             * reading cannot actually distinguish from "no battery
+             * hardware" or "read failed". */
+            snprintf(batt, sizeof(batt), "--");
+        } else {
+            /* charging == NO or UNKNOWN: smoothed pct so the unplug cliff
+             * (charge rail -> resting cell voltage) settles gradually
+             * instead of jumping; the smoothing floors at BATTERY_DANGER_PCT
+             * so a genuine low-battery drop is never delayed. */
+            uint8_t disp_pct = battery_display_pct(bstat.pct);
+            snprintf(batt, sizeof(batt), "%3u%%", disp_pct);
+        }
         int batt_x = DISPLAY_WIDTH - (strlen(batt) * FONT_W) - 2;
         display_draw_text(batt_x, HEADER_Y, batt);
         render_unread_badge(ui, batt_x - FONT_W);
@@ -490,8 +512,55 @@ static void render_main_screen(const ui_state_t* ui) {
         snprintf(line, sizeof(line), "Reach:%d (%d direct)", total, direct);
     }
     display_draw_text(2, y, line);
+    /* No flush here: render_screen() does the frame's one flush after
+     * drawing this and, if active, the pairing overlay on top of it. The
+     * standalone periodic-uptime-tick caller (never invoked while the
+     * overlay is active) flushes explicitly right after its call. */
+}
 
-    display_flush();
+/* BLE pairing overlay: drawn on top of whatever screen render_screen() just
+ * finished, so a pairing request interrupts without any per-screen case
+ * needing to know about it. Framed by two hlines like the header divider
+ * every other screen already draws; there is no filled-rect primitive in
+ * display.h, so the "panel" is this bordered text block. The rect it
+ * occupies is blanked first (display_pixel(..., false)) so it reads as a
+ * clean panel instead of garbling over whatever text was already lit
+ * underneath.
+ *
+ * render_screen() flushes once per frame, after this overlay (when active)
+ * draws on top of whatever case just ran; see the comment at the end of
+ * render_screen(). That keeps e-paper boards from double-flushing (a full
+ * SSD1680 refresh blocks and wears the panel; see the ghosting-policy
+ * comment at the top of render_screen()).
+ *
+ * The passkey itself is never logged, only rendered. */
+static void render_ble_passkey_overlay(const ui_state_t* ui) {
+    int y = (DISPLAY_HEIGHT - (LINE_H * 3)) / 2;
+    int panel_top = y - 2;
+    int panel_bottom = y + LINE_H * 3;
+
+    for (int py = panel_top; py <= panel_bottom; py++) {
+        for (int px = 0; px < DISPLAY_WIDTH; px++) {
+            display_pixel(px, py, false);
+        }
+    }
+
+    display_hline(0, panel_top, DISPLAY_WIDTH);
+
+    const char* title = "BLE PAIRING";
+    display_draw_text((DISPLAY_WIDTH - (int)strlen(title) * FONT_W) / 2, y, title);
+    y += LINE_H;
+
+    char code[16];
+    ble_pairing_format_code(ui->ble_passkey, code, sizeof(code));
+    display_draw_text((DISPLAY_WIDTH - (int)strlen(code) * FONT_W) / 2, y, code);
+    y += LINE_H;
+
+    const char* hint = "Enter code on client";
+    display_draw_text((DISPLAY_WIDTH - (int)strlen(hint) * FONT_W) / 2, y, hint);
+    y += LINE_H;
+
+    display_hline(0, panel_bottom, DISPLAY_WIDTH);
 }
 
 static void render_screen(ui_state_t* ui) {
@@ -592,7 +661,6 @@ static void render_screen(ui_state_t* ui) {
         else
             display_draw_text(2, FOOTER_Y, "[hold]older reply:app");
 #endif
-        display_flush();
         break;
     }
     case SCREEN_NODES: {
@@ -743,7 +811,6 @@ static void render_screen(ui_state_t* ui) {
             display_draw_text(2, FOOTER_Y, "[hold] verify contacts");
 #endif
         }
-        display_flush();
         break;
     }
     case SCREEN_SETTINGS: {
@@ -868,7 +935,6 @@ static void render_screen(ui_state_t* ui) {
             display_draw_text(2, FOOTER_Y, "[hold]edit [2x]exit");
 #endif
         }
-        display_flush();
         break;
     }
     case SCREEN_COMPOSE: {
@@ -970,7 +1036,6 @@ static void render_screen(ui_state_t* ui) {
         display_draw_text(2, FOOTER_Y, "*pend +ok ++mh x fail");
 #endif
 
-        display_flush();
         break;
     }
     case SCREEN_GPS: {
@@ -1036,15 +1101,25 @@ static void render_screen(ui_state_t* ui) {
         }
 
         display_draw_text(2, FOOTER_Y, "[press] next screen");
-        display_flush();
         break;
     }
     default:
         display_clear();
         display_draw_text(0, 28, "Unknown screen");
-        display_flush();
         break;
     }
+
+    if (ui->ble_passkey_active) {
+        render_ble_passkey_overlay(ui);
+    }
+    /* Single flush per rendered frame, overlay or not: every case above
+     * only draws, and render_ble_passkey_overlay() (if the overlay is
+     * active) draws on top of whatever the case just finished, so this is
+     * the one place in the function that actually pushes pixels. Keeps
+     * e-paper boards from double-flushing (a full SSD1680 refresh blocks
+     * and wears the panel; see the ghosting-policy comment at the top of
+     * this function). */
+    display_flush();
 }
 
 /* ── Main ───────────────────────────────────────────────────────────── */
@@ -1065,6 +1140,27 @@ static void ui_graphics_task(void* arg) {
             delay = 30;
         vTaskDelay(pdMS_TO_TICKS(delay));
     }
+}
+#else
+static bool board_has_display_for_pairing(void) {
+    /* SSD1306 OLED (Heltec) can show a pairing code. E-paper (Pager) has
+     * seconds-scale refresh and its boards do not enable BLE; treat it as
+     * displayless if that combination ever exists. */
+    return board_has_cap(BOARD_CAP_DISPLAY_SSD1306);
+}
+
+/* Marshals the NimBLE-task passkey callback into the text UI state machine.
+ * The UI state is owned by the main loop task; latch here, apply there.
+ * Packed into one word (bit layout in ble_pairing_policy.h) with atomic
+ * store/exchange (acquire/release) rather than separate volatiles, matching
+ * ui_pairing.c's s_pending cross-task handoff idiom: a plain aligned
+ * load/store cannot tear, but only the atomic ops add the ordering
+ * guarantee. */
+static uint32_t s_ble_passkey_pending;
+
+static void main_ble_passkey_cb(uint32_t passkey, bool show) {
+    __atomic_store_n(&s_ble_passkey_pending, ble_pairing_pending_pack(passkey, show),
+                     __ATOMIC_RELEASE);
 }
 #endif
 
@@ -1192,7 +1288,9 @@ void app_main(void) {
      * is not cryptographically secure until RF (Wi-Fi/BT) is up, and identity
      * generation runs long before that. bootloader_random_enable() turns on the
      * SAR-ADC entropy source; it MUST be disabled again before the first app
-     * ADC user (battery_init, ~line 832) which shares the SAR-ADC. */
+     * ADC user, battery_init, which shares the SAR-ADC: entropy harvesting
+     * must close out before that call runs, wherever it ends up in this
+     * function. */
 #ifndef CONFIG_IDF_TARGET_LINUX
     bootloader_random_enable();
 #endif
@@ -1312,7 +1410,15 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "=== BOOT STAGE: battery_init ===");
     battery_init();
-    ESP_LOGI(TAG, "Battery: %" PRIu32 " mV (%u%%)", battery_read_mv(), battery_read_pct());
+    {
+        /* One status snapshot for both values: battery_read_mv() and
+         * battery_read_pct() each average a fresh set of ADC samples, so
+         * calling them back to back can log an mv/pct pair that never
+         * actually coexisted. */
+        battery_status_t boot_bstat;
+        battery_get_status(&boot_bstat);
+        ESP_LOGI(TAG, "Battery: %" PRIu32 " mV (%u%%)", boot_bstat.mv, boot_bstat.pct);
+    }
 
     /* Init GPS on boards that advertise GPS capability */
     if (board_has_cap(BOARD_CAP_GPS)) {
@@ -1540,6 +1646,28 @@ void app_main(void) {
     }
 #endif
 
+    /* Passkey display registration: unconditional on every boot, regardless
+     * of connectivity mode. This is a plain pointer store, inert until
+     * ble_server_init() actually starts NimBLE, so it is safe to do before
+     * BLE is (or ever is) selected. It has to be: ble_server_has_passkey_display()
+     * is what bramble.getBleSecurity / bramble.setBlePasskey use to tell a
+     * display board from a displayless one, and both RPCs are reachable over
+     * the Wi-Fi transport too. A Wi-Fi-mode boot that skipped this would have
+     * a display board misreport "just-works" and wrongly accept a static
+     * passkey it can never use, so the registration must not be gated on
+     * boot_mode == CONN_MODE_BLE. Must run before the ble_server_init() call
+     * below, the only place BLE actually starts. */
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+    /* T-Deck: random pairing code rendered by the LVGL modal. ui_pairing
+     * only latches the request until the LVGL task is up, so registering
+     * this early (before that task exists) is safe. */
+    ble_server_set_passkey_display_cb(ui_pairing_passkey_cb);
+#else
+    if (board_has_display_for_pairing()) {
+        ble_server_set_passkey_display_cb(main_ble_passkey_cb);
+    }
+#endif
+
     /* Start BLE GATT server if selected */
     if (boot_mode == CONN_MODE_BLE) {
         ESP_LOGI(TAG, "=== BOOT STAGE: ble_init ===");
@@ -1634,6 +1762,11 @@ void app_main(void) {
     /* Emulator only: arm the scripted sender (no-op unless EMU_AUTO_SEND is set)
      * now that the mesh send path is live. */
     emu_node_start_autosend();
+    /* Emulator only: seed a location share target (no-op unless
+     * EMU_LOCATION_CHANNEL is set). The mesh task's policy tick reads the
+     * location namespace on every pass, so writing it here is picked up on
+     * the next tick. */
+    emu_node_seed_location_share_from_env();
 #endif
 
     while (1) {
@@ -1825,6 +1958,22 @@ void app_main(void) {
                 mesh_set_peer_verified(s_nodes_detail_addr, true);
         }
 
+        /* Drain a passkey display/hide request latched by main_ble_passkey_cb
+         * on the NimBLE host task. Applying it here (main loop task, which
+         * owns ui state) rather than in the callback keeps ui_show_ble_passkey
+         * / ui_clear_ble_passkey single-threaded. */
+        uint32_t ble_passkey_pending =
+            __atomic_exchange_n(&s_ble_passkey_pending, 0, __ATOMIC_ACQ_REL);
+        uint32_t pending_passkey;
+        bool pending_show;
+        if (ble_pairing_pending_unpack(ble_passkey_pending, &pending_passkey, &pending_show)) {
+            if (pending_show) {
+                ui_show_ble_passkey(&ui, pending_passkey);
+            } else {
+                ui_clear_ble_passkey(&ui);
+            }
+        }
+
         /* Check inactivity timeout */
         ui_check_timeout(&ui, now_ms);
 
@@ -1842,8 +1991,16 @@ void app_main(void) {
          * its status screen on real events (messages, neighbors), not a
          * live-ticking clock. */
         const uint32_t uptime_refresh_ms = board_has_cap(BOARD_CAP_DISPLAY_EPAPER) ? 60000u : 1000u;
-        if (ui_get_screen(&ui) == SCREEN_MAIN && (now_ms % uptime_refresh_ms) < 50) {
+        if (ui_get_screen(&ui) == SCREEN_MAIN && !ui.ble_passkey_active &&
+            (now_ms % uptime_refresh_ms) < 50) {
+            /* render_main_screen() draws straight to the display, bypassing
+             * render_screen() and the pairing overlay it draws on top; skip
+             * this tick while the overlay is up so it is not erased a second
+             * after appearing. render_main_screen() itself no longer
+             * flushes (render_screen() owns the single flush per frame for
+             * its own callers), so this standalone caller flushes here. */
             render_main_screen(&ui);
+            display_flush();
         }
 
         /* Alert outputs: advance the beep/vibra pattern and keep the

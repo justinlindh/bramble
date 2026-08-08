@@ -191,9 +191,33 @@ void test_beacon_serialize_max_name_fits_size_invariant(void) {
                       bramble_beacon_serialize(&b, too_small, sizeof(too_small)));
 }
 
+/*
+ * The protocol documents battery_pct=0xFF as "unknown/plugged in"
+ * (docs/bramble-protocol-spec.md), emitted by main/mesh_beacon.c whenever
+ * battery_beacon_pct() (components/battery, unit-tested in test_battery.c)
+ * decides the node is confirmed charging. beacon_build itself has no
+ * charging awareness: it is a plain field passthrough, so this proves 0xFF
+ * survives that passthrough and the wire serialize/deserialize round trip
+ * intact, exactly like any other battery_pct value (test_beacon_build
+ * already covers 85; this is the sentinel's own value, not a special case
+ * in the wire format).
+ */
+void test_beacon_battery_pct_sentinel_255_round_trips(void) {
+    bramble_beacon_t b = beacon_build(0xAABBCCDD, 0x11223344, 120, 0xFF, 3, 5, 0x01, 1000000, 500);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, b.battery_pct);
+
+    uint8_t buf[BEACON_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_beacon_serialize(&b, buf, sizeof(buf)));
+
+    bramble_beacon_t out = {0};
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_beacon_deserialize(&out, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL_UINT8(0xFF, out.battery_pct);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_beacon_build);
+    RUN_TEST(test_beacon_battery_pct_sentinel_255_round_trips);
     RUN_TEST(test_beacon_hmac_compute_verify);
     RUN_TEST(test_beacon_hmac_wrong_key);
     RUN_TEST(test_beacon_hmac_zero_key);

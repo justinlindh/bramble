@@ -462,6 +462,100 @@ gps_suite() {
     return 1
 }
 
+# location_channel_verdict <log> : succeeds when one node broadcast a channel
+# location share and a DIFFERENT node decoded it and attributed it to the
+# sharer. Console records are one JSON object per line carrying the emitting
+# node's address, so the sharer's address is read off its TX line and then
+# required to appear both as the source in the receiver's RX line and as a
+# different emitting node. Comparing the two node ids is what makes this a
+# delivery assertion rather than a log-line assertion: a node that decoded its
+# own frame, or a single node logging both, does not pass.
+LOCATION_SHARER=""
+LOCATION_RECEIVER=""
+location_channel_verdict() {
+    local log="$1"
+    LOCATION_SHARER=""
+    LOCATION_RECEIVER=""
+    local tx_line
+    tx_line="$(grep -F 'TX location (channel)' "$log" | head -1)"
+    [ -n "$tx_line" ] || return 1
+    LOCATION_SHARER="$(printf '%s' "$tx_line" | sed -n 's/.*"node":"\([0-9A-F]*\)".*/\1/p')"
+    [ -n "$LOCATION_SHARER" ] || return 1
+    LOCATION_RECEIVER="$(grep -F "RX location from $LOCATION_SHARER" "$log" \
+        | sed -n 's/.*"node":"\([0-9A-F]*\)".*/\1/p' | head -1)"
+    [ -n "$LOCATION_RECEIVER" ] || return 1
+    [ "$LOCATION_RECEIVER" != "$LOCATION_SHARER" ] || return 1
+
+    # The seeded public-channel rule must be gone, not merely unsent. A rule the
+    # send path refuses and the config surface will not delete would otherwise
+    # sit in NVS forever, which is the wedged state this asserts against.
+    grep -qF 'removed location rule lch_00' "$log"
+}
+
+# Two pagers, one channel location target, no DM between them. Both nodes derive
+# the same keyed channel from EMU_LOCATION_CHANNEL_PSK, and only the sharer sets
+# EMU_LOCATION_SHARE, so its location namespace is seeded with the same keys and
+# rule format bramble.setLocationConfig writes. The mesh task's real policy tick
+# has to collect the channel target, encrypt under the channel key and broadcast
+# it, and the listener has to authenticate, decrypt and cache it. The channel is
+# keyed rather than the public one because the public channel cannot carry
+# location: its PSK is well known. Neither node has a route or a DM session to
+# the other, which is the condition a channel share exists to work under. This
+# catches the failure a parser unit test cannot see: configuration accepted,
+# nothing transmitted.
+location_suite() {
+    echo "[4] emu-location-channel"
+    local scen="$SCEN_DIR/emu-location-channel.json"
+    [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
+    local budget_s="${EMU_LOCATION_BUDGET_S:-240}"
+    local log; log="$LOG_DIR/emu-location-channel-$(date +%s).log"
+
+    info "running emu-location-channel (share budget ${budget_s}s)..."
+    env -u EMU_SCENARIO_DURATION_MS \
+        timeout "$budget_s" "$GOSIM_BIN" -headless -scenario "$scen" >"$log" 2>&1 &
+    local pid=$!
+    CHILD_PIDS+=("$pid")
+
+    # Poll rather than wait out duration_ms: the first share lands about 30s in
+    # on a healthy box, and stopping there keeps the common case cheap while
+    # leaving the full budget for a starved runner.
+    local shared=1 deadline
+    deadline=$(( $(date +%s) + budget_s ))
+    while :; do
+        if location_channel_verdict "$log"; then
+            shared=0
+            break
+        fi
+        kill -0 "$pid" 2>/dev/null || break
+        [ "$(date +%s)" -lt "$deadline" ] || break
+        sleep 2
+    done
+
+    # Snapshot the scenario window before any teardown signal, so this suite's
+    # own kill cannot be read as a node death (see check_no_deaths).
+    local scenario_lines
+    scenario_lines="$(wc -l < "$log")"
+
+    kill "$pid" 2>/dev/null || true
+    pkill -P "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+
+    # Final check in case the share landed in the last lines flushed on exit.
+    if [ "$shared" -ne 0 ] && location_channel_verdict "$log"; then
+        shared=0
+    fi
+
+    check_no_deaths "$log" 2 "emu-location-channel" "$scenario_lines" || return 1
+
+    if [ "$shared" -eq 0 ]; then
+        green "PASS: emu-location-channel: $LOCATION_SHARER shared to the channel, $LOCATION_RECEIVER decoded it"
+        return 0
+    fi
+    red "FAIL: emu-location-channel: no node received a channel location share"
+    dump_diagnostics "$log" "emu-location-channel"
+    return 1
+}
+
 # Run the suites one after the other so only one scenario's firmware nodes
 # are on the host at a time (see the isolation note above).
 channel_suite; chan_rc=$?
@@ -470,10 +564,13 @@ dm_suite; dm_rc=$?
 echo
 gps_suite; gps_rc=$?
 echo
+location_suite; loc_rc=$?
+echo
 
 [ "$chan_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$dm_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$gps_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
+[ "$loc_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 
 # --- verdict --------------------------------------------------------------
 if [ "$FAILURES" -eq 0 ]; then

@@ -30,7 +30,7 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
 
 describe('BroadcastDeliveryPanel', () => {
   it('toggles from message bubble', () => {
-    render(<MessageBubble message={makeMessage()} myAddr={0x01} />);
+    render(<MessageBubble message={makeMessage()} />);
 
     expect(screen.queryByText(/delivery telemetry/i)).not.toBeInTheDocument();
 
@@ -54,7 +54,6 @@ describe('BroadcastDeliveryPanel', () => {
             { addr: 0x1004, status: 'pending', hopCount: 0, deliveredAtMs: Date.now() },
           ],
         })}
-        myAddr={0x01}
       />
     );
 
@@ -67,14 +66,14 @@ describe('BroadcastDeliveryPanel', () => {
   });
 
   it('applies broadcast icon alignment class in metadata row', () => {
-    render(<MessageBubble message={makeMessage()} myAddr={0x01} />);
+    render(<MessageBubble message={makeMessage()} />);
 
     const broadcastIcon = screen.getByTestId('broadcast-meta-icon');
     expect(broadcastIcon.className).toMatch(/broadcastTierTag/);
   });
 
   it('degrades gracefully with no telemetry', () => {
-    render(<MessageBubble message={makeMessage({ broadcastRecipients: undefined })} myAddr={0x01} />);
+    render(<MessageBubble message={makeMessage({ broadcastRecipients: undefined })} />);
 
     fireEvent.click(screen.getByRole('button', { name: /show delivery details/i }));
 

@@ -6,26 +6,65 @@
 #include <nrfx.h>
 #include <nrfx_nvmc.h>
 
-/* Word slots within the page: [0]=magic, then (tag, aux) pairs. */
-#define BT_MAX_WORDS 1022u
+#include "boot_trace_scan.h"
 
 static uint32_t s_next = 1; /* next free word slot */
 static uint32_t s_last_tag;
 static volatile bool s_adv_ok;
 
-void boot_trace_init(void) {
+/* Internal flash is memory-mapped, so reading the page back is a plain
+ * load. Volatile because the same words are written through the NVMC. */
+static const volatile uint32_t* const s_page = (const volatile uint32_t*)BOOT_TRACE_PAGE;
+
+static void page_reset(uint32_t carry_failed_boots) {
     nrfx_nvmc_page_erase(BOOT_TRACE_PAGE);
     nrfx_nvmc_word_write(BOOT_TRACE_PAGE, BOOT_TRACE_MAGIC);
     while (!nrfx_nvmc_write_done_check()) {
     }
     s_next = 1;
+    if (carry_failed_boots > 0) {
+        boot_trace_mark(BT_BOOT_CARRY, carry_failed_boots);
+    }
+}
+
+void boot_trace_init(void) {
+    /* Read and clear before anything else: this is the only evidence of why
+     * the previous boot ended, and on a board with no console it is the
+     * difference between "it hung" and "it keeps resetting". */
+    uint32_t resetreas = NRF_POWER->RESETREAS;
+    NRF_POWER->RESETREAS = resetreas;
+
+    boot_trace_scan_t scan;
+    boot_trace_scan(s_page, &scan);
+
+    if (!scan.valid) {
+        /* Virgin, corrupt, or not a trace page at all. */
+        page_reset(0);
+    } else {
+        s_next = scan.next;
+        if (boot_trace_page_exhausted(s_next)) {
+            page_reset(scan.failed_boots);
+        }
+    }
+
+    if (scan.failed_boots >= BT_BOOT_LOOP_LIMIT) {
+        /* Nothing that runs after this point has managed to reach the end of
+         * app_init for BT_BOOT_LOOP_LIMIT boots running, and a board that
+         * resets faster than the sentinel's 120s never gets rescued by it.
+         * Hand the board back to the bootloader while the trace, which now
+         * holds every one of those boots and their reset reasons, is
+         * readable. Never returns. */
+        boot_trace_fail(BT_FAIL_BOOTLOOP, scan.failed_boots);
+    }
+
+    boot_trace_mark(BT_BOOT_BEGIN, resetreas);
 }
 
 void boot_trace_mark(uint32_t tag, uint32_t aux) {
-    if (s_next + 1 >= BT_MAX_WORDS) {
+    if (s_next + 1u >= BOOT_TRACE_PAGE_WORDS) {
         return;
     }
-    nrfx_nvmc_word_write(BOOT_TRACE_PAGE + 4u * s_next, 0xB0000000u | tag);
+    nrfx_nvmc_word_write(BOOT_TRACE_PAGE + 4u * s_next, BOOT_TRACE_TAG_MARKER | tag);
     nrfx_nvmc_word_write(BOOT_TRACE_PAGE + 4u * (s_next + 1u), aux);
     while (!nrfx_nvmc_write_done_check()) {
     }

@@ -42,7 +42,7 @@ Accepted params (all optional for partial updates):
   - `tier` (string, optional)
   - `interval_s` (number, optional)
 - `channel_targets` (array of objects):
-  - `channel` (number)
+  - `channel` (number, 1 to 15; 0 is the public channel and is rejected)
   - `enabled` (bool, optional)
   - `tier` (string, optional)
   - `interval_s` (number, optional)
@@ -53,15 +53,48 @@ Response:
 { "ok": true }
 ```
 
-Compatibility notes:
+Notes:
 
+- `enabled` is a permission, not an activity. A node transmits only to its
+  targets, so `enabled: true` with no enabled contact rule or channel target
+  sends nothing.
+- A contact target is unicast under that peer's DM session key. It needs an
+  ACTIVE session, and when none exists the share round asks for one: the peer
+  gets a DM handshake, and the next due tick sends a fresh position once the
+  session is up. Sending a message first is not required. The position itself
+  is never queued across the handshake, because location is real-time presence
+  and a coordinate captured before the handshake would arrive stale.
+- Handshake requests are paced per peer, starting at 60 seconds and doubling to
+  a 30 minute ceiling, cleared once a session exists. Only peers that are
+  current neighbours are asked, and at most one handshake is started per share
+  round, so a fleet of unreachable targets cannot turn into an airtime or
+  battery drain.
+- A channel target is broadcast under the channel key and needs no session, no
+  route and no prior traffic. Its tier is the resolution every member of the
+  channel receives.
+- A `channel` target must name a keyed channel. Channel 0 is the public channel
+  and is rejected: its PSK is well known, so a target on it would broadcast
+  exact coordinates to anyone in radio range, and the shared replay window is
+  deliberately skipped for public-channel decrypts. A keyed channel gives
+  location both confidentiality and the full per-sender replay window. Add one
+  with `bramble.addChannel` and target the index it returns; that index is
+  per-device and nodes agree by deriving the same key from the same PSK, not by
+  occupying the same slot. A public-channel rule left in storage by an earlier
+  build does not resolve to a target, so an upgrade stops it transmitting.
+- A receiver believes a position only after the network-key origin MAC
+  verifies, so a node outside the network cannot originate one.
+- Each target is paced off its own `interval_s`, floored at 30 seconds.
+- A `channel` outside 1 to 15 names no channel the node can share to, and the
+  whole request is rejected with an invalid-params error rather than stored as
+  a rule that never fires. No part of a rejected request is applied.
 - Existing `default_tier` and `interval_s` fields remain supported.
-- Contact rules are stored and read only from canonical `lcr_XXXXXXXX` keys.
-- Legacy `lc_XXXXXXXX` contact keys are no longer read or maintained.
+- Contact rules are stored and read only from canonical `lcr_XXXXXXXX` keys,
+  and channel targets from `lch_NN` keys.
+- Legacy `lc_XXXXXXXX` contact keys are neither read nor maintained.
 
 ### `bramble.getConfig` (location section)
 
-`bramble.getConfig.result.location` now includes:
+`bramble.getConfig.result.location` includes:
 
 - `enabled` (bool)
 - `tier` (string)
@@ -128,7 +161,8 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 - Description: Returns high-level node runtime status.
 - Params: none (`{}`).
-- Response fields: `address` (string), `firmware_version` (string), `protocol_version` (string), `hardware` (string), `radio_ok` (bool), `peers` (number), `beacon_tx` (number), `beacon_rx` (number), `packets_tx` (number), `packets_rx` (number), `uptime_s` (number), `free_heap` (number), `battery_mv` (number), `battery_pct` (number), `gps_available` (bool), `gps_enabled` (bool), `gps_state` (string), `gps_sats_in_view` (number), `gps_sats_tracked` (number), `gps_sats_used` (number), `gps_snr_max_dbhz` (number), `gps_fix_quality` (number), `supports_delivery_event_sync` (bool), `identity_pins` (number), `identity_conflicts` (number), `identity_sig_failures` (number), `identity_addr_mismatches` (number), `identity_unendorsed` (number), `identity_expired` (number).
+- Response fields: `address` (string), `firmware_version` (string), `protocol_version` (string), `hardware` (string), `radio_ok` (bool), `peers` (number), `beacon_tx` (number), `beacon_rx` (number), `packets_tx` (number), `packets_rx` (number), `uptime_s` (number), `free_heap` (number), `battery_mv` (number), `battery_pct` (number), `charging` (string: `"unknown"`/`"no"`/`"yes"`), `present` (bool), `gps_available` (bool), `gps_enabled` (bool), `gps_state` (string), `gps_sats_in_view` (number), `gps_sats_tracked` (number), `gps_sats_used` (number), `gps_snr_max_dbhz` (number), `gps_fix_quality` (number), `supports_delivery_event_sync` (bool), `identity_pins` (number), `identity_conflicts` (number), `identity_sig_failures` (number), `identity_addr_mismatches` (number), `identity_unendorsed` (number), `identity_expired` (number).
+- `present` reports whether the battery backend initialized, not whether this particular read succeeded, so treat a 0 `battery_mv` as no reading even when `present` is true.
 - `gps_state` is one of `absent`, `no_signal`, `acquiring`, `fix`. The satellite counts and `gps_fix_quality` are always present and are 0 on a board without a receiver, so a client distinguishes "no receiver" from "zero satellites" on `gps_available`, never on a count. See [Diagnosing a node with no fix](#diagnosing-a-node-with-no-fix).
 - Example:
 
@@ -184,7 +218,7 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 
 - Description: Returns battery telemetry.
 - Params: none.
-- Response fields: `pct` (number), `mv` (number, optional), `charging` (bool, optional).
+- Response fields: `percentage` (number), `voltage_mv` (number), `charging` (string: `"unknown"`/`"no"`/`"yes"`, optional), `present` (bool, optional; init status, not per-read: treat a 0 voltage as no reading even when true).
 - Example:
 
 ```json
@@ -312,6 +346,23 @@ fixed to a place where it hears nothing therefore reports the second place.
 {"jsonrpc":"2.0","id":21,"method":"bramble.getRoutes","params":{}}
 ```
 
+#### `bramble.getDmSessions`
+
+- Description: Returns metadata for every used DM session slot. A directed send
+  (a chat DM, or a per-contact location share) requires an `active` session with
+  the destination and is dropped without one, so this is what identifies a
+  configured peer the node cannot currently send to. Key material is never
+  returned.
+- Params: none.
+- Response fields: `sessions` (array; `address`, `state` (`handshaking` or
+  `active`), `verified`, `ratchet_valid`, `msg_count`, `ke_epoch`,
+  `established_ms_ago`, `last_active_ms_ago`), `capacity`.
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":24,"method":"bramble.getDmSessions","params":{}}
+```
+
 #### `bramble.getAirtime`
 
 - Description: Returns airtime budget status.
@@ -400,6 +451,28 @@ fixed to a place where it hears nothing therefore reports the second place.
 
 ```json
 {"jsonrpc":"2.0","id":32,"method":"bramble.setNodeName","params":{"name":"ridge-01"}}
+```
+
+#### `bramble.getTimezone`
+
+- Description: Reports the POSIX TZ specification the node renders wall-clock times in, plus the named zones the on-device picker offers.
+- Params: none.
+- Response fields: `ok` (bool), `timezone` (string), `default_timezone` (string), `configured` (bool), `presets` (array of `{label, spec}`).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":37,"method":"bramble.getTimezone","params":{}}
+```
+
+#### `bramble.setTimezone`
+
+- Description: Persists a POSIX TZ specification. UTC stays the internal source of truth; the zone is applied only where a clock is rendered. A daylight-saving zone name must carry explicit transition rules, because the ruleless form is ambiguous.
+- Params: `timezone` (string).
+- Response fields: `ok` (bool), `timezone` (string), `error` (string, when `ok` is false).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":38,"method":"bramble.setTimezone","params":{"timezone":"PST8PDT,M3.2.0,M11.1.0"}}
 ```
 
 #### `bramble.setBacklight`
@@ -515,6 +588,33 @@ fixed to a place where it hears nothing therefore reports the second place.
 
 ```json
 {"jsonrpc":"2.0","id":53,"method":"bramble.getAllowedOrigins","params":{}}
+```
+
+### BLE pairing security
+
+See `docs/auth.md` for how link-layer pairing relates to the auth token,
+and `docs/SECURITY-MODEL.md` for the threat model.
+
+#### `bramble.getBleSecurity`
+
+- Description: Reports the current SMP pairing mode and whether a static passkey is set. The passkey value is write-only and never returned.
+- Params: none.
+- Response fields: `mode` (string: `passkey-display`, `static-passkey`, or `just-works`), `staticPasskeySet` (bool).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":90,"method":"bramble.getBleSecurity","params":{}}
+```
+
+#### `bramble.setBlePasskey`
+
+- Description: Sets or clears the 6-digit static SMP passkey used for BLE pairing on boards without a passkey-display callback. `null` or an empty string clears it, returning the board to Just Works. Rejected on boards that display a random code per pairing. Any change wipes stored BLE bonds, so every client must re-pair with the current code.
+- Params: `passkey` (string, exactly 6 digits, or `null`/`""` to clear).
+- Response fields: `ok` (bool), `mode` (string, the resulting mode), `error` (string, present when `ok` is false).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":91,"method":"bramble.setBlePasskey","params":{"passkey":"482913"}}
 ```
 
 ### Network key (control-plane MACs)

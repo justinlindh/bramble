@@ -321,6 +321,20 @@ void ui_set_message_total(ui_state_t* state, int total) { state->msg_total = tot
 
 void ui_set_node_total(ui_state_t* state, int total) { state->node_total = total; }
 
+void ui_show_ble_passkey(ui_state_t* state, uint32_t passkey) {
+    state->ble_passkey_active = true;
+    state->ble_passkey = passkey;
+    state->screen_dirty = true;
+}
+
+void ui_clear_ble_passkey(ui_state_t* state) {
+    if (!state->ble_passkey_active) {
+        return;
+    }
+    state->ble_passkey_active = false;
+    state->screen_dirty = true;
+}
+
 ui_screen_t ui_get_screen(const ui_state_t* state) { return state->current_screen; }
 
 bool ui_needs_redraw(const ui_state_t* state) { return state->screen_dirty; }

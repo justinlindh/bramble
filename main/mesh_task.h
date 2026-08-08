@@ -12,6 +12,7 @@
 #include "traffic_debug.h"
 #include "location.h"
 #include "delivery_event_ring.h"
+#include "mesh_dm_session_info.h"
 
 #define BRAMBLE_NODE_NAME_MAX 32
 
@@ -105,6 +106,18 @@ void mesh_reboot_delayed(int delay_ms);
 void mesh_get_routes(routing_table_t* out);
 
 /**
+ * Snapshot the used DM session slots (thread-safe). Entries come out in table
+ * order, not activity order. Returns the number written, never more than max.
+ * Slots with no session are skipped, so the count is the number of peers this
+ * node currently has a session with. See mesh_dm_session_info.h for what a
+ * slot reports and what it deliberately does not.
+ */
+size_t mesh_get_dm_sessions(mesh_dm_session_info_t* out, size_t max);
+
+/** Number of DM session slots the table holds, i.e. the useful `max`. */
+size_t mesh_dm_session_capacity(void);
+
+/**
  * Get a snapshot of the location manager state (thread-safe).
  */
 void mesh_get_location_state(location_manager_t* out);
@@ -122,8 +135,8 @@ bool mesh_resolve_self_position(bramble_position_t* out);
  * decision (gps_duty_should_power).
  */
 typedef struct {
-    bool sharing_active;   /* policy.enabled && location_policy_has_targets() */
-    uint16_t interval_s;   /* policy share interval */
+    bool sharing_active;   /* policy enabled AND at least one target configured */
+    uint16_t interval_s;   /* shortest configured target interval */
     uint32_t last_send_ms; /* 0 = never */
 } mesh_location_share_state_t;
 
@@ -210,10 +223,6 @@ uint8_t mesh_get_flood_hop_limit(void);
  * Get the current node name (returns NULL if not set).
  */
 const char* mesh_get_node_name(void);
-
-/* Network wall clock for display. Returns true and writes epoch ms only
- * when mesh timesync is synchronized. */
-bool mesh_get_network_time_ms(int64_t* out_ms);
 
 /**
  * Get the local identity address and public key.

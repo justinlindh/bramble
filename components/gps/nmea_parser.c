@@ -181,6 +181,29 @@ bool nmea_parse_rmc(char* sentence, nmea_position_t* pos) {
             pos->heading_deg2 = 179;
     }
 
+    /* UTC date from field 9 ("ddmmyy"). RMC is the only sentence the feed
+     * reads that carries a date, and a daylight-saving rule cannot be
+     * evaluated without one. The two-digit year is a 21st-century year, which
+     * is what the NMEA 0183 field means. */
+    if (field_count > 9 && !field_empty(fields[9]) && strlen(fields[9]) >= 6) {
+        bool digits = true;
+        for (int i = 0; i < 6; i++) {
+            if (!isdigit((unsigned char)fields[9][i]))
+                digits = false;
+        }
+        if (digits) {
+            int dd = (fields[9][0] - '0') * 10 + (fields[9][1] - '0');
+            int mo = (fields[9][2] - '0') * 10 + (fields[9][3] - '0');
+            int yy = (fields[9][4] - '0') * 10 + (fields[9][5] - '0');
+            if (dd >= 1 && dd <= 31 && mo >= 1 && mo <= 12) {
+                pos->utc_day = (uint8_t)dd;
+                pos->utc_month = (uint8_t)mo;
+                pos->utc_year = (uint16_t)(2000 + yy);
+                pos->utc_date_valid = true;
+            }
+        }
+    }
+
     pos->valid = true;
     return true;
 }

@@ -75,20 +75,36 @@ void battery_init(void) {
         s_cali_handle = NULL;
     }
 
+    /* Optional hardware charge-detect pin. No ESP board has this
+     * wired today (see board_config.h's charge struct, {-1,0,-1} on every
+     * ESP profile); when one does, configure it as an input here so
+     * battery_get_status can read it. */
+    if (s_board->charge.chrg_gpio >= 0) {
+        gpio_config_t chrg_cfg = {
+            .pin_bit_mask = (1ULL << s_board->charge.chrg_gpio),
+            .mode = GPIO_MODE_INPUT,
+        };
+        gpio_config(&chrg_cfg);
+    }
+
     s_initialized = true;
     ESP_LOGI(TAG, "Battery ADC initialized (GPIO%d, channel %d, divider=%dx)",
              s_board->battery.gpio, s_board->battery.adc_channel, s_board->battery.divider_factor);
 }
 
-uint32_t battery_read_mv(void) {
-    if (!s_initialized || !s_adc_handle || !s_board)
-        return 0;
-
+/* One raw-ADC-to-millivolts conversion, pre-divider-factor. Shared by every
+ * sample battery_get_status averages. Reports success via the return
+ * value instead of folding a failure into a fabricated 0 mV sample: see
+ * battery_average_mv's doc comment for why averaging a real failure in as
+ * 0 would corrupt the whole reading toward a false low battery, rather
+ * than degrading it the way a single-sample 0 mV used to (an obviously
+ * unavailable reading, not a plausible-looking low one). */
+static bool read_one_sample_mv(uint32_t* out_mv) {
     int raw = 0;
     esp_err_t err = adc_oneshot_read(s_adc_handle, s_board->battery.adc_channel, &raw);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "ADC read failed: %d", err);
-        return 0;
+        return false;
     }
 
     int voltage_mv = 0;
@@ -98,14 +114,48 @@ uint32_t battery_read_mv(void) {
         /* Rough estimate without calibration: 12-bit ADC, 0-3.3V range at 12dB atten */
         voltage_mv = (raw * 3300) / 4095;
     }
-
-    /* Apply voltage divider factor from board config */
-    return (uint32_t)(voltage_mv * s_board->battery.divider_factor);
+    *out_mv = (uint32_t)voltage_mv;
+    return true;
 }
 
 /* battery_mv_to_pct lives in battery_pct.c, shared with the virtual driver. */
 
-uint8_t battery_read_pct(void) {
-    uint32_t mv = battery_read_mv();
-    return battery_mv_to_pct(mv);
+void battery_get_status(battery_status_t* out) {
+    memset(out, 0, sizeof(*out));
+
+    if (!s_initialized || !s_adc_handle || !s_board) {
+        out->charging = BATTERY_CHG_UNKNOWN;
+        return;
+    }
+
+    /* Average BATTERY_AVG_SAMPLE_COUNT raw conversions before applying the
+     * board's divider factor. Averaging is linear, so doing it pre-divider
+     * (rather than post-multiply) is numerically equivalent and keeps
+     * read_one_sample_mv focused on one conversion. Only successful
+     * samples are averaged (battery_average_mv's valid mask); mv comes out
+     * 0 only when every one of the 8 conversions failed. */
+    uint32_t samples[BATTERY_AVG_SAMPLE_COUNT];
+    bool valid[BATTERY_AVG_SAMPLE_COUNT];
+    for (int i = 0; i < BATTERY_AVG_SAMPLE_COUNT; i++)
+        valid[i] = read_one_sample_mv(&samples[i]);
+    uint32_t voltage_mv = battery_average_mv(samples, valid, BATTERY_AVG_SAMPLE_COUNT);
+
+    out->mv = voltage_mv * (uint32_t)s_board->battery.divider_factor;
+    out->pct = battery_mv_to_pct(out->mv);
+    out->present = true;
+
+    if (s_board->charge.chrg_gpio >= 0) {
+        int level = gpio_get_level(s_board->charge.chrg_gpio);
+        out->charging = battery_charging_from_gpio(s_board->charge.chrg_gpio,
+                                                   s_board->charge.chrg_active_level, level);
+    } else {
+        out->charging = BATTERY_CHG_UNKNOWN;
+    }
+
+    /* No ESP board has a charge-detect pin wired today, so every one of
+     * them relies on this: a rail reading that a bare cell physically
+     * cannot produce (the T-Deck's charge rail clamps to ~4542-4798 mV,
+     * see BATTERY_MV_CHARGER_RAIL_MIN) is voltage-inferred as charging.
+     * A no-op wherever the pin logic above already reached YES or NO. */
+    out->charging = battery_infer_charging(out->charging, out->mv);
 }

@@ -418,6 +418,36 @@ void test_location_ui_status_indicators(void) {
     TEST_ASSERT_EQUAL_STRING("Hybrid", location_ui_source_label(LOCATION_UI_SOURCE_HYBRID));
 }
 
+/* Sharing switched on with nothing to send to must not read as sharing: that
+   state is the one a node sits in while its own settings screen claims it is
+   publishing. */
+void test_location_ui_share_summary(void) {
+    char buf[48];
+
+    location_ui_format_share_summary(buf, sizeof(buf), false, 3, 1, "coarse");
+    TEST_ASSERT_EQUAL_STRING("Off", buf);
+
+    location_ui_format_share_summary(buf, sizeof(buf), true, 0, 0, "coarse");
+    TEST_ASSERT_EQUAL_STRING("On, no targets", buf);
+
+    location_ui_format_share_summary(buf, sizeof(buf), true, 1, 0, "coarse");
+    TEST_ASSERT_EQUAL_STRING("1 peer, coarse", buf);
+
+    location_ui_format_share_summary(buf, sizeof(buf), true, 2, 0, "exact");
+    TEST_ASSERT_EQUAL_STRING("2 peers, exact", buf);
+
+    /* A channel-only node is sharing, and saying "no targets" there would be
+       the same lie in the other direction. */
+    location_ui_format_share_summary(buf, sizeof(buf), true, 0, 1, "coarse");
+    TEST_ASSERT_EQUAL_STRING("1 channel, coarse", buf);
+
+    location_ui_format_share_summary(buf, sizeof(buf), true, 0, 2, "coarse");
+    TEST_ASSERT_EQUAL_STRING("2 channels, coarse", buf);
+
+    location_ui_format_share_summary(buf, sizeof(buf), true, 2, 1, "presence");
+    TEST_ASSERT_EQUAL_STRING("3 targets, presence", buf);
+}
+
 void test_incoming_message_idle_auto_switches_to_messages(void) {
     state.current_screen = SCREEN_NODES;
     state.last_activity = 1000;
@@ -882,6 +912,29 @@ void test_full_refresh_pending_on_idle_auto_switch_to_messages(void) {
     TEST_ASSERT_TRUE(ui_take_full_refresh_pending(&state));
 }
 
+void test_ble_passkey_overlay_sets_state_and_dirty(void) {
+    ui_state_t st;
+    ui_init(&st);
+    st.screen_dirty = false;
+    ui_show_ble_passkey(&st, 42);
+    TEST_ASSERT_TRUE(st.ble_passkey_active);
+    TEST_ASSERT_EQUAL_UINT32(42u, st.ble_passkey);
+    TEST_ASSERT_TRUE(st.screen_dirty);
+
+    st.screen_dirty = false;
+    ui_clear_ble_passkey(&st);
+    TEST_ASSERT_FALSE(st.ble_passkey_active);
+    TEST_ASSERT_TRUE(st.screen_dirty);
+}
+
+void test_ble_passkey_clear_when_inactive_is_quiet(void) {
+    ui_state_t st;
+    ui_init(&st);
+    st.screen_dirty = false;
+    ui_clear_ble_passkey(&st);
+    TEST_ASSERT_FALSE(st.screen_dirty); /* no redraw churn when nothing shown */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_main_screen);
@@ -923,6 +976,7 @@ int main(void) {
     RUN_TEST(test_location_ui_actions_toggle_tier_interval);
     RUN_TEST(test_location_ui_panic_off_disables_sharing);
     RUN_TEST(test_location_ui_status_indicators);
+    RUN_TEST(test_location_ui_share_summary);
     RUN_TEST(test_incoming_message_idle_auto_switches_to_messages);
     RUN_TEST(test_incoming_message_while_active_increments_unread_without_switch);
     RUN_TEST(test_short_press_with_unread_jumps_to_messages_and_clears);
@@ -956,5 +1010,7 @@ int main(void) {
     RUN_TEST(test_full_refresh_not_pending_on_in_screen_redraw);
     RUN_TEST(test_full_refresh_pending_survives_screen_leaving_settings);
     RUN_TEST(test_full_refresh_pending_on_idle_auto_switch_to_messages);
+    RUN_TEST(test_ble_passkey_overlay_sets_state_and_dirty);
+    RUN_TEST(test_ble_passkey_clear_when_inactive_is_quiet);
     return UNITY_END();
 }

@@ -1,14 +1,18 @@
 #include "scr_settings_internal.h"
 #include "theme/bramble_theme.h"
 #include "ui_confirm.h"
+#include "ui_toast.h"
 #include "ui_zone.h"
 #include "keyboard.h"
 #include "audio.h"
 #include "sleep_manager.h"
+#include "bramble_tz.h"
+#include "tz_store.h"
 #include "esp_system.h"
 #include "esp_log.h"
 #include "lvgl.h"
 #include <stdio.h>
+#include <string.h>
 
 static const char* TAG = "scr_set_dev";
 
@@ -84,6 +88,100 @@ static void sleep_timeout_changed_cb(lv_event_t* e) {
         char buf[16];
         snprintf(buf, sizeof(buf), "%ds", val);
         lv_label_set_text(s_sleep_timeout_label, buf);
+    }
+}
+
+/* ── Time zone ───────────────────────────────────────────────────────────── */
+
+/* The picker offers the named zones in the bramble_tz preset table. A spec set
+ * over RPC that is not one of them still has to be representable, so the list
+ * grows a trailing "Custom" entry in that case; selecting a named zone
+ * replaces it. */
+static lv_obj_t* s_tz_dropdown = NULL;
+static bool s_tz_has_custom = false;
+
+/* Index of the preset whose spec equals spec, or -1 when none does. */
+static int tz_preset_index_of(const char* spec) {
+    for (size_t i = 0; i < bramble_tz_preset_count(); i++) {
+        if (strcmp(bramble_tz_preset(i)->spec, spec) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static void tz_changed_cb(lv_event_t* e) {
+    (void)e;
+    if (!s_tz_dropdown) {
+        return;
+    }
+
+    const uint16_t sel = lv_dropdown_get_selected(s_tz_dropdown);
+    const size_t count = bramble_tz_preset_count();
+    if (sel >= count) {
+        /* The "Custom" row is the zone already stored: re-selecting it is a
+         * no-op rather than a write. */
+        return;
+    }
+
+    const bramble_tz_preset_t* preset = bramble_tz_preset(sel);
+    if (tz_store_set(preset->spec) == 0) {
+        ESP_LOGI(TAG, "Timezone set to %s (%s)", preset->label, preset->spec);
+        ui_toast_show("Time zone saved");
+    } else {
+        ESP_LOGW(TAG, "Failed to persist timezone");
+        ui_toast_show("Save failed");
+    }
+}
+
+static void tz_build_row(lv_obj_t* cont, lv_group_t* g) {
+    char spec[BRAMBLE_TZ_SPEC_MAX];
+    tz_store_get(spec, sizeof(spec));
+    const int preset_idx = tz_preset_index_of(spec);
+    s_tz_has_custom = (preset_idx < 0);
+
+    /* Presets, one label per line, plus the current custom spec when the
+     * stored zone is not a named one. */
+    char options[512];
+    size_t used = 0;
+    options[0] = '\0';
+    for (size_t i = 0; i < bramble_tz_preset_count(); i++) {
+        int n = snprintf(options + used, sizeof(options) - used, "%s%s", i == 0 ? "" : "\n",
+                         bramble_tz_preset(i)->label);
+        if (n < 0 || (size_t)n >= sizeof(options) - used) {
+            break;
+        }
+        used += (size_t)n;
+    }
+    if (s_tz_has_custom) {
+        snprintf(options + used, sizeof(options) - used, "\nCustom (%s)", spec);
+    }
+
+    lv_obj_t* tz_row = settings_create_setting_row(cont, LV_SYMBOL_BELL " Time Zone");
+    lv_obj_set_size(tz_row, 304, 48);
+
+    ui_zone_track(&s_tz_dropdown, lv_dropdown_create(tz_row));
+    lv_dropdown_set_options(s_tz_dropdown, options);
+    lv_obj_set_size(s_tz_dropdown, 170, 34);
+    lv_obj_align(s_tz_dropdown, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    lv_obj_set_style_bg_color(s_tz_dropdown, BR_COLOR_SURFACE_2, 0);
+    lv_obj_set_style_text_color(s_tz_dropdown, BR_COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(s_tz_dropdown, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_border_color(s_tz_dropdown, BR_COLOR_PRIMARY, 0);
+    lv_obj_set_style_border_width(s_tz_dropdown, 1, 0);
+
+    lv_obj_t* tz_list = lv_dropdown_get_list(s_tz_dropdown);
+    lv_obj_set_style_bg_color(tz_list, BR_COLOR_SURFACE_2, 0);
+    lv_obj_set_style_text_color(tz_list, BR_COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(tz_list, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_border_color(tz_list, BR_COLOR_PRIMARY, 0);
+
+    const int selected_idx = (preset_idx >= 0) ? preset_idx : (int)bramble_tz_preset_count();
+    lv_dropdown_set_selected(s_tz_dropdown, (uint16_t)selected_idx);
+    lv_obj_add_event_cb(s_tz_dropdown, tz_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    if (g) {
+        lv_group_add_obj(g, s_tz_dropdown);
     }
 }
 
@@ -220,6 +318,9 @@ void settings_device_builder(bramble_layout_t* layout, void* ctx) {
     }
     if (g)
         lv_group_add_obj(g, s_sleep_timeout_slider);
+
+    /* ── Time zone ── */
+    tz_build_row(cont, g);
 
     /* ── Reboot button ── */
     lv_obj_t* reboot_btn = lv_btn_create(cont);

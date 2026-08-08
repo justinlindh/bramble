@@ -115,54 +115,455 @@ void test_location_policy_interval_floor(void) {
     TEST_ASSERT_EQUAL(LOCATION_MIN_INTERVAL_S, policy.interval_s);
 }
 
-void test_location_policy_should_send_disabled(void) {
+void test_location_share_round_disabled(void) {
     location_policy_t policy = {
         .enabled = false,
         .default_tier = LOCATION_TIER_COARSE,
         .interval_s = LOCATION_DEFAULT_INTERVAL_S,
     };
 
-    TEST_ASSERT_FALSE(location_policy_should_send(&policy, true, true, 1000, 0));
+    TEST_ASSERT_FALSE(location_share_round_enabled(&policy, true, 1));
 }
 
-void test_location_policy_should_send_no_source(void) {
+void test_location_share_round_no_source(void) {
     location_policy_t policy = {
         .enabled = true,
         .default_tier = LOCATION_TIER_COARSE,
         .interval_s = LOCATION_DEFAULT_INTERVAL_S,
     };
 
-    TEST_ASSERT_FALSE(location_policy_should_send(&policy, false, true, 1000, 0));
+    TEST_ASSERT_FALSE(location_share_round_enabled(&policy, false, 1));
 }
 
-void test_location_policy_should_send_no_target(void) {
+void test_location_share_round_no_target(void) {
     location_policy_t policy = {
         .enabled = true,
         .default_tier = LOCATION_TIER_COARSE,
         .interval_s = LOCATION_DEFAULT_INTERVAL_S,
     };
 
-    TEST_ASSERT_FALSE(location_policy_should_send(&policy, true, false, 1000, 0));
+    TEST_ASSERT_FALSE(location_share_round_enabled(&policy, true, 0));
 }
 
-void test_location_policy_should_send_interval_not_reached(void) {
+void test_location_share_round_allowed(void) {
     location_policy_t policy = {
         .enabled = true,
         .default_tier = LOCATION_TIER_COARSE,
         .interval_s = 60,
     };
 
-    TEST_ASSERT_FALSE(location_policy_should_send(&policy, true, true, 59000, 1000));
+    TEST_ASSERT_TRUE(location_share_round_enabled(&policy, true, 1));
 }
 
-void test_location_policy_should_send_allowed_send(void) {
-    location_policy_t policy = {
-        .enabled = true,
-        .default_tier = LOCATION_TIER_COARSE,
-        .interval_s = 60,
+/* The defect this target-selection API exists to prevent: a channel target
+   the config surface accepts and the send path never looks at. An enabled
+   channel rule MUST resolve to a channel target. */
+void test_location_target_from_entry_channel(void) {
+    location_target_t target;
+    memset(&target, 0, sizeof(target));
+
+    /* Channel 1 rather than 0: the public channel is never a target, which
+       test_location_send_path_refuses_stored_public_channel_rule covers. */
+    TEST_ASSERT_TRUE(location_target_from_entry("lch_01", "1|coarse|60", &target));
+    TEST_ASSERT_EQUAL(LOCATION_TARGET_CHANNEL, target.kind);
+    TEST_ASSERT_EQUAL_UINT32(1, target.id);
+    TEST_ASSERT_EQUAL(LOCATION_TIER_COARSE, target.tier);
+    TEST_ASSERT_EQUAL_UINT16(60, target.interval_s);
+
+    TEST_ASSERT_TRUE(location_target_from_entry("lch_07", "1|full|900", &target));
+    TEST_ASSERT_EQUAL(LOCATION_TARGET_CHANNEL, target.kind);
+    TEST_ASSERT_EQUAL_UINT32(7, target.id);
+    TEST_ASSERT_EQUAL(LOCATION_TIER_FULL, target.tier);
+    TEST_ASSERT_EQUAL_UINT16(900, target.interval_s);
+}
+
+void test_location_target_from_entry_contact(void) {
+    location_target_t target;
+    memset(&target, 0, sizeof(target));
+
+    TEST_ASSERT_TRUE(location_target_from_entry("lcr_AABBCCDD", "1|presence|300", &target));
+    TEST_ASSERT_EQUAL(LOCATION_TARGET_CONTACT, target.kind);
+    TEST_ASSERT_EQUAL_UINT32(0xAABBCCDDu, target.id);
+    TEST_ASSERT_EQUAL(LOCATION_TIER_PRESENCE, target.tier);
+    TEST_ASSERT_EQUAL_UINT16(300, target.interval_s);
+}
+
+void test_location_target_from_entry_rejects_non_targets(void) {
+    location_target_t target;
+
+    /* Policy keys share the namespace and are not targets. */
+    TEST_ASSERT_FALSE(location_target_from_entry("def_tier", "coarse", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("interval_s", "300", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lp_AABBCCDD", "blob", &target));
+    /* A disabled rule is a target switched off, not a target. */
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_00", "0|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lcr_AABBCCDD", "0|coarse|60", &target));
+    /* Outside the channel key space, so it names no channel. */
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_99", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_", "1|coarse|60", &target));
+}
+
+/* The public channel cannot carry position: its key is well known, so a target
+ * on it is a broadcast of exact coordinates in the clear. */
+void test_location_public_channel_is_not_a_permitted_target(void) {
+    TEST_ASSERT_FALSE(location_channel_target_is_permitted(LOCATION_PUBLIC_CHANNEL_INDEX));
+    TEST_ASSERT_TRUE(location_channel_target_is_permitted(1));
+    TEST_ASSERT_TRUE(location_channel_target_is_permitted(LOCATION_MAX_CHANNEL_TARGETS - 1));
+}
+
+/* Send-path guard, not just the setter: a public-channel rule already sitting
+ * in NVS (written by an earlier build, or by any path that bypassed the setter)
+ * must not resolve to a target, so an upgrade stops it transmitting rather than
+ * merely preventing new ones. A private-channel rule in the same storage still
+ * resolves. */
+void test_location_send_path_refuses_stored_public_channel_rule(void) {
+    location_target_t target;
+
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_00", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_00", "1|coarse|300", &target));
+
+    TEST_ASSERT_TRUE(location_target_from_entry("lch_01", "1|full|60", &target));
+    TEST_ASSERT_EQUAL_UINT8(LOCATION_TARGET_CHANNEL, target.kind);
+    TEST_ASSERT_EQUAL_UINT32(1u, target.id);
+}
+
+/* First need for a session attempts at once, a second need in the same window
+ * does not, and the delay doubles so a peer that never answers decays instead
+ * of retrying at the share interval forever. */
+/* Mutual targets must not both open at once. The higher-addressed side skips
+ * only its immediate first attempt, so a pair converges on one initiator
+ * instead of crossing two INITs and ending up with a one-sided session. The
+ * deferral is not a refusal: if the lower side never asks, the higher side
+ * still opens one backoff step later, which is what keeps an asymmetric
+ * configuration working. */
+void test_location_handshake_defers_the_higher_addressed_side(void) {
+    location_hs_table_t table;
+    location_hs_reset(&table);
+    uint32_t now = 1000;
+
+    /* Higher-addressed side: first attempt deferred, not taken. */
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0x11111111, true, true, now));
+    /* Still inside the deferred window. */
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0x11111111, true, true,
+                                                 now + LOCATION_HS_BACKOFF_START_MS - 1));
+    /* Once the step elapses it opens, so an asymmetric config converges. */
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0x11111111, true, true,
+                                                now + LOCATION_HS_BACKOFF_START_MS));
+
+    /* Lower-addressed side of a different pair opens immediately. */
+    location_hs_reset(&table);
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0x22222222, true, false, now));
+
+    /* Deferral costs the round nothing: an unreachable peer still records no
+     * attempt, so the one-per-round budget is untouched either way. */
+    location_hs_reset(&table);
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0x33333333, false, true, now));
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0x33333333, true, false, now));
+}
+
+void test_location_handshake_backoff_grows_and_gates(void) {
+    location_hs_table_t table;
+    location_hs_reset(&table);
+
+    uint32_t now = 1000;
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xAABBCCDD, true, false, now));
+    /* Same round, and any time inside the first backoff, is refused. */
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xAABBCCDD, true, false, now));
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xAABBCCDD, true, false,
+                                                 now + LOCATION_HS_BACKOFF_START_MS - 1));
+
+    /* Due again once the first backoff elapses. */
+    now += LOCATION_HS_BACKOFF_START_MS;
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xAABBCCDD, true, false, now));
+
+    /* Doubled: the previous interval is no longer enough. */
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xAABBCCDD, true, false,
+                                                 now + LOCATION_HS_BACKOFF_START_MS));
+    now += LOCATION_HS_BACKOFF_START_MS * 2;
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xAABBCCDD, true, false, now));
+
+    /* A different peer is paced independently. */
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0x11223344, true, false, now));
+}
+
+/* The backoff is bounded: an absent peer settles at the cap rather than growing
+ * without limit. */
+void test_location_handshake_backoff_caps(void) {
+    location_hs_table_t table;
+    location_hs_reset(&table);
+
+    uint32_t now = 1;
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xFEEDFACE, true, false, now));
+    for (int i = 0; i < 20; i++) {
+        now += LOCATION_HS_BACKOFF_MAX_MS;
+        TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xFEEDFACE, true, false, now));
+    }
+    /* Never longer than the cap: one cap-length wait is always sufficient. */
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xFEEDFACE, true, false, now + 1));
+    now += LOCATION_HS_BACKOFF_MAX_MS;
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xFEEDFACE, true, false, now));
+}
+
+/* Once a session exists the peer is cleared, so a later outage attempts
+ * immediately rather than inheriting a decayed delay. */
+void test_location_handshake_backoff_clears_on_session(void) {
+    location_hs_table_t table;
+    location_hs_reset(&table);
+
+    uint32_t now = 500;
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xC0FFEE00, true, false, now));
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xC0FFEE00, true, false, now));
+
+    location_hs_clear(&table, 0xC0FFEE00);
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xC0FFEE00, true, false, now));
+}
+
+/* An unreachable peer must cost nothing at all: no slot, no recorded attempt,
+ * no backoff growth. A share round grants ONE handshake, so if an unreachable
+ * target consumed it, a reachable target later in the same round would be
+ * starved every round they come due together, which is exactly the
+ * permanently-dead-target failure this pacing exists to end. */
+void test_location_unreachable_peer_does_not_consume_the_round(void) {
+    location_hs_table_t table;
+    location_hs_reset(&table);
+
+    uint32_t now = 1000;
+
+    /* The unreachable target is refused and records nothing. */
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xDEAD0001, false, false, now));
+
+    /* The reachable target in the same round still gets its handshake. */
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xBEEF0002, true, false, now));
+
+    /* And because nothing was recorded for the unreachable one, it attempts
+     * immediately on the round it first becomes reachable rather than serving
+     * out a backoff it never earned. */
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xDEAD0001, true, false, now));
+}
+
+/* Repeated rounds against an unreachable peer must not fill the table and evict
+ * live entries, since nothing is ever recorded for it. */
+void test_location_unreachable_peer_never_occupies_a_slot(void) {
+    location_hs_table_t table;
+    location_hs_reset(&table);
+
+    uint32_t now = 1;
+    for (int i = 0; i < LOCATION_HS_TRACK * 4; i++) {
+        TEST_ASSERT_FALSE(
+            location_hs_should_attempt(&table, 0xF0000000u + (uint32_t)i, false, false, now));
+        now += 1000;
+    }
+
+    /* Every slot is still free, so a reachable peer takes a fresh one and gets
+     * the fast first attempt. */
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0x0000AAAA, true, false, now));
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0x0000AAAA, true, false, now));
+}
+
+/* Wrap-safe against the mesh clock: a scheduled attempt that straddles the
+ * uint32 rollover must still come due. */
+void test_location_handshake_backoff_wraps_with_the_mesh_clock(void) {
+    location_hs_table_t table;
+    location_hs_reset(&table);
+
+    uint32_t now = 0xFFFFFFFFu - (LOCATION_HS_BACKOFF_START_MS / 2);
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xDEADBEEF, true, false, now));
+    /* Still inside the backoff, on the far side of the wrap. */
+    TEST_ASSERT_FALSE(location_hs_should_attempt(&table, 0xDEADBEEF, true, false, now + 1));
+    /* Past it, also on the far side. */
+    TEST_ASSERT_TRUE(location_hs_should_attempt(&table, 0xDEADBEEF, true, false,
+                                                now + LOCATION_HS_BACKOFF_START_MS));
+}
+
+/* A malformed channel suffix must not fall back to channel 0, which the public
+ * channel occupies: a corrupt key becoming a public-channel target is exactly
+ * the leak the guard above exists to stop. */
+void test_location_malformed_channel_key_does_not_become_public_target(void) {
+    location_target_t target;
+
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_xx", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_0x", "1|full|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_0", "1|full|60", &target));
+}
+
+/* Only the exact suffix shape the key builders emit names a target: 8 hex
+ * digits for a contact, 2 decimal digits for a channel. A partially numeric or
+ * wrong-width suffix is a key this module did not write, and accepting one
+ * would resolve a foreign key to some arbitrary target rather than skipping
+ * it. */
+void test_location_target_from_entry_rejects_malformed_suffixes(void) {
+    location_target_t target;
+
+    /* Channel: partial parses and wrong widths, not channel 1 or channel 0. */
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_1x", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_0", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_000", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lch_ab", "1|coarse|60", &target));
+
+    /* Contact: a non-hex or wrong-width suffix must not resolve to address 0. */
+    TEST_ASSERT_FALSE(location_target_from_entry("lcr_ZZZZZZZZ", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lcr_AABBCCD", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lcr_AABBCCDDE", "1|coarse|60", &target));
+    TEST_ASSERT_FALSE(location_target_from_entry("lcr_", "1|coarse|60", &target));
+
+    /* Lowercase hex is still a well-formed contact suffix. */
+    TEST_ASSERT_TRUE(location_target_from_entry("lcr_aabbccdd", "1|coarse|60", &target));
+    TEST_ASSERT_EQUAL_UINT32(0xAABBCCDDu, target.id);
+}
+
+void test_location_target_interval_floor(void) {
+    location_target_t target;
+
+    TEST_ASSERT_TRUE(location_target_from_entry("lch_01", "1|coarse|5", &target));
+    TEST_ASSERT_EQUAL_UINT16(LOCATION_MIN_INTERVAL_S, target.interval_s);
+}
+
+void test_location_rule_codec_roundtrip(void) {
+    location_rule_t rule = {.enabled = true, .tier = LOCATION_TIER_FULL, .interval_s = 120};
+    char buf[48];
+    location_rule_format(buf, sizeof(buf), &rule);
+    TEST_ASSERT_EQUAL_STRING("1|full|120", buf);
+
+    location_rule_t parsed = {0};
+    TEST_ASSERT_TRUE(location_rule_parse(buf, &parsed));
+    TEST_ASSERT_TRUE(parsed.enabled);
+    TEST_ASSERT_EQUAL(LOCATION_TIER_FULL, parsed.tier);
+    TEST_ASSERT_EQUAL_UINT16(120, parsed.interval_s);
+
+    /* A bare tier name reads as an enabled rule at the default interval. */
+    TEST_ASSERT_TRUE(location_rule_parse("presence", &parsed));
+    TEST_ASSERT_TRUE(parsed.enabled);
+    TEST_ASSERT_EQUAL(LOCATION_TIER_PRESENCE, parsed.tier);
+    TEST_ASSERT_EQUAL_UINT16(LOCATION_DEFAULT_INTERVAL_S, parsed.interval_s);
+}
+
+void test_location_target_keys(void) {
+    char key[LOCATION_TARGET_KEY_SIZE];
+
+    TEST_ASSERT_TRUE(location_contact_key(key, sizeof(key), 0xAABBCCDDu));
+    TEST_ASSERT_EQUAL_STRING("lcr_AABBCCDD", key);
+
+    TEST_ASSERT_TRUE(location_channel_key(key, sizeof(key), 0));
+    TEST_ASSERT_EQUAL_STRING("lch_00", key);
+    TEST_ASSERT_TRUE(location_channel_key(key, sizeof(key), 15));
+    TEST_ASSERT_EQUAL_STRING("lch_15", key);
+
+    /* Out-of-range indices are refused rather than written as a key nothing
+       will ever match. */
+    TEST_ASSERT_FALSE(location_channel_key(key, sizeof(key), -1));
+    TEST_ASSERT_FALSE(location_channel_key(key, sizeof(key), LOCATION_MAX_CHANNEL_TARGETS));
+
+    /* A key built for a channel round-trips back to the same target. */
+    location_target_t target;
+    TEST_ASSERT_TRUE(location_channel_key(key, sizeof(key), 3));
+    TEST_ASSERT_TRUE(location_target_from_entry(key, "1|coarse|60", &target));
+    TEST_ASSERT_EQUAL(LOCATION_TARGET_CHANNEL, target.kind);
+    TEST_ASSERT_EQUAL_UINT32(3, target.id);
+}
+
+void test_location_targets_min_interval(void) {
+    location_target_t targets[3] = {
+        {.kind = LOCATION_TARGET_CONTACT, .id = 1, .tier = 0, .interval_s = 900},
+        {.kind = LOCATION_TARGET_CHANNEL, .id = 0, .tier = 0, .interval_s = 60},
+        {.kind = LOCATION_TARGET_CONTACT, .id = 2, .tier = 0, .interval_s = 300},
     };
 
-    TEST_ASSERT_TRUE(location_policy_should_send(&policy, true, true, 61000, 1000));
+    TEST_ASSERT_EQUAL_UINT16(60, location_targets_min_interval_s(targets, 3));
+    TEST_ASSERT_EQUAL_UINT16(0, location_targets_min_interval_s(targets, 0));
+}
+
+void test_location_schedule_paces_each_target_separately(void) {
+    location_schedule_t sched;
+    location_schedule_init(&sched);
+
+    location_target_t fast = {
+        .kind = LOCATION_TARGET_CHANNEL, .id = 0, .tier = 0, .interval_s = 60};
+    location_target_t slow = {
+        .kind = LOCATION_TARGET_CONTACT, .id = 0xAABBCCDDu, .tier = 0, .interval_s = 600};
+
+    /* Never attempted: both share on the first round. */
+    TEST_ASSERT_TRUE(location_schedule_is_due(&sched, &fast, 1000));
+    TEST_ASSERT_TRUE(location_schedule_is_due(&sched, &slow, 1000));
+
+    location_schedule_record(&sched, &fast, 1000, true);
+    location_schedule_record(&sched, &slow, 1000, true);
+
+    TEST_ASSERT_FALSE(location_schedule_is_due(&sched, &fast, 1000 + 59000));
+    TEST_ASSERT_TRUE(location_schedule_is_due(&sched, &fast, 1000 + 60000));
+    /* The fast target coming due does not drag the slow one along. */
+    TEST_ASSERT_FALSE(location_schedule_is_due(&sched, &slow, 1000 + 60000));
+    TEST_ASSERT_TRUE(location_schedule_is_due(&sched, &slow, 1000 + 600000));
+}
+
+/* A failed channel broadcast is a transient radio-gate condition, so it
+   retries soon. A failed contact unicast is a missing DM session, which a
+   fast retry cannot fix, so it waits out its interval. */
+void test_location_schedule_failure_backoff_differs_by_kind(void) {
+    location_schedule_t sched;
+    location_schedule_init(&sched);
+
+    location_target_t channel = {
+        .kind = LOCATION_TARGET_CHANNEL, .id = 0, .tier = 0, .interval_s = 600};
+    location_target_t contact = {
+        .kind = LOCATION_TARGET_CONTACT, .id = 7, .tier = 0, .interval_s = 600};
+
+    location_schedule_record(&sched, &channel, 1000, false);
+    location_schedule_record(&sched, &contact, 1000, false);
+
+    uint32_t retry_ms = (uint32_t)LOCATION_SEND_RETRY_S * 1000U;
+    TEST_ASSERT_FALSE(location_schedule_is_due(&sched, &channel, 1000 + retry_ms - 1));
+    TEST_ASSERT_TRUE(location_schedule_is_due(&sched, &channel, 1000 + retry_ms));
+    TEST_ASSERT_FALSE(location_schedule_is_due(&sched, &contact, 1000 + retry_ms));
+    TEST_ASSERT_TRUE(location_schedule_is_due(&sched, &contact, 1000 + 600000));
+}
+
+/* The retry never stretches past the target's own interval. */
+void test_location_schedule_retry_never_exceeds_interval(void) {
+    location_schedule_t sched;
+    location_schedule_init(&sched);
+
+    location_target_t channel = {
+        .kind = LOCATION_TARGET_CHANNEL, .id = 0, .tier = 0, .interval_s = LOCATION_MIN_INTERVAL_S};
+
+    location_schedule_record(&sched, &channel, 0, false);
+    TEST_ASSERT_TRUE(
+        location_schedule_is_due(&sched, &channel, (uint32_t)LOCATION_SEND_RETRY_S * 1000U));
+}
+
+void test_location_schedule_retain_releases_removed_targets(void) {
+    location_schedule_t sched;
+    location_schedule_init(&sched);
+
+    location_target_t targets[2] = {
+        {.kind = LOCATION_TARGET_CHANNEL, .id = 0, .tier = 0, .interval_s = 600},
+        {.kind = LOCATION_TARGET_CONTACT, .id = 9, .tier = 0, .interval_s = 600},
+    };
+
+    location_schedule_record(&sched, &targets[0], 1000, true);
+    location_schedule_record(&sched, &targets[1], 1000, true);
+    TEST_ASSERT_FALSE(location_schedule_is_due(&sched, &targets[0], 2000));
+
+    /* Dropping the channel target from the config releases its slot, so
+       adding it back shares immediately instead of inheriting old pacing. */
+    location_schedule_retain(&sched, &targets[1], 1);
+    TEST_ASSERT_TRUE(location_schedule_is_due(&sched, &targets[0], 2000));
+    TEST_ASSERT_FALSE(location_schedule_is_due(&sched, &targets[1], 2000));
+}
+
+/* The mesh clock wraps, so pacing has to be wrap-safe. */
+void test_location_schedule_wraps_with_the_mesh_clock(void) {
+    location_schedule_t sched;
+    location_schedule_init(&sched);
+
+    location_target_t channel = {
+        .kind = LOCATION_TARGET_CHANNEL, .id = 2, .tier = 0, .interval_s = 60};
+
+    uint32_t before_wrap = 0xFFFFFFFFu - 30000U;
+    location_schedule_record(&sched, &channel, before_wrap, true);
+
+    TEST_ASSERT_FALSE(location_schedule_is_due(&sched, &channel, before_wrap + 59000U));
+    TEST_ASSERT_TRUE(location_schedule_is_due(&sched, &channel, before_wrap + 60000U));
 }
 
 void test_location_deserialize_for_tier_full_coarse_presence(void) {
@@ -214,11 +615,33 @@ int main(void) {
     RUN_TEST(test_location_cache);
     RUN_TEST(test_location_policy_defaults);
     RUN_TEST(test_location_policy_interval_floor);
-    RUN_TEST(test_location_policy_should_send_disabled);
-    RUN_TEST(test_location_policy_should_send_no_source);
-    RUN_TEST(test_location_policy_should_send_no_target);
-    RUN_TEST(test_location_policy_should_send_interval_not_reached);
-    RUN_TEST(test_location_policy_should_send_allowed_send);
+    RUN_TEST(test_location_share_round_disabled);
+    RUN_TEST(test_location_share_round_no_source);
+    RUN_TEST(test_location_share_round_no_target);
+    RUN_TEST(test_location_share_round_allowed);
+    RUN_TEST(test_location_target_from_entry_channel);
+    RUN_TEST(test_location_target_from_entry_contact);
+    RUN_TEST(test_location_target_from_entry_rejects_non_targets);
+    RUN_TEST(test_location_target_from_entry_rejects_malformed_suffixes);
+    RUN_TEST(test_location_public_channel_is_not_a_permitted_target);
+    RUN_TEST(test_location_send_path_refuses_stored_public_channel_rule);
+    RUN_TEST(test_location_handshake_backoff_grows_and_gates);
+    RUN_TEST(test_location_handshake_defers_the_higher_addressed_side);
+    RUN_TEST(test_location_handshake_backoff_caps);
+    RUN_TEST(test_location_handshake_backoff_clears_on_session);
+    RUN_TEST(test_location_unreachable_peer_does_not_consume_the_round);
+    RUN_TEST(test_location_unreachable_peer_never_occupies_a_slot);
+    RUN_TEST(test_location_handshake_backoff_wraps_with_the_mesh_clock);
+    RUN_TEST(test_location_malformed_channel_key_does_not_become_public_target);
+    RUN_TEST(test_location_target_interval_floor);
+    RUN_TEST(test_location_rule_codec_roundtrip);
+    RUN_TEST(test_location_target_keys);
+    RUN_TEST(test_location_targets_min_interval);
+    RUN_TEST(test_location_schedule_paces_each_target_separately);
+    RUN_TEST(test_location_schedule_failure_backoff_differs_by_kind);
+    RUN_TEST(test_location_schedule_retry_never_exceeds_interval);
+    RUN_TEST(test_location_schedule_retain_releases_removed_targets);
+    RUN_TEST(test_location_schedule_wraps_with_the_mesh_clock);
     RUN_TEST(test_location_deserialize_for_tier_full_coarse_presence);
     return UNITY_END();
 }

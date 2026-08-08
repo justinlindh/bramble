@@ -1,6 +1,6 @@
 import { formatAddr0x, formatAddrShort } from '../utils/address';
-import { copyWithFallback } from '../utils/clipboard';
 import { useTimedFlag } from '../hooks/useTimedFlag';
+import { useCopyFlash } from '../hooks/useCopyFlash';
 import styles from './AddressLabel.module.css';
 
 interface AddressLabelProps {
@@ -11,7 +11,7 @@ interface AddressLabelProps {
 }
 
 export function AddressLabel({ addr, name, short = false, className }: AddressLabelProps) {
-  const [copied, flashCopied] = useTimedFlag(1500);
+  const [copied, copy] = useCopyFlash(1500);
   const [copyFailed, flashFailed] = useTimedFlag(2000);
 
   const fullHex = formatAddr0x(addr);
@@ -19,11 +19,7 @@ export function AddressLabel({ addr, name, short = false, className }: AddressLa
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (await copyWithFallback(fullHex)) {
-      flashCopied();
-    } else {
-      flashFailed();
-    }
+    if (!(await copy(fullHex))) flashFailed();
   };
 
   return (

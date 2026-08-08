@@ -53,6 +53,10 @@ export function normalizeStatus(raw: StatusWire): NodeStatus {
     gpsFixQuality: raw.gps_fix_quality,
     batteryMv: raw.battery_mv ?? raw.batteryMv,
     batteryPct: raw.battery_pct ?? raw.batteryPct,
+    // Both fields are optional on the wire for older-firmware compatibility.
+    // Absent means unknown/undefined, never fabricate "no" or "not present".
+    charging: raw.charging,
+    present: raw.present,
     hardware: raw.hardware,
   } as NodeStatus;
 }

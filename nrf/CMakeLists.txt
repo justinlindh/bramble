@@ -88,6 +88,7 @@ add_library(nrfx_lib STATIC
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_spim.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_nvmc.c
   ${nrfx_SOURCE_DIR}/drivers/src/nrfx_gpiote.c
+  ${nrfx_SOURCE_DIR}/drivers/src/nrfx_saadc.c
   ${nrfx_SOURCE_DIR}/helpers/nrfx_flag32_allocator.c
 )
 target_include_directories(nrfx_lib PUBLIC
@@ -166,11 +167,15 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/radio/tx_gate.c
   ${BRAMBLE_COMPONENTS}/radio/tx_gate_esp.c
   ${BRAMBLE_COMPONENTS}/radio/phy_passthrough.c
+  ${BRAMBLE_COMPONENTS}/timezone/bramble_tz.c
+  ${BRAMBLE_COMPONENTS}/timezone/tz_store.c
   ${BRAMBLE_COMPONENTS}/gps/nmea_parser.c
   ${BRAMBLE_COMPONENTS}/gps/gps_pref.c
   ${BRAMBLE_COMPONENTS}/gps/gps_feed.c
   ${BRAMBLE_COMPONENTS}/gps/gps_duty.c
   ${BRAMBLE_COMPONENTS}/battery/battery_pct.c
+  ${BRAMBLE_COMPONENTS}/battery/battery_helpers.c
+  ${BRAMBLE_COMPONENTS}/battery/battery_wrappers.c
   ${BRAMBLE_COMPONENTS}/indicators/alerts.c
   ${BRAMBLE_COMPONENTS}/ota/ota_progress.c
   ${BRAMBLE_COMPONENTS}/ota/ota_origin.c
@@ -203,7 +208,7 @@ foreach(comp packet routing routing_auth dedup dm_session fragment replay_window
         security timesync airtime freq_plan mailbox nonce_counter bramble_probe
         channel identity location network_key msg_store reliability rpc
         traffic_debug ui radio gps battery indicators crypto nvs_keys ota
-        board_config)
+        board_config timezone)
   target_include_directories(bramble_core PUBLIC ${BRAMBLE_COMPONENTS}/${comp}/include)
 endforeach()
 target_include_directories(bramble_core BEFORE PUBLIC
@@ -327,10 +332,24 @@ else()
   set(BRAMBLE_NRF_GPS_SRCS shim/gps_null.c)
 endif()
 
+# Battery driver: the T1000-E gets the gated SAADC voltage read (drive the
+# P1.06 sensor rail per read) plus CHRG/VBUS charge detect, all in
+# shim/battery_t1000e.c; the dev kit (no battery sense wired) gets the null
+# backend. Exactly one backend is compiled per board, BY FILENAME, so a
+# wrong name here selects silently; the compile-time guard on
+# BOARD_BATTERY_NEEDS_RAIL_GATE (nrf/boards/t1000e.h, checked by
+# battery_null.c) is what turns a wrong selection into a build error.
+if(BRAMBLE_NRF_BOARD STREQUAL "t1000e")
+  set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_t1000e.c)
+else()
+  set(BRAMBLE_NRF_BATTERY_SRCS shim/battery_null.c)
+endif()
+
 add_executable(bramble-nrf
   src/main_nrf.c
   src/app_init.c
   src/boot_trace.c
+  src/boot_trace_scan.c
   src/radio_lr1110.c
   src/lr11xx_hal_nrf.c
   src/lfs_nvmc.c
@@ -342,6 +361,8 @@ add_executable(bramble-nrf
   src/nimble_port_freertos.c
   src/ble_host.c
   ${BRAMBLE_COMPONENTS}/ble/ble_server.c
+  ${BRAMBLE_COMPONENTS}/ble/ble_pairing_policy.c
+  ${BRAMBLE_COMPONENTS}/ble/ble_pairing_store.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_token.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
   src/nrf_provision.c
@@ -350,7 +371,7 @@ add_executable(bramble-nrf
   shim/esp_random_nrf.c
   shim/esp_system_nrf.c
   ${BRAMBLE_NRF_GPS_SRCS}
-  shim/battery_null.c
+  ${BRAMBLE_NRF_BATTERY_SRCS}
   shim/esp_app_desc_nrf.c
   shim/rpc_platform_stubs.c
   shim/nvs_lfs.c

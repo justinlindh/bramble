@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useStore, parseConversationId, formatConversationLabel } from '../../store/index';
-import { useConversation, useMyAddress } from '../../store/selectors';
+import { useConversation } from '../../store/selectors';
 import { IconChat, IconBroadcast, IconHash, IconRoutes, IconLock, IconWarning } from '../../components/Icons';
 import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
 import { ConversationList } from './ConversationList';
@@ -45,7 +45,6 @@ function EmptyMessages({ convId, loading }: { convId: string; loading?: boolean 
 
 function MessageList({ conversationId }: { conversationId: string }) {
   const { messages } = useConversation(conversationId);
-  const myAddr = useMyAddress();
   // `status` loads in the same initial connect-time batch as message history;
   // while it is still null we can't yet tell "no messages" from "haven't
   // fetched yet" apart, so show a loading affordance instead of the
@@ -117,7 +116,7 @@ function MessageList({ conversationId }: { conversationId: string }) {
                   <span className={styles.daySeparatorText}>{formatDaySeparatorLabel(msg.timestampMs)}</span>
                 </div>
               )}
-              <MessageBubble message={msg} myAddr={myAddr} />
+              <MessageBubble message={msg} />
             </div>
           );
         })}

@@ -5,8 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include "esp_stubs.h"
+/* One definition of the DM session snapshot type, shared with the firmware so
+   this stub cannot drift from the struct rpc_methods.c actually reads. */
+#include "mesh_dm_session_info.h"
 #include "nvs.h"
 #include "esp_wifi.h"
+#include "battery.h"
 
 typedef struct {
     uint32_t event_seq;
@@ -166,6 +170,12 @@ int mesh_get_channel_security(int i, bool* h, uint16_t* e) {
 }
 void mesh_get_state(mesh_shared_state_t* o) { memset(o, 0, sizeof(*o)); }
 void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
+size_t mesh_dm_session_capacity(void) { return 0; }
+size_t mesh_get_dm_sessions(mesh_dm_session_info_t* o, size_t max) {
+    (void)o;
+    (void)max;
+    return 0;
+}
 bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified, bool* key_changed) {
     (void)addr;
     if (sas_out)
@@ -266,8 +276,18 @@ broadcast_telemetry_mode_t mesh_get_broadcast_telemetry_mode(void) {
 uint32_t airtime_budget_remaining(void) { return 0; }
 void airtime_budget_refill(uint32_t n) { (void)n; }
 uint32_t airtime_budget_next_refill_ms(void) { return 0; }
-int battery_read_mv(void) { return 0; }
-int battery_read_pct(void) { return 0; }
+/* Correct signatures (uint32_t/uint8_t, matching battery.h): the previous
+ * `int` return types were a latent UB mismatch against the real
+ * declarations rpc_methods.c compiles against (undetected because these
+ * two translation units never saw each other's prototype). */
+uint32_t battery_read_mv(void) { return 0; }
+uint8_t battery_read_pct(void) { return 0; }
+void battery_get_status(battery_status_t* out) {
+    out->mv = 0;
+    out->pct = 0;
+    out->charging = BATTERY_CHG_UNKNOWN;
+    out->present = false;
+}
 const bramble_board_config_t* board_get_config(void) { return 0; }
 int display_set_backlight(uint8_t level) {
     (void)level;
@@ -527,10 +547,25 @@ esp_err_t nvs_set_u16(nvs_handle_t h, const char* k, uint16_t v) {
     (void)v;
     return ESP_OK;
 }
+/* One real u32 cell, backing the location store's boot counter. The peer
+ * records' age depends on it, so the getPeerLocations suite needs a value that
+ * survives the set/get round trip rather than a no-op. */
+static uint32_t g_nvs_loc_u32;
+static bool g_nvs_loc_u32_present;
+
 esp_err_t nvs_set_u32(nvs_handle_t h, const char* k, uint32_t v) {
-    (void)h;
     (void)k;
-    (void)v;
+    if (h != 3)
+        return ESP_OK;
+    g_nvs_loc_u32 = v;
+    g_nvs_loc_u32_present = true;
+    return ESP_OK;
+}
+esp_err_t nvs_get_u32(nvs_handle_t h, const char* k, uint32_t* o) {
+    (void)k;
+    if (h != 3 || !o || !g_nvs_loc_u32_present)
+        return ESP_FAIL;
+    *o = g_nvs_loc_u32;
     return ESP_OK;
 }
 esp_err_t nvs_set_i8(nvs_handle_t h, const char* k, int8_t v) {
@@ -762,3 +797,34 @@ esp_err_t esp_wifi_ap_get_sta_list(wifi_sta_list_t* list) {
     (void)list;
     return 1; /* ESP_FAIL */
 }
+
+/* BLE pairing (Task 4 contract tests drive these) */
+bool g_ble_has_passkey_display = false;
+int g_ble_pairing_config_changed_calls = 0;
+int g_ble_wipe_bonds_calls = 0;
+int g_ble_wipe_bonds_result = 0; /* 0 = success; set -1 to simulate a wipe failure */
+static uint32_t s_ble_passkey_value;
+static bool s_ble_passkey_set = false;
+
+bool ble_server_has_passkey_display(void) { return g_ble_has_passkey_display; }
+int ble_server_wipe_bonds(void) {
+    g_ble_wipe_bonds_calls++;
+    return g_ble_wipe_bonds_result;
+}
+void ble_server_pairing_config_changed(void) { g_ble_pairing_config_changed_calls++; }
+int ble_pairing_store_set(uint32_t v) {
+    s_ble_passkey_value = v;
+    s_ble_passkey_set = true;
+    return 0;
+}
+int ble_pairing_store_clear(void) {
+    s_ble_passkey_set = false;
+    return 0;
+}
+bool ble_pairing_store_get(uint32_t* out) {
+    if (!s_ble_passkey_set)
+        return false;
+    *out = s_ble_passkey_value;
+    return true;
+}
+bool ble_pairing_store_is_set(void) { return s_ble_passkey_set; }

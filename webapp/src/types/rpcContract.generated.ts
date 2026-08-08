@@ -224,6 +224,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rpc/bramble.getDmSessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get DM session table
+         * @description Returns metadata for every used slot in the DM session table. A directed send (a chat DM, or a per-contact location share) requires an active session with the destination and is dropped without one, so this is what tells a diagnostic which configured peer a node cannot currently reach directly. Key material is never included.
+         */
+        post: operations["getDmSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rpc/bramble.getMessages": {
         parameters: {
             query?: never;
@@ -418,6 +438,86 @@ export interface paths {
          * @description Sets the node name (max 32 characters).
          */
         post: operations["setNodeName"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rpc/bramble.getBleSecurity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the BLE pairing security posture
+         * @description Returns the SMP pairing mode: passkey-display (board shows a random code per pairing), static-passkey (operator-set code on displayless boards), or just-works (bootstrap, no code set). The static passkey value is write-only and never returned.
+         */
+        post: operations["getBleSecurity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rpc/bramble.setBlePasskey": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set or clear the static BLE pairing passkey
+         * @description Sets the 6-digit SMP passkey used for BLE pairing on boards without a display path; null or an empty string clears it, returning the board to Just Works. Rejected on boards that display a random code. Any change wipes stored BLE bonds, so every client re-pairs with the current code.
+         */
+        post: operations["setBlePasskey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rpc/bramble.getTimezone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the configured display timezone
+         * @description Returns the POSIX TZ specification the node renders wall-clock times in, together with the named zones the on-device picker offers. Clients read the preset list from here rather than carrying their own copy of the specs.
+         */
+        post: operations["getTimezone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rpc/bramble.setTimezone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the display timezone
+         * @description Persists a POSIX TZ specification, for example "PST8PDT,M3.2.0,M11.1.0". UTC remains the internal source of truth; the zone is applied only where a clock is rendered. A specification naming a daylight-saving zone must also carry explicit transition rules, since the ruleless form is ambiguous and guessing would produce a silently wrong clock.
+         */
+        post: operations["setTimezone"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1523,19 +1623,19 @@ export interface components {
             /** @description Override update interval in seconds. */
             interval_s?: number;
         };
-        /** @description Per-channel location sharing rule. */
+        /** @description Per-channel location sharing rule. The node broadcasts its position under this channel's key, so every holder of that key receives it and no route, DM session or prior traffic is required. The tier is the resolution the whole channel receives. A receiver additionally requires a valid network-key origin MAC before it believes the position, so a node outside the network cannot originate one. The channel must be a keyed one: a keyed channel gives location both confidentiality and the full per-sender replay window. */
         LocationChannelTarget: {
-            /** @description Channel index. */
+            /** @description Channel index, 1 to 15. Outside that range names no channel the node can share to, and setLocationConfig rejects the whole request without applying any part of it. Channel 0 is the public channel and is rejected: its PSK is well known, so a target on it would broadcast exact coordinates readable by anyone in radio range, and the shared replay window is deliberately skipped there. Create a channel with a PSK and target the index addChannel returns. A public-channel rule left in storage by an earlier build does not resolve to a target, so an upgrade stops it transmitting. */
             channel: number;
             /** @description Whether rule is enabled. */
             enabled?: boolean;
             tier?: components["schemas"]["LocationTier"];
-            /** @description Override update interval in seconds. */
+            /** @description Update interval in seconds for this target, paced independently of every other target. Floored at 30. */
             interval_s?: number;
         };
         /** @description Canonical location configuration. */
         LocationConfig: {
-            /** @description Whether location sharing is enabled. */
+            /** @description Whether location sharing is permitted. A node transmits only to the targets in contact_rules and channel_targets, so this being true with no enabled target means nothing is sent. */
             enabled: boolean;
             tier: components["schemas"]["LocationTier"];
             default_tier: components["schemas"]["LocationTier"];
@@ -1556,10 +1656,11 @@ export interface components {
             /** @description Peer display name. */
             name: string;
             tier: components["schemas"]["LocationTier"];
-            position: components["schemas"]["Position"];
-            /** @description Whether the peer is currently online. */
+            /** @description Omitted when the peer's tier carries no coordinates, which is the case for the presence tier: it reports only that the peer is there. Coordinates are never synthesized for such a peer, so a consumer must treat an absent position as "no position shared", not as the origin. */
+            position?: components["schemas"]["Position"];
+            /** @description Whether this position is recent enough to present as current. False when the node cannot compute the position's age, which is the case for anything persisted before the current boot: the node has no wall clock, so a stored uptime reading says nothing once the uptime counter has restarted. The position itself is still returned, as the peer's last known one. */
             online: boolean;
-            /** @description Unix timestamp (ms) of last update. */
+            /** @description Device uptime in milliseconds at which the position was received, measured on the CURRENT boot. 0 when the node cannot express the receipt time on that clock (a position carried over from an earlier boot), which is also when online is false. */
             lastUpdatedMs: number;
         };
         /** @description Node status information. */
@@ -1588,10 +1689,17 @@ export interface components {
             uptime_s: number;
             /** @description Free heap memory in bytes. */
             free_heap: number;
-            /** @description Battery voltage in millivolts. */
+            /** @description Battery voltage in millivolts, averaged over several ADC samples. While charging is "yes" this reflects the charge rail, not the cell's state of charge. */
             battery_mv: number;
-            /** @description Estimated battery charge percentage. */
+            /** @description Estimated battery charge percentage. While charging is "yes" this is not meaningful; see charging. */
             battery_pct: number;
+            /**
+             * @description Hardware-informed or voltage-inferred charging state. "unknown" covers every case the backend cannot determine a real charging state for: no charge-detect pin AND a voltage below the inference threshold, the battery backend failed to initialize, or (emulator only) the emu-link batt message omitted its optional charging field. "yes" means a charger is currently driving the battery rail, which includes a charger left connected after the cell reads full, not strictly "current is flowing into the cell right now"; boards with a charge-detect pin (currently only the T1000-E) report this from hardware, every other board infers it once voltage_mv is high enough that a real cell could not have produced it on its own (see BATTERY_MV_CHARGER_RAIL_MIN in components/battery/include/battery.h).
+             * @enum {string}
+             */
+            charging?: "unknown" | "no" | "yes";
+            /** @description Whether this board has battery-sensing hardware and it initialized successfully. false means battery_mv and battery_pct are not meaningful (0). present describes hardware init, not this particular read: a read where every ADC sample failed still reports present true with a 0 voltage, so treat a 0 voltage as "no reading" regardless of present. */
+            present?: boolean;
             /** @description Whether this board has GPS hardware. */
             gps_available: boolean;
             /** @description The persisted GPS power preference (independent of gps_available). */
@@ -1780,6 +1888,33 @@ export interface components {
         RoutesResponse: {
             routes: components["schemas"]["Route"][];
         };
+        /** @description One used slot of the DM session table. Metadata only: the session key, the peer's cached identity key and the ratchet chain keys are never returned. */
+        DmSession: {
+            /** @description Peer address, 8 hex digits. */
+            address: string;
+            /**
+             * @description active means directed traffic to this peer can be encrypted and sent; handshaking means the key exchange has not completed.
+             * @enum {string}
+             */
+            state: "handshaking" | "active";
+            /** @description Peer identity key is pinned and confirmed. */
+            verified: boolean;
+            /** @description Send chain is established, so a payload can be encrypted now. */
+            ratchet_valid: boolean;
+            /** @description Messages carried by this session since it was established. */
+            msg_count: number;
+            /** @description Key-exchange epoch this session is on. */
+            ke_epoch: number;
+            /** @description Milliseconds since the slot was established or re-established. */
+            established_ms_ago: number;
+            /** @description Milliseconds since the last send or receive on this session. */
+            last_active_ms_ago: number;
+        };
+        DmSessionsResponse: {
+            sessions: components["schemas"]["DmSession"][];
+            /** @description Total slots in the session table, used or not. */
+            capacity: number;
+        };
         MessagesResponse: {
             messages: components["schemas"]["Message"][];
         };
@@ -1926,6 +2061,52 @@ export interface components {
             ok: boolean;
             /** @description The applied node name. */
             name: string;
+        };
+        GetBleSecurityResponse: {
+            /** @enum {string} */
+            mode: "passkey-display" | "static-passkey" | "just-works";
+            staticPasskeySet: boolean;
+        };
+        SetBlePasskeyParams: {
+            /** @description 6-digit passkey to set; explicit null or an empty string clears it. The member itself is required: omitting it entirely is a bad-request error, not a clear, so a caller cannot silently wipe a configured passkey by forgetting the parameter. */
+            passkey: string | null;
+        };
+        SetBlePasskeyResponse: {
+            ok: boolean;
+            /** @enum {string} */
+            mode?: "passkey-display" | "static-passkey" | "just-works";
+            error?: string;
+        };
+        /** @description A named zone offered by the on-device picker. */
+        TimezonePreset: {
+            /** @description Human-facing zone name, for example "US Pacific". */
+            label: string;
+            /** @description POSIX TZ specification the label maps to. */
+            spec: string;
+        };
+        /** @description Response from bramble.getTimezone. */
+        GetTimezoneResponse: {
+            ok: boolean;
+            /** @description Effective POSIX TZ specification used to render clocks. */
+            timezone: string;
+            /** @description Compiled-in default, used when nothing valid is stored. */
+            default_timezone: string;
+            /** @description True when a zone is stored, as opposed to the default. */
+            configured: boolean;
+            /** @description Named zones the on-device picker offers. */
+            presets: components["schemas"]["TimezonePreset"][];
+        };
+        SetTimezoneParams: {
+            /** @description POSIX TZ specification, for example "PST8PDT,M3.2.0,M11.1.0" or "UTC0". */
+            timezone: string;
+        };
+        /** @description Response from bramble.setTimezone. */
+        SetTimezoneResponse: {
+            ok: boolean;
+            /** @description Effective timezone after the change. */
+            timezone?: string;
+            /** @description Error message when ok=false. */
+            error?: string;
         };
         AddChannelParams: {
             /** @description Channel display name. */
@@ -2334,10 +2515,17 @@ export interface components {
         };
         /** @description Response from bramble.getBattery. */
         GetBatteryResponse: {
-            /** @description Battery voltage in millivolts. */
+            /** @description Battery voltage in millivolts, averaged over several ADC samples. While charging is "yes" this reflects the charge rail, not the cell's state of charge. */
             voltage_mv: number;
-            /** @description Estimated battery charge percentage (0–100). */
+            /** @description Estimated battery charge percentage (0-100), derived from voltage_mv. While charging is "yes" this is not meaningful (the charge rail's voltage does not reflect the cell); treat it as unknown rather than a real level in that case. */
             percentage: number;
+            /**
+             * @description Hardware-informed or voltage-inferred charging state. "unknown" covers every case the backend cannot determine a real charging state for: no charge-detect pin AND a voltage below the inference threshold, the battery backend failed to initialize, or (emulator only) the emu-link batt message omitted its optional charging field. "yes" means a charger is currently driving the battery rail, which includes a charger left connected after the cell reads full, not strictly "current is flowing into the cell right now"; boards with a charge-detect pin (currently only the T1000-E) report this from hardware, every other board infers it once voltage_mv is high enough that a real cell could not have produced it on its own (see BATTERY_MV_CHARGER_RAIL_MIN in components/battery/include/battery.h).
+             * @enum {string}
+             */
+            charging?: "unknown" | "no" | "yes";
+            /** @description Whether this board has battery-sensing hardware and it initialized successfully. false means voltage_mv and percentage are not meaningful (0). present describes hardware init, not this particular read: a read where every ADC sample failed still reports present true with a 0 voltage, so treat a 0 voltage as "no reading" regardless of present. */
+            present?: boolean;
         };
         /** @description Parameters for bramble.setBacklight. */
         SetBacklightParams: {
@@ -2963,6 +3151,37 @@ export interface operations {
             };
         };
     };
+    getDmSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description DM session table */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DmSessionsResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     getMessages: {
         parameters: {
             query?: never;
@@ -3262,6 +3481,116 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SetNodeNameResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getBleSecurity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description Current BLE security posture */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GetBleSecurityResponse"];
+                };
+            };
+        };
+    };
+    setBlePasskey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SetBlePasskeyParams"];
+            };
+        };
+        responses: {
+            /** @description Passkey updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetBlePasskeyResponse"];
+                };
+            };
+            /** @description Bad request (invalid params or request body) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getTimezone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyParams"];
+            };
+        };
+        responses: {
+            /** @description Current timezone configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GetTimezoneResponse"];
+                };
+            };
+        };
+    };
+    setTimezone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SetTimezoneParams"];
+            };
+        };
+        responses: {
+            /** @description Effective timezone after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetTimezoneResponse"];
                 };
             };
             /** @description Bad request (invalid params or request body) */

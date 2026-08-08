@@ -10,7 +10,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include "esp_stubs.h"
+#include "ble_server.h"
+#include "ble_pairing_store.h"
+/* One definition of the DM session snapshot type, shared with the firmware so
+   this stub cannot drift from the struct rpc_methods.c actually reads. */
+#include "mesh_dm_session_info.h"
 #include "nvs.h"
+#include "battery.h"
 
 /* ── Types mirrored from firmware headers ─────────────────────────── */
 
@@ -222,6 +228,27 @@ void mesh_get_state(mesh_shared_state_t* o) {
     }
 }
 void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
+
+/* DM session table, controllable by the test: g_stub_dm_sessions holds what
+   mesh_get_dm_sessions hands back, g_stub_dm_session_count how many of them,
+   and g_stub_dm_session_capacity what the table claims to hold. */
+mesh_dm_session_info_t g_stub_dm_sessions[8];
+size_t g_stub_dm_session_count = 0;
+size_t g_stub_dm_session_capacity = 32;
+
+size_t mesh_dm_session_capacity(void) { return g_stub_dm_session_capacity; }
+
+size_t mesh_get_dm_sessions(mesh_dm_session_info_t* out, size_t max) {
+    if (!out || max == 0)
+        return 0;
+    size_t n = g_stub_dm_session_count;
+    if (n > max)
+        n = max;
+    if (n > (sizeof(g_stub_dm_sessions) / sizeof(g_stub_dm_sessions[0])))
+        n = sizeof(g_stub_dm_sessions) / sizeof(g_stub_dm_sessions[0]);
+    memcpy(out, g_stub_dm_sessions, n * sizeof(*out));
+    return n;
+}
 bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified, bool* key_changed) {
     (void)addr;
     if (sas_out)
@@ -344,8 +371,18 @@ uint32_t airtime_budget_next_refill_ms(const airtime_budget_t* ab, uint32_t now_
     (void)now_ms;
     return 0;
 }
-int battery_read_mv(void) { return 3700; }
-int battery_read_pct(void) { return 85; }
+/* Correct signatures (uint32_t/uint8_t, matching battery.h): the previous
+ * `int` return types were a latent UB mismatch against the real
+ * declarations rpc_methods.c compiles against (undetected because these
+ * two translation units never saw each other's prototype). */
+uint32_t battery_read_mv(void) { return 3700; }
+uint8_t battery_read_pct(void) { return 85; }
+void battery_get_status(battery_status_t* out) {
+    out->mv = 3700;
+    out->pct = 85;
+    out->charging = BATTERY_CHG_UNKNOWN;
+    out->present = true;
+}
 /* Return a zeroed-out block large enough for the real bramble_board_config_t.
  * The real struct is ~256 bytes; we allocate 512 to be safe.
  * The short_name pointer is at offset 0 in the real struct. */
@@ -689,6 +726,12 @@ esp_err_t nvs_set_u32(nvs_handle_t h, const char* k, uint32_t v) {
     (void)v;
     return ESP_OK;
 }
+esp_err_t nvs_get_u32(nvs_handle_t h, const char* k, uint32_t* o) {
+    (void)h;
+    (void)k;
+    (void)o;
+    return ESP_FAIL;
+}
 esp_err_t nvs_set_i8(nvs_handle_t h, const char* k, int8_t v) {
     (void)h;
     (void)k;
@@ -860,3 +903,26 @@ void nvs_release_iterator(nvs_iterator_t it) {
 void ws_server_load_token(void) {}
 void ws_server_load_origins(void) {}
 const char* ws_server_get_extra_origins(void) { return ""; }
+
+/* BLE pairing: no display path and no static passkey by default (just-works). */
+bool ble_server_has_passkey_display(void) { return false; }
+int ble_server_wipe_bonds(void) { return 0; }
+void ble_server_pairing_config_changed(void) {}
+static uint32_t s_test_stub_ble_passkey_value;
+static bool s_test_stub_ble_passkey_set = false;
+int ble_pairing_store_set(uint32_t v) {
+    s_test_stub_ble_passkey_value = v;
+    s_test_stub_ble_passkey_set = true;
+    return 0;
+}
+int ble_pairing_store_clear(void) {
+    s_test_stub_ble_passkey_set = false;
+    return 0;
+}
+bool ble_pairing_store_get(uint32_t* out) {
+    if (!s_test_stub_ble_passkey_set)
+        return false;
+    *out = s_test_stub_ble_passkey_value;
+    return true;
+}
+bool ble_pairing_store_is_set(void) { return s_test_stub_ble_passkey_set; }

@@ -99,14 +99,25 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
     }
   };
 
+  // A node transmits only to configured targets, so the switch on its own says
+  // nothing about whether anything is being sent. Every affirmative bit of copy
+  // below is derived from this, not from `enabled`.
+  const targetCount = useMemo(
+    () => contactRules.filter(r => r.enabled !== false).length + channelTargets.filter(c => c.enabled !== false).length,
+    [contactRules, channelTargets],
+  );
+  const sharingActive = enabled && targetCount > 0;
+
   const preview = useMemo(() => {
     if (!enabled) {
       return 'Sharing is OFF. Your node will not publish periodic location packets.';
     }
+    if (targetCount === 0) {
+      return 'Sharing is ON but has no targets, so nothing is sent. Add a contact or a channel target below.';
+    }
 
-    const targetCount = contactRules.filter(r => r.enabled !== false).length + channelTargets.filter(c => c.enabled !== false).length;
     return `Sharing ${tier === 'full' ? 'exact coordinates' : tier === 'coarse' ? 'coarse zone updates' : tier === 'presence' ? 'presence only' : 'off'} every ${interval}s using ${source}. Active targets: ${targetCount}.`;
-  }, [enabled, tier, interval, source, contactRules, channelTargets]);
+  }, [enabled, tier, interval, source, targetCount]);
 
   const addContactRule = () => {
     setError('');
@@ -186,8 +197,14 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
             checked={enabled}
             onChange={e => setEnabled(e.target.checked)}
           />
-          <span>{enabled ? 'Location sharing enabled' : 'Location sharing disabled'}</span>
-          {enabled ? <IconLocation size={14} /> : <IconLocationOff size={14} />}
+          <span>
+            {!enabled
+              ? 'Location sharing disabled'
+              : sharingActive
+                ? 'Location sharing enabled'
+                : 'Location sharing enabled, no targets'}
+          </span>
+          {sharingActive ? <IconLocation size={14} /> : <IconLocationOff size={14} />}
         </label>
       </div>
 
