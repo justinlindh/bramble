@@ -912,6 +912,29 @@ void test_full_refresh_pending_on_idle_auto_switch_to_messages(void) {
     TEST_ASSERT_TRUE(ui_take_full_refresh_pending(&state));
 }
 
+void test_ble_passkey_overlay_sets_state_and_dirty(void) {
+    ui_state_t st;
+    ui_init(&st);
+    st.screen_dirty = false;
+    ui_show_ble_passkey(&st, 42);
+    TEST_ASSERT_TRUE(st.ble_passkey_active);
+    TEST_ASSERT_EQUAL_UINT32(42u, st.ble_passkey);
+    TEST_ASSERT_TRUE(st.screen_dirty);
+
+    st.screen_dirty = false;
+    ui_clear_ble_passkey(&st);
+    TEST_ASSERT_FALSE(st.ble_passkey_active);
+    TEST_ASSERT_TRUE(st.screen_dirty);
+}
+
+void test_ble_passkey_clear_when_inactive_is_quiet(void) {
+    ui_state_t st;
+    ui_init(&st);
+    st.screen_dirty = false;
+    ui_clear_ble_passkey(&st);
+    TEST_ASSERT_FALSE(st.screen_dirty); /* no redraw churn when nothing shown */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_main_screen);
@@ -987,5 +1010,7 @@ int main(void) {
     RUN_TEST(test_full_refresh_not_pending_on_in_screen_redraw);
     RUN_TEST(test_full_refresh_pending_survives_screen_leaving_settings);
     RUN_TEST(test_full_refresh_pending_on_idle_auto_switch_to_messages);
+    RUN_TEST(test_ble_passkey_overlay_sets_state_and_dirty);
+    RUN_TEST(test_ble_passkey_clear_when_inactive_is_quiet);
     return UNITY_END();
 }

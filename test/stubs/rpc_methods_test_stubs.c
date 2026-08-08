@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "esp_stubs.h"
+#include "ble_server.h"
+#include "ble_pairing_store.h"
 /* One definition of the DM session snapshot type, shared with the firmware so
    this stub cannot drift from the struct rpc_methods.c actually reads. */
 #include "mesh_dm_session_info.h"
@@ -925,3 +927,26 @@ void nvs_release_iterator(nvs_iterator_t it) {
 void ws_server_load_token(void) {}
 void ws_server_load_origins(void) {}
 const char* ws_server_get_extra_origins(void) { return ""; }
+
+/* BLE pairing: no display path and no static passkey by default (just-works). */
+bool ble_server_has_passkey_display(void) { return false; }
+int ble_server_wipe_bonds(void) { return 0; }
+void ble_server_pairing_config_changed(void) {}
+static uint32_t s_test_stub_ble_passkey_value;
+static bool s_test_stub_ble_passkey_set = false;
+int ble_pairing_store_set(uint32_t v) {
+    s_test_stub_ble_passkey_value = v;
+    s_test_stub_ble_passkey_set = true;
+    return 0;
+}
+int ble_pairing_store_clear(void) {
+    s_test_stub_ble_passkey_set = false;
+    return 0;
+}
+bool ble_pairing_store_get(uint32_t* out) {
+    if (!s_test_stub_ble_passkey_set)
+        return false;
+    *out = s_test_stub_ble_passkey_value;
+    return true;
+}
+bool ble_pairing_store_is_set(void) { return s_test_stub_ble_passkey_set; }

@@ -590,6 +590,33 @@ fixed to a place where it hears nothing therefore reports the second place.
 {"jsonrpc":"2.0","id":53,"method":"bramble.getAllowedOrigins","params":{}}
 ```
 
+### BLE pairing security
+
+See `docs/auth.md` for how link-layer pairing relates to the auth token,
+and `docs/SECURITY-MODEL.md` for the threat model.
+
+#### `bramble.getBleSecurity`
+
+- Description: Reports the current SMP pairing mode and whether a static passkey is set. The passkey value is write-only and never returned.
+- Params: none.
+- Response fields: `mode` (string: `passkey-display`, `static-passkey`, or `just-works`), `staticPasskeySet` (bool).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":90,"method":"bramble.getBleSecurity","params":{}}
+```
+
+#### `bramble.setBlePasskey`
+
+- Description: Sets or clears the 6-digit static SMP passkey used for BLE pairing on boards without a passkey-display callback. `null` or an empty string clears it, returning the board to Just Works. Rejected on boards that display a random code per pairing. Any change wipes stored BLE bonds, so every client must re-pair with the current code.
+- Params: `passkey` (string, exactly 6 digits, or `null`/`""` to clear).
+- Response fields: `ok` (bool), `mode` (string, the resulting mode), `error` (string, present when `ok` is false).
+- Example:
+
+```json
+{"jsonrpc":"2.0","id":91,"method":"bramble.setBlePasskey","params":{"passkey":"482913"}}
+```
+
 ### Network key (control-plane MACs)
 
 See `docs/network-key-provisioning.md` for the operator flow.

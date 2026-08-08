@@ -41,4 +41,35 @@ bool ble_server_connected(void);
  */
 int ble_server_notify(const char* json, size_t len);
 
+/**
+ * Passkey display hook. When registered (display boards), pairing runs in
+ * passkey-display mode: a fresh random 6-digit code per pairing attempt is
+ * passed to the callback with show=true, and show=false clears it when the
+ * pairing attempt ends (success, failure, or disconnect). The callback runs
+ * on the NimBLE host task: it must marshal to its own UI context and must
+ * not block. Register before ble_server_init().
+ */
+typedef void (*ble_passkey_display_cb_t)(uint32_t passkey, bool show);
+void ble_server_set_passkey_display_cb(ble_passkey_display_cb_t cb);
+
+/** True when a passkey display callback is registered (board has a display
+ * path); bramble.setBlePasskey is rejected on such boards. */
+bool ble_server_has_passkey_display(void);
+
+/**
+ * Wipe every stored BLE bond. Callers changing the static passkey must call
+ * this first and check the result: bonds created under the previous policy
+ * stay trusted otherwise, which would make a freshly set passkey theater for
+ * already-bonded peers. Returns 0 on success, -1 on failure; on failure the
+ * caller must not persist the passkey change or claim it succeeded.
+ */
+int ble_server_wipe_bonds(void);
+
+/**
+ * Static passkey was set, changed, or cleared and the bond wipe already
+ * succeeded (see ble_server_wipe_bonds): re-apply the SM policy (IO
+ * capability / MITM) for subsequent pairing attempts.
+ */
+void ble_server_pairing_config_changed(void);
+
 #endif

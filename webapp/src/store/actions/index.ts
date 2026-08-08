@@ -79,8 +79,10 @@ export {
   startOtaUpdate,
   getOtaStatus,
   subscribeOtaEvents,
+  getBleSecurity,
+  setBlePasskey,
 } from './deviceManagement';
-export type { AuthTokenInfo, OtaOriginInfo, OtaStatus } from './deviceManagement';
+export type { AuthTokenInfo, OtaOriginInfo, OtaStatus, BlePairingMode, BleSecurityInfo } from './deviceManagement';
 export {
   saveConnectedDevice,
   refreshDevices,
