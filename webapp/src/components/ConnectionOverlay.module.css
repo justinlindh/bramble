@@ -120,7 +120,10 @@
   min-height: 2.6rem;
 }
 
-.transportBtn:hover:not(:disabled) {
+/* The accent hover means "this works", so unavailable transports are excluded
+   from it: they are clickable, and painting them blue under the cursor would
+   promise a connection they cannot make. */
+.transportBtn:hover:not(.unsupportedBtn) {
   border-color: var(--accent-blue);
   color: var(--text);
 }
@@ -129,11 +132,6 @@
   border-color: var(--accent-blue);
   color: var(--text);
   background: rgba(31, 111, 235, 0.1);
-}
-
-.transportBtn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .connectBtn {
@@ -227,7 +225,9 @@
   color: var(--accent-green, #3fb950);
 }
 
-.mockBtn:hover:not(:disabled) {
+/* Both class names, so this keeps winning over the transport hover rule above
+   and the mock node stays green under the cursor. */
+.transportBtn.mockBtn:hover {
   border-color: var(--accent-green, #3fb950);
   background: rgba(63, 185, 80, 0.1);
   color: var(--text);
@@ -239,8 +239,12 @@
   opacity: 0.45;
 }
 
+/* Border and colour are spelled out rather than left to opacity so hover and
+   selection cannot pick up the accent treatment from an earlier rule. */
 .unsupportedBtn:hover {
   opacity: 0.7;
+  border-color: var(--text-muted);
+  color: var(--text-muted);
 }
 
 .unsupportedBtn.active {
