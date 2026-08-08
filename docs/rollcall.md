@@ -76,16 +76,21 @@ See [trust-anchor.md](trust-anchor.md) for the enrollment ceremony.
 ## Airtime cost, and how it scales
 
 A roll-call is the most expensive primitive in the protocol, so its cost is
-bounded by construction rather than by operator discipline.
+bounded by construction rather than by operator discipline: three announce
+rounds, one answer per member per roll-call, one delivery receipt per member
+per roll-call, and a member-side cap on how many roll-calls a node will answer
+in an hour.
 
 Wire sizes, at the shipped envelope (28-byte DATA prefix + 12-byte nonce +
-8-byte channel header + payload + 16-byte tag):
+8-byte channel header + payload + 16-byte tag) and, for the receipt, at
+`DELIVERY_RECEIPT_MIN_SIZE` plus one path hop:
 
 | Frame | On-air bytes |
 | --- | --- |
 | Announce, empty payload | 70 |
 | Announce, full 48-byte payload | 118 |
 | Answer | 137 |
+| Broadcast delivery receipt | 40 |
 
 Per roll-call, with N members and a mesh of R relaying nodes:
 
@@ -93,15 +98,31 @@ Per roll-call, with N members and a mesh of R relaying nodes:
   plus up to R relayed transmissions. Round 2 goes out 30s after round 1,
   round 3 60s after round 2.
 - **N answers, not 3N.** A member answers a given roll-call at most once, no
-  matter how many rounds it hears, so rounds 2 and 3 cost a decode on a member
-  that already answered and nothing more. Each answer costs one transmission
-  per hop back to the initiator, plus the ACK the reliability layer already
-  sends.
+  matter how many rounds it hears. Each answer costs one transmission per hop
+  back to the initiator, plus the ACK the reliability layer already sends.
+- **N delivery receipts, not 3N.** An announce is an ordinary broadcast, so a
+  member confirms it through the same broadcast delivery-receipt machinery
+  every other broadcast uses, and that is where a ledger row's relay path
+  comes from. A receipt is a `0xFFFFFFFF` flood carrying up to
+  `BROADCAST_RECEIPT_RETRY_COUNT` (3) transmissions, and the receipt policy
+  emits one on any mesh up to 40 peers, so it is not a rounding error next to
+  the answer it accompanies. Only the round on which a member first takes the
+  roll-call on is confirmed: rounds 2 and 3 cost an already-answered member a
+  decode and nothing more, which is what keeps this term N rather than 3N.
 
-The dominant term is therefore `N` unicast answers of 137 bytes each, times
-their hop counts: a roll-call over a 20-node mesh averaging 2 hops is roughly
-40 answer transmissions plus 3 floods. That is affordable occasionally and
-ruinous continuously, which is why initiation is rate limited.
+So a roll-call's airtime is roughly N answers of 137 bytes times their hop
+counts, plus N receipt floods of 40 bytes times their retries, plus 3
+announce floods. Answers dominate on frame size, receipts on transmission
+count, and neither term is negligible: a roll-call over a 20-node mesh
+averaging 2 hops is roughly 40 answer transmissions, up to 60 receipt
+transmissions and 3 floods. That is affordable occasionally and ruinous
+continuously, which is why both ends are rate limited.
+
+Measured in the simulator, on the 4-node line of
+`simulator/gosim/rollcall_test.go` with one member partitioned, a whole
+roll-call (three announce rounds, two answers, two confirmations) accounts
+for 4977ms of DATA airtime and 3120ms of receipt airtime. These are
+simulation results, not bench measurements.
 
 The answers are slotted rather than fired at once. Each member draws a
 deterministic bucket from its own address XOR the roll-call id, over a window
@@ -122,12 +143,28 @@ not reopen it, so "closed" is a stable, reportable state.
 | Initiation interval | 5 minutes, start to start | Refused with `reason: rate_limited` and the milliseconds to wait |
 | Concurrent roll-calls started here | 1 | Refused with `reason: busy` and the milliseconds until the current one closes |
 | Operator payload | 48 bytes | Rejected as invalid params |
-| Tracked responders | 24 | Counted in `overflow` rather than dropped silently, so a ledger that could not hold the whole mesh says so |
+| Tracked responders | 24 | Counted in `overflow` rather than dropped silently, so a ledger that could not hold the whole mesh says so. An attested answer outranks a relay path: when the table is full it reclaims a row that carries only a path, so `overflow` can only ever mean "more members answered than this ledger holds" |
 | Announce rounds | 3 | No further rounds; the schedule is a hard airtime bound |
 | Answers a member owes at once | 2 concurrent initiators | Counted in `pending_dropped`, reported by that node, so a node that failed to take part says so locally instead of only appearing as a hole in someone else's ledger |
+| Answers a member emits | 12 per rolling hour, whoever asks | Counted in `answer_limited` and reported by that node; the announce is not confirmed either, so an over-asked mesh spends nothing on it |
 
-The rate limit is enforced in the firmware, not in the client: it has to hold
-for a script driving the RPC directly.
+Both limits are enforced in the firmware, not in the client: they have to
+hold for a script driving the RPC directly.
+
+The two limits answer different questions. The initiation interval bounds
+what THIS node asks of the fleet. The answer budget bounds what the fleet
+will spend on being asked, by anyone: a network-key insider holding the
+public channel can broadcast a fresh announce as fast as it likes, and
+without a member-side bound each one would cost every node a signature, a
+137-byte unicast with its retry ladder and a flooded receipt. The per-node
+TX budget would not save the fleet from that, it would be the casualty: the
+roll-call answers would consume the budget and legitimate chat, beacons and
+receipts would be denied by the lane the roll-call filled. Twelve per hour is
+two initiators running continuously at their own five-minute floor, so a
+cooperative fleet never meets it.
+
+A refused answer takes no answer-once claim, so the next announce round of
+the same roll-call is answered if the budget has room by then.
 
 ## What a roll-call proves, and what it does not
 
@@ -148,6 +185,14 @@ An answer from a peer this node holds no pinned key for cannot be attested at
 all. It is counted in `unattested` and never recorded as a responder, because
 a response nobody can check is not evidence.
 
+**A relay path is not attested either.** It comes from the broadcast
+delivery-receipt machinery, which is authenticated by the shared network key
+alone, and a receipt's source address is whatever its sender wrote. A receipt
+may therefore only open a ledger row for an address this node already pins,
+and even then the row says "a receipt named this member", never "this member
+answered". Read the path as a hint about how the announce travelled and the
+signature as the evidence.
+
 Out of scope, so that nothing here reads as a promise: a roll-call does not
 integrate with the store-and-forward mailbox. An offline member is reported
 missing, full stop, and no answer is delivered later when it rejoins.
@@ -165,7 +210,8 @@ malformed request and returns `-32602`.
 the per-member rows (address, whether an answer verified, milliseconds INTO
 the roll-call, the round it named, the relay path where the broadcast
 delivery-receipt machinery supplied one), the missing set, and the honest
-counters (`unattested`, `overflow`, `late`, `pending_dropped`). Times are
+counters (`unattested`, `overflow`, `late`, `pending_dropped`,
+`answer_limited`). Times are
 reported as milliseconds into the roll-call, never as device uptime: the
 device clock is boot-relative and means nothing to a client, while "answered
 4.2s in" is directly comparable across nodes.
@@ -183,9 +229,11 @@ reference is [rpc/events.md](rpc/events.md).
 - `test/test_rollcall.c` covers the pure core against the shipped codecs: the
   wire round trips and their malformed-input rejections, the signed-message
   layout, a second fleet member failing to forge an answer on a victim's
-  behalf, the stagger bounds, the round schedule, the rate limit across the
-  millisecond rollover, and the ledger's idempotence, close, overflow and
-  missing-set rules.
+  behalf, the stagger bounds, the round schedule, both rate limits across the
+  millisecond rollover, the release of a claim whose answer never reached the
+  air, and the ledger's idempotence, close, overflow and missing-set rules,
+  including a table filled with receipt-supplied paths that still records
+  every attested answer and a forged receipt that cannot open a row at all.
 - `test/test_rpc_rollcall.c` drives both RPC methods through the real
   dispatcher and the real ledger, including the un-anchored ledger that names
   nobody missing.
