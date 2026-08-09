@@ -36,7 +36,7 @@ void test_rerr_for_dest_fast_fails_matching_pending_ack(void) {
     TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
     TEST_ASSERT_TRUE(table.entries[idx].active);
 
-    size_t failed = rerr_ack_failfast_for_dest(&table, 0xABCDEF01, "route_broken", NULL, NULL);
+    size_t failed = rerr_ack_failfast_for_dest(&table, 0xABCDEF01, "route_broken", NULL);
 
     TEST_ASSERT_EQUAL_UINT32(1, failed);
     TEST_ASSERT_FALSE(table.entries[idx].active);
@@ -54,7 +54,7 @@ void test_rerr_for_dest_does_not_affect_other_destination(void) {
     TEST_ASSERT_GREATER_OR_EQUAL(0, idx_a);
     TEST_ASSERT_GREATER_OR_EQUAL(0, idx_b);
 
-    size_t failed = rerr_ack_failfast_for_dest(&table, 0xDEAD0001, "route_broken", NULL, NULL);
+    size_t failed = rerr_ack_failfast_for_dest(&table, 0xDEAD0001, "route_broken", NULL);
 
     TEST_ASSERT_EQUAL_UINT32(1, failed);
     TEST_ASSERT_FALSE(table.entries[idx_a].active);
@@ -70,7 +70,7 @@ void test_rerr_fast_fail_updates_msg_store_status_to_failed(void) {
                               sizeof(payload), 1000);
     TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
 
-    (void)rerr_ack_failfast_for_dest(&table, 0xFEEDBEEF, "route_broken", NULL, NULL);
+    (void)rerr_ack_failfast_for_dest(&table, 0xFEEDBEEF, "route_broken", NULL);
 
     TEST_ASSERT_EQUAL_INT(1, s_status_update_calls);
     TEST_ASSERT_EQUAL_HEX32(0xCAFEBABE, s_last_failed_packet_id);

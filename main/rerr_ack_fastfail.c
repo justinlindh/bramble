@@ -8,8 +8,7 @@
 static const char* TAG = "rerr_ack_fastfail";
 
 size_t rerr_ack_failfast_for_dest(pending_ack_table_t* table, uint32_t broken_dest,
-                                  const char* reason, rerr_ack_fail_notify_fn notify,
-                                  void* notify_ctx) {
+                                  const char* reason, rerr_ack_fail_notify_fn notify) {
     if (!table) {
         return 0;
     }
@@ -26,7 +25,7 @@ size_t rerr_ack_failfast_for_dest(pending_ack_table_t* table, uint32_t broken_de
 
         msg_store_update_status(pa->packet_id, MSG_STATUS_FAILED);
         if (notify) {
-            notify(pa->packet_id, reason, notify_ctx);
+            notify(pa->packet_id, reason);
         }
 
         pa->active = false;
