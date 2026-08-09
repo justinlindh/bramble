@@ -8,7 +8,7 @@ All events are sent as JSON-RPC 2.0 notifications over the WebSocket endpoint (`
 
 When firmware calls `rpc_notify(..., NULL)`, clients may see `"params": null` (or omitted by some transports) and should treat that as an empty payload.
 
-Notifications are delivered only to authenticated connections (WebSocket and BLE alike); a connection that has not presented the device token receives none. On a device whose owner has explicitly disabled auth, all connections receive notifications. See [../auth.md](../auth.md).
+On the network transports, notifications are delivered only to authenticated connections (WebSocket and BLE alike); a connection that has not presented the device token receives none. On a device whose owner has explicitly disabled auth, all connections receive notifications. The serial (UART) transport applies no such filter and carries every notification, because physical access is the trust boundary there. See [../auth.md](../auth.md).
 
 ---
 
@@ -768,7 +768,7 @@ The roll-call's collection window closed. Raised on the INITIATOR exactly once.
 ## `bramble.onPhyFrame`
 
 **Description**  
-Raw received frame forwarded by the PHY passthrough hardware bridge (DESIGN.md section 10). This is a bridge stream, not a mesh event: it carries the frame the radio heard, before any channel decryption or packet-type handling.
+Raw received frame forwarded by the PHY passthrough hardware bridge ([`emulator/DESIGN.md`](../../emulator/DESIGN.md) section 10). This is a bridge stream, not a mesh event: it carries the frame the radio heard, before any channel decryption or packet-type handling.
 
 **Trigger conditions**
 
@@ -782,11 +782,11 @@ Raw received frame forwarded by the PHY passthrough hardware bridge (DESIGN.md s
 | `frame` | string | Received frame bytes as lowercase hex, up to 255 bytes (510 hex characters). |
 | `rssi` | integer | RX RSSI (dBm). |
 | `snr` | number | RX SNR (dB). |
-| `freq` | integer | Receive frequency in Hz. |
+| `freq` | integer | Configured channel carrier in Hz, read from the live radio config as the frame arrives rather than measured off the air. |
 
 **Semantics notes**
 
-- Unlike the other events on this page, `bramble.onPhyFrame` is also emitted on the serial transport, which the gateway path trusts by physical access; over WebSocket and BLE it stays behind the authenticated-only notification filter.
+- Like every notification, the frame stream reaches the serial transport unfiltered, which is what the gateway path consumes and trusts by physical access; over WebSocket and BLE it stays behind the authenticated-only notification filter.
 - The frame is delivered exactly as received off the air, so a consumer parses and verifies it itself; the firmware neither decrypts nor authenticates it before forwarding.
 - Enabling passthrough is refused while the node holds a live channel identity (a provisioned network key, or any channel beyond the public one) unless `force` is set, so a normal mesh participant does not emit this stream by accident.
 
@@ -800,7 +800,7 @@ Raw received frame forwarded by the PHY passthrough hardware bridge (DESIGN.md s
     "frame": "40a1b2c3d4e5f6",
     "rssi": -91,
     "snr": 9,
-    "freq": 906875000
+    "freq": 915000000
   }
 }
 ```
