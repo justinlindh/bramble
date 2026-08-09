@@ -81,6 +81,22 @@ describe('NetworkReach session persistence', () => {
     expect(await screen.findByText(/Results from 7 minutes ago/i)).toBeInTheDocument();
   });
 
+  it('restores an in-flight probe as finalized rather than collecting', async () => {
+    const now = Date.now();
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        probeResult: { ...sampleProbeResult(now - 5000), complete: false },
+        persistedAt: now - 5000,
+      }),
+    );
+
+    render(<NetworkReach />);
+
+    expect(await screen.findByRole('button', { name: /refresh/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Collecting/i)).toBeNull();
+  });
+
   it('shows a Refresh button after results are available', () => {
     useStore.setState({ probeResult: sampleProbeResult() });
 
