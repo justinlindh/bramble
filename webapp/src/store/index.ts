@@ -10,7 +10,6 @@ import type {
   ConnectionState,
   RelayHop,
   DeliveryStatus,
-  Transport,
   ProbeResult,
   PeerLocation,
   PeerVerification,
@@ -172,7 +171,6 @@ function persistUnreads(conversations: Map<string, any>, config: BrambleConfig |
 
 interface Actions {
   setConnectionState: (s: ConnectionState, err?: string) => void;
-  setTransport: (t: Transport | null) => void;
   setConnectionCapabilities: (c: ConnectionCapabilities) => void;
   setConfig: (c: BrambleConfig) => void;
   setStatus: (s: NodeStatus) => void;
@@ -208,7 +206,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   // ─── Initial state ───────────────────────────────────────────────────
   connectionState: 'disconnected',
   connectionError: undefined,
-  transport: null,
   connectionCapabilities: DEFAULT_CAPABILITIES,
   capabilitiesLoaded: false,
   config: null,
@@ -236,8 +233,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   // ─── Actions ─────────────────────────────────────────────────────────
   setConnectionState: (s, err?) =>
     set({ connectionState: s, connectionError: err }),
-
-  setTransport: (t) => set({ transport: t }),
 
   // Setting capabilities is what makes them known, whatever their source: the
   // /api/capabilities response, its failure fallback, or an embedded shell's

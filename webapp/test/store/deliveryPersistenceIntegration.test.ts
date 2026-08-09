@@ -36,7 +36,6 @@ describe('delivery persistence hydration + live merge', () => {
     useStore.setState({
       connectionState: 'disconnected',
       connectionError: undefined,
-      transport: null,
       config: null,
       status: null,
       airtime: null,

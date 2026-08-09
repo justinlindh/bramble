@@ -138,7 +138,6 @@ export async function connect(
     const transport = createTransport(type, options);
     await transport.connect();
     session.client = new BrambleClient(transport);
-    store.setTransport(transport);
 
     // Verify the endpoint speaks Bramble before declaring Connected (issue #91).
     // Serial is a trusted physical link and keeps its existing best-effort
@@ -284,7 +283,6 @@ export async function connect(
         try { session.client?.clearSubscriptions(); } catch { /* noop */ }
         try { await session.client?.disconnect(); } catch { /* noop */ }
         session.client = null;
-        store.setTransport(null);
         store.setConnectionState('error', 'That address now belongs to a different node. Check the device and reconnect.');
         return;
       }
@@ -364,7 +362,6 @@ export async function connect(
     try { session.client?.clearSubscriptions(); } catch { /* noop */ }
     try { await session.client?.disconnect(); } catch { /* noop */ }
     session.client = null;
-    store.setTransport(null);
     // Show the overlay so the user can retry: 'disconnected' shows connect UI.
     store.setConnectionState('disconnected', friendlyErrorFrom(e));
   }
@@ -375,5 +372,4 @@ export async function disconnect(): Promise<void> {
   await session.client?.disconnect();
   session.client = null;
   useStore.getState().setConnectionState('disconnected');
-  useStore.getState().setTransport(null);
 }
