@@ -762,3 +762,45 @@ The roll-call's collection window closed. Raised on the INITIATOR exactly once.
   }
 }
 ```
+
+---
+
+## `bramble.onPhyFrame`
+
+**Description**  
+Raw received frame forwarded by the PHY passthrough hardware bridge (DESIGN.md section 10). This is a bridge stream, not a mesh event: it carries the frame the radio heard, before any channel decryption or packet-type handling.
+
+**Trigger conditions**
+
+- Passthrough is enabled (`phy.enable`) and the radio receives a frame; the registered emit hook serializes it.
+- The stream stops on `phy.disable`, on the enable TTL expiring, or on reboot; passthrough never persists.
+
+**Params**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `frame` | string | Received frame bytes as lowercase hex, up to 255 bytes (510 hex characters). |
+| `rssi` | integer | RX RSSI (dBm). |
+| `snr` | number | RX SNR (dB). |
+| `freq` | integer | Receive frequency in Hz. |
+
+**Semantics notes**
+
+- Unlike the other events on this page, `bramble.onPhyFrame` is also emitted on the serial transport, which the gateway path trusts by physical access; over WebSocket and BLE it stays behind the authenticated-only notification filter.
+- The frame is delivered exactly as received off the air, so a consumer parses and verifies it itself; the firmware neither decrypts nor authenticates it before forwarding.
+- Enabling passthrough is refused while the node holds a live channel identity (a provisioned network key, or any channel beyond the public one) unless `force` is set, so a normal mesh participant does not emit this stream by accident.
+
+**JSON-RPC example**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onPhyFrame",
+  "params": {
+    "frame": "40a1b2c3d4e5f6",
+    "rssi": -91,
+    "snr": 9,
+    "freq": 906875000
+  }
+}
+```
