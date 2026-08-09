@@ -76,12 +76,16 @@ for port in /dev/ttyACM* /dev/ttyUSB*; do
   extra=""
   [[ "$port" == /dev/ttyUSB* ]] && extra="--cp2102"
   status=$("$PY" scripts/bramble-rpc "$port" bramble.getStatus $extra 2>/dev/null || true)
-  addr=$(echo "$status" | python3 -c "import json,sys
-try: print(json.load(sys.stdin).get('address',''))
-except Exception: print('')" 2>/dev/null || true)
-  hw=$(echo "$status" | python3 -c "import json,sys
-try: print(json.load(sys.stdin).get('hardware',''))
-except Exception: print('')" 2>/dev/null || true)
+  # Parse address and hardware out of the one status response in a single
+  # pass; a tab separates them so an empty field stays empty.
+  fields=$(echo "$status" | python3 -c "import json,sys
+try:
+    d = json.load(sys.stdin)
+    print(d.get('address',''), d.get('hardware',''), sep='\t')
+except Exception:
+    print('\t')" 2>/dev/null || true)
+  addr=${fields%%$'\t'*}
+  hw=${fields##*$'\t'}
   if [[ -z "$addr" ]]; then
     echo "$port: no bramble node detected, skipping"
     continue
