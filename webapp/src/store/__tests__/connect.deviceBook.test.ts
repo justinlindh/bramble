@@ -140,7 +140,12 @@ describe('connect() device-book guards', () => {
       remember: true,
       expectAddressHex: 'CAFEBABE',
     });
-    expect(useStore.getState().connectionState).toBe('error');
+    // 'disconnected', not 'error': App treats 'error' as auto-reconnect
+    // (overlay hidden, pill says Reconnecting…), which dead-ended a guard
+    // that has already dropped the link. 'disconnected' brings the overlay
+    // back with the message so the user can act on it.
+    expect(useStore.getState().connectionState).toBe('disconnected');
+    expect(useStore.getState().connectionError ?? '').toMatch(/different node/i);
     expect(listDevices()).toHaveLength(0);
     expect(getDeviceToken('0000A001')).toBe('');
   });

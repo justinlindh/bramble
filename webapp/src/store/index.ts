@@ -171,6 +171,7 @@ function persistUnreads(conversations: Map<string, any>, config: BrambleConfig |
 
 interface Actions {
   setConnectionState: (s: ConnectionState, err?: string) => void;
+  setPairingPending: (pending: boolean) => void;
   setConnectionCapabilities: (c: ConnectionCapabilities) => void;
   setConfig: (c: BrambleConfig) => void;
   setStatus: (s: NodeStatus) => void;
@@ -205,6 +206,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   // ─── Initial state ───────────────────────────────────────────────────
   connectionState: 'disconnected',
   connectionError: undefined,
+  pairingPending: false,
   connectionCapabilities: DEFAULT_CAPABILITIES,
   capabilitiesLoaded: false,
   config: null,
@@ -231,6 +233,8 @@ export const useStore = create<AppState & Actions>((set) => ({
   // ─── Actions ─────────────────────────────────────────────────────────
   setConnectionState: (s, err?) =>
     set({ connectionState: s, connectionError: err }),
+
+  setPairingPending: (pending) => set({ pairingPending: pending }),
 
   // Setting capabilities is what makes them known, whatever their source: the
   // /api/capabilities response, its failure fallback, or an embedded shell's

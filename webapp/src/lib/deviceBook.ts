@@ -85,6 +85,15 @@ export function getDeviceToken(address: string): string {
     ?? '';
 }
 
+// Remove a stored token from BOTH storages while keeping the book entry.
+// Reconnecting with a blank token and Remember off used to leave the previous
+// session's localStorage copy behind, quietly breaking the "leave off on
+// shared devices" promise the Remember checkbox makes.
+export function clearDeviceToken(address: string): void {
+  safeRemove(localStorage, TOKEN_PREFIX + address);
+  safeRemove(sessionStorage, TOKEN_PREFIX + address);
+}
+
 export function setDeviceToken(address: string, token: string, remember: boolean): void {
   const key = TOKEN_PREFIX + address;
   if (remember) {

@@ -390,6 +390,12 @@ export interface ConnectionCapabilities {
 export interface AppState {
   connectionState: ConnectionState;
   connectionError?: string;
+  /**
+   * True while the transport reports an OS pairing prompt is up during a BLE
+   * connect. The overlay uses it to tell the user to type the code shown on
+   * the node; without it a first-time pairing reads as a silent hang.
+   */
+  pairingPending: boolean;
   connectionCapabilities: ConnectionCapabilities;
   /**
    * False until the capabilities fetch resolves. Until then

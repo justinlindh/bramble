@@ -136,6 +136,19 @@ export async function connect(
   store.setConnectionState('connecting');
   try {
     const transport = createTransport(type, options);
+
+    // Surface OS pairing prompts in the UI. Only the BLE transport reports
+    // them, so this is feature-detected structurally like enableAutoReconnect
+    // below. Wired BEFORE transport.connect(): first-time pairing happens
+    // inside that call, and on fail-fast stacks the prompt window is exactly
+    // the stretch that otherwise reads as a silent hang in the overlay.
+    const pairingAware = transport as typeof transport & {
+      onPairingStateChange?: (cb: (pending: boolean) => void) => void;
+    };
+    if ('onPairingStateChange' in transport && typeof pairingAware.onPairingStateChange === 'function') {
+      pairingAware.onPairingStateChange((pending) => useStore.getState().setPairingPending(pending));
+    }
+
     await transport.connect();
     session.client = new BrambleClient(transport);
 
@@ -278,7 +291,16 @@ export async function connect(
         try { session.client?.clearSubscriptions(); } catch { /* noop */ }
         try { await session.client?.disconnect(); } catch { /* noop */ }
         session.client = null;
-        store.setConnectionState('error', 'That address now belongs to a different node. Check the device and reconnect.');
+        // 'disconnected', not 'error': App treats 'error' as auto-reconnect
+        // (overlay hidden, pill saying Reconnecting…, Disconnect the only
+        // exit) which dead-ends a guard that has already dropped the link.
+        // 'disconnected' brings the overlay back with the message.
+        // Named by transport: for wifi the usual cause is DHCP churn behind a
+        // saved IP; for a serial row it means the picked port belongs to
+        // another node ("address" would read as an IP the user never typed).
+        store.setConnectionState('disconnected', type === 'serial'
+          ? 'That port belongs to a different node than the saved one. Check the device and reconnect.'
+          : 'That address now belongs to a different node. Check the device and reconnect.');
         return;
       }
       // A book write must never break a live connection.
@@ -359,6 +381,11 @@ export async function connect(
     session.client = null;
     // Show the overlay so the user can retry: 'disconnected' shows connect UI.
     store.setConnectionState('disconnected', friendlyErrorFrom(e));
+  } finally {
+    // Every settle path (success, failure, and the DHCP-guard early return)
+    // drops the pairing flag: a stale true would leave the pairing banner and
+    // the Pairing… label on screen with no prompt left to answer.
+    useStore.getState().setPairingPending(false);
   }
 }
 

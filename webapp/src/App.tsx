@@ -25,6 +25,16 @@ const Map = lazy(() => import('./pages/Map/Map').then(m => ({ default: m.Map }))
 
 type Tab = 'chat' | 'nodes' | 'map' | 'config' | 'stats';
 
+// Status pill copy. Every state gets a cased label: the raw enum values
+// ('connecting', 'disconnected') used to render verbatim next to the
+// properly cased 'Connected' and 'Reconnecting…'.
+export function statusLabelFor(state: ReturnType<typeof useStore.getState>['connectionState']): string {
+  if (state === 'connected') return 'Connected';
+  if (state === 'error') return 'Reconnecting…';
+  if (state === 'connecting') return 'Connecting…';
+  return 'Disconnected';
+}
+
 export function tabFromShortcut(key: string): Tab | null {
   if (key === '1') return 'chat';
   if (key === '2') return 'nodes';
@@ -197,9 +207,7 @@ export default function App() {
         <span className={styles.statusArea}>
           <StatusDot state={connectionState} />
           <span className={styles.statusLabel}>
-            {connectionState === 'connected' ? 'Connected'
-             : connectionState === 'error' ? 'Reconnecting…'
-             : connectionState}
+            {statusLabelFor(connectionState)}
           </span>
           {/* Ahead of the node label because the label is the one item in this
               row designed to give way: it ellipsizes, while the indicator can
