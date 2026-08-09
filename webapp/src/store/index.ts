@@ -189,7 +189,6 @@ interface Actions {
   showRoutes: boolean;
   setShowRoutes: (show: boolean) => void;
   setProbeResult: (r: ProbeResult | null) => void;
-  setProbeCollecting: (c: boolean) => void;
   setDevices: (d: SavedDevice[]) => void;
   setPeerLocations: (locs: PeerLocation[]) => void;
   setMapFocusAddr: (addr: number | null) => void;
@@ -223,7 +222,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   showRoutes: loadShowRoutes(),
   probeResult: null,
   peerNames: new Map(),
-  probeCollecting: false,
   devices: [],
   peerLocations: [],
   mapFocusAddr: null,
@@ -400,7 +398,6 @@ export const useStore = create<AppState & Actions>((set) => ({
     status: null as any,
     airtime: null as any,
     probeResult: null,
-    probeCollecting: false,
     peerLocations: [],
     mapFocusAddr: null,
     peerVerifications: new Map(),
@@ -409,7 +406,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   }),
 
   setProbeResult: (r) => set({ probeResult: r }),
-  setProbeCollecting: (c) => set({ probeCollecting: c }),
   setDevices: (devices) => set({ devices }),
 
   setPeerLocations: (locs) => set({ peerLocations: locs }),

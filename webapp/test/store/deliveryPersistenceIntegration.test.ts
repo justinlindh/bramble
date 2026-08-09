@@ -49,7 +49,6 @@ describe('delivery persistence hydration + live merge', () => {
       showRoutes: false,
       probeResult: null,
       peerNames: new Map(),
-      probeCollecting: false,
       peerLocations: [],
       mapFocusAddr: null,
       trafficDebugStatus: null,
