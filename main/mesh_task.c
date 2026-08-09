@@ -1656,7 +1656,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                 if (s_queued_msgs[i].reason == QUEUE_REASON_SESSION) {
                     ESP_LOGW(TAG, "Queued DM for %08" PRIX32 " expired (no secure session)",
                              s_queued_msgs[i].dest_addr);
-                    rerr_fastfail_notify(s_queued_msgs[i].pkt_id, "no_secure_session", NULL);
+                    rerr_fastfail_notify(s_queued_msgs[i].pkt_id, "no_secure_session");
                 } else {
                     ESP_LOGW(TAG, "Queued msg for %08" PRIX32 " expired",
                              s_queued_msgs[i].dest_addr);
