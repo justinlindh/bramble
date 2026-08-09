@@ -54,6 +54,7 @@ const PAIRING_RETRY_DELAY_MS = 1000;
 // awaited: real RPC ids start at 1, so the id 0 response routes nowhere by
 // design.
 const ENCRYPTION_PROBE_LINE = '{"jsonrpc":"2.0","id":0,"method":"bramble.getVersion","params":{}}';
+const ENCRYPTION_PROBE_BYTES = new TextEncoder().encode(ENCRYPTION_PROBE_LINE + '\n');
 
 // True only for the firmware rejecting our RPC token, the one failure that a
 // retry cannot fix. It must NOT match the platform's GATT security errors:
@@ -67,16 +68,33 @@ function isTokenRejection(e: unknown): boolean {
   return /authentication required/i.test(msg) && !/timed out/i.test(msg);
 }
 
+// The user dismissed an OS/browser pairing dialog. One predicate for every
+// caller: the "anything containing cancel is a user cancel, never retried"
+// contract must not be written as three separate regexes that can drift.
+function isUserCancel(e: unknown): boolean {
+  return /cancel/i.test((e as Error)?.message ?? '');
+}
+
+// Terminal pairing cancellation, minted by writeLineWithPairingGrace so
+// connect() can recognize it by type instead of re-regexing the message it
+// itself minted. The message stays the errors.ts contract string
+// (/pairing was cancelled/i).
+class PairingCancelledError extends Error {
+  constructor() {
+    super('Bluetooth pairing was cancelled');
+  }
+}
+
 // The platform's transient GATT security errors: what a fail-fast stack
 // (BlueZ) returns for a write attempted while the link is not yet encrypted,
 // i.e. while the OS pairing prompt is still up. These improve on retry once
 // the user finishes typing the passkey. Deliberately disjoint from the two
-// terminal shapes: a user cancel (anything containing "cancel") aborts the
-// connect, and the firmware's token rejection ("authentication required",
-// isTokenRejection above) can never improve on retry.
+// terminal shapes: a user cancel (isUserCancel) aborts the connect, and the
+// firmware's token rejection ("authentication required", isTokenRejection
+// above) can never improve on retry.
 function isPairingSecurityError(e: unknown): boolean {
   const msg = (e as Error)?.message ?? '';
-  if (/cancel/i.test(msg)) return false;
+  if (isUserCancel(e)) return false;
   if (/authentication required/i.test(msg)) return false;
   return /not authorized|insufficient authentication|insufficient encryption/i.test(msg);
 }
@@ -206,16 +224,13 @@ export class BLETransport implements Transport {
         await this.establishLink({ graceMs: (this.constructor as typeof BLETransport).pairingGraceMs });
         return;
       } catch (e) {
-        const msg = (e as Error)?.message ?? '';
         if (isTokenRejection(e)) {
           throw e; // a real token rejection will not improve on retry
         }
-        if (/cancel/i.test(msg)) {
+        if (e instanceof PairingCancelledError) {
           throw e; // the user dismissed the pairing dialog; a retry re-prompts
         }
-        try {
-          if (this.device?.gatt?.connected) this.device.gatt.disconnect();
-        } catch { /* best effort */ }
+        this.safeGattDisconnect();
         await new Promise(r => setTimeout(r, 1500));
       }
       // One fresh-link retry, with no pairing grace. By the time attempt 1
@@ -224,11 +239,18 @@ export class BLETransport implements Transport {
       // heal Chromium's stale-cached-session wedge described above.
       await this.establishLink({ graceMs: 0 });
     } catch (e) {
-      try {
-        if (this.device?.gatt?.connected) this.device.gatt.disconnect();
-      } catch { /* best effort */ }
+      this.safeGattDisconnect();
       throw e;
     }
+  }
+
+  // Best-effort teardown of a standing GATT link. Distinct from the
+  // UNguarded disconnect in connect()'s stale-session reset, which must run
+  // even when the cached gatt claims a state we do not trust.
+  private safeGattDisconnect(): void {
+    try {
+      if (this.device?.gatt?.connected) this.device.gatt.disconnect();
+    } catch { /* best effort */ }
   }
 
   // The (re)connectable part of connect(): everything after device selection.
@@ -280,10 +302,7 @@ export class BLETransport implements Transport {
       // prompt) here, under the grace machinery, instead of leaving it to
       // ambush the first real RPC and its short timeout. See the constant's
       // comment for why this is safe on auth-required firmware.
-      await this.writeLineWithPairingGrace(
-        new TextEncoder().encode(ENCRYPTION_PROBE_LINE + '\n'),
-        opts.graceMs
-      );
+      await this.writeLineWithPairingGrace(ENCRYPTION_PROBE_BYTES, opts.graceMs);
     }
 
     this._connected = true;
@@ -305,9 +324,7 @@ export class BLETransport implements Transport {
         // retrying: a BLE peripheral stops advertising while a connection is
         // open, so a zombie session blocks the node for everyone - including
         // our own next attempt.
-        try {
-          if (this.device?.gatt?.connected) this.device.gatt.disconnect();
-        } catch { /* best effort */ }
+        this.safeGattDisconnect();
         this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, RECONNECT_MAX_DELAY_MS);
         this.scheduleReconnect();
       }
@@ -413,13 +430,11 @@ export class BLETransport implements Transport {
           });
           return;
         } catch (e) {
-          const msg = (e as Error)?.message ?? '';
-          if (/cancel/i.test(msg)) {
+          if (isUserCancel(e)) {
             // The user dismissed the OS pairing dialog. Abort the whole
             // connect: any retry raises a fresh prompt at someone who just
-            // said no. The exact wording is a contract with errors.ts
-            // (/pairing was cancelled/i).
-            throw new Error('Bluetooth pairing was cancelled');
+            // said no.
+            throw new PairingCancelledError();
           }
           if (isPairingSecurityError(e)) {
             if (Date.now() < deadline) {
@@ -529,9 +544,7 @@ export class BLETransport implements Transport {
       const timer = setTimeout(() => {
         reject(new Error('BLE write timed out'));
         if (generationAtWrite !== this.sessionGeneration || !this._connected) return;
-        try {
-          if (this.device?.gatt?.connected) this.device.gatt.disconnect();
-        } catch { /* best effort */ }
+        this.safeGattDisconnect();
       }, timeoutMs);
       this.txChar!.writeValueWithResponse(chunk).then(
         () => { clearTimeout(timer); resolve(); },
@@ -594,11 +607,7 @@ export class BLETransport implements Transport {
     // minutes). The call still clears Chromium's notifications-active flag
     // so the next session re-arms event delivery.
     try { Promise.resolve(this.rxChar?.stopNotifications?.()).catch(() => {}); } catch { /* ignore */ }
-    try {
-      if (this.device?.gatt?.connected) {
-        this.device.gatt.disconnect();
-      }
-    } catch { /* ignore */ }
+    this.safeGattDisconnect();
     this.txChar = null;
     this.rxChar = null;
     this.device = null;

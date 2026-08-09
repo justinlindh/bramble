@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore } from '../store/index';
 import { forgetSavedDevice, renameSavedDevice } from '../store/actions';
+import { useTimedFlag } from '../hooks/useTimedFlag';
 import type { SavedDevice } from '../lib/deviceBook';
 import styles from './DeviceList.module.css';
 
@@ -26,9 +27,11 @@ export function DeviceList({ onConnect, busyAddress, disabled }: DeviceListProps
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [confirmingForget, setConfirmingForget] = useState<string | null>(null);
-  const disarmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // useTimedFlag owns the arm window's timer lifecycle (restart on
+  // re-trigger, cancel on unmount); a row is armed when the flag is up AND
+  // confirmingForget names it.
+  const [forgetArmed, armForget, disarmForget] = useTimedFlag(FORGET_CONFIRM_MS);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
-  useEffect(() => () => { if (disarmTimer.current) clearTimeout(disarmTimer.current); }, []);
   if (devices.length === 0) return null;
 
   // Closing the rename form unmounts the focused input, which would drop a
@@ -42,11 +45,12 @@ export function DeviceList({ onConnect, busyAddress, disabled }: DeviceListProps
   };
 
   // Two-step inline confirm instead of window.confirm: the first click arms
-  // this row's Forget, the second within the window executes, and the timer
-  // disarms it so the armed state cannot lie in wait indefinitely.
+  // this row's Forget, the second within the window executes, and the flag's
+  // timer disarms it so the armed state cannot lie in wait indefinitely.
+  const isArmed = (address: string) => forgetArmed && confirmingForget === address;
   const handleForget = (d: SavedDevice) => {
-    if (disarmTimer.current) clearTimeout(disarmTimer.current);
-    if (confirmingForget === d.address) {
+    if (isArmed(d.address)) {
+      disarmForget();
       setConfirmingForget(null);
       forgetSavedDevice(d.address);
       // The focused button vanished with its row: land on the list heading
@@ -55,7 +59,7 @@ export function DeviceList({ onConnect, busyAddress, disabled }: DeviceListProps
       return;
     }
     setConfirmingForget(d.address);
-    disarmTimer.current = setTimeout(() => setConfirmingForget(null), FORGET_CONFIRM_MS);
+    armForget();
   };
 
   return (
@@ -120,12 +124,12 @@ export function DeviceList({ onConnect, busyAddress, disabled }: DeviceListProps
             </button>
             <button
               type="button"
-              className={`${styles.action} ${styles.danger} ${confirmingForget === d.address ? styles.armed : ''}`}
+              className={`${styles.action} ${styles.danger} ${isArmed(d.address) ? styles.armed : ''}`}
               onClick={() => handleForget(d)}
               disabled={disabled}
-              aria-label={confirmingForget === d.address ? `Confirm forget ${d.name}` : `Forget ${d.name}`}
+              aria-label={isArmed(d.address) ? `Confirm forget ${d.name}` : `Forget ${d.name}`}
             >
-              {confirmingForget === d.address ? 'Forget?' : 'Forget'}
+              {isArmed(d.address) ? 'Forget?' : 'Forget'}
             </button>
           </li>
         ))}

@@ -28,25 +28,25 @@ describe('device actions', () => {
     expect(sessionStorage.getItem('bramble.deviceToken.0000A001')).toBeNull();
   });
 
-  it('a serial connect never wipes a token the user remembered via wifi or BLE', () => {
-    // Tokens are keyed by node address, not transport. Serial saves hard-code
-    // token '' and remember false because the serial form has no token or
-    // Remember control, so that combination expresses no revocation intent:
-    // treating it as one deleted the node's remembered token on every USB
-    // connect and broke the next one-click wifi/BLE row.
+  it('a token-less save (serial) never wipes a token the user remembered via wifi or BLE', () => {
+    // Tokens are keyed by node address, not transport. The serial flow has
+    // no token or Remember control, so it omits both: absence expresses no
+    // revocation intent. Passing hard-coded blanks instead used to delete
+    // the node's remembered token on every USB connect and broke the next
+    // one-click wifi/BLE row.
     upsertDevice({ address: '0000A001', transport: 'wifi', remember: true, lastIp: '192.0.2.9', nowMs: 1 });
     setDeviceToken('0000A001', 'kept-tok', true);
-    saveConnectedDevice({ addr: 0xA001, ip: '', token: '', remember: false, transport: 'serial' });
+    saveConnectedDevice({ addr: 0xA001, ip: '', transport: 'serial' });
     expect(getDeviceToken('0000A001')).toBe('kept-tok');
     expect(localStorage.getItem('bramble.deviceToken.0000A001')).toBe('kept-tok');
   });
 
-  it('a serial connect preserves the entry\'s remember flag instead of forcing it off', () => {
+  it('a save that omits remember preserves the entry\'s flag instead of forcing it off', () => {
     // The remember flag drives the one-click row's post-connect token save:
-    // forcing it false here made the next BLE row connect demote the stored
-    // token to sessionStorage, silently un-remembering it.
+    // forcing it false on serial saves made the next BLE row connect demote
+    // the stored token to sessionStorage, silently un-remembering it.
     upsertDevice({ address: '0000A001', transport: 'wifi', remember: true, lastIp: '192.0.2.9', nowMs: 1 });
-    saveConnectedDevice({ addr: 0xA001, ip: '', token: '', remember: false, transport: 'serial' });
+    saveConnectedDevice({ addr: 0xA001, ip: '', transport: 'serial' });
     refreshDevices();
     expect(useStore.getState().devices[0].remember).toBe(true);
   });

@@ -17,6 +17,7 @@ beforeEach(() => {
     connectionState: 'disconnected',
     connectionError: undefined,
     pairingPending: false,
+    attemptSource: 'form',
     devices: [],
   } as any);
 });
@@ -135,6 +136,25 @@ describe('ConnectionOverlay favorites', () => {
     const err = await screen.findByText(/form boom/);
     const heading = screen.getByText(/add a device/i);
     expect(err.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it('row attribution survives the overlay unmounting mid-attempt', async () => {
+    // The identity guard's path passes through 'connected' before settling
+    // back to 'disconnected', which unmounts and remounts the overlay.
+    // Attribution kept in component state reset to 'form' on remount and
+    // dropped the row's error into the bottom slot, so it lives in the store.
+    upsertDevice({ address: 'DEADBEEF', name: 'V4', lastIp: '198.51.100.146', transport: 'wifi', remember: true, nowMs: 1 });
+    vi.spyOn(actions, 'connect').mockImplementation(async () => {
+      useStore.getState().setConnectionState('disconnected', 'guard boom');
+    });
+    const first = render(<ConnectionOverlay />);
+    fireEvent.click(screen.getByRole('button', { name: /connect to V4/i }));
+    await screen.findByText(/guard boom/);
+    first.unmount();
+    render(<ConnectionOverlay />);
+    const err = await screen.findByText(/guard boom/);
+    const heading = screen.getByText(/add a device/i);
+    expect(err.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('locks the device rows while a connect is in flight', () => {

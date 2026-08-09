@@ -295,12 +295,17 @@ export async function connect(
         // (overlay hidden, pill saying Reconnecting…, Disconnect the only
         // exit) which dead-ends a guard that has already dropped the link.
         // 'disconnected' brings the overlay back with the message.
-        // Named by transport: for wifi the usual cause is DHCP churn behind a
-        // saved IP; for a serial row it means the picked port belongs to
-        // another node ("address" would read as an IP the user never typed).
-        store.setConnectionState('disconnected', type === 'serial'
-          ? 'That port belongs to a different node than the saved one. Check the device and reconnect.'
-          : 'That address now belongs to a different node. Check the device and reconnect.');
+        // Named by transport: each one's wording matches what the user
+        // actually touched (a port pick, a chooser entry, a saved IP whose
+        // DHCP lease moved). A single default here quietly gave BLE the
+        // wifi-flavored "address" copy for an address the user never typed.
+        const mismatchMsg: Record<string, string> = {
+          serial: 'That port belongs to a different node than the saved one. Check the device and reconnect.',
+          ble: 'That Bluetooth device is a different node than the one saved. Check the device and reconnect.',
+          wifi: 'That address now belongs to a different node. Check the device and reconnect.',
+        };
+        store.setConnectionState('disconnected',
+          mismatchMsg[type] ?? mismatchMsg.wifi);
         return;
       }
       // A book write must never break a live connection.
@@ -330,7 +335,10 @@ export async function connect(
             bleDeviceName: options?.bleDevice?.name ?? undefined,
           });
         } else if (type === 'serial') {
-          saveConnectedDevice({ addr: bookAddrNum, name: options?.name, ip: '', token: '', remember: false, transport: 'serial' });
+          // token/remember omitted: the serial form has no controls for
+          // them, so the save expresses no credential intent and the book
+          // preserves whatever the user set via wifi or BLE.
+          saveConnectedDevice({ addr: bookAddrNum, name: options?.name, ip: '', transport: 'serial' });
         }
       } catch { /* noop */ }
     }
@@ -380,7 +388,11 @@ export async function connect(
     try { await session.client?.disconnect(); } catch { /* noop */ }
     session.client = null;
     // Show the overlay so the user can retry: 'disconnected' shows connect UI.
-    store.setConnectionState('disconnected', friendlyErrorFrom(e));
+    // Auth-ness is classified here from the RAW error, then carried as a
+    // structured flag beside the friendly text: the overlay highlights the
+    // token field from the flag, so display copy never has to dodge
+    // substrings like 'auth' to avoid a false red field.
+    store.setConnectionState('disconnected', friendlyErrorFrom(e), isAuthError(e));
   } finally {
     // Every settle path (success, failure, and the DHCP-guard early return)
     // drops the pairing flag: a stale true would leave the pairing banner and

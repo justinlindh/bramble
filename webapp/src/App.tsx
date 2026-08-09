@@ -7,7 +7,7 @@ import { formatAddr0x } from './utils/address';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { DevicePickerModal } from './components/DevicePickerModal';
 import { UnprovisionedBanner } from './components/UnprovisionedBanner';
-import { StatusDot } from './components/StatusDot';
+import { StatusDot, STATE_LABELS } from './components/StatusDot';
 import { GnssDot } from './components/GnssDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer, showToast, dismissToast } from './components/Toast';
@@ -25,14 +25,10 @@ const Map = lazy(() => import('./pages/Map/Map').then(m => ({ default: m.Map }))
 
 type Tab = 'chat' | 'nodes' | 'map' | 'config' | 'stats';
 
-// Status pill copy. Every state gets a cased label: the raw enum values
-// ('connecting', 'disconnected') used to render verbatim next to the
-// properly cased 'Connected' and 'Reconnecting…'.
+// Status pill copy: same map as the StatusDot beside it, so the visible text
+// can never contradict the dot's title/aria-label.
 export function statusLabelFor(state: ReturnType<typeof useStore.getState>['connectionState']): string {
-  if (state === 'connected') return 'Connected';
-  if (state === 'error') return 'Reconnecting…';
-  if (state === 'connecting') return 'Connecting…';
-  return 'Disconnected';
+  return STATE_LABELS[state];
 }
 
 export function tabFromShortcut(key: string): Tab | null {

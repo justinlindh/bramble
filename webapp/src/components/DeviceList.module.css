@@ -100,11 +100,6 @@
   gap: 0.4rem;
 }
 
-.renameForm .renameInput {
-  flex: 1;
-  min-width: 0;
-}
-
 /* Row busy indicator, matching ConnectionOverlay's spinner but drawn in the
    accent so it survives the row's neutral background. */
 .spinnerIcon {
@@ -123,7 +118,8 @@
 }
 
 .renameInput {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
@@ -148,14 +144,10 @@
   color: var(--text);
 }
 
-/* Forget is destructive: keep it quiet until hover, then signal danger. */
-.danger:hover {
-  border-color: var(--danger, #ef4444);
-  color: var(--danger, #ef4444);
-}
-
-/* An armed Forget must read as danger without the pointer on it: the second
-   click is destructive, so the button cannot look idle in between. */
+/* Forget is destructive: keep it quiet until hover, then signal danger. An
+   armed Forget reads as danger without the pointer on it too, because the
+   second click is destructive and the button cannot look idle in between. */
+.danger:hover,
 .danger.armed {
   border-color: var(--danger, #ef4444);
   color: var(--danger, #ef4444);

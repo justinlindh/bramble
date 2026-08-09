@@ -3,7 +3,6 @@ import { connect, refreshDevices } from '../store/actions';
 import { BLETransport } from '../transport/BLETransport';
 import { useStore } from '../store/index';
 import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
-import { isAuthError } from '../lib/errors';
 import { isEmbeddedShell, describePlatform } from '../utils/platform';
 import {
   describeTransports,
@@ -20,6 +19,11 @@ import { TransportUnavailableNotice } from './TransportUnavailableNotice';
 import styles from './ConnectionOverlay.module.css';
 
 const WIFI_IP_KEY = 'bramble_wifi_ip';
+
+// One wording for both Remember checkboxes (wifi and BLE): the two copies
+// drifted within a single change once already.
+const REMEMBER_HINT =
+  "Saves this node's auth token in this browser so you do not retype it; leave off on shared computers. The device stays in your list either way, and Forget removes it.";
 
 export function buildWifiUrl(ip: string, protocol: string, host: string): string {
   let url: string;
@@ -143,16 +147,18 @@ export function ConnectionOverlay() {
   const connectionCapabilities = useStore(s => s.connectionCapabilities);
   const capabilitiesLoaded = useStore(s => s.capabilitiesLoaded);
   const pairingPending = useStore(s => s.pairingPending);
+  const attemptSource = useStore(s => s.attemptSource);
+  const setAttemptSource = useStore(s => s.setAttemptSource);
 
   const isConnecting = connectionState === 'connecting';
-  const authError = isAuthError(connectionError);
+  // Structured flag from the store, classified from the raw error at the
+  // connect() boundary: regexing the friendly display text here forced every
+  // ERROR_MAP entry to avoid substrings like 'auth'.
+  const authError = useStore(s => s.connectionErrorIsAuth);
 
-  // Which surface started the attempt decides where its error renders: a
-  // row-initiated error belongs next to the row (the bottom slot put it a
-  // screenful below, off-screen on phones), a form-initiated error stays in
-  // the bottom slot under the form.
-  const [errorFrom, setErrorFrom] = useState<'row' | 'form'>('form');
   // Address of the row whose connect is in flight, for its busy spinner.
+  // (Attempt attribution lives in the store as attemptSource: the overlay
+  // can unmount mid-attempt, so component state would forget it.)
   const [rowBusyAddress, setRowBusyAddress] = useState<string | null>(null);
 
   useEffect(() => {
@@ -191,10 +197,7 @@ export function ConnectionOverlay() {
       // label node B with node A's name.
       const known = devices.find(d => d.bleDeviceId === device.id || (device.name && d.bleDeviceName === device.name));
       if (known) {
-        const saved = getDeviceToken(known.address);
-        setBleToken(saved);
-        setBleRemember(!!saved && known.remember);
-        setBleName(known.name);
+        prefillBleFromBook(known);
       } else {
         setBleToken('');
         setBleRemember(false);
@@ -208,7 +211,7 @@ export function ConnectionOverlay() {
   };
 
   const handleConnect = () => {
-    setErrorFrom('form');
+    setAttemptSource('form');
     if (transportType === 'wifi') {
       const ip = wifiIp.trim();
       const token = wifiToken.trim();
@@ -268,50 +271,63 @@ export function ConnectionOverlay() {
     setTransportType(t);
   };
 
+  // Book-prefill helpers: the remember rule (a token AND the entry's flag)
+  // is a policy the sticky-prefill bug lived in, so it is written once and
+  // shared by the pick path and the row path.
+  const prefillBleFromBook = (d: SavedDevice) => {
+    const tok = getDeviceToken(d.address);
+    setBleToken(tok);
+    setBleRemember(!!tok && d.remember);
+    setBleName(d.name);
+  };
+  const prefillWifiFromBook = (d: SavedDevice) => {
+    const tok = getDeviceToken(d.address);
+    setWifiIp(d.lastIp);
+    setWifiToken(tok);
+    setWifiRemember(!!tok && d.remember);
+    setWifiName(d.name);
+  };
+
+  // The shared attempt scaffold for row connects: attribution, busy row,
+  // guaranteed busy-clear. Kept in one place so the invariant cannot drift
+  // between the three transport branches.
+  const runRowAttempt = async (d: SavedDevice, go: () => Promise<void>) => {
+    setAttemptSource('row');
+    setRowBusyAddress(d.address);
+    try { await go(); } finally { setRowBusyAddress(null); }
+  };
+
   // A saved-device row drives the form: select the transport tab, prefill
   // the fields from the book (so a failure leaves the RIGHT device's values
   // on screen for editing), then connect where an address is known. The
   // wifi-without-lastIp and serial rows used to be silent dead clicks.
   const handleRowConnect = async (d: SavedDevice) => {
     setUserPicked(true);
-    const tok = getDeviceToken(d.address);
     if (d.transport === 'ble') {
-      setErrorFrom('row');
       setTransportType('ble');
-      setBleToken(tok);
-      setBleRemember(!!tok && d.remember);
-      setBleName(d.name);
-      setRowBusyAddress(d.address);
-      try { await connectToSavedBleDevice(d); } finally { setRowBusyAddress(null); }
+      prefillBleFromBook(d);
+      await runRowAttempt(d, () => connectToSavedBleDevice(d));
     } else if (d.transport === 'wifi') {
       setTransportType('wifi');
-      setWifiIp(d.lastIp);
-      setWifiToken(tok);
-      setWifiRemember(!!tok && d.remember);
-      setWifiName(d.name);
+      prefillWifiFromBook(d);
       // No saved address means nothing to dial: leave the prefilled form for
       // the user to complete, and focus the empty field as the visible cue
       // (the form sits below the list, so a silent return reads as a dead
-      // click). errorFrom stays untouched here: no attempt ran, and claiming
-      // 'row' would pin a leftover form error on a row that did nothing.
+      // click). Attribution stays untouched here: no attempt ran, and
+      // claiming 'row' would pin a leftover form error on a row that did
+      // nothing.
       if (!d.lastIp) {
         setTimeout(() => document.getElementById('wifi-ip')?.focus(), 0);
         return;
       }
-      setErrorFrom('row');
-      setRowBusyAddress(d.address);
-      try { await connectToSavedDevice(d, d.lastIp); } finally { setRowBusyAddress(null); }
+      await runRowAttempt(d, () => connectToSavedDevice(d, d.lastIp));
     } else {
       // Serial: the browser's port picker appearing next is correct behavior.
       // expectAddressHex guards identity: ports are indistinguishable in the
       // picker, and without it a wrong pick would create a book entry for
       // another node carrying this row's name.
-      setErrorFrom('row');
       setTransportType('serial');
-      setRowBusyAddress(d.address);
-      try {
-        await connect('serial', { name: d.name, expectAddressHex: d.address });
-      } finally { setRowBusyAddress(null); }
+      await runRowAttempt(d, () => connect('serial', { name: d.name, expectAddressHex: d.address }));
     }
   };
 
@@ -330,6 +346,20 @@ export function ConnectionOverlay() {
       Enter that code in the browser prompt to finish connecting.
     </div>
   ) : null;
+
+  // One feedback block (pairing banner + error), rendered in whichever slot
+  // matches the surface that started the attempt: next to the rows or under
+  // the form. A single definition so the two slots cannot drift.
+  const attemptFeedback = (
+    <>
+      {pairingBanner}
+      {connectionError && (
+        <div className={styles.error}>
+          <span><IconWarning size={14} /> {connectionError}</span>
+        </div>
+      )}
+    </>
+  );
 
   const hints: Record<TransportType, string> = {
     serial: 'Connect your Bramble node via USB cable, then click Connect.',
@@ -363,12 +393,7 @@ export function ConnectionOverlay() {
             phones. That applies to the pairing banner too, since a saved-row
             BLE reconnect can still need re-pairing (OS bond removed, new
             browser profile) and its spinner is up here. */}
-        {errorFrom === 'row' && pairingBanner}
-        {connectionError && errorFrom === 'row' && (
-          <div className={styles.error}>
-            <span><IconWarning size={14} /> {connectionError}</span>
-          </div>
-        )}
+        {attemptSource === 'row' && attemptFeedback}
 
         {devices.length > 0 && (
           <h3 className={styles.sectionHeading}>Add a device</h3>
@@ -492,9 +517,7 @@ export function ConnectionOverlay() {
                 />
                 <span>Remember this device</span>
               </label>
-              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>
-                Saves this node's auth token in this browser so you do not retype it; leave off on shared computers. The device stays in your list either way, and Forget removes it.
-              </span>
+              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>{REMEMBER_HINT}</span>
             </div>
           </div>
         )}
@@ -571,22 +594,14 @@ export function ConnectionOverlay() {
                 />
                 <span>Remember this device</span>
               </label>
-              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>
-                Saves this node's auth token in this browser; leave off on shared computers. The device stays in your list either way, and Forget removes it.
-              </span>
+              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>{REMEMBER_HINT}</span>
             </div>
           </div>
         )}
 
         {selectedUnavailable && <TransportUnavailableNotice info={selectedUnavailable} />}
 
-        {errorFrom === 'form' && pairingBanner}
-
-        {connectionError && errorFrom === 'form' && (
-          <div className={styles.error}>
-            <span><IconWarning size={14} /> {connectionError}</span>
-          </div>
-        )}
+        {attemptSource === 'form' && attemptFeedback}
 
         {!selectedUnavailable && (
           <>

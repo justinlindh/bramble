@@ -59,14 +59,34 @@ describe('ConnectionOverlay auth token flow', () => {
     expect(localStorage.getItem('bramble_wifi_token')).toBeNull();
   });
 
-  it('highlights token field on auth errors', () => {
-    useStore.setState({ connectionError: 'Authentication required. Enter your device token.' } as any);
+  it('highlights the token field when the store marks the error as an auth failure', () => {
+    useStore.setState({
+      connectionError: 'Authentication required. Enter your device token.',
+      connectionErrorIsAuth: true,
+    } as any);
     render(<ConnectionOverlay />);
 
     fireEvent.click(screen.getByRole('button', { name: /wifi/i }));
 
     const tokenInput = screen.getByLabelText('Auth Token');
     expect(tokenInput.className).toMatch(/authErrorField/);
+  });
+
+  it('does not highlight the token field from error WORDING alone', () => {
+    // The auth-ness of an error is a structured store flag classified from
+    // the raw error at the connect() boundary, not a regex over display
+    // copy: matching the friendly text forced every future ERROR_MAP entry
+    // to avoid substrings like 'auth' or silently paint the field red.
+    useStore.setState({
+      connectionError: 'Authentication required. Enter your device token.',
+      connectionErrorIsAuth: false,
+    } as any);
+    render(<ConnectionOverlay />);
+
+    fireEvent.click(screen.getByRole('button', { name: /wifi/i }));
+
+    const tokenInput = screen.getByLabelText('Auth Token');
+    expect(tokenInput.className).not.toMatch(/authErrorField/);
   });
 
   it('shows a visual spinner while BLE scanning is in progress', () => {

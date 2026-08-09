@@ -4,13 +4,12 @@ const ERROR_MAP: Array<[RegExp, string]> = [
   // answered (usually because another device, like the phone, holds its one
   // BLE connection), not that the token is wrong.
   [/handshake timed out/i, 'The node did not respond over Bluetooth. If it is connected to another device (like your phone), disconnect there first, then retry.'],
-  // First-time BLE pairing outcomes from the transport. Both friendly texts
-  // must avoid the substring 'auth' in any form (authentication, unauthorized,
-  // ...): the stored connectionError feeds isAuthError(), and a pairing
-  // failure that trips it paints the token field red, sending the user
-  // hunting for a token problem that does not exist. Both rules also sit
-  // before the /1008|unauthorized|auth/i rule because fail-fast stacks append
-  // security reasons like "insufficient authentication" to the raw message.
+  // First-time BLE pairing outcomes from the transport. Both rules sit
+  // before the /1008|unauthorized|auth/i rule because fail-fast stacks
+  // append security reasons like "insufficient authentication" to the raw
+  // message, and a pairing failure must map to pairing copy, not token copy.
+  // (The overlay's token-field highlight reads the store's structured
+  // connectionErrorIsAuth flag, not this display text.)
   [/pairing did not complete/i, 'Bluetooth pairing did not finish. Click Connect again, and type the code shown on the node when the browser asks for it.'],
   [/pairing was cancelled/i, 'Pairing was cancelled. Click Connect to try again.'],
   // A raw 'RPC timeout: bramble.getVersion' used to leak to the UI verbatim.

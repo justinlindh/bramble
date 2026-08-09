@@ -11,33 +11,30 @@ export function saveConnectedDevice(args: {
   addr: number;
   name?: string;
   ip: string;
-  token: string;
-  remember: boolean;
+  /**
+   * Omit token AND remember when the connect flow had no credential controls
+   * (serial): absence expresses no intent, so the stored token and the
+   * entry's remember flag are preserved. Tokens are keyed by node address
+   * across transports, so treating serial's hard-coded blanks as intent
+   * wiped tokens the user remembered via wifi or BLE.
+   */
+  token?: string;
+  remember?: boolean;
   transport: 'wifi' | 'serial' | 'ble';
   bleDeviceId?: string;
   bleDeviceName?: string;
 }): void {
   const address = formatAddrHex(args.addr);
-  // Serial saves hard-code token '' and remember false because the serial
-  // form has no token or Remember control, so that combination expresses no
-  // intent about credentials. Tokens are keyed by node address across
-  // transports: honoring it wiped the node's remembered wifi/BLE token (and
-  // demoted its remember flag) on every USB connect, breaking the next
-  // one-click row.
-  const isSerial = args.transport === 'serial';
-  const remember = isSerial
-    ? (listDevices().find(d => d.address === address)?.remember ?? false)
-    : args.remember;
   upsertDevice({
-    address, name: args.name, lastIp: args.ip, transport: args.transport, remember,
+    address, name: args.name, lastIp: args.ip, transport: args.transport, remember: args.remember,
     bleDeviceId: args.bleDeviceId, bleDeviceName: args.bleDeviceName,
   });
   if (args.token) {
-    setDeviceToken(address, args.token, args.remember);
-  } else if (!args.remember && !isSerial) {
-    // Blank token with Remember off on a token-capable form: drop any stored
-    // copy. Leaving it made a stale localStorage token survive the reconnect,
-    // so "leave off on shared devices" did not actually take effect until the
+    setDeviceToken(address, args.token, args.remember ?? false);
+  } else if (args.remember === false) {
+    // Blank token with Remember explicitly off: drop any stored copy.
+    // Leaving it made a stale localStorage token survive the reconnect, so
+    // "leave off on shared devices" did not actually take effect until the
     // entry was forgotten.
     clearDeviceToken(address);
   }

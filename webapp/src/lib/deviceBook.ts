@@ -41,7 +41,7 @@ export function listDevices(): SavedDevice[] {
 
 export function upsertDevice(input: {
   address: string; name?: string; lastIp?: string;
-  transport: 'wifi' | 'serial' | 'ble'; remember: boolean; nowMs?: number;
+  transport: 'wifi' | 'serial' | 'ble'; remember?: boolean; nowMs?: number;
   bleDeviceId?: string; bleDeviceName?: string;
 }): SavedDevice {
   const book = readBook();
@@ -53,7 +53,9 @@ export function upsertDevice(input: {
     name: existing?.name ?? input.name ?? `Node ${input.address}`,
     lastIp: input.lastIp ?? existing?.lastIp ?? '',
     transport: input.transport,
-    remember: input.remember,
+    // An omitted remember expresses no intent (a caller whose form has no
+    // Remember control, like serial): preserve the entry's flag.
+    remember: input.remember ?? existing?.remember ?? false,
     lastConnectedAt: now,
     // Preserve a known BLE identity when a later save omits it.
     bleDeviceId: input.bleDeviceId ?? existing?.bleDeviceId,
@@ -75,8 +77,7 @@ export function renameDevice(address: string, name: string): void {
 
 export function forgetDevice(address: string): void {
   writeBook(readBook().filter(d => d.address !== address));
-  safeRemove(localStorage, TOKEN_PREFIX + address);
-  safeRemove(sessionStorage, TOKEN_PREFIX + address);
+  clearDeviceToken(address);
 }
 
 export function getDeviceToken(address: string): string {

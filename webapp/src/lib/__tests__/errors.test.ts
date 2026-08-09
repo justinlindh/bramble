@@ -38,18 +38,15 @@ describe('pairing and link failure mappings', () => {
     const friendly = friendlyError('Bluetooth pairing did not complete');
     expect(friendly).toMatch(/connect again/i);
     expect(friendly).toMatch(/code shown on the node/i);
-    // The friendly text feeds isAuthError via the stored connectionError; any
-    // 'auth' substring would paint the token field red for a non-token failure.
-    expect(isAuthError(friendly)).toBe(false);
   });
 
   it('maps pairing-was-cancelled and wins over the auth rule', () => {
     expect(friendlyError('Bluetooth pairing was cancelled')).toBe('Pairing was cancelled. Click Connect to try again.');
     // BlueZ appends a security reason to the raw message; the cancel mapping
-    // must still win over /1008|unauthorized|auth/i.
+    // must still win over /1008|unauthorized|auth/i so the RAW classification
+    // at the connect() boundary maps to the cancel copy, not the token copy.
     const friendly = friendlyError('Bluetooth pairing was cancelled: insufficient authentication');
     expect(friendly).toBe('Pairing was cancelled. Click Connect to try again.');
-    expect(isAuthError(friendly)).toBe(false);
   });
 
   it('maps a raw RPC timeout instead of leaking it verbatim', () => {
