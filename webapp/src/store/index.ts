@@ -373,12 +373,15 @@ export const useStore = create<AppState & Actions>((set) => ({
     } else {
       names.delete(addr);
     }
-    // Update labels on any DM conversation for this peer
+    // Update labels on any DM conversation for this peer. Route through the
+    // shared labeler (reading the just-updated names map) instead of
+    // re-deriving the DM label here, so this path cannot drift from the
+    // classifier every other labeling path uses.
     const convs = new Map(state.conversations);
     const dmKey = `dm:${addr}`;
     const conv = convs.get(dmKey);
     if (conv) {
-      convs.set(dmKey, { ...conv, label: name || formatAddr0x(addr) });
+      convs.set(dmKey, { ...conv, label: formatConversationLabel(dmKey, names, state.config) });
     }
     return { peerNames: names, conversations: convs };
   }),
