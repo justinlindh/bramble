@@ -9,7 +9,7 @@ import styles from './VerifySafetyNumber.module.css';
  * identically on both surfaces. Returns the raw string unchanged if it is
  * not exactly 7 digits (e.g. the empty "no pin yet" string).
  */
-export function formatSasGrouped(sas: string): string {
+function formatSasGrouped(sas: string): string {
   if (!/^\d{7}$/.test(sas)) return sas;
   return `${sas.slice(0, 3)} ${sas.slice(3)}`;
 }

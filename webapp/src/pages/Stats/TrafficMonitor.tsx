@@ -212,7 +212,7 @@ export function TrafficMonitor() {
         <div className={styles.filterRow}>
           <label className={styles.filterLabel}>
             Category
-            <select className={styles.filterSelect} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value as any)}>
+            <select className={styles.filterSelect} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value as TrafficCategory | 'all')}>
               <option value="all">All</option>
               <option value="beacon">Beacon</option>
               <option value="timesync">Timesync</option>
@@ -226,7 +226,7 @@ export function TrafficMonitor() {
 
           <label className={styles.filterLabel}>
             Direction
-            <select className={styles.filterSelect} value={directionFilter} onChange={(e) => setDirectionFilter(e.target.value as any)}>
+            <select className={styles.filterSelect} value={directionFilter} onChange={(e) => setDirectionFilter(e.target.value as TrafficDirection | 'all')}>
               <option value="all">All</option>
               <option value="tx">TX</option>
               <option value="rx">RX</option>
@@ -235,7 +235,7 @@ export function TrafficMonitor() {
 
           <label className={styles.filterLabel}>
             Bucket
-            <select className={styles.filterSelect} value={bucketFilter} onChange={(e) => setBucketFilter(e.target.value as any)}>
+            <select className={styles.filterSelect} value={bucketFilter} onChange={(e) => setBucketFilter(e.target.value as AirtimeBucket | 'all')}>
               <option value="all">All</option>
               <option value="broadcast">Broadcast</option>
               <option value="normal">Normal</option>

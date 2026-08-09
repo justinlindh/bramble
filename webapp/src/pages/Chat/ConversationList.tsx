@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Conversation } from '../../types/bramble';
+import type { BrambleConfig, Channel, Conversation } from '../../types/bramble';
 import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock, IconWarning } from '../../components/Icons';
 import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
 import { addChannel } from '../../store/actions';
@@ -25,10 +25,10 @@ type ChannelItem = {
   hasPsk: boolean;
 };
 
-export function buildChannelItems(config: any, conversations: Map<string, Conversation>): ChannelItem[] {
+export function buildChannelItems(config: Pick<BrambleConfig, 'channels'> | null, conversations: Map<string, Conversation>): ChannelItem[] {
   return (config?.channels ?? [])
-    .filter((ch: any) => ch.index > 0)
-    .map((ch: any): ChannelItem => {
+    .filter((ch: Channel) => ch.index > 0)
+    .map((ch: Channel): ChannelItem => {
       const id = `ch:${ch.index}`;
       const existing = conversations.get(id);
       const rawName = typeof ch.name === 'string' ? ch.name : '';

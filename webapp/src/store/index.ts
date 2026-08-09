@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   AppState,
+  Conversation,
   Message,
   Neighbor,
   Route,
@@ -157,7 +158,7 @@ export function formatConversationLabel(id: string, peerNames?: Map<number, stri
   }
 }
 
-function persistUnreads(conversations: Map<string, any>, config: BrambleConfig | null): void {
+function persistUnreads(conversations: Map<string, Conversation>, config: BrambleConfig | null): void {
   if (!config?.identity?.address) return;
   const nodeAddr = formatAddrHex(config.identity.address);
   const counts: Record<string, number> = {};
@@ -392,9 +393,9 @@ export const useStore = create<AppState & Actions>((set) => ({
     neighbors: undefined,
     routes: [],
     peerNames: new Map(),
-    config: null as any,
-    status: null as any,
-    airtime: null as any,
+    config: null,
+    status: null,
+    airtime: null,
     probeResult: null,
     peerLocations: [],
     mapFocusAddr: null,

@@ -6,8 +6,6 @@ import { isEmbeddedShell } from '../utils/platform';
 import type { Transport, TransportType } from '../types/bramble';
 import type { RpcMethod, RpcParams, RpcResult } from '../types/rpc';
 
-export { SerialTransport } from './SerialTransport';
-export { BLETransport } from './BLETransport';
 export { WebSocketTransport } from './WebSocketTransport';
 export { MockTransport } from './MockTransport';
 

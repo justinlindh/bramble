@@ -27,7 +27,7 @@ export const EMBEDDED_CAPABILITIES: ConnectionCapabilities = {
   localLanAllowed: true,
 };
 
-export function normalizeCapabilities(input: unknown): ConnectionCapabilities {
+function normalizeCapabilities(input: unknown): ConnectionCapabilities {
   const body = (input ?? {}) as CapabilitiesResponse;
   const mode: RuntimeMode = body.mode === 'local' ? 'local' : 'hosted';
   const localLanAllowed = mode === 'local' ? body.localLanAllowed !== false : false;
