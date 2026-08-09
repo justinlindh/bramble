@@ -225,11 +225,6 @@ export async function connect(
     // self position only appears after a manual reload.
     session.client.subscribe('bramble.onGpsEvent', () => { loadPeerLocations().catch(() => {}); });
     session.client.subscribe('bramble.onNeighborChange', () => loadNeighbors());
-    // NOTE: no firmware build emits bramble.onRouteUpdate today (nothing in
-    // main/ or components/ calls rpc_notify with it, and it is absent from
-    // api/openapi.yaml). Kept for forward compatibility, but route freshness
-    // currently depends on the slow poll in the Nodes page, not on this event.
-    session.client.subscribe('bramble.onRouteUpdate', () => loadRoutes());
     session.client.subscribe('bramble.onAirtimeWarning', () => loadAirtime());
     session.client.subscribe('bramble.onProbeResult', (params) => handleProbeAck(params));
     session.client.subscribe('bramble.onProbeComplete', (params) => handleProbeComplete(params));
