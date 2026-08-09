@@ -390,7 +390,6 @@ export interface ConnectionCapabilities {
 export interface AppState {
   connectionState: ConnectionState;
   connectionError?: string;
-  transport: Transport | null;
   connectionCapabilities: ConnectionCapabilities;
   /**
    * False until the capabilities fetch resolves. Until then
