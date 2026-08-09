@@ -95,6 +95,31 @@
 
 .renameForm {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.renameForm .renameInput {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Row busy indicator, matching ConnectionOverlay's spinner but drawn in the
+   accent so it survives the row's neutral background. */
+.spinnerIcon {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--accent-blue) 30%, transparent);
+  border-top-color: var(--accent-blue);
+  animation: spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .renameInput {
@@ -127,4 +152,24 @@
 .danger:hover {
   border-color: var(--danger, #ef4444);
   color: var(--danger, #ef4444);
+}
+
+/* An armed Forget must read as danger without the pointer on it: the second
+   click is destructive, so the button cannot look idle in between. */
+.danger.armed {
+  border-color: var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
+}
+
+/* Everything locks while a connect is in flight; the lock must be visible or
+   the rows just look broken. */
+.connectBtn:disabled,
+.action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.connectBtn:disabled:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
 }

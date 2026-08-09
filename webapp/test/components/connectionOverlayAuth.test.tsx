@@ -75,6 +75,12 @@ describe('ConnectionOverlay auth token flow', () => {
     render(<ConnectionOverlay />);
 
     fireEvent.click(screen.getByRole('button', { name: /bluetooth/i }));
-    expect(screen.getByLabelText('Scanning in progress')).toBeInTheDocument();
+    // The spinner icon is decoration (aria-hidden): a fixed 'Scanning' label
+    // on it contradicted the visible text the moment that flipped to
+    // Pairing…. The visible connecting label carries the state instead.
+    const connectBtn = screen.getByRole('button', { name: /scanning/i });
+    const icon = connectBtn.querySelector('[class*="spinnerIcon"]');
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute('aria-hidden', 'true');
   });
 });
