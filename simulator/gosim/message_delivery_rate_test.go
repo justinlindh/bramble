@@ -3,9 +3,10 @@ package main
 import "testing"
 
 // message_delivery_rate must be the end-to-end scripted-message outcome
-// (delivered over terminal states), NOT the delivered/total_packets ratio
-// that delivery_rate reports: at 10 nodes the honest figure is 19/20 = 0.95
-// while delivery_rate reads 19/203 = 0.094 against the same run.
+// (delivered over terminal states), NOT a delivered/total_packets ratio
+// against every frame of every type on the air: at 10 nodes the honest
+// figure is 19/20 = 0.95 while the packet-count ratio reads 19/203 = 0.094
+// against the same run.
 func TestMessageDeliveryRateUsesTerminalMessageDenominator(t *testing.T) {
 	if got := messageDeliveryRate(19, 0, 1); got != 0.95 {
 		t.Fatalf("19 delivered / 20 terminal = 0.95, got %v", got)
