@@ -55,7 +55,6 @@ typedef struct {
     /* The announce packet_id of every round, so a broadcast delivery receipt
      * echoing orig_packet_id can be matched back to THIS roll-call. */
     uint32_t announce_pkt_id[ROLLCALL_MAX_ROUNDS];
-    int announce_channel_idx;
 
     /* Member side. */
     rollcall_seen_table_t seen;
@@ -82,7 +81,6 @@ static rollcall_runtime_t* rollcall_runtime(void) {
     rollcall_rate_init(&s_rc->rate);
     rollcall_seen_init(&s_rc->seen);
     rollcall_answer_budget_init(&s_rc->answer_budget);
-    s_rc->announce_channel_idx = 0;
     return s_rc;
 }
 
@@ -90,11 +88,9 @@ static rollcall_runtime_t* rollcall_runtime(void) {
  * every member of the mesh holds by construction, which is exactly the
  * audience a roll-call is asking about; a secret channel would silently
  * shrink the question to that channel's membership without saying so. */
-static const bramble_channel_t* rollcall_channel(int* idx_out) {
+static const bramble_channel_t* rollcall_channel(void) {
     if (s_num_channels <= 0)
         return NULL;
-    if (idx_out != NULL)
-        *idx_out = 0;
     return &s_channels[0];
 }
 
@@ -136,8 +132,7 @@ static uint32_t rollcall_send_round(uint8_t round) {
     if (rc == NULL || !rc->ledger.active)
         return 0;
 
-    int ch_idx = 0;
-    const bramble_channel_t* ch = rollcall_channel(&ch_idx);
+    const bramble_channel_t* ch = rollcall_channel();
     if (ch == NULL) {
         ESP_LOGE(TAG, "No channel available for the roll-call announce");
         return 0;
@@ -165,7 +160,6 @@ static uint32_t rollcall_send_round(uint8_t round) {
     if (round >= 1 && round <= ROLLCALL_MAX_ROUNDS) {
         rc->announce_pkt_id[round - 1] = pkt_id;
     }
-    rc->announce_channel_idx = ch_idx;
     ESP_LOGI(TAG, "ROLLCALL ANNOUNCE id=%08" PRIX32 " round=%u pkt=%08" PRIX32,
              rc->ledger.rollcall_id, (unsigned)round, pkt_id);
     return pkt_id;
