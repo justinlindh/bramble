@@ -65,8 +65,13 @@ function messageOf(e: unknown): string {
 // the firmware's auth-error text contract in one place; the app decides whether
 // to prompt for a token based on it, so update the pattern here when the
 // wording changes rather than in each caller.
+// A TIMEOUT is excluded even when the message mentions auth: the transport's
+// 'Authentication handshake timed out' means the node never answered (usually
+// another device holds its one BLE connection), not that the token is wrong,
+// so it must not paint the token field red.
 export function isAuthError(e: unknown): boolean {
-  return /1008|unauthorized|auth/i.test(messageOf(e));
+  const msg = messageOf(e);
+  return /1008|unauthorized|auth/i.test(msg) && !/timed out/i.test(msg);
 }
 
 // The RPC method is not implemented by this firmware build (an older node that

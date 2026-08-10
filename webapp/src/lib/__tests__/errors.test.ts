@@ -18,6 +18,10 @@ describe('isAuthError', () => {
     expect(isAuthError(undefined)).toBe(false);
     expect(isAuthError('')).toBe(false);
   });
+
+  it('is false for a handshake timeout even though the message contains "auth"', () => {
+    expect(isAuthError(new Error('Authentication handshake timed out'))).toBe(false);
+  });
 });
 
 describe('isUnknownMethodError', () => {
