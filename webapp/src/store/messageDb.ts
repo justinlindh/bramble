@@ -1,19 +1,14 @@
 import type { Message, DeliveryStatus, RelayHop } from '../types/bramble';
-import { conversationIdForMessage } from './index';
 
-type DbMessage = Message & { conversationId: string };
-
-// The persisted conversationId is derived through the store's single
-// classifier (conversationIdForMessage in store/index.ts) so the index this
-// file maintains cannot drift from the buckets the UI shows. This is the same
-// invariant store/index.ts pins for its in-memory callers: the bucket kind is
-// decided in exactly one place. Keying off the store's direction-based rule
-// (rather than a local self-address comparison) also avoids mis-bucketing an
-// outgoing message whose `from` carries the 0-means-self sentinel.
+// The message cache is a flat, id-keyed per-node log, read back in timestamp
+// order. Conversation bucketing is NOT persisted here: the store re-derives
+// each message's bucket in memory through conversationIdForMessage
+// (store/index.ts) whenever it loads the cache, so this layer never has to
+// keep a denormalized bucket id in sync with the classifier the UI renders.
 
 class MessageDb {
   private db: IDBDatabase | null = null;
-  private readonly DB_VERSION = 2;
+  private readonly DB_VERSION = 3;
   private readonly STORE_NAME = 'messages';
   private nodeAddr: string = '';
 
@@ -32,76 +27,37 @@ class MessageDb {
     const dbName = `bramble-messages-${addr}`;
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(dbName, this.DB_VERSION);
-      req.onupgradeneeded = (event) => {
+      req.onupgradeneeded = () => {
         const db = req.result;
-        const oldVersion = event.oldVersion;
-        if (oldVersion < 1) {
-          // Fresh DB: create store with indexes
-          const store = db.createObjectStore(this.STORE_NAME, { keyPath: 'id' });
-          store.createIndex('by-conversation', 'conversationId', { unique: false });
+        const store = db.objectStoreNames.contains(this.STORE_NAME)
+          ? req.transaction!.objectStore(this.STORE_NAME)
+          : db.createObjectStore(this.STORE_NAME, { keyPath: 'id' });
+
+        if (!store.indexNames.contains('by-timestamp')) {
           store.createIndex('by-timestamp', 'timestampMs', { unique: false });
         }
-        if (oldVersion >= 1 && oldVersion < 2) {
-          // v1 → v2: conversation IDs changed from dm:{min}-{max} to dm:{peerAddr}.
-          // The record fields needed to recompute the id are already on each row,
-          // so we re-key on first read rather than during upgrade. The index
-          // itself doesn't need schema changes.
+        // v1/v2 carried a by-conversation index (and a denormalized
+        // conversationId column) that nothing ever queried: getMessages is only
+        // ever called with no argument, reading the whole log in timestamp
+        // order. Drop the index from existing databases on the v3 upgrade. Any
+        // stale conversationId still on old rows is ignored on read.
+        if (store.indexNames.contains('by-conversation')) {
+          store.deleteIndex('by-conversation');
         }
       };
       req.onsuccess = () => {
         this.db = req.result;
-        // Migrate old v1 conversation IDs in background
-        this.migrateV1ConversationIds().catch(() => {});
         resolve();
       };
       req.onerror = () => reject(req.error);
     });
   }
 
-  /**
-   * Re-key any DM conversation IDs from the old v1 format (dm:{min}-{max})
-   * to the current format (dm:{peerAddr}).
-   */
-  private async migrateV1ConversationIds(): Promise<void> {
-    // Only real-node DBs carry legacy DM ids worth re-keying; skip the
-    // 'default' namespace opened before an identity is known.
-    if (!this.db || this.nodeAddr === 'default') return;
-    const migratedKey = `bramble:msgdb-migrated-v2:${this.nodeAddr}`;
-    try {
-      if (localStorage.getItem(migratedKey)) return;
-    } catch { /* proceed anyway */ }
-
-    return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction(this.STORE_NAME, 'readwrite');
-      const store = tx.objectStore(this.STORE_NAME);
-      const req = store.openCursor();
-      req.onsuccess = () => {
-        const cursor = req.result;
-        if (!cursor) return;
-        const record = cursor.value as DbMessage;
-        // Detect old format: dm:{hex}-{hex}
-        if (record.conversationId && /^dm:[0-9a-f]+-[0-9a-f]+$/i.test(record.conversationId)) {
-          const newId = conversationIdForMessage(record);
-          if (newId !== record.conversationId) {
-            cursor.update({ ...record, conversationId: newId });
-          }
-        }
-        cursor.continue();
-      };
-      tx.oncomplete = () => {
-        try { localStorage.setItem(migratedKey, '1'); } catch {}
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
   async saveMessage(msg: Message): Promise<void> {
     if (!this.db) return;
-    const record: DbMessage = { ...msg, conversationId: conversationIdForMessage(msg) };
     return new Promise((resolve, reject) => {
       const tx = this.db!.transaction(this.STORE_NAME, 'readwrite');
-      tx.objectStore(this.STORE_NAME).put(record);
+      tx.objectStore(this.STORE_NAME).put(msg);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -113,27 +69,24 @@ class MessageDb {
       const tx = this.db!.transaction(this.STORE_NAME, 'readwrite');
       const store = tx.objectStore(this.STORE_NAME);
       for (const msg of msgs) {
-        store.put({ ...msg, conversationId: conversationIdForMessage(msg) });
+        store.put(msg);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   }
 
-  async getMessages(conversationId?: string): Promise<Message[]> {
+  async getMessages(): Promise<Message[]> {
     if (!this.db) return [];
     return new Promise((resolve, reject) => {
       const tx = this.db!.transaction(this.STORE_NAME, 'readonly');
       const store = tx.objectStore(this.STORE_NAME);
-      let req: IDBRequest;
-      if (conversationId) {
-        req = store.index('by-conversation').getAll(conversationId);
-      } else {
-        req = store.index('by-timestamp').getAll();
-      }
+      const req = store.index('by-timestamp').getAll();
       req.onsuccess = () => {
-        const results = (req.result as DbMessage[]).map(({ conversationId: _, ...msg }) => msg as Message);
-        resolve(results);
+        // Strip any legacy conversationId left on rows written before v3, so
+        // returned objects match the Message type whatever version wrote them.
+        const rows = req.result as Array<Message & { conversationId?: string }>;
+        resolve(rows.map(({ conversationId: _legacy, ...msg }) => msg));
       };
       req.onerror = () => reject(req.error);
     });
@@ -146,7 +99,7 @@ class MessageDb {
       const store = tx.objectStore(this.STORE_NAME);
       const getReq = store.get(id);
       getReq.onsuccess = () => {
-        const record = getReq.result as DbMessage | undefined;
+        const record = getReq.result as Message | undefined;
         if (record) {
           record.status = status;
           if (relayPath) record.relayPath = relayPath;
