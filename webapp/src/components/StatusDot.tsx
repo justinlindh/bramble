@@ -5,11 +5,15 @@ interface StatusDotProps {
   state: ConnectionState;
 }
 
-const STATE_LABELS: Record<ConnectionState, string> = {
+// The single connection-state label map: the dot's title/aria-label and the
+// status pill text (App.statusLabelFor) render side by side, and two parallel
+// maps drifted ('Error' next to 'Reconnecting…'). 'error' means the app is
+// auto-reconnecting, so the label says that.
+export const STATE_LABELS: Record<ConnectionState, string> = {
   disconnected: 'Disconnected',
   connecting: 'Connecting…',
   connected: 'Connected',
-  error: 'Error',
+  error: 'Reconnecting…',
 };
 
 export function StatusDot({ state }: StatusDotProps) {

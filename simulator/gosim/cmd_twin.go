@@ -199,6 +199,7 @@ func runTwinIO(args []string, out, errw io.Writer) int {
 				Kind: "simulation over an observed link snapshot; not a field measurement " +
 					"and not a propagation prediction",
 				ReciprocalLinks:     len(graph.UnobservedLinks()),
+				OneWayLinks:         len(graph.OneWayLinks()),
 				UnexportedNodes:     len(graph.UnexportedNodes()),
 				ObservationWindowMs: *durationMs,
 			},

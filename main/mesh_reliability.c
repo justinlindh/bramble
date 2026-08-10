@@ -31,7 +31,7 @@ static void record_broadcast_delivery_event(uint32_t recipient_addr, uint32_t br
                                             uint8_t hop_count, const uint32_t* relay_path);
 static bool recent_broadcast_contains(uint32_t packet_id);
 static void mesh_schedule_next_receipt_timer(void);
-static void forward_ack(bramble_ack_t* ack, int16_t rssi);
+static void forward_ack(bramble_ack_t* ack);
 static void forward_delivery_receipt(bramble_delivery_receipt_t* receipt);
 
 static void delivery_event_ring_append_locked(const delivery_event_record_t* event) {
@@ -487,7 +487,7 @@ void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
     }
 }
 
-static void forward_ack(bramble_ack_t* ack, int16_t rssi) {
+static void forward_ack(bramble_ack_t* ack) {
     /* Append our address to the relay path */
     if (ack->hop_count < ACK_MAX_HOPS) {
         ack->relay_path[ack->hop_count++] = s_identity->address;
@@ -616,7 +616,7 @@ void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
                          ack.ack_packet_id);
             }
         } else {
-            forward_ack(&ack, rssi);
+            forward_ack(&ack);
         }
         return;
     }

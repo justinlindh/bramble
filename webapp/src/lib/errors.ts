@@ -4,6 +4,17 @@ const ERROR_MAP: Array<[RegExp, string]> = [
   // answered (usually because another device, like the phone, holds its one
   // BLE connection), not that the token is wrong.
   [/handshake timed out/i, 'The node did not respond over Bluetooth. If it is connected to another device (like your phone), disconnect there first, then retry.'],
+  // First-time BLE pairing outcomes from the transport. Both rules sit
+  // before the /1008|unauthorized|auth/i rule because fail-fast stacks
+  // append security reasons like "insufficient authentication" to the raw
+  // message, and a pairing failure must map to pairing copy, not token copy.
+  // (The overlay's token-field highlight reads the store's structured
+  // connectionErrorIsAuth flag, not this display text.)
+  [/pairing did not complete/i, 'Bluetooth pairing did not finish. Click Connect again, and type the code shown on the node when the browser asks for it.'],
+  [/pairing was cancelled/i, 'Pairing was cancelled. Click Connect to try again.'],
+  // A raw 'RPC timeout: bramble.getVersion' used to leak to the UI verbatim.
+  [/RPC timeout/i, 'Connected, but the node did not answer. Retry, and power-cycle the node if it keeps happening.'],
+  [/write timed out/i, 'The Bluetooth link stalled while sending. Move closer to the node and retry.'],
   [/cancelled.*requestDevice/i, 'Bluetooth pairing was cancelled.'],
   [/cancelled.*requestPort/i, 'Serial port selection was cancelled.'],
   [/user cancel/i, 'Connection was cancelled.'],
@@ -54,8 +65,13 @@ function messageOf(e: unknown): string {
 // the firmware's auth-error text contract in one place; the app decides whether
 // to prompt for a token based on it, so update the pattern here when the
 // wording changes rather than in each caller.
+// A TIMEOUT is excluded even when the message mentions auth: the transport's
+// 'Authentication handshake timed out' means the node never answered (usually
+// another device holds its one BLE connection), not that the token is wrong,
+// so it must not paint the token field red.
 export function isAuthError(e: unknown): boolean {
-  return /1008|unauthorized|auth/i.test(messageOf(e));
+  const msg = messageOf(e);
+  return /1008|unauthorized|auth/i.test(msg) && !/timed out/i.test(msg);
 }
 
 // The RPC method is not implemented by this firmware build (an older node that

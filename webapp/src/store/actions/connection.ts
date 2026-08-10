@@ -46,6 +46,25 @@ export async function loadConnectionCapabilities(): Promise<void> {
   useStore.getState().setConnectionCapabilities(capabilities);
 }
 
+// The per-node data refresh shared by the initial (network) connect and by
+// auto-reconnect. Both paths must pull the same store slices from the node, so
+// keeping them in one place is what stops the two lists drifting: reconnect
+// used to hand-copy a subset and had already fallen behind, silently skipping
+// status and peer locations. Best-effort throughout via the caller's `opt`
+// wrapper so a slow RPC cannot abort the load. Must run after initMessageStore
+// so loadMessages persists its rows into the right per-node DB namespace.
+async function refreshNodeData(opt: (p: Promise<void>) => Promise<void>): Promise<void> {
+  await Promise.all([
+    opt(loadStatus()),
+    opt(loadAirtime()),
+    opt(loadNeighbors()),
+    opt(loadRoutes()),
+    opt(loadMessages()),
+    opt(loadPeerLocations()),
+  ]);
+  await opt(syncDeliveryEventReplay());
+}
+
 // ─── Connection ─────────────────────────────────────────────────────────
 
 const SERIAL_RPC_READY_ATTEMPTS = 8;
@@ -136,6 +155,19 @@ export async function connect(
   store.setConnectionState('connecting');
   try {
     const transport = createTransport(type, options);
+
+    // Surface OS pairing prompts in the UI. Only the BLE transport reports
+    // them, so this is feature-detected structurally like enableAutoReconnect
+    // below. Wired BEFORE transport.connect(): first-time pairing happens
+    // inside that call, and on fail-fast stacks the prompt window is exactly
+    // the stretch that otherwise reads as a silent hang in the overlay.
+    const pairingAware = transport as typeof transport & {
+      onPairingStateChange?: (cb: (pending: boolean) => void) => void;
+    };
+    if ('onPairingStateChange' in transport && typeof pairingAware.onPairingStateChange === 'function') {
+      pairingAware.onPairingStateChange((pending) => useStore.getState().setPairingPending(pending));
+    }
+
     await transport.connect();
     session.client = new BrambleClient(transport);
 
@@ -202,10 +234,9 @@ export async function connect(
               ? formatAddrHex(nodeAddr)
               : readLastKnownNodeAddrHex();
             await initMessageStore(addrHex);
-            await Promise.all([loadNeighbors(), loadRoutes(), loadAirtime()]);
-            // Keep loadMessages after initMessageStore so reconnect fetches persist into the right DB namespace.
-            await opt(loadMessages());
-            await opt(syncDeliveryEventReplay());
+            // refreshNodeData runs after initMessageStore so loadMessages
+            // persists into the right per-node DB namespace.
+            await refreshNodeData(opt);
           } catch { /* best effort */ }
         },
       });
@@ -278,7 +309,21 @@ export async function connect(
         try { session.client?.clearSubscriptions(); } catch { /* noop */ }
         try { await session.client?.disconnect(); } catch { /* noop */ }
         session.client = null;
-        store.setConnectionState('error', 'That address now belongs to a different node. Check the device and reconnect.');
+        // 'disconnected', not 'error': App treats 'error' as auto-reconnect
+        // (overlay hidden, pill saying Reconnecting…, Disconnect the only
+        // exit) which dead-ends a guard that has already dropped the link.
+        // 'disconnected' brings the overlay back with the message.
+        // Named by transport: each one's wording matches what the user
+        // actually touched (a port pick, a chooser entry, a saved IP whose
+        // DHCP lease moved). A single default here quietly gave BLE the
+        // wifi-flavored "address" copy for an address the user never typed.
+        const mismatchMsg: Record<string, string> = {
+          serial: 'That port belongs to a different node than the saved one. Check the device and reconnect.',
+          ble: 'That Bluetooth device is a different node than the one saved. Check the device and reconnect.',
+          wifi: 'That address now belongs to a different node. Check the device and reconnect.',
+        };
+        store.setConnectionState('disconnected',
+          mismatchMsg[type] ?? mismatchMsg.wifi);
         return;
       }
       // A book write must never break a live connection.
@@ -308,7 +353,10 @@ export async function connect(
             bleDeviceName: options?.bleDevice?.name ?? undefined,
           });
         } else if (type === 'serial') {
-          saveConnectedDevice({ addr: bookAddrNum, name: options?.name, ip: '', token: '', remember: false, transport: 'serial' });
+          // token/remember omitted: the serial form has no controls for
+          // them, so the save expresses no credential intent and the book
+          // preserves whatever the user set via wifi or BLE.
+          saveConnectedDevice({ addr: bookAddrNum, name: options?.name, ip: '', transport: 'serial' });
         }
       } catch { /* noop */ }
     }
@@ -316,6 +364,9 @@ export async function connect(
     await initMessageStore(addrHex);
 
     if (type === 'serial') {
+      // Serial stages the load rather than fanning out: the link is a single
+      // slow UART, so status and airtime go first, then neighbours/routes, then
+      // messages/peer-locations, instead of six RPCs contending at once.
       await opt(loadStatus());
       await opt(loadAirtime());
       await Promise.all([
@@ -326,18 +377,10 @@ export async function connect(
         opt(loadMessages()),
         opt(loadPeerLocations()),
       ]);
+      await opt(syncDeliveryEventReplay());
     } else {
-      await Promise.all([
-        opt(loadStatus()),
-        opt(loadAirtime()),
-        opt(loadNeighbors()),
-        opt(loadRoutes()),
-        opt(loadMessages()),
-        opt(loadPeerLocations()),
-      ]);
+      await refreshNodeData(opt);
     }
-
-    await opt(syncDeliveryEventReplay());
 
     store.setConnectionState('connected');
 
@@ -358,7 +401,16 @@ export async function connect(
     try { await session.client?.disconnect(); } catch { /* noop */ }
     session.client = null;
     // Show the overlay so the user can retry: 'disconnected' shows connect UI.
-    store.setConnectionState('disconnected', friendlyErrorFrom(e));
+    // Auth-ness is classified here from the RAW error, then carried as a
+    // structured flag beside the friendly text: the overlay highlights the
+    // token field from the flag, so display copy never has to dodge
+    // substrings like 'auth' to avoid a false red field.
+    store.setConnectionState('disconnected', friendlyErrorFrom(e), isAuthError(e));
+  } finally {
+    // Every settle path (success, failure, and the DHCP-guard early return)
+    // drops the pairing flag: a stale true would leave the pairing banner and
+    // the Pairing… label on screen with no prompt left to answer.
+    useStore.getState().setPairingPending(false);
   }
 }
 

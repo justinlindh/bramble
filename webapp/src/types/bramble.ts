@@ -55,7 +55,6 @@ export type MessageTier = 'broadcast' | 'normal' | 'critical';
 export type MessageDirection = 'outgoing' | 'incoming';
 
 export type DeliveryStatus =
-  | 'queued'      // in app, not yet sent to node
   | 'sending'     // RPC call in flight
   | 'sent'        // node accepted (packet_id returned)
   | 'delivered'   // delivery receipt received (ACK from dest)
@@ -391,6 +390,28 @@ export interface ConnectionCapabilities {
 export interface AppState {
   connectionState: ConnectionState;
   connectionError?: string;
+  /**
+   * True when connectionError is an authentication failure, classified from
+   * the RAW error at the connect() boundary. The overlay highlights the
+   * token field from this flag; regexing the friendly display text instead
+   * forced every ERROR_MAP entry to avoid substrings like 'auth'.
+   */
+  connectionErrorIsAuth: boolean;
+  /**
+   * Which surface started the current connect attempt. Decides where the
+   * overlay renders attempt feedback (errors, the pairing banner): next to
+   * the saved-device rows or in the bottom slot under the form. Lives in the
+   * store because the overlay can unmount mid-attempt (the identity guard
+   * passes through 'connected' before settling), which would reset
+   * component-local attribution.
+   */
+  attemptSource: 'row' | 'form';
+  /**
+   * True while the transport reports an OS pairing prompt is up during a BLE
+   * connect. The overlay uses it to tell the user to type the code shown on
+   * the node; without it a first-time pairing reads as a silent hang.
+   */
+  pairingPending: boolean;
   connectionCapabilities: ConnectionCapabilities;
   /**
    * False until the capabilities fetch resolves. Until then

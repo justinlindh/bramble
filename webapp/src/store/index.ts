@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   AppState,
+  Conversation,
   Message,
   Neighbor,
   Route,
@@ -157,7 +158,7 @@ export function formatConversationLabel(id: string, peerNames?: Map<number, stri
   }
 }
 
-function persistUnreads(conversations: Map<string, any>, config: BrambleConfig | null): void {
+function persistUnreads(conversations: Map<string, Conversation>, config: BrambleConfig | null): void {
   if (!config?.identity?.address) return;
   const nodeAddr = formatAddrHex(config.identity.address);
   const counts: Record<string, number> = {};
@@ -170,7 +171,9 @@ function persistUnreads(conversations: Map<string, any>, config: BrambleConfig |
 }
 
 interface Actions {
-  setConnectionState: (s: ConnectionState, err?: string) => void;
+  setConnectionState: (s: ConnectionState, err?: string, errIsAuth?: boolean) => void;
+  setPairingPending: (pending: boolean) => void;
+  setAttemptSource: (source: 'row' | 'form') => void;
   setConnectionCapabilities: (c: ConnectionCapabilities) => void;
   setConfig: (c: BrambleConfig) => void;
   setStatus: (s: NodeStatus) => void;
@@ -205,6 +208,9 @@ export const useStore = create<AppState & Actions>((set) => ({
   // ─── Initial state ───────────────────────────────────────────────────
   connectionState: 'disconnected',
   connectionError: undefined,
+  connectionErrorIsAuth: false,
+  attemptSource: 'form' as const,
+  pairingPending: false,
   connectionCapabilities: DEFAULT_CAPABILITIES,
   capabilitiesLoaded: false,
   config: null,
@@ -229,8 +235,14 @@ export const useStore = create<AppState & Actions>((set) => ({
   anchorStatus: null,
 
   // ─── Actions ─────────────────────────────────────────────────────────
-  setConnectionState: (s, err?) =>
-    set({ connectionState: s, connectionError: err }),
+  // errIsAuth rides along with the error it describes so the pair can never
+  // desynchronize (an omitted flag clears with the error).
+  setConnectionState: (s, err?, errIsAuth?) =>
+    set({ connectionState: s, connectionError: err, connectionErrorIsAuth: errIsAuth ?? false }),
+
+  setPairingPending: (pending) => set({ pairingPending: pending }),
+
+  setAttemptSource: (source) => set({ attemptSource: source }),
 
   // Setting capabilities is what makes them known, whatever their source: the
   // /api/capabilities response, its failure fallback, or an embedded shell's
@@ -392,9 +404,9 @@ export const useStore = create<AppState & Actions>((set) => ({
     neighbors: undefined,
     routes: [],
     peerNames: new Map(),
-    config: null as any,
-    status: null as any,
-    airtime: null as any,
+    config: null,
+    status: null,
+    airtime: null,
     probeResult: null,
     peerLocations: [],
     mapFocusAddr: null,

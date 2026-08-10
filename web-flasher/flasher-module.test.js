@@ -33,3 +33,15 @@ test('flasher.js imports ESPLoader and Transport directly and does not use globa
   assert.match(js, /new\s+ESPLoader\(/);
   assert.doesNotMatch(js, /\besptool\./);
 });
+
+test('user-derived text never reaches an HTML-injection sink', () => {
+  const js = read('flasher.js');
+  // The done-screen message interpolates user-typed values (device name,
+  // SSID, auth token), so it must be rendered via text nodes. The only
+  // permitted innerHTML use is clearing with a constant empty string.
+  const uses = js.match(/innerHTML\s*=\s*[^;]+/g) || [];
+  for (const use of uses) {
+    assert.match(use, /^innerHTML\s*=\s*''$/, `non-constant innerHTML assignment: ${use}`);
+  }
+  assert.doesNotMatch(js, /insertAdjacentHTML|outerHTML\s*=|document\.write/);
+});

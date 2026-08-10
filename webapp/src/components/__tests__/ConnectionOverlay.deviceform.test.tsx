@@ -44,6 +44,15 @@ describe('ConnectionOverlay new-device form', () => {
     selectWifi();
     expect(screen.getByLabelText(/name/i)).toBeInTheDocument();
   });
+
+  it('says plainly that Remember controls token storage only (wifi)', () => {
+    render(<ConnectionOverlay />);
+    selectWifi();
+    // The checkbox governs the auth token alone: the device entry stays in
+    // the list either way, and Forget is what removes it.
+    expect(screen.getByText(/stays in your list either way/i)).toBeInTheDocument();
+    expect(screen.getByText(/forget removes it/i)).toBeInTheDocument();
+  });
 });
 
 // Web Bluetooth is not present in jsdom by default; add it directly on the
@@ -78,5 +87,12 @@ describe('ConnectionOverlay Bluetooth auth token field', () => {
     render(<ConnectionOverlay />);
     selectBluetooth();
     expect(screen.getByLabelText(/remember this device/i)).toBeInTheDocument();
+  });
+
+  it('says plainly that Remember controls token storage only (ble)', () => {
+    render(<ConnectionOverlay />);
+    selectBluetooth();
+    expect(screen.getByText(/stays in your list either way/i)).toBeInTheDocument();
+    expect(screen.getByText(/forget removes it/i)).toBeInTheDocument();
   });
 });
