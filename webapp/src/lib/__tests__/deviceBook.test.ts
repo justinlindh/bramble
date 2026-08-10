@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   listDevices, upsertDevice, renameDevice, forgetDevice,
-  getDeviceToken, setDeviceToken, type SavedDevice,
+  getDeviceToken, setDeviceToken, clearDeviceToken, type SavedDevice,
 } from '../deviceBook';
 
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
@@ -57,6 +57,17 @@ describe('deviceBook', () => {
     expect(listDevices()).toHaveLength(0);
     expect(localStorage.getItem('bramble.deviceToken.AAAA0001')).toBeNull();
     expect(sessionStorage.getItem('bramble.deviceToken.AAAA0001')).toBeNull();
+  });
+
+  it('clearDeviceToken removes the token from both storages and keeps the book entry', () => {
+    upsertDevice({ address: 'AAAA0001', transport: 'ble', remember: true, nowMs: 1 });
+    setDeviceToken('AAAA0001', 'tok', true);
+    sessionStorage.setItem('bramble.deviceToken.AAAA0001', 'stale');
+    clearDeviceToken('AAAA0001');
+    expect(localStorage.getItem('bramble.deviceToken.AAAA0001')).toBeNull();
+    expect(sessionStorage.getItem('bramble.deviceToken.AAAA0001')).toBeNull();
+    expect(getDeviceToken('AAAA0001')).toBe('');
+    expect(listDevices()).toHaveLength(1); // only the token goes; Forget removes the entry
   });
 
   it('degrades gracefully when storage throws', () => {

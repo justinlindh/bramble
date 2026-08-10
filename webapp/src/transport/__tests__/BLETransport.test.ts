@@ -98,7 +98,7 @@ describe('BLETransport auth handshake', () => {
   });
 
   it('rejects connect() on an auth error result', async () => {
-    const { bluetooth, writes, emitLine } = makeFakeBleStack();
+    const { bluetooth, writes, emitLine, gattServer } = makeFakeBleStack();
     vi.stubGlobal('navigator', { bluetooth });
 
     const transport = new BLETransport('wrong-token');
@@ -110,6 +110,11 @@ describe('BLETransport auth handshake', () => {
 
     await expect(connectPromise).rejects.toThrow(/unauthorized|auth/i);
     expect(transport.connected).toBe(false);
+    // The rejection must not leave the GATT link standing: the store never
+    // gets a client to clean up when connect() itself rejects, and a
+    // peripheral with an open link stops advertising, so a leaked link makes
+    // the node invisible to every later chooser.
+    expect(gattServer.disconnect).toHaveBeenCalled();
   });
 
   it('times out and rejects connect() if no auth result arrives', async () => {
@@ -140,8 +145,11 @@ describe('BLETransport auth handshake', () => {
   it('retries the link when the first write fails the platform GATT security check', async () => {
     // The firmware requires an encrypted link (issue #73), so on an unpaired
     // device the very first write can fail while the OS runs its pairing
-    // prompt. That message contains "authorized", which a looser substring
-    // match mistook for a token rejection and threw instead of retrying.
+    // prompt. The grace machinery retries the token write on the SAME link
+    // attempt (a second link attempt would raise a second OS prompt) until
+    // the write goes through. That message contains "authorized", which a
+    // looser substring match once mistook for a token rejection and threw
+    // instead of retrying.
     const { bluetooth, txChar, writes, emitLine } = makeFakeBleStack();
     vi.stubGlobal('navigator', { bluetooth });
 
@@ -165,7 +173,14 @@ describe('BLETransport auth handshake', () => {
     expect(transport.connected).toBe(true);
   });
 
-  it('does not write a handshake when no token is provided', async () => {
+  it('writes an encryption probe (never a bare token line) when no token is provided', async () => {
+    // The firmware's TX characteristic requires an encrypted link, so the
+    // first write triggers the OS pairing prompt. Without a token the old
+    // code wrote nothing during connect(), which deferred pairing to the
+    // first real RPC (getVersion) where its 4-5s timeout aborted the prompt.
+    // The probe is JSON, so an auth-required node routes it to the
+    // unauthenticated allowlist dispatcher instead of counting it as a
+    // failed token attempt (ble_rpc_task in ble_server.c).
     const { bluetooth, writes } = makeFakeBleStack();
     vi.stubGlobal('navigator', { bluetooth });
 
@@ -173,7 +188,9 @@ describe('BLETransport auth handshake', () => {
     await transport.connect();
 
     expect(transport.connected).toBe(true);
-    expect(writes.length).toBe(0);
+    const text = writesAsText(writes);
+    expect(text.startsWith('{')).toBe(true);
+    expect(text).toContain('"id":0'); // real RPC ids start at 1: the reply routes nowhere
   });
 
   it('routes a normal RPC response correctly after a successful handshake', async () => {
@@ -213,9 +230,11 @@ describe('BLETransport auth handshake', () => {
     const b = transport.sendRPC('bramble.getStatus', { filler: 'b'.repeat(80) }, 2000).catch(() => {});
     await vi.waitFor(() => {
       const text = writesAsText(writes);
-      // Wait for COMPLETED lines: a trailing partial line would parse-fail below.
+      // Wait for COMPLETED lines: a trailing partial line would parse-fail
+      // below. Three lines: the no-token connect()'s encryption probe plus
+      // the two RPCs under test.
       expect(text.endsWith('\n')).toBe(true);
-      expect(text.split('\n').filter(l => l.length > 0)).toHaveLength(2);
+      expect(text.split('\n').filter(l => l.length > 0)).toHaveLength(3);
     });
 
     // Every reassembled line must be intact JSON: interleaved chunks would
@@ -229,6 +248,172 @@ describe('BLETransport auth handshake', () => {
     emitLine('{"jsonrpc":"2.0","id":2,"result":{}}\n');
     await Promise.all([a, b]);
   });
+});
+
+describe('BLETransport first-time pairing', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('keeps retrying the token write while the OS pairing prompt is up, on one link attempt', async () => {
+    // Fail-fast stacks (BlueZ) reject the write with a security error while
+    // the user is still typing the passkey. The old code let the 5s
+    // handshake timer abort the whole connect mid-pairing and then blind-
+    // retried the link, producing a second prompt and feeding the node's
+    // anti-MITM advertising backoff.
+    vi.useFakeTimers();
+    const { bluetooth, txChar, writes, emitLine, gattServer } = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth });
+
+    let paired = false;
+    txChar.writeValueWithResponse.mockImplementation(async (data: BufferSource) => {
+      if (!paired) throw new Error('GATT operation not authorized');
+      writes.push(new Uint8Array(data as ArrayBuffer));
+    });
+
+    const pairingStates: boolean[] = [];
+    const transport = new BLETransport('secret-token');
+    transport.onPairingStateChange(s => pairingStates.push(s));
+    const connectPromise = transport.connect();
+    connectPromise.catch(() => {});
+
+    await vi.advanceTimersByTimeAsync(0);
+    // 12s of typing: far beyond the old 5s handshake / 6s write timeouts.
+    await vi.advanceTimersByTimeAsync(12000);
+    expect(transport.connected).toBe(false);
+    paired = true;
+    await vi.advanceTimersByTimeAsync(1000); // next grace retry lands the token
+
+    expect(writesAsText(writes)).toBe('secret-token\n');
+    emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+    await connectPromise;
+
+    expect(transport.connected).toBe(true);
+    expect(gattServer.connect).toHaveBeenCalledTimes(1); // one link attempt = one OS prompt
+    expect(gattServer.disconnect).not.toHaveBeenCalled(); // never torn down mid-pairing
+    expect(pairingStates).toEqual([true, false]);
+  });
+
+  it('survives a token write that blocks past the old 6s timeout (Chrome pairing dialog)', async () => {
+    // Chrome resolves an insufficient-authentication write only after its own
+    // pairing dialog completes: the write promise simply blocks while the
+    // user types. The old writeWithTimeout fired at 6s and called
+    // gatt.disconnect(), killing SMP mid-entry.
+    vi.useFakeTimers();
+    const { bluetooth, txChar, writes, emitLine, gattServer } = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth });
+
+    let resolveWrite: (() => void) | null = null;
+    txChar.writeValueWithResponse.mockImplementationOnce((data: BufferSource) =>
+      new Promise<void>(r => {
+        resolveWrite = () => { writes.push(new Uint8Array(data as ArrayBuffer)); r(); };
+      })
+    );
+
+    const transport = new BLETransport('secret-token');
+    const connectPromise = transport.connect();
+    connectPromise.catch(() => {});
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(15000); // user still typing at 15s
+    expect(gattServer.disconnect).not.toHaveBeenCalled();
+    expect(transport.connected).toBe(false);
+
+    resolveWrite!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(writesAsText(writes)).toBe('secret-token\n');
+    emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+    await connectPromise;
+
+    expect(transport.connected).toBe(true);
+    expect(gattServer.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up after the pairing grace window with a pairing error, not a raw GATT string', async () => {
+    (BLETransport as unknown as { pairingGraceMs: number }).pairingGraceMs = 2000;
+    vi.useFakeTimers();
+    try {
+      const { bluetooth, txChar, gattServer } = makeFakeBleStack();
+      vi.stubGlobal('navigator', { bluetooth });
+      txChar.writeValueWithResponse.mockRejectedValue(new Error('GATT operation not authorized'));
+
+      const transport = new BLETransport('secret-token');
+      const connectPromise = transport.connect();
+      const rejection = expect(connectPromise).rejects.toThrow(/pairing did not complete/i);
+
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(2500); // grace expires on attempt 1
+      await vi.advanceTimersByTimeAsync(1600); // stale-session retry delay
+      await vi.advanceTimersByTimeAsync(500);  // attempt 2 fails fast (no second grace)
+      await rejection;
+
+      // The prompt is long dead by expiry, so one fresh-link retry is safe;
+      // more would re-prompt.
+      expect(gattServer.connect).toHaveBeenCalledTimes(2);
+    } finally {
+      (BLETransport as unknown as { pairingGraceMs: number }).pairingGraceMs = 60000;
+    }
+  });
+
+  it('aborts immediately when the user cancels the pairing dialog, with no link retry', async () => {
+    const { bluetooth, txChar, writes, gattServer } = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth });
+    txChar.writeValueWithResponse.mockRejectedValue(new Error('Authentication canceled.'));
+
+    const transport = new BLETransport('secret-token');
+    await expect(transport.connect()).rejects.toThrow(/cancel/i);
+
+    expect(gattServer.connect).toHaveBeenCalledTimes(1); // a retry would re-prompt
+    expect(writes.length).toBe(0);
+    // The abort must still tear the link down: at cancel time gatt.connect()
+    // and discovery already succeeded (neither needs encryption), and a
+    // standing link keeps the node from advertising, which is exactly the
+    // connected-but-invisible state the user escapes by power-cycling.
+    expect(gattServer.disconnect).toHaveBeenCalled();
+  });
+
+  it('ignores a dead session\'s stale write timer after auto-reconnect built a new session', async () => {
+    // A hung write's timeout used to call gatt.disconnect() unconditionally.
+    // If the link died and auto-reconnect already established a NEW healthy
+    // session by the time that stale timer fired, the timer killed the new
+    // session. The session-generation guard must make the stale timer a
+    // no-op while still letting same-session hung writes drop the link.
+    (BLETransport as unknown as { writeChunkTimeoutMs: number }).writeChunkTimeoutMs = 3000;
+    try {
+      const stack = makeFakeBleStack();
+      vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
+      const transport = new BLETransport('secret-token');
+      const p = transport.connect();
+      await vi.waitFor(() => expect(writesAsText(stack.writes)).toContain('secret-token\n'));
+      stack.emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+      await p;
+      const onReconnect = vi.fn();
+      transport.enableAutoReconnect({ onReconnect });
+
+      // Session 1: a write hangs (its 3s timer now pending), then the link
+      // drops and auto-reconnect rebuilds within ~2s: session 2 is healthy
+      // and _connected when the stale 3s timer fires.
+      stack.txChar.writeValueWithResponse.mockImplementationOnce(() => new Promise(() => {}));
+      transport.sendRPC('bramble.getStatus', {}, 10000).catch(() => {});
+      await new Promise(r => setTimeout(r, 10)); // let the doomed write start
+      stack.fireGattDisconnected();
+      await vi.waitFor(() => {
+        const tokenWrites = writesAsText(stack.writes).split('secret-token\n').length - 1;
+        expect(tokenWrites).toBe(2);
+      }, { timeout: 8000 });
+      stack.emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+      await vi.waitFor(() => expect(onReconnect).toHaveBeenCalledTimes(1));
+      const disconnectsAfterReconnect = stack.gattServer.disconnect.mock.calls.length;
+
+      // Ride past the stale timer's 3s mark: it must not touch the new session.
+      await new Promise(r => setTimeout(r, 3300));
+      expect(stack.gattServer.disconnect.mock.calls.length).toBe(disconnectsAfterReconnect);
+      expect(transport.connected).toBe(true);
+    } finally {
+      (BLETransport as unknown as { writeChunkTimeoutMs: number }).writeChunkTimeoutMs = 6000;
+    }
+  }, 20000);
 });
 
 describe('BLETransport auto-reconnect', () => {

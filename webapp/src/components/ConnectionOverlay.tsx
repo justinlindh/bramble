@@ -3,7 +3,6 @@ import { connect, refreshDevices } from '../store/actions';
 import { BLETransport } from '../transport/BLETransport';
 import { useStore } from '../store/index';
 import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
-import { isAuthError } from '../lib/errors';
 import { isEmbeddedShell, describePlatform } from '../utils/platform';
 import {
   describeTransports,
@@ -20,6 +19,11 @@ import { TransportUnavailableNotice } from './TransportUnavailableNotice';
 import styles from './ConnectionOverlay.module.css';
 
 const WIFI_IP_KEY = 'bramble_wifi_ip';
+
+// One wording for both Remember checkboxes (wifi and BLE): the two copies
+// drifted within a single change once already.
+const REMEMBER_HINT =
+  "Saves this node's auth token in this browser so you do not retype it; leave off on shared computers. The device stays in your list either way, and Forget removes it.";
 
 export function buildWifiUrl(ip: string, protocol: string, host: string): string {
   let url: string;
@@ -39,10 +43,10 @@ export function buildWifiUrl(ip: string, protocol: string, host: string): string
 // caller may know a fresher one than the book (mDNS discovery vs saved lastIp);
 // expectAddressHex keeps the DHCP guard: connect() drops the session if that
 // IP now answers as a different node.
-export function connectToSavedDevice(d: SavedDevice, ip: string): void {
+export function connectToSavedDevice(d: SavedDevice, ip: string): Promise<void> {
   const tok = getDeviceToken(d.address);
   const url = buildWifiUrl(ip, location.protocol, location.host);
-  connect('wifi', {
+  return connect('wifi', {
     url,
     token: tok || undefined,
     ip,
@@ -52,12 +56,15 @@ export function connectToSavedDevice(d: SavedDevice, ip: string): void {
   });
 }
 
-// Reconnect to a saved Bluetooth device with zero prompts: reuse the stored
-// token AND the stored BLE identity. pickDevice(expected) resolves silently
-// (desktop: main auto-selects the matching candidate; Android: direct connect
-// to the stored MAC) and falls back to the chooser when the identity is
-// missing or stale. expectAddressHex still verifies the node is the one the
-// user chose, dropping the session on a mismatch.
+// Reconnect to a saved Bluetooth device, reusing the stored token and the
+// stored BLE identity. How silent this is depends on the shell:
+// pickDevice(expected) resolves without a chooser only where the platform
+// provides a hook (Electron: main auto-selects the matching candidate;
+// Android polyfill: direct connect to the stored device id). A plain browser
+// has no such hook and still shows the system chooser. pickDevice also falls
+// back to the chooser when the identity is missing or stale, and
+// expectAddressHex still verifies the node is the one the user chose,
+// dropping the session on a mismatch.
 export async function connectToSavedBleDevice(d: SavedDevice): Promise<void> {
   const tok = getDeviceToken(d.address);
   let device: BluetoothDevice | undefined;
@@ -75,7 +82,10 @@ export async function connectToSavedBleDevice(d: SavedDevice): Promise<void> {
   });
 }
 
-export function connectingLabelFor(transportType: TransportType): string {
+export function connectingLabelFor(transportType: TransportType, pairingPending = false): string {
+  // While the OS passkey prompt is up, pairing is the gating step whatever
+  // the transport label would otherwise say: 'Scanning…' reads as a stall.
+  if (pairingPending) return 'Pairing…';
   if (transportType === 'ble') return 'Scanning…';
   if (transportType === 'serial') return 'Opening serial…';
   if (transportType === 'wifi') return 'Handshaking…';
@@ -136,9 +146,20 @@ export function ConnectionOverlay() {
   const connectionError = useStore(s => s.connectionError);
   const connectionCapabilities = useStore(s => s.connectionCapabilities);
   const capabilitiesLoaded = useStore(s => s.capabilitiesLoaded);
+  const pairingPending = useStore(s => s.pairingPending);
+  const attemptSource = useStore(s => s.attemptSource);
+  const setAttemptSource = useStore(s => s.setAttemptSource);
 
   const isConnecting = connectionState === 'connecting';
-  const authError = isAuthError(connectionError);
+  // Structured flag from the store, classified from the raw error at the
+  // connect() boundary: regexing the friendly display text here forced every
+  // ERROR_MAP entry to avoid substrings like 'auth'.
+  const authError = useStore(s => s.connectionErrorIsAuth);
+
+  // Address of the row whose connect is in flight, for its busy spinner.
+  // (Attempt attribution lives in the store as attemptSource: the overlay
+  // can unmount mid-attempt, so component state would forget it.)
+  const [rowBusyAddress, setRowBusyAddress] = useState<string | null>(null);
 
   useEffect(() => {
     refreshDevices();
@@ -154,7 +175,11 @@ export function ConnectionOverlay() {
     const saved = getDeviceToken(lastBle.address);
     setBleToken(prev => (prev ? prev : saved));
     setBleName(prev => (prev ? prev : lastBle.name));
-    if (saved) setBleRemember(true);
+    // Reflect the entry's remember flag, not mere token presence: a token
+    // saved with Remember off lives in sessionStorage, and pre-checking the
+    // box for it would promote it to localStorage on the next unnoticed
+    // Connect (the pick and row paths already honor the flag).
+    if (saved) setBleRemember(lastBle.remember);
   }, [devices]);
 
   const [bleDevice, setBleDevice] = useState<BluetoothDevice | null>(null);
@@ -165,14 +190,18 @@ export function ConnectionOverlay() {
     try {
       const device = await BLETransport.pickDevice();
       setBleDevice(device);
-      // Prefill token/name when this BLE identity is already in the book.
+      // The picked device OWNS the fields from here: a known identity loads
+      // its book state over whatever was typed, and an unknown one clears
+      // them. The old sticky prefill silently kept the previous node's token
+      // (which then auth-failed looking like a pairing problem) and could
+      // label node B with node A's name.
       const known = devices.find(d => d.bleDeviceId === device.id || (device.name && d.bleDeviceName === device.name));
       if (known) {
-        const saved = getDeviceToken(known.address);
-        if (saved) { setBleToken(saved); setBleRemember(true); }
-        setBleName(prev => (prev ? prev : known.name));
-      } else if (device.name) {
-        setBleName(prev => (prev ? prev : device.name!));
+        prefillBleFromBook(known);
+      } else {
+        setBleToken('');
+        setBleRemember(false);
+        setBleName(device.name ?? '');
       }
     } catch (e) {
       const msg = (e as Error)?.message ?? '';
@@ -182,6 +211,7 @@ export function ConnectionOverlay() {
   };
 
   const handleConnect = () => {
+    setAttemptSource('form');
     if (transportType === 'wifi') {
       const ip = wifiIp.trim();
       const token = wifiToken.trim();
@@ -241,9 +271,99 @@ export function ConnectionOverlay() {
     setTransportType(t);
   };
 
+  // Book-prefill helpers: the remember rule (a token AND the entry's flag)
+  // is a policy the sticky-prefill bug lived in, so it is written once and
+  // shared by the pick path and the row path.
+  const prefillBleFromBook = (d: SavedDevice) => {
+    const tok = getDeviceToken(d.address);
+    setBleToken(tok);
+    setBleRemember(!!tok && d.remember);
+    setBleName(d.name);
+  };
+  const prefillWifiFromBook = (d: SavedDevice) => {
+    const tok = getDeviceToken(d.address);
+    setWifiIp(d.lastIp);
+    setWifiToken(tok);
+    setWifiRemember(!!tok && d.remember);
+    setWifiName(d.name);
+  };
+
+  // The shared attempt scaffold for row connects: attribution, busy row,
+  // guaranteed busy-clear. Kept in one place so the invariant cannot drift
+  // between the three transport branches.
+  const runRowAttempt = async (d: SavedDevice, go: () => Promise<void>) => {
+    setAttemptSource('row');
+    setRowBusyAddress(d.address);
+    try { await go(); } finally { setRowBusyAddress(null); }
+  };
+
+  // A saved-device row drives the form: select the transport tab, prefill
+  // the fields from the book (so a failure leaves the RIGHT device's values
+  // on screen for editing), then connect where an address is known. The
+  // wifi-without-lastIp and serial rows used to be silent dead clicks.
+  const handleRowConnect = async (d: SavedDevice) => {
+    setUserPicked(true);
+    if (d.transport === 'ble') {
+      setTransportType('ble');
+      prefillBleFromBook(d);
+      await runRowAttempt(d, () => connectToSavedBleDevice(d));
+    } else if (d.transport === 'wifi') {
+      setTransportType('wifi');
+      prefillWifiFromBook(d);
+      // No saved address means nothing to dial: leave the prefilled form for
+      // the user to complete, and focus the empty field as the visible cue
+      // (the form sits below the list, so a silent return reads as a dead
+      // click). Attribution stays untouched here: no attempt ran, and
+      // claiming 'row' would pin a leftover form error on a row that did
+      // nothing.
+      if (!d.lastIp) {
+        setTimeout(() => document.getElementById('wifi-ip')?.focus(), 0);
+        return;
+      }
+      await runRowAttempt(d, () => connectToSavedDevice(d, d.lastIp));
+    } else {
+      // Serial: the browser's port picker appearing next is correct behavior.
+      // expectAddressHex guards identity: ports are indistinguishable in the
+      // picker, and without it a wrong pick would create a book entry for
+      // another node carrying this row's name.
+      setTransportType('serial');
+      await runRowAttempt(d, () => connect('serial', { name: d.name, expectAddressHex: d.address }));
+    }
+  };
+
+  // The BLE hint carries the pairing-code warning STATICALLY on purpose:
+  // Chrome blocks the connect inside its own pairing dialog with no signal
+  // the app can detect, so for Chrome users this copy is the only warning
+  // that a code may appear on the node. The dynamic banner below only covers
+  // stacks that reject writes while the prompt is up.
+  // Fail-fast stacks (BlueZ) reject writes while the OS passkey prompt is
+  // up, which the transport reports as pairingPending: point the user at the
+  // prompt instead of looking hung. Rendered next to whichever surface
+  // started the attempt (row slot or bottom slot), same as errors.
+  const pairingBanner = isConnecting && pairingPending ? (
+    <div className={styles.pairingBanner} role="alert">
+      <strong>Your node is showing a pairing code.</strong>{' '}
+      Enter that code in the browser prompt to finish connecting.
+    </div>
+  ) : null;
+
+  // One feedback block (pairing banner + error), rendered in whichever slot
+  // matches the surface that started the attempt: next to the rows or under
+  // the form. A single definition so the two slots cannot drift.
+  const attemptFeedback = (
+    <>
+      {pairingBanner}
+      {connectionError && (
+        <div className={styles.error}>
+          <span><IconWarning size={14} /> {connectionError}</span>
+        </div>
+      )}
+    </>
+  );
+
   const hints: Record<TransportType, string> = {
     serial: 'Connect your Bramble node via USB cable, then click Connect.',
-    ble: 'Enable Bluetooth on your device, then click Connect to scan.',
+    ble: 'Enable Bluetooth on your device, then click Connect to scan. First-time connections may show a pairing code on the node: type it into the browser prompt to finish.',
     websocket: 'Connects to the local mock node for development and demos.',
     wifi: 'The node must be on the same network (Station mode), or connect to its hotspot first (AP mode).',
   };
@@ -262,7 +382,18 @@ export function ConnectionOverlay() {
           <span className={styles.runtimeBadge} title={`Runtime context: ${runtimeBadge}`}>{runtimeBadge}</span>
         </div>
 
-        <DeviceList />
+        <DeviceList
+          onConnect={handleRowConnect}
+          busyAddress={rowBusyAddress}
+          disabled={isConnecting}
+        />
+
+        {/* Row-initiated feedback renders here, next to the row that caused
+            it: the bottom slot is a screenful below the list, off-screen on
+            phones. That applies to the pairing banner too, since a saved-row
+            BLE reconnect can still need re-pairing (OS bond removed, new
+            browser profile) and its spinner is up here. */}
+        {attemptSource === 'row' && attemptFeedback}
 
         {devices.length > 0 && (
           <h3 className={styles.sectionHeading}>Add a device</h3>
@@ -386,9 +517,7 @@ export function ConnectionOverlay() {
                 />
                 <span>Remember this device</span>
               </label>
-              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>
-                Stores the token in this browser so you do not retype it; leave off on shared devices.
-              </span>
+              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>{REMEMBER_HINT}</span>
             </div>
           </div>
         )}
@@ -465,20 +594,14 @@ export function ConnectionOverlay() {
                 />
                 <span>Remember this device</span>
               </label>
-              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>
-                Stores the token in this browser; leave off on shared computers.
-              </span>
+              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>{REMEMBER_HINT}</span>
             </div>
           </div>
         )}
 
         {selectedUnavailable && <TransportUnavailableNotice info={selectedUnavailable} />}
 
-        {connectionError && (
-          <div className={styles.error}>
-            <span><IconWarning size={14} /> {connectionError}</span>
-          </div>
-        )}
+        {attemptSource === 'form' && attemptFeedback}
 
         {!selectedUnavailable && (
           <>
@@ -489,8 +612,11 @@ export function ConnectionOverlay() {
             >
               {isConnecting ? (
                 <span className={styles.spinner}>
-                  {transportType === 'ble' && <span className={styles.spinnerIcon} aria-label="Scanning in progress" />}
-                  {connectingLabelFor(transportType)}
+                  {/* aria-hidden: the adjacent label announces the state, and
+                      a fixed 'Scanning' label here contradicted it the moment
+                      it flipped to Pairing…. */}
+                  {transportType === 'ble' && <span className={styles.spinnerIcon} aria-hidden="true" />}
+                  {connectingLabelFor(transportType, pairingPending)}
                 </span>
               ) : (
                 'Connect'

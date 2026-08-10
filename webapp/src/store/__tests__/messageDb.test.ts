@@ -1,13 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { messageDb } from '../messageDb';
-import { conversationIdForMessage } from '../index';
 import type { Message } from '../../types/bramble';
 
-// These tests pin the invariant that the persisted `by-conversation` index is
-// keyed through the store's single classifier (conversationIdForMessage), not a
-// second hand-rolled copy. Before this was consolidated, messageDb derived DM
-// buckets from a local self-address comparison that could disagree with the
-// store the UI actually renders.
+// messageDb is a flat, id-keyed per-node log. It does not persist conversation
+// buckets: the store re-derives those in memory on load. These tests pin the
+// surviving contract: messages round-trip, are read back in timestamp order,
+// update in place, and clear.
 
 function msg(over: Partial<Message>): Message {
   return {
@@ -23,47 +21,93 @@ function msg(over: Partial<Message>): Message {
   };
 }
 
-describe('messageDb conversation bucketing', () => {
+describe('messageDb persistence', () => {
   beforeEach(async () => {
     await messageDb.open('11111111');
     await messageDb.clearAll();
   });
 
-  it('persists each message under the store classifier bucket', async () => {
-    const incomingDm = msg({ direction: 'incoming', from: 0xa1b2c3d4, to: 0x11111111 });
-    const channel = msg({ direction: 'incoming', from: 0xa1b2c3d4, to: 0x11111111, channelIndex: 2 });
-    const broadcast = msg({ direction: 'incoming', from: 0xa1b2c3d4, to: 0xffffffff });
+  it('round-trips saved messages in timestamp order', async () => {
+    const a = msg({ timestampMs: 3000 });
+    const b = msg({ timestampMs: 1000 });
+    const c = msg({ timestampMs: 2000 });
+    await messageDb.saveMessages([a, b, c]);
 
-    await messageDb.saveMessages([incomingDm, channel, broadcast]);
-
-    for (const m of [incomingDm, channel, broadcast]) {
-      const bucket = conversationIdForMessage(m);
-      const got = await messageDb.getMessages(bucket);
-      expect(got.map(x => x.id)).toContain(m.id);
-    }
+    const got = await messageDb.getMessages();
+    // by-timestamp index yields ascending order regardless of insert order.
+    expect(got.map(m => m.timestampMs)).toEqual([1000, 2000, 3000]);
+    expect(got.map(m => m.id).sort()).toEqual([a.id, b.id, c.id].sort());
   });
 
-  it('keys an outgoing DM off the destination even when `from` is the 0-means-self sentinel', async () => {
-    // A local self-address comparison (from === selfAddr) would file this under
-    // dm:0 because `from` is 0; the store's direction-based rule files it under
-    // the peer. The persisted index must match the store.
-    const outgoing = msg({ direction: 'outgoing', from: 0, to: 0xa1b2c3d4 });
-    expect(conversationIdForMessage(outgoing)).toBe('dm:2712847316');
+  it('does not leak a persisted conversationId onto returned messages', async () => {
+    const m = msg({ direction: 'outgoing', from: 0, to: 0xa1b2c3d4 });
+    await messageDb.saveMessage(m);
 
-    await messageDb.saveMessage(outgoing);
-
-    const inPeerBucket = await messageDb.getMessages('dm:2712847316');
-    expect(inPeerBucket.map(x => x.id)).toContain(outgoing.id);
-    const inZeroBucket = await messageDb.getMessages('dm:0');
-    expect(inZeroBucket).toHaveLength(0);
+    const [got] = await messageDb.getMessages();
+    expect(got).not.toHaveProperty('conversationId');
   });
 
-  it('round-trips a filtered bucket without leaking other conversations', async () => {
-    const a = msg({ direction: 'incoming', from: 0xaaaa, to: 0x11111111 });
-    const b = msg({ direction: 'incoming', from: 0xbbbb, to: 0x11111111 });
-    await messageDb.saveMessages([a, b]);
+  it('updates a stored message status in place', async () => {
+    const m = msg({ status: 'sending' });
+    await messageDb.saveMessage(m);
 
-    const onlyA = await messageDb.getMessages(conversationIdForMessage(a));
-    expect(onlyA.map(x => x.id)).toEqual([a.id]);
+    await messageDb.updateMessageStatus(m.id, 'delivered', [{ addr: 0x2222, rssi: -80 }]);
+
+    const [got] = await messageDb.getMessages();
+    expect(got.status).toBe('delivered');
+    expect(got.relayPath).toEqual([{ addr: 0x2222, rssi: -80 }]);
+  });
+
+  it('clears the log', async () => {
+    await messageDb.saveMessages([msg({}), msg({})]);
+    await messageDb.clearAll();
+    expect(await messageDb.getMessages()).toHaveLength(0);
+  });
+
+  // Pre-build a v2 database (the old schema: a by-conversation index and a
+  // denormalized conversationId column) and confirm the v3 open upgrades it in
+  // place: the dead index is dropped, existing rows survive, and the stale
+  // conversationId does not leak back out.
+  it('upgrades a legacy v2 database by dropping the dead by-conversation index', async () => {
+    const addr = 'abcd0002';
+    const dbName = `bramble-messages-${addr}`;
+    const legacyId = 'legacy-row';
+
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open(dbName, 2);
+      req.onupgradeneeded = () => {
+        const store = req.result.createObjectStore('messages', { keyPath: 'id' });
+        store.createIndex('by-conversation', 'conversationId', { unique: false });
+        store.createIndex('by-timestamp', 'timestampMs', { unique: false });
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction('messages', 'readwrite');
+        tx.objectStore('messages').put({ ...msg({ id: legacyId }), conversationId: 'dm:deadbeef-cafe' });
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+      req.onerror = () => reject(req.error);
+    });
+
+    // The v3 open must run the upgrade without error and keep the row.
+    await messageDb.open(addr);
+    const got = await messageDb.getMessages();
+    expect(got.map(m => m.id)).toContain(legacyId);
+    expect(got.find(m => m.id === legacyId)).not.toHaveProperty('conversationId');
+
+    // The dead index is gone from the upgraded schema.
+    const indexNames = await new Promise<string[]>((resolve, reject) => {
+      const req = indexedDB.open(dbName);
+      req.onsuccess = () => {
+        const db = req.result;
+        const names = Array.from(db.transaction('messages', 'readonly').objectStore('messages').indexNames);
+        db.close();
+        resolve(names);
+      };
+      req.onerror = () => reject(req.error);
+    });
+    expect(indexNames).toContain('by-timestamp');
+    expect(indexNames).not.toContain('by-conversation');
   });
 });
