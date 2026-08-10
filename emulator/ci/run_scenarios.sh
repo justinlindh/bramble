@@ -636,6 +636,14 @@ location_suite() {
 # of a wide margin for CPU-starvation slack. A genuine regression (flush never
 # fires, or the sticky-park guard breaks) simply never produces both lines and
 # the wait times out.
+#
+# NEGATIVE CONTROL (run by hand, not in CI, so the gate stays one run): the
+# same scenario with the parking step disabled and everything else identical
+# must NOT produce either marker. Verified 2026-08-09 at 86c07401: both DMs
+# were sent and neither was ever received, no "[MSG from ...]" line appeared
+# at all, and final_metrics reported delivered 0. So the delivery in the
+# positive run is attributable to the park plus the rejoin-edge flush and to
+# nothing else, rather than to a send that would have succeeded anyway.
 parked_suite() {
     echo "[5] emu-parked-delivery"
     local budget_s="${EMU_PARKED_BUDGET_S:-900}"
