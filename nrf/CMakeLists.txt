@@ -224,6 +224,7 @@ add_library(bramble_core STATIC
   ${BRAMBLE_COMPONENTS}/ota/ota_version.c
   ${BRAMBLE_COMPONENTS}/ota/ota_rollback_policy.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_task.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main/parked_retry.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_beacon.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_persist.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../main/mesh_dm.c
