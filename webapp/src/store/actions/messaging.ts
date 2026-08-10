@@ -806,7 +806,6 @@ export async function sendProbe(): Promise<void> {
     responses: [],
     complete: false,
   });
-  store.setProbeCollecting(true);
 
   /* Firmware emits bramble.onProbeComplete once its collection window
    * elapses (mesh_task.c), and handleProbeComplete finalizes on it. This
@@ -818,9 +817,8 @@ export async function sendProbe(): Promise<void> {
     const cur = s.probeResult;
     if (!cur) return;
     if (cur.probeId !== probeId) return;      /* newer probe started */
-    if (!s.probeCollecting || cur.complete) return;
+    if (cur.complete) return;
     s.setProbeResult({ ...cur, complete: true });
-    s.setProbeCollecting(false);
   }, Math.max(1, ackWindow) * 1000 + 150);
 }
 
@@ -923,7 +921,6 @@ export function handleProbeComplete(params: unknown): void {
   }
 
   store.setProbeResult({ ...prev, responses, complete: true });
-  store.setProbeCollecting(false);
 }
 
 // Clears every module-level correlation singleton (the packet/broadcast id

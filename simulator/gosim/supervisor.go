@@ -125,7 +125,7 @@ func (s *Supervisor) run() {
 			nodeLabel := fmt.Sprintf("%s-%d", label, i)
 			nodeDir := filepath.Join(s.baseDir, nodeLabel)
 			_ = os.MkdirAll(nodeDir, 0o755)
-			slot := s.broker.reserveSlot(x, y, nodeLabel, nodeDir)
+			slot := s.broker.reserveSlot(x, y, nodeLabel)
 
 			p := &superProc{
 				sup:      s,
@@ -143,6 +143,15 @@ func (s *Supervisor) run() {
 			}
 			s.procs = append(s.procs, p)
 			s.mu.Unlock()
+
+			// Drop any attach event that is not this instance's: a restart of
+			// an earlier node (or a leftover from a previous scenario) would
+			// otherwise satisfy the wait below instantly, letting two node
+			// processes race to bind slots. Slot binding is FIFO, so that race
+			// permutes positions and the console tagging that reads the slot's
+			// bound id, which surfaces one node's log lines under another
+			// node's name.
+			s.broker.drainAttach()
 
 			s.wg.Add(1)
 			go p.supervise()

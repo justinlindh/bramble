@@ -9,9 +9,9 @@
 # IDF-linux esp_timer gap.
 idf_component_register(
     SRCS "../periph_null.c" "../esp_timer_posix.c" "../emu_flash_persist.c"
-         "../emu_provision.c" "../emu_autosend.c"
+         "../emu_provision.c" "../emu_autosend.c" "../emu_control.c"
     REQUIRES wifi ota esp_timer freertos esp_system esp_partition network_key
-             location nvs_keys nvs_flash msg_store
+             location nvs_keys nvs_flash msg_store emu_link
 )
 
 # The emulator node runs with the firmware's REAL task priorities, the same as

@@ -1,0 +1,63 @@
+{
+  "name": "emu-playground",
+  "description": "The playground fleet: three real firmware pagers (ALPHA, BRAVO, CHARLIE) in a line on one ether, and the ONLY emulator scenario that boots them UNPROVISIONED on purpose. Every other emu-* scenario hands each node EMU_NETWORK_KEY at boot because a headless assertion needs a meshing fleet immediately; here the fail-closed state is the first thing a newcomer is meant to see, so the fleet boots inert and an operator provisions it at runtime over the emu-link control path (emulator/node/emu_control.c), which is the same network_key_set_provisioned call the setNetworkKey RPC makes on real hardware. Geometry makes multi-hop a fact rather than a hope: the nodes sit at x=0, 100 and 200 with a 150-unit range, so ALPHA and BRAVO are neighbours, BRAVO and CHARLIE are neighbours, and ALPHA to CHARLIE (200 units) is out of range in both directions and can only be reached through BRAVO. A channel broadcast from ALPHA therefore has to be relayed to reach CHARLIE, and CHARLIE's delivery receipt has to come home the same way, which is what makes the relay path in the receipt real. Beacons run at 15s, matching emu-channel-delivery: a shorter cadence puts most of the single-channel ether's capacity into beacons and starves the traffic the tour asks the user to watch. duration_ms is 30 minutes because this scenario is driven by a person reading a guided tour, not by a script on a CI budget; emulator/ci/run_scenarios.sh caps its own headless run with EMU_SCENARIO_DURATION_MS. No node sets EMU_AUTO_SEND: every message in the playground is one the operator originated. What a keyed node sends unasked is the firmware's own control plane on its shipped cadence (beacons, and an identity attestation once it has a key and every 15 minutes after, mesh_beacon.c); the control path schedules nothing of its own, so a provisioned playground node matches a bench node keyed over the setNetworkKey RPC.",
+  "mode": "deterministic",
+  "duration_ms": 1800000,
+  "nodes": [],
+  "firmware_nodes": [
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [
+        [
+          0,
+          0
+        ]
+      ],
+      "label": "alpha",
+      "env": {
+        "EMU_NODE_NAME": "ALPHA",
+        "EMU_BEACON_INTERVAL_MS": "15000"
+      }
+    },
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [
+        [
+          100,
+          0
+        ]
+      ],
+      "label": "bravo",
+      "env": {
+        "EMU_NODE_NAME": "BRAVO",
+        "EMU_BEACON_INTERVAL_MS": "15000"
+      }
+    },
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [
+        [
+          200,
+          0
+        ]
+      ],
+      "label": "charlie",
+      "env": {
+        "EMU_NODE_NAME": "CHARLIE",
+        "EMU_BEACON_INTERVAL_MS": "15000"
+      }
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": []
+}

@@ -84,7 +84,6 @@ void metrics_update_active_nodes(metrics_state_t* metrics, int count);
  * model computed for this transmission) to the bucket for pkt_type. Called
  * once per actual (post-budget-gate) transmission, from sim_radio_broadcast. */
 void metrics_record_tx_airtime(metrics_state_t* metrics, uint8_t pkt_type, uint32_t airtime_us);
-double metrics_delivery_rate(const metrics_state_t* metrics);
 double metrics_avg_latency_ms(const metrics_state_t* metrics);
 /* ToA-weighted control-plane share: ToA(beacon+RREQ+RREP+RERR) / ToA(all).
  * This is the HONEST replacement for the packet-count ratio this function

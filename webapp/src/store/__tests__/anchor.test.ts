@@ -89,7 +89,6 @@ describe('anchor actions', () => {
     useStore.setState({
       connectionState: 'disconnected',
       connectionError: undefined,
-      transport: null,
       config: null,
       status: null,
       airtime: null,

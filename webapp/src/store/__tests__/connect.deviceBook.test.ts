@@ -85,7 +85,6 @@ beforeEach(() => {
   useStore.setState({
     connectionState: 'disconnected',
     connectionError: undefined,
-    transport: null,
     config: null,
     devices: [],
   } as any);
@@ -144,6 +143,5 @@ describe('connect() device-book guards', () => {
     expect(useStore.getState().connectionState).toBe('error');
     expect(listDevices()).toHaveLength(0);
     expect(getDeviceToken('0000A001')).toBe('');
-    expect(useStore.getState().transport).toBeNull();
   });
 });

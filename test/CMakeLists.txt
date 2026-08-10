@@ -529,6 +529,15 @@ target_include_directories(test_cad_timeout_policy PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
 )
 
+# Radio reinit retry policy: a failed recovery must be attempted again.
+add_executable(test_radio_reinit_policy
+    test_radio_reinit_policy.c
+    unity/unity.c
+)
+target_include_directories(test_radio_reinit_policy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+
 # Crypto tests
 add_executable(test_crypto
     test_crypto.c
@@ -1330,7 +1339,11 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1355,7 +1368,11 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1380,7 +1397,11 @@ add_executable(test_rpc_ble_security
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1405,7 +1426,11 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1430,7 +1455,11 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1480,6 +1509,7 @@ target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
 )
 target_compile_definitions(test_rpc_add_channel_contract PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1517,6 +1547,7 @@ target_include_directories(test_rpc_set_auth_token_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
 )
 target_compile_definitions(test_rpc_set_auth_token_contract PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1554,6 +1585,7 @@ target_include_directories(test_rpc_ble_security PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
 )
 target_compile_definitions(test_rpc_ble_security PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1580,7 +1612,11 @@ add_executable(test_rpc_anchor_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1619,6 +1655,7 @@ target_include_directories(test_rpc_anchor_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
 )
 target_compile_definitions(test_rpc_anchor_contract PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1656,6 +1693,7 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
 )
 # ESP_TIMER_CUSTOM_IMPL lets the peer-location cases drive the clock: whether a
 # persisted position reads as current depends on where "now" sits relative to
@@ -1697,6 +1735,7 @@ target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
 )
 target_compile_definitions(test_mesh_broadcast_delivery PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1892,7 +1931,11 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1932,6 +1975,7 @@ target_include_directories(test_rpc_methods_firmware PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
 )
 target_compile_definitions(test_rpc_methods_firmware PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -1959,7 +2003,11 @@ add_executable(test_rpc_scratch_isolation
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -1999,6 +2047,7 @@ target_include_directories(test_rpc_scratch_isolation PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
 )
 target_compile_definitions(test_rpc_scratch_isolation PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -2234,7 +2283,11 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    stubs/rollcall_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
@@ -2274,6 +2327,7 @@ target_include_directories(test_host_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
 )
 target_compile_definitions(test_host_rpc_methods PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=96
@@ -2654,3 +2708,96 @@ target_include_directories(test_parked_retry PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/include
 )
+
+# Attested roll-call core (components/rollcall): wire codecs, the canonical
+# signed message, the response stagger, the round schedule, the initiation
+# rate limit, and the ledger. Links the host crypto backend because the
+# signature binding is part of the primitive's contract, not an integration
+# detail: the test signs with one identity and verifies with another's view
+# of it, which is what proves a network-key insider cannot answer on a
+# victim's behalf.
+add_executable(test_rollcall
+    test_rollcall.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_rollcall PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_rollcall ssl crypto)
+
+# Roll-call RPC surface: bramble.startRollCall / bramble.getRollCall, driven
+# through the real rpc_methods.c and the real components/rollcall ledger (the
+# firmware entry points behind them are the driveable stubs in
+# stubs/rpc_methods_link_stubs.c, since a ledger needs a radio and an identity
+# store to fill itself). Same firmware-link harness as the other RPC contract
+# tests.
+add_executable(test_rpc_rollcall
+    test_rpc_rollcall.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    stubs/cJSON.c
+    stubs/rpc_methods_link_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_feed.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps_pref.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/gnss_status.c
+    stubs/rollcall_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/rollcall.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/topology_export.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/ble_pairing_policy.c
+)
+target_include_directories(test_rpc_rollcall PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rollcall/include
+)
+target_compile_definitions(test_rpc_rollcall PRIVATE
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=96
+)
+target_compile_options(test_rpc_rollcall PRIVATE
+    -Wno-error=unused-parameter
+)
+target_link_libraries(test_rpc_rollcall m ssl crypto)

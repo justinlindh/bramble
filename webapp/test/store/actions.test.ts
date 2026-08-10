@@ -22,7 +22,6 @@ describe('Zustand store: message state transitions', () => {
     useStore.setState({
       connectionState: 'disconnected',
       connectionError: undefined,
-      transport: null,
       config: null,
       status: null,
       airtime: null,

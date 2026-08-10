@@ -10,11 +10,23 @@
 // - Reset: NRESET low 5ms, high, then 250ms for the chip firmware to boot.
 // - BUSY stuck three times consecutively => hard reset + needs_reinit latch
 //   (the same fail-abort contract as sx1262.c BUSY_STUCK_THRESHOLD).
+// - One command sequence at a time. Every entry point below holds s_bus_lock
+//   from before the BUSY wait until after NSS is released, which is the
+//   contract sx1262.c implements with g_spi_mutex (issue #82). Three tasks
+//   drive this HAL concurrently: mesh (LBT, transmit, start_rx, reconfigure,
+//   reinit), radio (IRQ status and the RX-done reads) and the BLE RPC task
+//   (radio_reconfigure), all at FreeRTOS priority 5 under a preemptive,
+//   time-sliced 1kHz tick, so they round-robin at arbitrary instruction
+//   boundaries. Unserialized, that splices one command's bytes into
+//   another's NSS assertion and, because nrfx SPIM in blocking mode never
+//   sets transfer_in_progress, BOTH callers still get NRFX_SUCCESS: a
+//   corrupted command reaches the chip and every layer above reports OK.
 #include "lr11xx_hal_nrf.h"
 
 #include <string.h>
 
 #include <FreeRTOS.h>
+#include <semphr.h>
 #include <task.h>
 
 #include <hal/nrf_gpio.h>
@@ -42,15 +54,36 @@ static bool s_spim_ready;
 static volatile bool s_needs_reinit;
 static uint8_t s_busy_stuck_count;
 
+/* Recursive so wait_busy_low()'s three-strikes escalation can hard-reset the
+ * chip from inside a sequence that already holds the lock, while a direct
+ * lr11xx_hal_nrf_hard_reset() from the radio layer's bring-up still gets the
+ * whole 255ms reset window to itself. Created before the radio task exists
+ * (lr11xx_hal_nrf_init runs inside radio_init on the mesh task), and the
+ * take/give helpers tolerate a NULL handle so a pre-init call degrades to the
+ * old unserialized behavior rather than faulting. */
+static SemaphoreHandle_t s_bus_lock;
+
+static void bus_lock(void) {
+    if (s_bus_lock)
+        xSemaphoreTakeRecursive(s_bus_lock, portMAX_DELAY);
+}
+
+static void bus_unlock(void) {
+    if (s_bus_lock)
+        xSemaphoreGiveRecursive(s_bus_lock);
+}
+
 static void nss_assert(void) { nrf_gpio_pin_clear(BOARD_PIN_LORA_NSS); }
 static void nss_release(void) { nrf_gpio_pin_set(BOARD_PIN_LORA_NSS); }
 
 void lr11xx_hal_nrf_hard_reset(void) {
+    bus_lock();
     nrf_gpio_pin_clear(BOARD_PIN_LORA_RESET);
     vTaskDelay(pdMS_TO_TICKS(5));
     nrf_gpio_pin_set(BOARD_PIN_LORA_RESET);
     vTaskDelay(pdMS_TO_TICKS(LR_RESET_BOOT_MS));
     s_ctx.radio_sleeping = false;
+    bus_unlock();
 }
 
 bool lr11xx_hal_nrf_needs_reinit(void) { return s_needs_reinit; }
@@ -114,7 +147,9 @@ lr11xx_hal_status_t lr11xx_hal_write(const void* context, const uint8_t* command
                                      const uint16_t command_length, const uint8_t* data,
                                      const uint16_t data_length) {
     lr11xx_hal_ctx_t* ctx = (lr11xx_hal_ctx_t*)(uintptr_t)context;
+    bus_lock();
     if (!ensure_ready(ctx)) {
+        bus_unlock();
         return LR11XX_HAL_STATUS_ERROR;
     }
     nss_assert();
@@ -129,6 +164,7 @@ lr11xx_hal_status_t lr11xx_hal_write(const void* context, const uint8_t* command
         ctx->radio_sleeping = true;
         vTaskDelay(1); // let the chip actually enter sleep
     }
+    bus_unlock();
     return ok ? LR11XX_HAL_STATUS_OK : LR11XX_HAL_STATUS_ERROR;
 }
 
@@ -136,7 +172,13 @@ lr11xx_hal_status_t lr11xx_hal_read(const void* context, const uint8_t* command,
                                     const uint16_t command_length, uint8_t* data,
                                     const uint16_t data_length) {
     lr11xx_hal_ctx_t* ctx = (lr11xx_hal_ctx_t*)(uintptr_t)context;
+    // Both phases under one lock: the chip buffers this command's response
+    // and hands it back on the next NSS assertion, so another task's command
+    // slipping between them would be answered with, and would clobber, this
+    // read's payload.
+    bus_lock();
     if (!ensure_ready(ctx)) {
+        bus_unlock();
         return LR11XX_HAL_STATUS_ERROR;
     }
     // Phase 1: send the command.
@@ -144,12 +186,14 @@ lr11xx_hal_status_t lr11xx_hal_read(const void* context, const uint8_t* command,
     bool ok = spim_xfer(command, NULL, command_length);
     nss_release();
     if (!ok) {
+        bus_unlock();
         return LR11XX_HAL_STATUS_ERROR;
     }
     // Phase 2: after BUSY drops, clock out 1 dummy byte then the payload,
     // driving NOPs on MOSI throughout (RX-only transfers shift out 0x00 on
     // nrfx SPIM via the ORC character, configured to 0x00 at init).
     if (!wait_busy_low()) {
+        bus_unlock();
         return LR11XX_HAL_STATUS_ERROR;
     }
     nss_assert();
@@ -159,18 +203,22 @@ lr11xx_hal_status_t lr11xx_hal_read(const void* context, const uint8_t* command,
         ok = spim_xfer(NULL, data, data_length);
     }
     nss_release();
+    bus_unlock();
     return ok ? LR11XX_HAL_STATUS_OK : LR11XX_HAL_STATUS_ERROR;
 }
 
 lr11xx_hal_status_t lr11xx_hal_direct_read(const void* context, uint8_t* data,
                                            const uint16_t data_length) {
     lr11xx_hal_ctx_t* ctx = (lr11xx_hal_ctx_t*)(uintptr_t)context;
+    bus_lock();
     if (!ensure_ready(ctx)) {
+        bus_unlock();
         return LR11XX_HAL_STATUS_ERROR;
     }
     nss_assert();
     bool ok = spim_xfer(NULL, data, data_length);
     nss_release();
+    bus_unlock();
     return ok ? LR11XX_HAL_STATUS_OK : LR11XX_HAL_STATUS_ERROR;
 }
 
@@ -182,7 +230,10 @@ lr11xx_hal_status_t lr11xx_hal_reset(const void* context) {
 
 lr11xx_hal_status_t lr11xx_hal_wakeup(const void* context) {
     lr11xx_hal_ctx_t* ctx = (lr11xx_hal_ctx_t*)(uintptr_t)context;
-    return ensure_ready(ctx) ? LR11XX_HAL_STATUS_OK : LR11XX_HAL_STATUS_ERROR;
+    bus_lock();
+    bool ready = ensure_ready(ctx);
+    bus_unlock();
+    return ready ? LR11XX_HAL_STATUS_OK : LR11XX_HAL_STATUS_ERROR;
 }
 
 lr11xx_hal_status_t lr11xx_hal_abort_blocking_cmd(const void* context) {
@@ -192,6 +243,13 @@ lr11xx_hal_status_t lr11xx_hal_abort_blocking_cmd(const void* context) {
 }
 
 const void* lr11xx_hal_nrf_init(void) {
+    if (!s_bus_lock) {
+        s_bus_lock = xSemaphoreCreateRecursiveMutex();
+        if (!s_bus_lock) {
+            ESP_LOGE(TAG, "SPI bus mutex alloc failed");
+            return NULL;
+        }
+    }
     if (!s_spim_ready) {
         nrf_gpio_cfg_output(BOARD_PIN_LORA_NSS);
         nrf_gpio_pin_set(BOARD_PIN_LORA_NSS);

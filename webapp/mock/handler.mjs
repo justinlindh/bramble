@@ -106,6 +106,34 @@ const PEERS = {
 
 const PEER_ADDRS = Object.keys(PEERS).map(Number);
 
+// ─── Attested roll-call mock state ───────────────────────────────────────────
+// Constants mirror components/rollcall (ROLLCALL_MAX_ROUNDS, the 30s-doubled
+// round schedule plus the 45s collection tail, ROLLCALL_MIN_INTERVAL_MS,
+// ROLLCALL_TEXT_MAX and ROLLCALL_ANSWER_MAX_PER_HOUR), so the panel's
+// countdown and caps match what a real node would report.
+const ROLLCALL_ROUNDS_TOTAL = 3;
+const ROLLCALL_WINDOW_MS = 135_000;
+const ROLLCALL_MIN_INTERVAL_MS = 300_000;
+const ROLLCALL_TEXT_MAX = 48;
+const ROLLCALL_ANSWER_MAX_PER_HOUR = 12;
+// Who answers, when, and over which relay path. Fixed rather than random: the
+// docs/rollcall.md screenshot is captured from this mock and has to be
+// reproducible. Ranger (0xAABBCC05), the mobile presence-only node, is absent
+// on purpose so the ledger always has one member to report missing.
+const ROLLCALL_ANSWERS = [
+  { addr: 0xAABBCC01, atMs: 1_240, round: 1, path: [SELF_ADDR, 0xAABBCC01] },
+  { addr: 0xAABBCC02, atMs: 2_610, round: 1 },
+  { addr: 0xAABBCC04, atMs: 4_180, round: 1, path: [SELF_ADDR, 0xAABBCC01, 0xAABBCC04] },
+  { addr: 0xAABBCC03, atMs: 6_320, round: 1 },
+];
+let rollcall = null;
+let rollcallCounter = 0;
+
+// The expected set is only meaningful when it is anchor-certified, exactly as
+// on a real node: un-anchored, the ledger reports observed responders only and
+// names nobody missing.
+const rollcallExpected = () => (mockAnchorPub ? PEER_ADDRS : []);
+
 const BOOT_TIME = Date.now();
 
 // ─── Mutable state ──────────────────────────────────────────────────────────
@@ -631,6 +659,134 @@ export const handlers = {
     const idx = params?.index;
     for (const ch of channels) ch.isDefault = ch.index === idx;
     return { ok: true };
+  },
+
+  // ─── Attested roll-call ────────────────────────────────────────────────
+  //
+  // The ledger is DERIVED from elapsed time rather than accumulated in a
+  // timer, so a page reload mid-roll-call reads the same state the mock would
+  // have reported all along. The schedule below is fixed rather than random:
+  // the doc screenshot in docs/rollcall.md is captured from this mock, and a
+  // random ledger would make that image unreproducible.
+  //
+  // Ranger is the mesh's mobile presence-only node and never answers, so the
+  // ledger always has exactly one member to report missing: the whole point of
+  // the primitive is showing who did NOT answer.
+
+  'bramble.startRollCall'(params) {
+    const text = typeof params?.text === 'string' ? params.text : '';
+    if (text.length > ROLLCALL_TEXT_MAX) {
+      throw { code: -32602, message: `text over ${ROLLCALL_TEXT_MAX} bytes` };
+    }
+    const now = Date.now();
+    if (rollcall) {
+      const since = now - rollcall.startedAt;
+      if (since < ROLLCALL_WINDOW_MS) {
+        return {
+          ok: false,
+          reason: 'busy',
+          retry_after_ms: Math.max(ROLLCALL_WINDOW_MS - since, ROLLCALL_MIN_INTERVAL_MS - since),
+          min_interval_ms: ROLLCALL_MIN_INTERVAL_MS,
+        };
+      }
+      if (since < ROLLCALL_MIN_INTERVAL_MS) {
+        return {
+          ok: false,
+          reason: 'rate_limited',
+          retry_after_ms: ROLLCALL_MIN_INTERVAL_MS - since,
+          min_interval_ms: ROLLCALL_MIN_INTERVAL_MS,
+        };
+      }
+    }
+
+    rollcallCounter++;
+    rollcall = {
+      id: (0x00C0FFE0 + rollcallCounter) >>> 0,
+      startedAt: now,
+      text,
+    };
+
+    // The same events real firmware raises, so a client that subscribes sees
+    // the roll-call fill in rather than only discovering it by polling.
+    for (const a of ROLLCALL_ANSWERS) {
+      setTimeout(() => {
+        if (!rollcall || rollcall.startedAt !== now) return;
+        notify('bramble.onRollCallResponse', {
+          rollcall_id: hex8(rollcall.id).slice(2),
+          address: hex8(a.addr).slice(2),
+          round: a.round,
+          responded: ROLLCALL_ANSWERS.filter((x) => x.atMs <= a.atMs).length,
+          expected: rollcallExpected().length,
+        });
+      }, a.atMs);
+    }
+    setTimeout(() => {
+      if (!rollcall || rollcall.startedAt !== now) return;
+      notify('bramble.onRollCallComplete', {
+        rollcall_id: hex8(rollcall.id).slice(2),
+        responded: ROLLCALL_ANSWERS.length,
+        expected: rollcallExpected().length,
+        anchored: mockAnchorPub !== null,
+        rounds: ROLLCALL_ROUNDS_TOTAL,
+        unattested: 0,
+      });
+    }, ROLLCALL_WINDOW_MS);
+
+    return {
+      ok: true,
+      rollcall_id: hex8(rollcall.id).slice(2),
+      window_ms: ROLLCALL_WINDOW_MS,
+      rounds_total: ROLLCALL_ROUNDS_TOTAL,
+      expected: rollcallExpected().length,
+      anchored: mockAnchorPub !== null,
+    };
+  },
+
+  'bramble.getRollCall'(_params) {
+    const base = {
+      rounds_total: ROLLCALL_ROUNDS_TOTAL,
+      window_ms: ROLLCALL_WINDOW_MS,
+      min_interval_ms: ROLLCALL_MIN_INTERVAL_MS,
+      max_text_bytes: ROLLCALL_TEXT_MAX,
+      pending_dropped: 0,
+      answer_limited: 0,
+      answer_max_per_hour: ROLLCALL_ANSWER_MAX_PER_HOUR,
+    };
+    if (!rollcall) return { ...base, active: false };
+
+    const elapsed = Date.now() - rollcall.startedAt;
+    const expected = rollcallExpected();
+    const answered = ROLLCALL_ANSWERS.filter((a) => a.atMs <= elapsed);
+    const answeredAddrs = new Set(answered.map((a) => a.addr));
+    // Rounds go out at 0s, 30s and 90s, the firmware schedule (30s doubled
+    // per round already sent).
+    const roundsSent = elapsed >= 90_000 ? 3 : elapsed >= 30_000 ? 2 : 1;
+    const missing = expected.filter((addr) => !answeredAddrs.has(addr));
+
+    return {
+      ...base,
+      active: true,
+      rollcall_id: hex8(rollcall.id).slice(2),
+      open: elapsed < ROLLCALL_WINDOW_MS,
+      text: rollcall.text,
+      rounds_sent: roundsSent,
+      elapsed_ms: elapsed,
+      anchored: expected.length > 0,
+      expected: expected.length,
+      responded: answered.length,
+      unattested: 0,
+      overflow: 0,
+      late: 0,
+      missing_count: expected.length > 0 ? missing.length : 0,
+      missing: expected.length > 0 ? missing.map((a) => hex8(a).slice(2)) : [],
+      responders: answered.map((a) => ({
+        address: hex8(a.addr).slice(2),
+        responded: true,
+        at_ms: a.atMs,
+        round: a.round,
+        ...(a.path ? { hops: a.path.length, path: a.path.map((h) => hex8(h).slice(2)) } : {}),
+      })),
+    };
   },
 
   'bramble.sendProbe'(_params) {

@@ -135,6 +135,9 @@ Place JSON files in `scenarios/`. Supports:
 - **Deterministic:** Scripted events at specific timestamps
 - **Stochastic:** Seeded PRNG chaos events (reproducible)
 - **Anomaly detection:** Black hole, partition, route loop, excessive RREQ
+- **Explicit link graph:** a top-level `links` array of `{from, to, rssi, snr}`
+  puts the radio in link mode, where reachability comes from those entries
+  instead of node positions (the mesh digital twin below)
 
 See `scenarios/` for examples. Upload custom scenarios via the UI or `POST /api/scenarios/upload`.
 
@@ -202,6 +205,23 @@ Via the UI or WebSocket (`ws://host:port/ws`):
 
 All added/moved nodes are full protocol participants (beaconing, routing, forwarding).
 
+## Mesh digital twin
+
+`bramble-gosim twin` imports a real deployment's observed topology and reports
+what that mesh carries and where it is fragile:
+
+```bash
+./gosim/bramble-gosim twin node-a.json node-b.json node-c.json
+```
+
+Each input is one node's `bramble.exportTopology` result. The merged link graph
+becomes an ordinary scenario carrying a `links` block, which puts the radio into
+link mode: audibility and received power come from the imported observations
+rather than from node positions, and everything else (time-on-air, collisions,
+capture, half-duplex, listen-before-talk, the firmware's own protocol code) runs
+unchanged. Workflow, flags, a worked example, and the bounds on what a twin does
+and does not reproduce: [`../docs/digital-twin.md`](../docs/digital-twin.md).
+
 ## Design Docs
 
 - Simulator architecture: the "Architecture" section above, plus the inline
@@ -209,5 +229,6 @@ All added/moved nodes are full protocol participants (beaconing, routing, forwar
 - Component architecture: [`../docs/bramble-architecture.md`](../docs/bramble-architecture.md)
 - Protocol spec: [`../docs/bramble-protocol-spec.md`](../docs/bramble-protocol-spec.md)
 - Anomaly detection: [`../docs/bramble-anomaly-detection.md`](../docs/bramble-anomaly-detection.md)
+- Mesh digital twin: [`../docs/digital-twin.md`](../docs/digital-twin.md)
 - Emulator (real firmware binaries on this same ether):
   [`../emulator/README.md`](../emulator/README.md) and `../emulator/DESIGN.md`

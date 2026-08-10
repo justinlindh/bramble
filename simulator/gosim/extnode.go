@@ -83,6 +83,32 @@ type timeMsg struct {
 	EpochMs int64  `json:"epoch_ms"`
 }
 
+// provMsg / sendMsg: the emulator control path (emulator/node/emu_control.c).
+// prov provisions the control-plane network key at runtime through the same
+// component call the setNetworkKey RPC reaches; send originates one message
+// through the public mesh send API. Both exist so a person can drive an inert
+// fleet from the browser, rather than a scenario keying it up from the
+// environment at boot.
+type provMsg struct {
+	T   string `json:"t"`
+	Key string `json:"key"` // 64 hex chars (32 bytes)
+}
+
+type sendMsg struct {
+	T    string `json:"t"`
+	Text string `json:"text"`
+	To   string `json:"to,omitempty"` // 8 hex chars; empty = channel broadcast
+}
+
+// attestMsg asks a node to announce its identity now (the same
+// mesh_trigger_attestation the setEndorsement RPC calls). A peer pins an
+// identity only from an attestation, and a safety number is derived from a
+// pin, so this is what makes the verification flow reachable on demand
+// instead of only at the 15-minute periodic cadence.
+type attestMsg struct {
+	T string `json:"t"`
+}
+
 type nmeaMsg struct {
 	T        string `json:"t"`
 	Sentence string `json:"sentence"`
@@ -97,7 +123,6 @@ type nmeaMsg struct {
 type extSlot struct {
 	x, y      float32
 	label     string
-	nodeDir   string
 	nodeIndex int
 	addr      uint32
 	conn      *extConn
@@ -211,8 +236,8 @@ func (b *Broker) resetSlots() {
 // reserveSlot reserves a position in the ether for one external node and
 // returns its slot. The supervisor calls this before spawning each firmware
 // instance; tests call it before dialing a fake node.
-func (b *Broker) reserveSlot(x, y float32, label, nodeDir string) *extSlot {
-	slot := &extSlot{x: x, y: y, label: label, nodeDir: nodeDir, nodeIndex: -1}
+func (b *Broker) reserveSlot(x, y float32, label string) *extSlot {
+	slot := &extSlot{x: x, y: y, label: label, nodeIndex: -1}
 	b.mu.Lock()
 	b.slots = append(b.slots, slot)
 	b.mu.Unlock()
@@ -249,6 +274,39 @@ func (b *Broker) findByNode(node string) *extConn {
 	return nil
 }
 
+// drainAttach empties the attach channel.
+//
+// waitAttach (supervisor.go) blocks on this channel to spawn one node at a
+// time, so slots bind to instances in declaration order and every node lands
+// at its declared position. That only holds if the event it consumes is the
+// attach it is waiting for: the channel is buffered, and an attach from a
+// previous scenario or from a node restart otherwise sits in it and satisfies
+// the next wait instantly. Two node processes then race to bind slots FIFO,
+// which permutes positions AND the console tagging that reads the slot's bound
+// id, so a node's log lines surface under a different node's name.
+func (b *Broker) drainAttach() {
+	for {
+		select {
+		case <-b.attachCh:
+		default:
+			return
+		}
+	}
+}
+
+// allConns returns a snapshot of the live connections, so a caller can act on
+// every attached node (the playground provisions the whole fleet in one click)
+// without holding b.mu while it writes to each one.
+func (b *Broker) allConns() []*extConn {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]*extConn, 0, len(b.conns))
+	for c := range b.conns {
+		out = append(out, c)
+	}
+	return out
+}
+
 func (b *Broker) acceptLoop() {
 	for {
 		conn, err := b.ln.Accept()
@@ -264,7 +322,7 @@ func (b *Broker) acceptLoop() {
 		ec := &extConn{
 			broker: b,
 			conn:   conn,
-			send:   make(chan []byte, 256),
+			send:   make(chan []byte, nodeSendBuffer),
 			closed: make(chan struct{}),
 		}
 		b.mu.Lock()
@@ -289,6 +347,22 @@ func (b *Broker) bindSlot(ec *extConn) *extSlot {
 	b.slots = append(b.slots, s)
 	return s
 }
+
+// nodeSendBuffer is how many broker-to-node messages may queue for one node
+// before the broker starts dropping for it.
+//
+// This channel carries two very different kinds of traffic. Radio events (rx,
+// txdone, cadres) are frames, and dropping one under backpressure is a
+// defensible model of a radio that missed something. Control messages (btn,
+// prov, send, attest, nmea, time) are not frames: they are the operator acting
+// on the node, nothing retransmits them, and a dropped one simply never
+// happens, which reads as a button press that did nothing or a fleet that
+// refuses to take its key. The old 256 sat close enough to a real burst (three
+// firmware processes on a contended host, each fed every frame on the ether
+// plus a 1 Hz GNSS feed) that control messages were observed vanishing.
+// Sizing well past the burst keeps the drop path for a node that has genuinely
+// stopped reading, where the alternative is stalling the simulation loop.
+const nodeSendBuffer = 4096
 
 // writeLoop drains the send channel to the socket.
 func (ec *extConn) writeLoop() {
@@ -581,14 +655,23 @@ func (ec *extConn) handleCad() {
 
 // handleFB stores the latest framebuffer for this node and forwards it to UI
 // subscribers. The framebuffer bytes are opaque to the broker (the frontend
-// renders e-paper physics); only the latest frame per node is kept.
+// renders e-paper physics); only the latest frame per node is kept, which is
+// what a client connecting later is shown (Sim.SnapshotEvents) so a pager that
+// last painted a minute ago is not a blank rectangle in a fresh browser.
 func (ec *extConn) handleFB(msg *emuInbound) {
 	s := ec.broker.sim
-	s.emitJSON(map[string]any{
+	evt := map[string]any{
 		"type": "device_fb", "node": ec.label(), "addr": fmt.Sprintf("0x%08X", ec.addr),
 		"seq": msg.Seq, "kind": msg.Kind, "fb": msg.FB, "busy_ms": msg.BusyMs,
 		"w": msg.FBW, "h": msg.FBH,
-	})
+	}
+	data, err := json.Marshal(evt)
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+	s.recordDeviceFB(ec.label(), data)
+	s.emitRaw(data)
 }
 
 // handleInd forwards an indicator (LED / buzzer / vibra) state change to the UI.
@@ -664,6 +747,11 @@ func (ec *extConn) sendJSON(v any) {
 	case <-ec.closed:
 	case ec.send <- data:
 	default:
+		// Never silent: a dropped message here is invisible at both ends (the
+		// node simply never hears it), so a full buffer is reported rather
+		// than swallowed. See nodeSendBuffer for why it should not happen.
+		log.Printf("emu-link: dropped a message for %s: send buffer full (%d queued)",
+			ec.label(), cap(ec.send))
 	}
 }
 
@@ -671,6 +759,18 @@ func (ec *extConn) sendJSON(v any) {
 // The frontend and gateway (Task 9) drive these; a "reset" edge is how the UI
 // reboots a node (the firmware exits, the supervisor restarts it).
 func (ec *extConn) sendButton(id, edge string) { ec.sendJSON(btnMsg{T: "btn", ID: id, Edge: edge}) }
+
+// sendProvision hands the node a network key to provision at runtime.
+func (ec *extConn) sendProvision(key string) { ec.sendJSON(provMsg{T: "prov", Key: key}) }
+
+// sendMessage makes the node originate text: a DM when to names a peer
+// address, a channel broadcast when to is empty.
+func (ec *extConn) sendMessage(text, to string) {
+	ec.sendJSON(sendMsg{T: "send", Text: text, To: to})
+}
+
+// sendAttest asks the node to announce its identity now.
+func (ec *extConn) sendAttest() { ec.sendJSON(attestMsg{T: "attest"}) }
 
 // close tears the connection down once, dropping it from the broker registry
 // and the sim's external-node map, and marking its slot free for a reconnect.
@@ -785,9 +885,15 @@ func (s *Sim) channelBusyFor(addr uint32) bool {
 // emitConsole forwards one firmware console line to UI subscribers (and, in
 // headless mode, to stdout) tagged with the originating node.
 func (s *Sim) emitConsole(node, line string) {
-	s.emitJSON(map[string]any{
+	data, err := json.Marshal(map[string]any{
 		"type": "console", "node": node, "line": line,
 	})
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+	s.recordConsole(node, data)
+	s.emitRaw(data)
 }
 
 // resetEmulatorForReload tears down per-scenario emulator state at the start of
@@ -810,8 +916,12 @@ func (s *Sim) resetEmulatorForReload() {
 	s.emuPHYAdopted = false
 	s.emuPHYSF = 0
 	s.emuPHYBWHz = 0
+	// Cached frames belong to the scenario that produced them; a snapshot
+	// must never paint a fresh client with the previous fleet's screens.
+	s.forgetDeviceFBs()
 	if s.broker != nil {
 		s.broker.resetSlots()
+		s.broker.drainAttach()
 	}
 }
 

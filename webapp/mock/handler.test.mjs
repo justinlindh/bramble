@@ -190,6 +190,55 @@ describe('mock handler shapes', () => {
   });
 });
 
+describe('mock roll-call', () => {
+  it('reports observed responders only until the node is anchored', async () => {
+    const { handlers } = await load();
+    expect(handlers['bramble.getRollCall']({}).active).toBe(false);
+
+    expect(handlers['bramble.startRollCall']({ text: 'sound off' }).ok).toBe(true);
+    vi.advanceTimersByTime(7000);
+
+    const led = handlers['bramble.getRollCall']({});
+    expect(led.active).toBe(true);
+    expect(led.text).toBe('sound off');
+    expect(led.responded).toBe(4);
+    // Un-anchored: no authoritative expected set, so nobody can be missing.
+    expect(led.anchored).toBe(false);
+    expect(led.expected).toBe(0);
+    expect(led.missing).toEqual([]);
+  });
+
+  it('names the member that never answered once the node is anchored', async () => {
+    const { handlers } = await load();
+    handlers['bramble.setAnchor']({ anchor_pubkey: 'a0'.repeat(32) });
+    handlers['bramble.startRollCall']({ text: 'sound off' });
+    vi.advanceTimersByTime(7000);
+
+    const led = handlers['bramble.getRollCall']({});
+    expect(led.anchored).toBe(true);
+    expect(led.expected).toBe(5);
+    expect(led.responded).toBe(4);
+    expect(led.missing).toEqual(['AABBCC05']);
+    expect(led.responders[0]).toMatchObject({ address: 'AABBCC01', responded: true, round: 1 });
+  });
+
+  it('refuses a second roll-call while the first is still collecting', async () => {
+    const { handlers } = await load();
+    handlers['bramble.startRollCall']({});
+    vi.advanceTimersByTime(5000);
+
+    const refused = handlers['bramble.startRollCall']({});
+    expect(refused.ok).toBe(false);
+    expect(refused.reason).toBe('busy');
+    expect(refused.retry_after_ms).toBeGreaterThan(0);
+  });
+
+  it('rejects an operator payload over the announce cap', async () => {
+    const { handlers } = await load();
+    expect(() => handlers['bramble.startRollCall']({ text: 'x'.repeat(49) })).toThrow();
+  });
+});
+
 describe('mock dest normalization (issue #96, BUG-5)', () => {
   it('a DM to a stale-route peer can fail', async () => {
     const { handleConnection } = await load();

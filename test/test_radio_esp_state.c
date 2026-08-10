@@ -67,6 +67,15 @@ static void portYIELD_FROM_ISR(void) {}
 
 static TaskHandle_t xTaskGetCurrentTaskHandle(void) { return (TaskHandle_t)0xABCD; }
 
+/* A clock the reinit-retry cases can advance by hand. Defined before radio_esp.c
+ * pulls in esp_timer.h so the stub's extern branch is what the driver sees. */
+#define ESP_TIMER_CUSTOM_IMPL
+#include "esp_timer.h"
+
+static int64_t s_fake_now_us;
+int64_t esp_timer_get_time(void) { return s_fake_now_us; }
+static void advance_ms(uint32_t ms) { s_fake_now_us += (int64_t)ms * 1000; }
+
 /* GPIO bits radio_esp.c uses that the shared driver/gpio.h stub omits. */
 #include "driver/gpio.h"
 
@@ -133,8 +142,15 @@ static void arm_failure(const char* call, int code) {
     s_fail_code = code;
 }
 
+/* Wall-clock a failing command burns before returning, so a test can model a
+ * wedged chip: the real driver spends BUSY_STUCK_THRESHOLD command waits of
+ * 2000ms (5000ms for calibration) before a reconfigure gives up, which can
+ * exceed the reinit backoff itself. */
+static uint32_t s_fail_delay_ms;
+
 static int fake_rc(const char* call) {
     if (s_fail_call && strcmp(s_fail_call, call) == 0) {
+        advance_ms(s_fail_delay_ms);
         return s_fail_code;
     }
     return 0;
@@ -193,14 +209,22 @@ static int s_depth_in_get_pkt_status;
 static void (*s_rx_read_hook)(void);
 
 int sx1262_init(void) { return fake_rc("init"); }
-bool sx1262_needs_reinit(void) { return false; }
-void sx1262_clear_reinit(void) {}
 
-/* Referenced by radio_cad_check's fail-closed path (issue #118). The CAD policy
- * itself is covered by test_cad_timeout_policy and test_radio_virt; here the
- * semaphore stub always succeeds so the timeout branch is never taken, and this
- * only has to exist for linking. */
-void sx1262_request_reinit(void) {}
+/* The reinit latch is stateful here, not a stub: whether a failed recovery
+ * leaves the request standing is exactly what the reinit cases assert, and a
+ * latch that always reads false could not tell the two behaviors apart. Also
+ * reached from radio_cad_check's fail-closed path (issue #118), which these
+ * tests do not exercise (the semaphore stub always succeeds, so the CAD timeout
+ * branch is never taken). */
+static bool s_fake_needs_reinit;
+static int s_reinit_requests;
+
+bool sx1262_needs_reinit(void) { return s_fake_needs_reinit; }
+void sx1262_clear_reinit(void) { s_fake_needs_reinit = false; }
+void sx1262_request_reinit(void) {
+    s_fake_needs_reinit = true;
+    s_reinit_requests++;
+}
 
 int sx1262_write_register(uint16_t addr, const uint8_t* data, size_t len) {
     (void)addr;
@@ -441,6 +465,11 @@ void setUp(void) {
     s_fake_rx_len = 0;
     s_depth_in_get_pkt_status = -1;
     s_rx_read_hook = NULL;
+    s_fake_needs_reinit = false;
+    s_reinit_requests = 0;
+    s_fake_now_us = 0;
+    s_fail_delay_ms = 0;
+    s_reinit_policy = (radio_reinit_policy_t){0};
 }
 
 void tearDown(void) {}
@@ -712,6 +741,106 @@ static void test_reconfigure_mid_read_contends_on_the_rx_seq_lock(void) {
     TEST_ASSERT_EQUAL_INT(0, s_rxseq_depth); /* both releases happened */
 }
 
+/* ---------- reinit recovery is never dropped ---------- */
+
+/* With no request outstanding the mesh loop's per-pass call is free: it reports
+ * nothing to do and issues no commands. */
+static void test_reinit_check_is_a_noop_when_nothing_is_requested(void) {
+    TEST_ASSERT_FALSE(radio_check_and_clear_reinit());
+    TEST_ASSERT_EQUAL_INT(0, s_calls_set_rx);
+}
+
+/* A recovery that works clears the request and leaves the radio receiving. */
+static void test_successful_reinit_clears_the_request(void) {
+    sx1262_request_reinit();
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+    TEST_ASSERT_FALSE(sx1262_needs_reinit());
+    TEST_ASSERT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
+}
+
+/* The bug this closes: the latch is cleared before the attempt, so a
+ * reconfigure that fails used to drop the request entirely. The chip then sat
+ * at power-on defaults forever, transmitting nothing a neighbor could hear,
+ * while the node stayed alive, fed its watchdog and looked healthy. */
+static void test_failed_reinit_leaves_the_request_standing(void) {
+    arm_failure("write_register", -1); /* sync word write fails the reconfigure */
+    sx1262_request_reinit();
+    int requests_before = s_reinit_requests;
+
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+    TEST_ASSERT_TRUE(sx1262_needs_reinit());
+    TEST_ASSERT_EQUAL_INT(requests_before + 1, s_reinit_requests);
+}
+
+/* The retry is real, and it is paced: the failed attempt does not turn the
+ * mesh loop's 10ms cadence into a stream of chip resets, and once the backoff
+ * expires a working chip recovers. */
+static void test_failed_reinit_retries_after_the_backoff(void) {
+    arm_failure("write_register", -1);
+    sx1262_request_reinit();
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+
+    /* Inside the backoff: the request stands but no attempt is made. */
+    int requests_after_first = s_reinit_requests;
+    advance_ms(BRAMBLE_RADIO_REINIT_RETRY_MS - 1u);
+    TEST_ASSERT_FALSE(radio_check_and_clear_reinit());
+    TEST_ASSERT_TRUE(sx1262_needs_reinit());
+    TEST_ASSERT_EQUAL_INT(requests_after_first, s_reinit_requests);
+
+    /* Backoff expired and the chip is answering again: the retry happens and
+     * takes. */
+    advance_ms(1u);
+    s_fail_call = NULL;
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+    TEST_ASSERT_FALSE(sx1262_needs_reinit());
+    TEST_ASSERT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
+}
+
+/* A recovery only counts if the radio actually ended up receiving.
+ * radio_reconfigure returns 0 as soon as its configure commands land; its
+ * trailing radio_start_rx() returns void and merely records RADIO_STATE_IDLE
+ * when it fails. A single failed SetRx that does not trip BUSY_STUCK_THRESHOLD
+ * therefore raises no latch and, keyed on rc alone, reads as a clean recovery
+ * while the node hears nothing: exactly the silent-radio failure this whole
+ * change exists to prevent, reached through the recovery path itself. */
+static void test_reinit_that_cannot_re_enter_rx_is_not_a_success(void) {
+    arm_failure("set_rx", -1);
+    sx1262_request_reinit();
+
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+    /* The chip is configured but deaf. */
+    TEST_ASSERT_NOT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
+    /* So the request must still be standing, and another attempt owed. */
+    TEST_ASSERT_TRUE(sx1262_needs_reinit());
+
+    /* And it recovers on the paced retry once SetRx works again. */
+    advance_ms(BRAMBLE_RADIO_REINIT_RETRY_MS);
+    s_fail_call = NULL;
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+    TEST_ASSERT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
+    TEST_ASSERT_FALSE(sx1262_needs_reinit());
+}
+
+/* A failing recovery against a wedged chip can take longer than the backoff.
+ * The deadline must therefore be measured from when the attempt finished: a
+ * caller that samples the clock once up front produces a deadline already in
+ * the past, and the mesh loop, which calls this every 10ms, re-attempts back
+ * to back forever with no gap. That is worse than the busy-loop the backoff
+ * exists to prevent, because each iteration also hard-resets the chip. */
+static void test_a_slow_failing_reinit_still_backs_off(void) {
+    arm_failure("write_register", -1);
+    s_fail_delay_ms = BRAMBLE_RADIO_REINIT_RETRY_MS + 4000u; /* wedged chip */
+    sx1262_request_reinit();
+
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+    TEST_ASSERT_TRUE(sx1262_needs_reinit());
+    /* The attempt outlasted the backoff, so a start-sampled deadline is now
+     * in the past and the next pass would re-attempt immediately. */
+    int requests = s_reinit_requests;
+    TEST_ASSERT_FALSE(radio_check_and_clear_reinit());
+    TEST_ASSERT_EQUAL_INT(requests, s_reinit_requests);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -744,6 +873,13 @@ int main(void) {
     RUN_TEST(test_rx_read_releases_lock_when_no_frame);
     RUN_TEST(test_reconfigure_takes_the_rx_seq_lock);
     RUN_TEST(test_reconfigure_mid_read_contends_on_the_rx_seq_lock);
+
+    RUN_TEST(test_reinit_check_is_a_noop_when_nothing_is_requested);
+    RUN_TEST(test_successful_reinit_clears_the_request);
+    RUN_TEST(test_failed_reinit_leaves_the_request_standing);
+    RUN_TEST(test_failed_reinit_retries_after_the_backoff);
+    RUN_TEST(test_reinit_that_cannot_re_enter_rx_is_not_a_success);
+    RUN_TEST(test_a_slow_failing_reinit_still_backs_off);
 
     return UNITY_END();
 }

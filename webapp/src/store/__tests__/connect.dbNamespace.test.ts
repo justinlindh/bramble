@@ -73,7 +73,6 @@ beforeEach(() => {
   useStore.setState({
     connectionState: 'disconnected',
     connectionError: undefined,
-    transport: null,
     config: null,
     devices: [],
   } as any);

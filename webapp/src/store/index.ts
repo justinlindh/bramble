@@ -10,7 +10,6 @@ import type {
   ConnectionState,
   RelayHop,
   DeliveryStatus,
-  Transport,
   ProbeResult,
   PeerLocation,
   PeerVerification,
@@ -172,7 +171,6 @@ function persistUnreads(conversations: Map<string, any>, config: BrambleConfig |
 
 interface Actions {
   setConnectionState: (s: ConnectionState, err?: string) => void;
-  setTransport: (t: Transport | null) => void;
   setConnectionCapabilities: (c: ConnectionCapabilities) => void;
   setConfig: (c: BrambleConfig) => void;
   setStatus: (s: NodeStatus) => void;
@@ -189,7 +187,6 @@ interface Actions {
   showRoutes: boolean;
   setShowRoutes: (show: boolean) => void;
   setProbeResult: (r: ProbeResult | null) => void;
-  setProbeCollecting: (c: boolean) => void;
   setDevices: (d: SavedDevice[]) => void;
   setPeerLocations: (locs: PeerLocation[]) => void;
   setMapFocusAddr: (addr: number | null) => void;
@@ -208,7 +205,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   // ─── Initial state ───────────────────────────────────────────────────
   connectionState: 'disconnected',
   connectionError: undefined,
-  transport: null,
   connectionCapabilities: DEFAULT_CAPABILITIES,
   capabilitiesLoaded: false,
   config: null,
@@ -223,7 +219,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   showRoutes: loadShowRoutes(),
   probeResult: null,
   peerNames: new Map(),
-  probeCollecting: false,
   devices: [],
   peerLocations: [],
   mapFocusAddr: null,
@@ -236,8 +231,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   // ─── Actions ─────────────────────────────────────────────────────────
   setConnectionState: (s, err?) =>
     set({ connectionState: s, connectionError: err }),
-
-  setTransport: (t) => set({ transport: t }),
 
   // Setting capabilities is what makes them known, whatever their source: the
   // /api/capabilities response, its failure fallback, or an embedded shell's
@@ -380,12 +373,15 @@ export const useStore = create<AppState & Actions>((set) => ({
     } else {
       names.delete(addr);
     }
-    // Update labels on any DM conversation for this peer
+    // Update labels on any DM conversation for this peer. Route through the
+    // shared labeler (reading the just-updated names map) instead of
+    // re-deriving the DM label here, so this path cannot drift from the
+    // classifier every other labeling path uses.
     const convs = new Map(state.conversations);
     const dmKey = `dm:${addr}`;
     const conv = convs.get(dmKey);
     if (conv) {
-      convs.set(dmKey, { ...conv, label: name || formatAddr0x(addr) });
+      convs.set(dmKey, { ...conv, label: formatConversationLabel(dmKey, names, state.config) });
     }
     return { peerNames: names, conversations: convs };
   }),
@@ -400,7 +396,6 @@ export const useStore = create<AppState & Actions>((set) => ({
     status: null as any,
     airtime: null as any,
     probeResult: null,
-    probeCollecting: false,
     peerLocations: [],
     mapFocusAddr: null,
     peerVerifications: new Map(),
@@ -409,7 +404,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   }),
 
   setProbeResult: (r) => set({ probeResult: r }),
-  setProbeCollecting: (c) => set({ probeCollecting: c }),
   setDevices: (devices) => set({ devices }),
 
   setPeerLocations: (locs) => set({ peerLocations: locs }),

@@ -15,6 +15,8 @@
  *   mesh_mailbox.c      store-and-forward mailbox glue
  *   mesh_persist.c      NVS: nonce ceiling, pin store, replay store, net key
  *   mesh_channels.c     channel table management
+ *   mesh_rollcall.c     attested roll-call: announce rounds, staggered
+ *                       identity-signed answers, and the initiator ledger
  *
  * These modules include this header to reach the shared state and each other's
  * cross-module entry points. This is deliberately the ONE place visibility is
@@ -71,6 +73,7 @@
 #include "timesync.h"
 #include "delivery_event_ring.h"
 #include "mailbox.h"
+#include "mesh_rollcall.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -354,7 +357,7 @@ void process_flood_relay_queue(uint32_t t);
 void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr);
 void handle_rrep(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr);
 void handle_rerr(const uint8_t* data, uint8_t len);
-void rerr_fastfail_notify(uint32_t packet_id, const char* reason, void* ctx);
+void rerr_fastfail_notify(uint32_t packet_id, const char* reason);
 void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_header_t* header);
 
 /* ── mesh_location.c ────────────────────────────────────────────────── */

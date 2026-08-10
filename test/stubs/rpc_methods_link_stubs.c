@@ -282,6 +282,7 @@ int mesh_send_probe(uint32_t t, uint16_t c, bool p) {
     (void)p;
     return 0;
 }
+
 uint32_t mesh_get_last_broadcast_id(void) { return 0xABCDEF01; }
 void mesh_set_broadcast_telemetry_mode(broadcast_telemetry_mode_t mode) { (void)mode; }
 broadcast_telemetry_mode_t mesh_get_broadcast_telemetry_mode(void) {
@@ -307,20 +308,14 @@ int display_set_backlight(uint8_t level) {
     (void)level;
     return 0;
 }
-bool freq_plan_valid_freq(uint32_t f) {
-    (void)f;
-    return true;
-}
-int8_t freq_plan_clamp_power(uint32_t f, int8_t p) {
-    (void)f;
-    return p;
-}
-void freq_plan_get_default(uint32_t* f, int8_t* p) {
-    if (f)
-        *f = 915000;
-    if (p)
-        *p = 14;
-}
+/* No freq_plan stubs here on purpose. These used to be hand-written with
+ * signatures that did not match components/freq_plan/include/freq_plan.h at
+ * all (a uint32_t frequency where the real API takes a plan pointer and a
+ * float, and a void out-parameter form of freq_plan_get_default where the real
+ * one returns const bramble_freq_plan_t*), so every call rpc_methods.c made
+ * into them was undefined behaviour that happened not to be exercised. The
+ * real components/freq_plan/freq_plan.c is a table lookup with no platform
+ * dependencies, so the test targets link it directly instead. */
 void radio_get_config(radio_config_t* cfg) { memset(cfg, 0, sizeof(*cfg)); }
 /* No SX1262 behind the host build, so report the unsupported shape the real
  * virtual driver reports: getDiagnostics must still emit a radio_health block

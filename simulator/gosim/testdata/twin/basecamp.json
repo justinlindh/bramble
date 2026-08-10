@@ -1,0 +1,59 @@
+{
+  "twin_schema": 1,
+  "node": {
+    "address": "0A1B2C3D",
+    "name": "basecamp",
+    "firmware_version": "0.9.3",
+    "protocol_version": "0.5.0",
+    "hardware": "heltec_v3",
+    "uptime_s": 261984
+  },
+  "radio": {
+    "frequency_mhz": 915.0,
+    "sf": 9,
+    "bw_hz": 125000,
+    "coding_rate": 1,
+    "tx_power_dbm": 22,
+    "region": "US915",
+    "regulatory": "FCC Part 15.247",
+    "max_duty_cycle_pct": 100,
+    "duty_cycle_enforced": false
+  },
+  "neighbors": [
+    {
+      "address": "3D4E5F60",
+      "rssi": -92,
+      "snr": 9,
+      "deliveryRate": 251,
+      "airtimeRemaining": 94,
+      "last_seen_ms": 20516,
+      "name": "tower"
+    }
+  ],
+  "routes": [
+    {
+      "dest": "3D4E5F60",
+      "next_hop": "3D4E5F60",
+      "hop_count": 1,
+      "metric": 31,
+      "state": "active",
+      "use_count": 143
+    },
+    {
+      "dest": "1B2C3D4E",
+      "next_hop": "3D4E5F60",
+      "hop_count": 2,
+      "metric": 66,
+      "state": "active",
+      "use_count": 52
+    },
+    {
+      "dest": "2C3D4E5F",
+      "next_hop": "3D4E5F60",
+      "hop_count": 2,
+      "metric": 79,
+      "state": "stale",
+      "use_count": 9
+    }
+  ]
+}

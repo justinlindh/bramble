@@ -241,7 +241,20 @@ void mesh_get_state(mesh_shared_state_t* o) {
         g_stub_mesh_state_after_fill();
     }
 }
-void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
+/* g_stub_mesh_routes_fill is the routing-table counterpart of
+ * g_stub_mesh_state_fill above: it lets a test decide what mesh_get_routes()
+ * hands back, so the route-serializing handlers (bramble.getRoutes and the
+ * routes array inside bramble.exportTopology) can be exercised against a
+ * populated table instead of only the empty one. NULL (the default) keeps the
+ * plain zeroed table every other suite expects. */
+void (*g_stub_mesh_routes_fill)(routing_table_t* out) = NULL;
+
+void mesh_get_routes(routing_table_t* o) {
+    memset(o, 0, sizeof(*o));
+    if (g_stub_mesh_routes_fill) {
+        g_stub_mesh_routes_fill(o);
+    }
+}
 
 /* DM session table, controllable by the test: g_stub_dm_sessions holds what
    mesh_get_dm_sessions hands back, g_stub_dm_session_count how many of them,
@@ -430,21 +443,34 @@ int display_set_backlight(uint8_t level) {
     (void)level;
     return 0;
 }
-bool freq_plan_valid_freq(uint32_t f) {
-    (void)f;
-    return true;
+/* No freq_plan stubs here on purpose. These used to be hand-written with
+ * signatures that did not match components/freq_plan/include/freq_plan.h at
+ * all (a uint32_t frequency where the real API takes a plan pointer and a
+ * float, and a void out-parameter form of freq_plan_get_default where the real
+ * one returns const bramble_freq_plan_t*), so every call rpc_methods.c made
+ * into them was undefined behaviour that happened not to be exercised. The
+ * real components/freq_plan/freq_plan.c is a table lookup with no platform
+ * dependencies, so the test targets link it directly instead. */
+/* s_stub_radio_config is what radio_get_config() hands back. Zeroed by
+ * default, which is what every suite that does not care about the PHY sees;
+ * a suite that asserts on reported radio parameters (bramble.exportTopology)
+ * calls stub_set_radio_config. Set through a function rather than exporting
+ * the struct, because radio_config_t is mirrored here rather than included,
+ * and a third copy of that layout in a test file would be one more place to
+ * drift. */
+static radio_config_t s_stub_radio_config;
+
+void stub_set_radio_config(float frequency_mhz, uint8_t sf, uint32_t bw_hz, uint8_t coding_rate,
+                           int8_t tx_power) {
+    memset(&s_stub_radio_config, 0, sizeof(s_stub_radio_config));
+    s_stub_radio_config.frequency_mhz = frequency_mhz;
+    s_stub_radio_config.sf = sf;
+    s_stub_radio_config.bw_hz = bw_hz;
+    s_stub_radio_config.coding_rate = coding_rate;
+    s_stub_radio_config.tx_power = tx_power;
 }
-int8_t freq_plan_clamp_power(uint32_t f, int8_t p) {
-    (void)f;
-    return p;
-}
-void freq_plan_get_default(uint32_t* f, int8_t* p) {
-    if (f)
-        *f = 915000;
-    if (p)
-        *p = 14;
-}
-void radio_get_config(radio_config_t* cfg) { memset(cfg, 0, sizeof(*cfg)); }
+
+void radio_get_config(radio_config_t* cfg) { memcpy(cfg, &s_stub_radio_config, sizeof(*cfg)); }
 /* No SX1262 behind the host build, so report the unsupported shape the real
  * virtual driver reports: getDiagnostics must still emit a radio_health block
  * with supported=false rather than fabricating chip status bytes. */

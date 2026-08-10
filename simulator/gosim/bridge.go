@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include -I../../components/airtime/include -I../../components/airtime -I../../components/fragment/include -I../../components/fragment -I../../components/crypto/include -I../../components/crypto -I../../components/mailbox/include -I../../components/location/include -I../../components/channel/include -I../../components/nvs_keys/include -I../../components/radio/include -I../../components/freq_plan/include -I../../components/network_key/include -I../../components/security/include -I../../components/routing_auth/include -I../../components/identity/include
+#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include -I../../components/airtime/include -I../../components/airtime -I../../components/fragment/include -I../../components/fragment -I../../components/crypto/include -I../../components/crypto -I../../components/mailbox/include -I../../components/location/include -I../../components/channel/include -I../../components/nvs_keys/include -I../../components/radio/include -I../../components/freq_plan/include -I../../components/network_key/include -I../../components/security/include -I../../components/routing_auth/include -I../../components/identity/include -I../../components/rollcall/include
 #cgo LDFLAGS: -lm -lssl -lcrypto
 #include <stdlib.h>
 #include "bridge.h"
@@ -162,8 +162,25 @@ func anomalyInit(t *C.node_anomaly_tracker_t) {
 // anomalyCheckPartition runs the reachability sweep at virtual time nowUs.
 // Issue #144: this used to hardcode 0, so mesh_partition was the only
 // anomaly type whose emitted timestamp_us was not the detection time.
-func anomalyCheckPartition(nodes *C.node_array_t, radioRange float32, nowUs uint64) {
-	C.anomaly_check_partition(nodes, C.float(radioRange), C.uint64_t(nowUs), C.stdout)
+// The whole radio config, not just its range, because adjacency comes from
+// radio_nodes_connected: the range disk normally, the imported link graph for
+// a digital-twin scenario.
+func anomalyCheckPartition(nodes *C.node_array_t, radio *C.radio_config_t, nowUs uint64) {
+	C.anomaly_check_partition(nodes, radio, C.uint64_t(nowUs), C.stdout)
+}
+
+// partitionComponents labels every active node with its connected-component
+// index (-1 for inactive nodes), via the same anomaly_partition_components
+// traversal the mesh_partition detector runs on. Returns one entry per node in
+// node_array order plus the component count.
+func partitionComponents(nodes *C.node_array_t, radio *C.radio_config_t) ([]int, int) {
+	var comp [C.MAX_NODES]C.int
+	count := int(C.anomaly_partition_components(nodes, radio, &comp[0]))
+	out := make([]int, int(nodes.count))
+	for i := range out {
+		out[i] = int(comp[i])
+	}
+	return out, count
 }
 
 // --- RNG ---
@@ -197,13 +214,30 @@ type scenarioRunResult struct {
 // drainInstant core RunHeadless uses, so a duration-truncated scenario reports
 // identical sim_ended drops here as it does under the real headless binary.
 func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
+	return runScenarioCaptured(scenarioPath, true)
+}
+
+// runScenarioQuiet is runScenarioHeadless with the event stream captured and
+// nothing written to the process's own stdout. What the digital twin's capacity
+// probe (twin_analysis.go) runs on: it drives a scenario per offered rate and
+// then prints a report, and interleaving tens of thousands of simulation events
+// with that report would make it unreadable.
+func runScenarioQuiet(scenarioPath string) (*scenarioRunResult, error) {
+	return runScenarioCaptured(scenarioPath, false)
+}
+
+// runScenarioCaptured is the shared body. echoStdout is the sim's `headless`
+// flag, which decides only one thing (sim.go's emitRaw): whether every emitted
+// event is additionally written to the saved real stdout. Either way the caller
+// gets the full stream back in scenarioRunResult.Lines.
+func runScenarioCaptured(scenarioPath string, echoStdout bool) (*scenarioRunResult, error) {
 	var mu sync.Mutex
 	var lines []string
 	sim, err := NewSim("", func(b []byte) {
 		mu.Lock()
 		lines = append(lines, strings.TrimRight(string(b), "\n"))
 		mu.Unlock()
-	}, true)
+	}, echoStdout)
 	if err != nil {
 		return nil, err
 	}
@@ -266,4 +300,90 @@ func (r *scenarioRunResult) RouteNextHop(nodeID string, destAddr uint32) (uint32
 		}
 	}
 	return 0, false
+}
+
+// rollCallRow is one responder's line in an initiator's roll-call ledger.
+type rollCallRow struct {
+	Addr      uint32
+	Responded bool
+	Round     uint8
+	AtMs      uint32 // milliseconds into the roll-call, not device uptime
+}
+
+// rollCallLedger is a Go view of one node's terminal roll-call ledger, read
+// straight from the C struct the real components/rollcall code filled.
+type rollCallLedger struct {
+	Open       bool
+	ID         uint32
+	Text       string
+	Anchored   bool
+	Expected   int
+	Responded  int
+	Unattested uint32
+	Overflow   uint32
+	Late       uint32
+	RoundsSent int
+	Missing    []uint32
+	Rows       []rollCallRow
+}
+
+// RollCall returns nodeID's roll-call ledger, or ok=false when that node
+// never started one. Reads the C state directly rather than scraping the JSON
+// stream, for the same reason RouteNextHop does.
+func (r *scenarioRunResult) RollCall(nodeID string) (rollCallLedger, bool) {
+	cid := C.CString(nodeID)
+	defer C.free(unsafe.Pointer(cid))
+	l := C.bridge_rollcall_ledger(&r.sim.nodes, cid)
+	if l == nil {
+		return rollCallLedger{}, false
+	}
+
+	out := rollCallLedger{
+		Open:       bool(l.open),
+		ID:         uint32(l.rollcall_id),
+		Text:       C.GoString(&l.text[0]),
+		Anchored:   bool(l.anchored),
+		Expected:   int(l.expected_count),
+		Responded:  int(C.rollcall_ledger_responded_count(l)),
+		Unattested: uint32(l.unattested),
+		Overflow:   uint32(l.overflow),
+		Late:       uint32(l.late),
+		RoundsSent: int(l.rounds_sent),
+	}
+	for i := 0; i < int(l.entry_count); i++ {
+		e := l.entries[i]
+		if !bool(e.used) {
+			continue
+		}
+		row := rollCallRow{Addr: uint32(e.addr), Responded: bool(e.responded), Round: uint8(e.round)}
+		if row.Responded {
+			row.AtMs = uint32(e.responded_at_ms) - uint32(l.started_ms)
+		}
+		out.Rows = append(out.Rows, row)
+	}
+
+	var missing [C.ROLLCALL_MAX_EXPECTED]C.uint32_t
+	n := int(C.rollcall_ledger_missing(l, &missing[0], C.ROLLCALL_MAX_EXPECTED))
+	for i := 0; i < n && i < len(missing); i++ {
+		out.Missing = append(out.Missing, uint32(missing[i]))
+	}
+	return out, true
+}
+
+// RollCallPendingDropped reports how many answers nodeID could not queue
+// because its pending-answer queue was full.
+func (r *scenarioRunResult) RollCallPendingDropped(nodeID string) uint32 {
+	cid := C.CString(nodeID)
+	defer C.free(unsafe.Pointer(cid))
+	return uint32(C.bridge_rollcall_pending_dropped(&r.sim.nodes, cid))
+}
+
+// NodeAddr returns nodeID's simulated node address, which derives from that
+// node's Ed25519 identity key and so is not knowable from the scenario file.
+func (r *scenarioRunResult) NodeAddr(nodeID string) (uint32, bool) {
+	node := nodeArrayFindByID(&r.sim.nodes, nodeID)
+	if node == nil {
+		return 0, false
+	}
+	return uint32(node.addr), true
 }

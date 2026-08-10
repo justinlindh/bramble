@@ -10,7 +10,7 @@ info:
     serial is unauthenticated by design (physical access is the trust anchor).
     Unauthenticated WS/BLE clients may call only bramble.ping and
     bramble.getVersion; every other method answers Unauthorized (-1005).
-  version: 0.6.0
+  version: 0.7.0
   license:
     name: MIT
     identifier: MIT
@@ -305,6 +305,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/RoutesResponse'
 
+  /rpc/bramble.exportTopology:
+    post:
+      operationId: exportTopology
+      summary: Export this node's observed mesh state
+      description: >
+        Returns one node's view of the mesh as a single document: its identity,
+        the neighbours it hears with per-link RSSI and SNR, its routing table,
+        and the PHY and frequency-plan parameters that decide time-on-air. The
+        neighbours and routes arrays are the same shapes bramble.getNeighbors
+        and bramble.getRoutes return, written by the same emitters. Collect one
+        export per node and feed the files to the simulator's digital-twin
+        importer (docs/digital-twin.md) to reconstruct the deployment as a
+        runnable scenario.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Observed topology export
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopologyExportResponse'
+
   /rpc/bramble.getDmSessions:
     post:
       operationId: getDmSessions
@@ -509,6 +538,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SendProbeResponse'
+
+  /rpc/bramble.startRollCall:
+    post:
+      operationId: startRollCall
+      summary: Start an attested roll-call
+      description: >
+        Starts an attested roll-call: an authenticated broadcast asking every
+        member to answer with an Ed25519-signed, identity-bound reply. The
+        primitive is expensive (one flood per round plus one unicast answer
+        per member), so initiation is rate limited in the firmware and only
+        one roll-call this node started may be collecting at a time. Both
+        refusals come back as ok=false with a reason and retry_after_ms, so a
+        caller waits a known interval instead of polling. A payload over
+        max_text_bytes is a malformed request and returns -32602. Progress
+        arrives as bramble.onRollCallResponse notifications followed by
+        bramble.onRollCallComplete; the ledger is readable at any time via
+        bramble.getRollCall.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartRollCallParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Roll-call started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartRollCallResponse'
+
+  /rpc/bramble.getRollCall:
+    post:
+      operationId: getRollCall
+      summary: Get the roll-call ledger
+      description: >
+        Returns the ledger of the roll-call this node started: which members
+        answered with a verified signature, how far into the roll-call each
+        answered, and the relay path where the broadcast delivery-receipt
+        machinery supplied one. On an anchored mesh the expected set is this
+        node's anchor-certified peers, so missing lists the addresses that
+        did not answer. On an un-anchored mesh there is no authoritative
+        expected set: anchored is false, expected is 0 and missing is empty
+        by construction, and the ledger reports observed responders only.
+      tags: [status]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Roll-call ledger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RollCallLedger'
 
   /rpc/bramble.setRadio:
     post:
@@ -2813,6 +2903,88 @@ components:
           items:
             $ref: '#/components/schemas/Route'
 
+    TopologyExportResponse:
+      type: object
+      description: >
+        One node's observed mesh state, shaped for the simulator's digital-twin
+        importer. Observation only: every field is state the node already keeps,
+        read at the moment of the call.
+      required: [twin_schema, node, radio, neighbors, routes]
+      properties:
+        twin_schema:
+          type: integer
+          description: >
+            Document schema version. The importer refuses a version it does not
+            know rather than guessing at fields.
+        node:
+          type: object
+          required: [address, firmware_version, protocol_version, hardware, uptime_s]
+          properties:
+            address:
+              type: string
+              description: This node's address as 8-char uppercase hex.
+            name:
+              type: string
+              description: Configured node name (omitted when unset).
+            firmware_version:
+              type: string
+            protocol_version:
+              type: string
+            hardware:
+              type: string
+            uptime_s:
+              type: integer
+              description: Seconds since boot, the age bound on every observation below.
+        radio:
+          type: object
+          description: >
+            Runtime PHY plus the compiled-in frequency plan. sf, bw_hz and
+            coding_rate are what price a frame's time-on-air; the plan's duty
+            cycle bounds what the deployment may spend.
+          required:
+            - frequency_mhz
+            - sf
+            - bw_hz
+            - coding_rate
+            - tx_power_dbm
+            - region
+            - regulatory
+            - max_duty_cycle_pct
+            - duty_cycle_enforced
+          properties:
+            frequency_mhz:
+              type: number
+            sf:
+              type: integer
+            bw_hz:
+              type: integer
+            coding_rate:
+              type: integer
+              description: 1 to 4, meaning 4/5 through 4/8.
+            tx_power_dbm:
+              type: integer
+            region:
+              type: string
+              description: Frequency plan name, for example US915.
+            regulatory:
+              type: string
+              description: Regulatory regime the plan follows.
+            max_duty_cycle_pct:
+              type: integer
+              description: Plan duty-cycle ceiling; 100 means no limit.
+            duty_cycle_enforced:
+              type: boolean
+              description: Whether the ceiling is hard-enforced or advisory.
+        neighbors:
+          type: array
+          description: Nodes heard directly, with the link quality they were heard at.
+          items:
+            $ref: '#/components/schemas/Neighbor'
+        routes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Route'
+
     DmSession:
       type: object
       description: >
@@ -3084,6 +3256,195 @@ components:
         rounds_total:
           type: integer
           description: Number of probe rounds in the sweep.
+
+    StartRollCallParams:
+      type: object
+      description: Roll-call parameters. All fields optional.
+      properties:
+        text:
+          type: string
+          description: >
+            Operator payload the announce carries, at most 48 bytes. Kept
+            short because it is paid for once per relay per round.
+          maxLength: 48
+
+    StartRollCallResponse:
+      type: object
+      description: >
+        Roll-call start outcome. ok=true carries the identifier and the
+        schedule; ok=false is an operational refusal carrying reason and
+        retry_after_ms, and none of the roll-call fields are present.
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          description: True when the first announce round reached the air.
+        reason:
+          type: string
+          description: >
+            Why the roll-call was refused (present only when ok=false).
+            busy = one this node started is still collecting; rate_limited =
+            inside min_interval_ms of the last start; not_transmitted = the
+            announce never reached the air, so nothing is owed an answer and
+            the rate limiter was not charged.
+          enum: [busy, rate_limited, not_transmitted]
+        retry_after_ms:
+          type: integer
+          description: >
+            Milliseconds until a start would be accepted (present only when
+            ok=false). 0 means immediately.
+        min_interval_ms:
+          type: integer
+          description: >
+            Enforced floor between two roll-calls started by this node
+            (present only when ok=false).
+        rollcall_id:
+          type: string
+          description: Roll-call identifier as 8-char uppercase hex.
+        window_ms:
+          type: integer
+          description: Milliseconds from start to ledger close.
+        rounds_total:
+          type: integer
+          description: Announce rounds this roll-call will send, including the first.
+        expected:
+          type: integer
+          description: >
+            Size of the anchor-certified expected set. Always 0 on an
+            un-anchored mesh, where no authoritative expected set exists.
+        anchored:
+          type: boolean
+          description: >
+            True when this node pins anchor-certified peers, which is the
+            only configuration in which missing members can be named.
+
+    RollCallResponder:
+      type: object
+      required: [address, responded]
+      properties:
+        address:
+          type: string
+          description: Responder address as 8-char uppercase hex.
+        responded:
+          type: boolean
+          description: >
+            True when an Ed25519 signature over (roll-call id, initiator,
+            responder) verified against this address's pinned identity key.
+            A row may exist with responded false when the announce's delivery
+            receipt reported a path for a member that never answered.
+        at_ms:
+          type: integer
+          description: >
+            Milliseconds into the roll-call at which the answer was recorded.
+            Present only when responded is true.
+        round:
+          type: integer
+          description: Announce round the answer named. Present only when responded is true.
+        hops:
+          type: integer
+          description: Relay path length, present only when a delivery receipt supplied one.
+        path:
+          type: array
+          description: >
+            Relay path initiator to responder, as 8-char uppercase hex
+            addresses. Present only when a delivery receipt supplied one.
+          items:
+            type: string
+
+    RollCallLedger:
+      type: object
+      required:
+        [active, rounds_total, window_ms, min_interval_ms, max_text_bytes, pending_dropped,
+         answer_limited, answer_max_per_hour]
+      properties:
+        active:
+          type: boolean
+          description: False when this node has never started a roll-call.
+        rollcall_id:
+          type: string
+          description: Roll-call identifier as 8-char uppercase hex.
+        open:
+          type: boolean
+          description: True while the ledger is still collecting answers.
+        text:
+          type: string
+          description: The operator payload the announce carried.
+        rounds_sent:
+          type: integer
+          description: Announce rounds sent so far.
+        rounds_total:
+          type: integer
+          description: Announce rounds a roll-call sends, including the first.
+        window_ms:
+          type: integer
+          description: Milliseconds from start to ledger close.
+        elapsed_ms:
+          type: integer
+          description: Milliseconds since this roll-call started.
+        min_interval_ms:
+          type: integer
+          description: Enforced floor between two roll-calls started by this node.
+        max_text_bytes:
+          type: integer
+          description: Maximum operator payload size.
+        anchored:
+          type: boolean
+          description: >
+            True when the expected set is anchor-certified and therefore
+            authoritative. False means the ledger reports observed
+            responders only.
+        expected:
+          type: integer
+          description: Size of the anchor-certified expected set, 0 when not anchored.
+        responded:
+          type: integer
+          description: Members whose signed answer verified.
+        unattested:
+          type: integer
+          description: >
+            Answers that could not be attested: a signature that did not
+            verify, a responder that does not match the sending envelope, or
+            a responder this node holds no pinned identity key for. Counted,
+            never recorded as a responder.
+        overflow:
+          type: integer
+          description: Answers dropped because the ledger table was full.
+        late:
+          type: integer
+          description: Answers that arrived after the ledger closed.
+        pending_dropped:
+          type: integer
+          description: >
+            Answers THIS node could not queue because its pending-answer
+            queue was full, reported so a node that failed to take part says
+            so locally.
+        answer_limited:
+          type: integer
+          description: >
+            Answers THIS node refused because it had already spent its answer
+            budget. Non-zero means something on this mesh is asking for
+            roll-calls faster than the fleet has agreed to pay for them.
+        answer_max_per_hour:
+          type: integer
+          description: >
+            Answers this node will emit in any rolling hour, whoever asks.
+            The member-side bound that keeps a roll-call's fleet-wide cost
+            independent of how fast an initiator asks for one.
+        missing_count:
+          type: integer
+          description: >
+            Expected members with no verified answer. Always 0 on an
+            un-anchored mesh: absence of an authoritative expected set means
+            nothing can honestly be called missing.
+        missing:
+          type: array
+          description: Expected members with no verified answer, as 8-char uppercase hex.
+          items:
+            type: string
+        responders:
+          type: array
+          items:
+            $ref: '#/components/schemas/RollCallResponder'
 
     SetRadioParams:
       type: object
@@ -4520,6 +4881,82 @@ components:
           enum: [address_collision]
           description: Why the identity changed.
 
+    OnRollCallPayload:
+      type: object
+      description: >
+        Params of the bramble.onRollCall notification, raised on a MEMBER
+        that heard a roll-call announce. Surfaced as its own event rather
+        than filed as a chat message: a roll-call is an operational request,
+        not traffic somebody sent.
+      required: [rollcall_id, from, text, round]
+      properties:
+        rollcall_id:
+          type: string
+          description: Roll-call identifier as 8-char uppercase hex.
+        from:
+          type: string
+          description: Initiator address as 8-char uppercase hex.
+        text:
+          type: string
+          description: The operator payload the announce carried.
+        round:
+          type: integer
+          description: Announce round this frame was (1-based).
+
+    OnRollCallResponsePayload:
+      type: object
+      description: >
+        Params of the bramble.onRollCallResponse notification, raised on the
+        INITIATOR once a member's signature verified against its pinned
+        identity key. An answer that failed to attest raises nothing; it is
+        only counted, in the ledger's unattested field.
+      required: [rollcall_id, address, round, responded, expected]
+      properties:
+        rollcall_id:
+          type: string
+          description: Roll-call identifier as 8-char uppercase hex.
+        address:
+          type: string
+          description: Responder address as 8-char uppercase hex.
+        round:
+          type: integer
+          description: Announce round the answer named.
+        responded:
+          type: integer
+          description: Members whose signed answer has verified so far.
+        expected:
+          type: integer
+          description: Size of the anchor-certified expected set, 0 when not anchored.
+
+    OnRollCallCompletePayload:
+      type: object
+      description: >
+        Params of the bramble.onRollCallComplete notification, raised once
+        when the collection window closes. The ledger stays readable after
+        it closes via bramble.getRollCall.
+      required: [rollcall_id, responded, expected, anchored, rounds, unattested]
+      properties:
+        rollcall_id:
+          type: string
+          description: Roll-call identifier as 8-char uppercase hex.
+        responded:
+          type: integer
+          description: Members whose signed answer verified.
+        expected:
+          type: integer
+          description: Size of the anchor-certified expected set, 0 when not anchored.
+        anchored:
+          type: boolean
+          description: >
+            True when the expected set is anchor-certified. False means the
+            ledger reports observed responders only and names nobody missing.
+        rounds:
+          type: integer
+          description: Announce rounds sent.
+        unattested:
+          type: integer
+          description: Answers that could not be attested.
+
   securitySchemes:
     deviceToken:
       type: http
@@ -4589,6 +5026,28 @@ x-notifications:
       Carries the aggregated responder list for the sweep.
     payload:
       $ref: '#/components/schemas/OnProbeCompletePayload'
+
+  bramble.onRollCall:
+    description: >
+      This node heard a roll-call announce and has queued its own signed
+      answer for a staggered slot. Raised on a member, once per roll-call:
+      the re-announce rounds are deduped before this point.
+    payload:
+      $ref: '#/components/schemas/OnRollCallPayload'
+
+  bramble.onRollCallResponse:
+    description: >
+      A member's signed answer verified against its pinned identity key.
+      Raised on the initiator, once per responder.
+    payload:
+      $ref: '#/components/schemas/OnRollCallResponsePayload'
+
+  bramble.onRollCallComplete:
+    description: >
+      The roll-call's collection window closed. Raised on the initiator
+      exactly once; the ledger remains readable via bramble.getRollCall.
+    payload:
+      $ref: '#/components/schemas/OnRollCallCompletePayload'
 
   bramble.onTrafficEvent:
     description: >

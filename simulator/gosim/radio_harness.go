@@ -54,6 +54,16 @@ func newRadioHarness() *radioHarness {
 	C.metrics_init(h.metrics)
 	C.pcg32_seed(h.rng, C.uint64_t(42))
 	C.sim_beacon_policy_init(h.beacon)
+	// The bridge's routing/transport switches are process globals, and a
+	// scenario-driven test earlier in the same binary may have left one set
+	// (a scenario load resets them; a harness build never did). Reset them to
+	// the shipped firmware defaults here for the same reason sim.go resets
+	// them on every scenario load: no run may inherit another run's arm.
+	C.bridge_set_flood_transport_enabled(C.bool(false))
+	C.bridge_set_flood_hop_limit(C.uint8_t(C.FLOOD_HOP_LIMIT_DEFAULT))
+	C.bridge_set_intermediate_rrep_enabled(C.bool(true))
+	C.bridge_set_rreq_src_route_trust(C.int(-1))
+	C.bridge_set_broadcast_receipt_tx_kind(C.int(C.TX_KIND_RECEIPT))
 	return h
 }
 

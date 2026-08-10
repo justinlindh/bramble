@@ -1,3 +1,13 @@
+# The simulation engine is a library, not a program: it has no main() and is
+# compiled into the Go simulator through cgo (../gosim/all.c includes every
+# source below). This makefile therefore builds the object set and nothing
+# else, which is what it is useful for: a fast standalone compile of the engine
+# under -Wall -Wextra, without waiting for a cgo link of the whole simulator.
+#
+# It previously declared a `bramble-sim` binary linked from these objects plus a
+# main.o that has no source in this tree, so `make` here could not succeed on a
+# clean checkout at all.
+
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -g -O2 -DBRAMBLE_SIM \
          -I../../test/stubs \
@@ -15,10 +25,7 @@ CFLAGS = -Wall -Wextra -std=c11 -g -O2 -DBRAMBLE_SIM \
 
 SIM_OBJS = sim_event.o sim_random.o sim_emitter.o sim_node.o sim_radio.o sim_scenario.o sim_metrics.o sim_anomaly.o cJSON.o freq_plan.o
 
-all: bramble-sim
-
-bramble-sim: $(SIM_OBJS) main.o
-	$(CC) $(CFLAGS) -o $@ $^ -lm
+all: $(SIM_OBJS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $<
@@ -28,6 +35,6 @@ freq_plan.o: ../../components/freq_plan/freq_plan.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f *.o bramble-sim
+	rm -f *.o
 
 .PHONY: all clean

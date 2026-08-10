@@ -703,7 +703,13 @@ bool radio_check_and_clear_reinit(void) {
     /* Honor the CAD-timeout fail-closed path (issue #118): if a run of CAD
      * timeouts flagged the radio as wedged, report it once so the mesh loop
      * runs radio_reconfigure, and clear the flag. Normal emulator runs never
-     * set it, since the broker answers every CAD. */
+     * set it, since the broker answers every CAD.
+     *
+     * No radio_reinit_policy_t here, unlike the SX1262 and LR1110 backends.
+     * That policy exists because a hardware recovery can fail and must then be
+     * retried rather than dropped; there is no chip to bring up here, nothing
+     * to fail, and so nothing to owe a retry. Clearing unconditionally is
+     * correct for this backend, not an older shape left behind. */
     return atomic_exchange(&s_needs_reinit, false);
 }
 

@@ -8,7 +8,7 @@ All events are sent as JSON-RPC 2.0 notifications over the WebSocket endpoint (`
 
 When firmware calls `rpc_notify(..., NULL)`, clients may see `"params": null` (or omitted by some transports) and should treat that as an empty payload.
 
-Notifications are delivered only to authenticated connections (WebSocket and BLE alike); a connection that has not presented the device token receives none. On a device whose owner has explicitly disabled auth, all connections receive notifications. See [../auth.md](../auth.md).
+On the network transports, notifications are delivered only to authenticated connections (WebSocket and BLE alike); a connection that has not presented the device token receives none. On a device whose owner has explicitly disabled auth, all connections receive notifications. The serial (UART) transport applies no such filter and carries every notification, because physical access is the trust boundary there. See [../auth.md](../auth.md).
 
 ---
 
@@ -631,6 +631,176 @@ Emitted during a background OTA update started by bramble.otaUpdate.
     "bytes": 524288,
     "total": 1708032,
     "percent": 30
+  }
+}
+```
+
+---
+
+## `bramble.onRollCall`
+
+**Description**  
+This node heard an attested roll-call announce and queued its own signed answer for a staggered slot. Raised on a MEMBER. See [../rollcall.md](../rollcall.md).
+
+**Trigger conditions**
+
+- A broadcast DATA frame with app type `APP_TYPE_ROLLCALL` decoded, after the same replay and freshness gates every other DATA payload passes.
+- This node had not already claimed an answer for that (roll-call id, initiator) pair, so re-announce rounds raise nothing.
+
+**Params**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `rollcall_id` | string | Roll-call identifier (8-char uppercase hex). |
+| `from` | string | Initiator address (8-char uppercase hex). |
+| `text` | string | Operator payload the announce carried (up to 48 bytes). |
+| `round` | integer | Announce round this frame was (1-based). |
+
+**Semantics notes**
+
+- Raised as its own event rather than filed as a chat message: a roll-call is an operational request, not traffic somebody sent.
+- The answer itself goes out later, after the response stagger; this event fires when it is queued.
+
+**JSON-RPC example**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onRollCall",
+  "params": {
+    "rollcall_id": "00C0FFE1",
+    "from": "CAFEBABE",
+    "text": "sound off",
+    "round": 1
+  }
+}
+```
+
+---
+
+## `bramble.onRollCallResponse`
+
+**Description**  
+A member's signed answer verified against its pinned identity key. Raised on the INITIATOR, once per responder.
+
+**Trigger conditions**
+
+- A unicast DATA frame with app type `APP_TYPE_ROLLCALL_REPLY` decoded for the roll-call this node started.
+- Its responder field matched the sending envelope, the responder holds a verified pin here, and the Ed25519 signature over the canonical roll-call message verified.
+
+**Params**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `rollcall_id` | string | Roll-call identifier (8-char uppercase hex). |
+| `address` | string | Responder address (8-char uppercase hex). |
+| `round` | integer | Announce round the answer named. |
+| `responded` | integer | Members whose signed answer has verified so far. |
+| `expected` | integer | Size of the anchor-certified expected set (0 when not anchored). |
+
+**Semantics notes**
+
+- An answer that fails to attest raises nothing; it is only counted, in the ledger's `unattested` field.
+- A retransmitted answer is idempotent at the ledger and raises no second event.
+
+**JSON-RPC example**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onRollCallResponse",
+  "params": {
+    "rollcall_id": "00C0FFE1",
+    "address": "AABBCC01",
+    "round": 1,
+    "responded": 2,
+    "expected": 5
+  }
+}
+```
+
+---
+
+## `bramble.onRollCallComplete`
+
+**Description**  
+The roll-call's collection window closed. Raised on the INITIATOR exactly once.
+
+**Trigger conditions**
+
+- 135 seconds elapsed since the roll-call started (the two round gaps plus the collection tail).
+
+**Params**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `rollcall_id` | string | Roll-call identifier (8-char uppercase hex). |
+| `responded` | integer | Members whose signed answer verified. |
+| `expected` | integer | Size of the anchor-certified expected set (0 when not anchored). |
+| `anchored` | boolean | True when the expected set is authoritative; false means observed responders only, and nobody can be named missing. |
+| `rounds` | integer | Announce rounds sent. |
+| `unattested` | integer | Answers that could not be attested. |
+
+**Semantics notes**
+
+- The ledger stays readable after it closes; fetch it with `bramble.getRollCall`.
+- An answer arriving after the close is counted as `late` and does not reopen the roll-call.
+
+**JSON-RPC example**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onRollCallComplete",
+  "params": {
+    "rollcall_id": "00C0FFE1",
+    "responded": 4,
+    "expected": 5,
+    "anchored": true,
+    "rounds": 3,
+    "unattested": 0
+  }
+}
+```
+
+---
+
+## `bramble.onPhyFrame`
+
+**Description**  
+Raw received frame forwarded by the PHY passthrough hardware bridge ([`emulator/DESIGN.md`](../../emulator/DESIGN.md) section 10). This is a bridge stream, not a mesh event: it carries the frame the radio heard, before any channel decryption or packet-type handling.
+
+**Trigger conditions**
+
+- Passthrough is enabled (`phy.enable`) and the radio receives a frame; the registered emit hook serializes it.
+- The stream stops on `phy.disable`, on the enable TTL expiring, or on reboot; passthrough never persists.
+
+**Params**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `frame` | string | Received frame bytes as lowercase hex, up to 255 bytes (510 hex characters). |
+| `rssi` | integer | RX RSSI (dBm). |
+| `snr` | number | RX SNR (dB). |
+| `freq` | integer | Configured channel carrier in Hz, read from the live radio config as the frame arrives rather than measured off the air. |
+
+**Semantics notes**
+
+- Like every notification, the frame stream reaches the serial transport unfiltered, which is what the gateway path consumes and trusts by physical access; over WebSocket and BLE it stays behind the authenticated-only notification filter.
+- The frame is delivered exactly as received off the air, so a consumer parses and verifies it itself; the firmware neither decrypts nor authenticates it before forwarding.
+- Enabling passthrough is refused while the node holds a live channel identity (a provisioned network key, or any channel beyond the public one) unless `force` is set, so a normal mesh participant does not emit this stream by accident.
+
+**JSON-RPC example**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onPhyFrame",
+  "params": {
+    "frame": "40a1b2c3d4e5f6",
+    "rssi": -91,
+    "snr": 9,
+    "freq": 915000000
   }
 }
 ```

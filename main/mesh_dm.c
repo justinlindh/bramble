@@ -450,7 +450,7 @@ static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t* data, s
         }
         ESP_LOGW(TAG, "Message queue full, evicting oldest awaiting-session entry for %08" PRIX32,
                  s_queued_msgs[oldest].dest_addr);
-        rerr_fastfail_notify(s_queued_msgs[oldest].pkt_id, "queue_full", NULL);
+        rerr_fastfail_notify(s_queued_msgs[oldest].pkt_id, "queue_full");
         msg_store_update_by_uid(s_queued_msgs[oldest].uid, 0, MSG_STATUS_FAILED);
         free_idx = oldest;
     }
@@ -510,7 +510,7 @@ static void flush_session_queue(uint32_t dest_addr) {
             }
         } else {
             ESP_LOGW(TAG, "Failed to flush queued DM to %08" PRIX32, dest_addr);
-            rerr_fastfail_notify(s_queued_msgs[i].pkt_id, "session_send_failed", NULL);
+            rerr_fastfail_notify(s_queued_msgs[i].pkt_id, "session_send_failed");
             msg_store_update_by_uid(s_queued_msgs[i].uid, 0, MSG_STATUS_FAILED);
         }
         s_queued_msgs[i].used = false;
@@ -1050,7 +1050,7 @@ int emu_mesh_drop_dm_sessions(void) {
              * tables follows the existing discipline of the send paths,
              * which already run on arbitrary caller tasks. */
             size_t acks =
-                rerr_ack_failfast_for_dest(&s_pending_acks, peer, "emu_desync_inject", NULL, NULL);
+                rerr_ack_failfast_for_dest(&s_pending_acks, peer, "emu_desync_inject", NULL);
             int queued = 0;
             for (int q = 0; q < MAX_QUEUED_MSGS; q++) {
                 if (s_queued_msgs[q].used && s_queued_msgs[q].dest_addr == peer) {
