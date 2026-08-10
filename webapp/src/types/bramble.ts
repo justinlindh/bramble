@@ -55,7 +55,6 @@ export type MessageTier = 'broadcast' | 'normal' | 'critical';
 export type MessageDirection = 'outgoing' | 'incoming';
 
 export type DeliveryStatus =
-  | 'queued'      // in app, not yet sent to node
   | 'sending'     // RPC call in flight
   | 'sent'        // node accepted (packet_id returned)
   | 'delivered'   // delivery receipt received (ACK from dest)

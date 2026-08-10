@@ -7,7 +7,6 @@ interface DeliveryBadgeProps {
 }
 
 const STATUS_META: Record<DeliveryStatus, { label: string; cls: string }> = {
-  queued:    { label: 'Queued',                 cls: 'pending'   },
   sending:   { label: 'Sending…',               cls: 'sending'   },
   sent:      { label: 'Sent to next hop',       cls: 'pending'   },
   delivered: { label: 'Delivered',              cls: 'delivered' },
