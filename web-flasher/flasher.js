@@ -382,7 +382,16 @@ const BOARDS = {
 
     function showDone({ title, message }) {
         if (doneTitle) doneTitle.textContent = title || "You're all set!";
-        if (doneMessage) doneMessage.innerHTML = (message || 'Your Bramble device is ready to go.').replace(/\n/g, '<br>');
+        if (doneMessage) {
+            // The message interpolates user-typed values (device name, SSID,
+            // auth token), so build text nodes plus <br> elements instead of
+            // assigning innerHTML, which would reinterpret those values as HTML.
+            doneMessage.replaceChildren();
+            (message || 'Your Bramble device is ready to go.').split('\n').forEach((line, i) => {
+                if (i > 0) doneMessage.append(document.createElement('br'));
+                doneMessage.append(line);
+            });
+        }
         showStep('done');
     }
 
