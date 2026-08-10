@@ -34,6 +34,27 @@ const ESTABLISH_LINK_TIMEOUT_MS = 20000;
 // resolves writeValueWithResponse; the serialized write queue then wedges
 // silently (outgoing RPCs stop, incoming notifications keep flowing).
 const WRITE_CHUNK_TIMEOUT_MS = 6000;
+// How long the handshake write may spend inside the OS pairing flow before
+// we give up. The node's TX characteristic requires an encrypted link, so
+// the first write on an unpaired device raises the OS passkey prompt, and
+// typing a 6-digit code takes tens of seconds. Aborting earlier (the old 5s
+// handshake / 6s write timeouts) killed SMP mid-entry and each failed
+// attempt fed the firmware's anti-MITM advertising backoff (1s doubling to
+// 60s), which is how a node became invisible to the very next attempt.
+const PAIRING_GRACE_MS = 60000;
+// Delay between token-write retries while the prompt is up on fail-fast
+// stacks (BlueZ rejects the write immediately with a security error rather
+// than blocking until pairing completes the way Chrome does).
+const PAIRING_RETRY_DELAY_MS = 1000;
+// Written during a no-token connect so first-time pairing happens inside
+// connect(), under the grace machinery, instead of ambushing the first real
+// RPC. Safe on auth-required nodes: ble_rpc_task dispatches pre-auth lines
+// starting with '{' to the UNAUTHENTICATED allowlist dispatcher and only
+// counts non-JSON first lines as failed token attempts. The reply is never
+// awaited: real RPC ids start at 1, so the id 0 response routes nowhere by
+// design.
+const ENCRYPTION_PROBE_LINE = '{"jsonrpc":"2.0","id":0,"method":"bramble.getVersion","params":{}}';
+const ENCRYPTION_PROBE_BYTES = new TextEncoder().encode(ENCRYPTION_PROBE_LINE + '\n');
 
 // True only for the firmware rejecting our RPC token, the one failure that a
 // retry cannot fix. It must NOT match the platform's GATT security errors:
@@ -45,6 +66,37 @@ const WRITE_CHUNK_TIMEOUT_MS = 6000;
 function isTokenRejection(e: unknown): boolean {
   const msg = (e as Error)?.message ?? '';
   return /authentication required/i.test(msg) && !/timed out/i.test(msg);
+}
+
+// The user dismissed an OS/browser pairing dialog. One predicate for every
+// caller: the "anything containing cancel is a user cancel, never retried"
+// contract must not be written as three separate regexes that can drift.
+function isUserCancel(e: unknown): boolean {
+  return /cancel/i.test((e as Error)?.message ?? '');
+}
+
+// Terminal pairing cancellation, minted by writeLineWithPairingGrace so
+// connect() can recognize it by type instead of re-regexing the message it
+// itself minted. The message stays the errors.ts contract string
+// (/pairing was cancelled/i).
+class PairingCancelledError extends Error {
+  constructor() {
+    super('Bluetooth pairing was cancelled');
+  }
+}
+
+// The platform's transient GATT security errors: what a fail-fast stack
+// (BlueZ) returns for a write attempted while the link is not yet encrypted,
+// i.e. while the OS pairing prompt is still up. These improve on retry once
+// the user finishes typing the passkey. Deliberately disjoint from the two
+// terminal shapes: a user cancel (isUserCancel) aborts the connect, and the
+// firmware's token rejection ("authentication required", isTokenRejection
+// above) can never improve on retry.
+function isPairingSecurityError(e: unknown): boolean {
+  const msg = (e as Error)?.message ?? '';
+  if (isUserCancel(e)) return false;
+  if (/authentication required/i.test(msg)) return false;
+  return /not authorized|insufficient authentication|insufficient encryption/i.test(msg);
 }
 
 export class BLETransport implements Transport {
@@ -62,6 +114,17 @@ export class BLETransport implements Transport {
   // instead of the normal id/notification routing below, then cleared so
   // routing resumes as usual.
   private pendingAuth: AuthWaiter | null = null;
+  // Signaled true on the first pairing-security write failure (the OS prompt
+  // is up) and false once the handshake write settles, so the UI can show
+  // "check your device / OS pairing dialog" instead of a dead spinner.
+  private pairingCb: ((pending: boolean) => void) | null = null;
+  // Bumped when a GATT session is (re)built or drops. A hung write's timeout
+  // closure captures the generation at write time so a stale timer from a
+  // dead session can never tear down the healthy session auto-reconnect
+  // built in the meantime (latent bug in the old unconditional-disconnect
+  // teardown: a pre-drop write's 6s timer outlived the drop and fired after
+  // the NEW session was already up).
+  private sessionGeneration = 0;
 
   // Auto-reconnect: mirrors WebSocketTransport so the store's duck-typed
   // enableAutoReconnect wiring (banner + full state refetch) works unchanged.
@@ -132,6 +195,7 @@ export class BLETransport implements Transport {
     // the handshake times out; only an app restart used to clear it). Reset a
     // stale session first, and retry the whole link once after teardown.
     this.device.addEventListener('gattserverdisconnected', () => {
+      this.sessionGeneration++;
       this._connected = false;
       this.rejectAll(new Error('BLE disconnected'));
       // Walking out of range fires this within seconds (supervision
@@ -147,27 +211,58 @@ export class BLETransport implements Transport {
       try { this.device.gatt.disconnect(); } catch { /* best effort */ }
       await new Promise(r => setTimeout(r, 1000));
     }
+    // Any final rejection below must tear the link down before it leaves
+    // this method: when connect() itself rejects, the store never gets a
+    // client to clean up (session.client is only assigned after connect()
+    // resolves), and a peripheral with an open GATT link stops advertising,
+    // so a leaked link makes the node invisible to every later chooser.
     try {
-      await this.establishLink();
-      return;
-    } catch (e) {
-      if (isTokenRejection(e)) {
-        throw e; // a real token rejection will not improve on retry
-      }
+      // Attempt 1 carries the full pairing grace budget: a first-time pairing
+      // (OS passkey prompt and all) must complete inside this attempt, on one
+      // link, so the user sees exactly one prompt.
       try {
-        if (this.device?.gatt?.connected) this.device.gatt.disconnect();
-      } catch { /* best effort */ }
-      await new Promise(r => setTimeout(r, 1500));
+        await this.establishLink({ graceMs: (this.constructor as typeof BLETransport).pairingGraceMs });
+        return;
+      } catch (e) {
+        if (isTokenRejection(e)) {
+          throw e; // a real token rejection will not improve on retry
+        }
+        if (e instanceof PairingCancelledError) {
+          throw e; // the user dismissed the pairing dialog; a retry re-prompts
+        }
+        this.safeGattDisconnect();
+        await new Promise(r => setTimeout(r, 1500));
+      }
+      // One fresh-link retry, with no pairing grace. By the time attempt 1
+      // has failed, any OS prompt is dead (NimBLE's SM timeout is about
+      // 30s), so this cannot interrupt active passkey typing; it exists to
+      // heal Chromium's stale-cached-session wedge described above.
+      await this.establishLink({ graceMs: 0 });
+    } catch (e) {
+      this.safeGattDisconnect();
+      throw e;
     }
-    await this.establishLink();
+  }
+
+  // Best-effort teardown of a standing GATT link. Distinct from the
+  // UNguarded disconnect in connect()'s stale-session reset, which must run
+  // even when the cached gatt claims a state we do not trust.
+  private safeGattDisconnect(): void {
+    try {
+      if (this.device?.gatt?.connected) this.device.gatt.disconnect();
+    } catch { /* best effort */ }
   }
 
   // The (re)connectable part of connect(): everything after device selection.
   // Runs on first connect and on every reconnect attempt against the same
   // BluetoothDevice, including the auth handshake (the firmware requires the
-  // token line first on every fresh GATT session).
-  private async establishLink(): Promise<void> {
+  // token line first on every fresh GATT session). graceMs is the pairing
+  // budget for the handshake write: connect() attempt 1 passes the full
+  // grace window, everything else passes 0 (a reconnecting session was
+  // already paired, and connect() attempt 2 runs after any prompt is dead).
+  private async establishLink(opts: { graceMs: number }): Promise<void> {
     if (!this.device) throw new Error('No device selected');
+    this.sessionGeneration++;
     this.lineBuf = '';
     // A write that was in flight when the link died may never settle (the
     // Android bridge cannot deliver its completion callback for a dead GATT
@@ -200,7 +295,14 @@ export class BLETransport implements Transport {
     // Fresh connections with auth enabled require the bare token (not JSON-RPC)
     // as the first TX write, before any sendRPC call is allowed to run.
     if (this.token) {
-      await this.performAuthHandshake(this.token);
+      await this.performAuthHandshake(this.token, opts.graceMs);
+    } else {
+      // No token still means a write during connect: the encryption probe
+      // triggers the link encryption (and, first time, the OS pairing
+      // prompt) here, under the grace machinery, instead of leaving it to
+      // ambush the first real RPC and its short timeout. See the constant's
+      // comment for why this is safe on auth-required firmware.
+      await this.writeLineWithPairingGrace(ENCRYPTION_PROBE_BYTES, opts.graceMs);
     }
 
     this._connected = true;
@@ -213,7 +315,7 @@ export class BLETransport implements Transport {
       this.reconnectTimer = null;
       if (this.intentionalClose) return;
       try {
-        await this.withAttemptTimeout(this.establishLink());
+        await this.withAttemptTimeout(this.establishLink({ graceMs: 0 }));
         this.reconnectDelay = RECONNECT_INITIAL_DELAY_MS;
         this.reconnectCbs.onReconnect?.();
       } catch {
@@ -222,9 +324,7 @@ export class BLETransport implements Transport {
         // retrying: a BLE peripheral stops advertising while a connection is
         // open, so a zombie session blocks the node for everyone - including
         // our own next attempt.
-        try {
-          if (this.device?.gatt?.connected) this.device.gatt.disconnect();
-        } catch { /* best effort */ }
+        this.safeGattDisconnect();
         this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, RECONNECT_MAX_DELAY_MS);
         this.scheduleReconnect();
       }
@@ -248,6 +348,14 @@ export class BLETransport implements Transport {
 
   static establishLinkTimeoutMs = ESTABLISH_LINK_TIMEOUT_MS;
   static writeChunkTimeoutMs = WRITE_CHUNK_TIMEOUT_MS;
+  static pairingGraceMs = PAIRING_GRACE_MS;
+  static pairingRetryDelayMs = PAIRING_RETRY_DELAY_MS;
+
+  // The store feature-detects this method structurally to surface pairing
+  // progress in the connect UI; keep the name stable.
+  onPairingStateChange(cb: (pending: boolean) => void): void {
+    this.pairingCb = cb;
+  }
 
   // Background timers are throttled aggressively on Android, so a 30s-capped
   // backoff can stretch much longer while the screen is off. When the user
@@ -269,11 +377,17 @@ export class BLETransport implements Transport {
   // with. Rejects with a message the existing auth-error UI matches
   // (/1008|unauthorized|auth/i), mirroring the WiFi path's wording.
   //
-  // The timeout is armed BEFORE the token write, bounding the whole
-  // handshake: on a half-dead link the GATT write itself can hang forever,
-  // and awaiting it first would freeze connect/reconnect with no timeout
-  // ever starting.
-  private performAuthHandshake(token: string): Promise<void> {
+  // The write is awaited FIRST and the 5s reply timer armed only after it
+  // succeeds. On a first-time pairing the write IS the pairing flow: Chrome
+  // blocks the write promise until the user finishes its pairing dialog, so
+  // a reply timer running across the write (the old design) aborted the
+  // handshake while the user was still typing the passkey. The write itself
+  // is bounded (grace deadline or chunk timeout), so the handshake still
+  // cannot hang forever on a half-dead link; and write success implies the
+  // link is encrypted and the firmware holds the token line, at which point
+  // 5s is plenty for its one-line reply.
+  private async performAuthHandshake(token: string, graceMs: number): Promise<void> {
+    await this.writeLineWithPairingGrace(new TextEncoder().encode(token + '\n'), graceMs);
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingAuth = null;
@@ -283,15 +397,65 @@ export class BLETransport implements Transport {
         resolve: () => { clearTimeout(timer); resolve(); },
         reject: (err: Error) => { clearTimeout(timer); reject(err); },
       };
-      this.writeChunked(new TextEncoder().encode(token + '\n')).catch((e) => {
-        // Failed write: fail the handshake now instead of waiting out the timer.
-        if (this.pendingAuth) {
-          const waiter = this.pendingAuth;
-          this.pendingAuth = null;
-          waiter.reject(e as Error);
-        }
-      });
     });
+  }
+
+  // Writes one protocol line, riding out first-time pairing. Fail-fast
+  // stacks (BlueZ) reject each write with a transient security error while
+  // the OS passkey prompt is up, so those are retried every
+  // pairingRetryDelayMs until the grace deadline; Chrome instead blocks the
+  // write until its dialog closes, which the per-call chunk timeout (bounded
+  // by the time remaining, not the 6s default) rides out. Both terminal
+  // outcomes are wrapped into stable contract strings the UI maps:
+  // 'Bluetooth pairing was cancelled' and 'Bluetooth pairing did not
+  // complete'. Never leaks a raw GATT security string. graceMs 0 means one
+  // attempt with the default chunk timeout.
+  private async writeLineWithPairingGrace(payload: Uint8Array, graceMs: number): Promise<void> {
+    const ctor = this.constructor as typeof BLETransport;
+    const deadline = Date.now() + graceMs;
+    let pairingSignaled = false;
+    try {
+      for (;;) {
+        const remaining = deadline - Date.now();
+        try {
+          // Deliberate trade-off: raising the chunk timeout to the grace
+          // remainder means the rare Chromium stale-cached-session wedge (a
+          // handshake write that hangs on a half-dead session) now waits out
+          // the grace before connect()'s fresh-link retry heals it, instead
+          // of ~6s. Accepted: a 6s cap kills every Chrome first-time pairing
+          // (the blocked write IS the user typing the passkey), while the
+          // wedge is rare and still self-heals on attempt 2.
+          await this.writeChunked(payload, {
+            chunkTimeoutMs: remaining > 0 ? remaining : undefined,
+          });
+          return;
+        } catch (e) {
+          if (isUserCancel(e)) {
+            // The user dismissed the OS pairing dialog. Abort the whole
+            // connect: any retry raises a fresh prompt at someone who just
+            // said no.
+            throw new PairingCancelledError();
+          }
+          if (isPairingSecurityError(e)) {
+            if (Date.now() < deadline) {
+              if (!pairingSignaled) {
+                pairingSignaled = true;
+                this.pairingCb?.(true);
+              }
+              await new Promise(r => setTimeout(r, ctor.pairingRetryDelayMs));
+              continue;
+            }
+            // Grace exhausted (or graceMs 0): wrap instead of leaking the
+            // platform's GATT string. Contract with errors.ts
+            // (/pairing did not complete/i).
+            throw new Error('Bluetooth pairing did not complete');
+          }
+          throw e;
+        }
+      }
+    } finally {
+      if (pairingSignaled) this.pairingCb?.(false);
+    }
   }
 
   private boundOnBLEData = this.onBLEData.bind(this) as EventListener;
@@ -347,11 +511,11 @@ export class BLETransport implements Transport {
   // sendRPC and the auth handshake, which writes a bare token line instead
   // of a JSON-RPC payload. One payload's chunks are written atomically with
   // respect to other writeChunked callers.
-  private writeChunked(payload: Uint8Array): Promise<void> {
+  private writeChunked(payload: Uint8Array, opts?: { chunkTimeoutMs?: number }): Promise<void> {
     const run = this.writeQueue.then(async () => {
       if (!this.txChar) throw new Error('Not connected');
       for (let i = 0; i < payload.length; i += BLE_CHUNK_SIZE) {
-        await this.writeWithTimeout(payload.slice(i, i + BLE_CHUNK_SIZE));
+        await this.writeWithTimeout(payload.slice(i, i + BLE_CHUNK_SIZE), opts?.chunkTimeoutMs);
       }
     });
     // The queue must advance even when a write fails, or one error would
@@ -360,18 +524,27 @@ export class BLETransport implements Transport {
     return run;
   }
 
-  // A write that never completes means the link is functionally dead even if
-  // GATT still claims connected (field case: outgoing RPCs stopped while
-  // notifications kept arriving for 11 minutes). Fail the write AND drop the
-  // link so gattserverdisconnected fires and the auto-reconnect loop heals it.
-  private writeWithTimeout(chunk: Uint8Array<ArrayBuffer>): Promise<void> {
+  // A mid-session write that never completes means the link is functionally
+  // dead even if GATT still claims connected (field case: outgoing RPCs
+  // stopped while notifications kept arriving for 11 minutes). Fail the
+  // write AND drop the link so gattserverdisconnected fires and the
+  // auto-reconnect loop heals it. The teardown is guarded, not
+  // unconditional, for two reasons. First, handshake-phase writes
+  // (_connected still false) must NEVER self-disconnect: on Chrome a
+  // blocked handshake write IS the user typing the pairing code, and
+  // killing the link kills SMP mid-entry (the timeout still rejects, so
+  // nothing hangs). Second, the session-generation check: without it a hung
+  // write's timer from a dead session could fire after auto-reconnect had
+  // already built a NEW session and would disconnect that healthy link.
+  private writeWithTimeout(chunk: Uint8Array<ArrayBuffer>, timeoutMsOverride?: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const timeoutMs = (this.constructor as typeof BLETransport).writeChunkTimeoutMs;
+      const timeoutMs = timeoutMsOverride
+        ?? (this.constructor as typeof BLETransport).writeChunkTimeoutMs;
+      const generationAtWrite = this.sessionGeneration;
       const timer = setTimeout(() => {
         reject(new Error('BLE write timed out'));
-        try {
-          if (this.device?.gatt?.connected) this.device.gatt.disconnect();
-        } catch { /* best effort */ }
+        if (generationAtWrite !== this.sessionGeneration || !this._connected) return;
+        this.safeGattDisconnect();
       }, timeoutMs);
       this.txChar!.writeValueWithResponse(chunk).then(
         () => { clearTimeout(timer); resolve(); },
@@ -434,11 +607,7 @@ export class BLETransport implements Transport {
     // minutes). The call still clears Chromium's notifications-active flag
     // so the next session re-arms event delivery.
     try { Promise.resolve(this.rxChar?.stopNotifications?.()).catch(() => {}); } catch { /* ignore */ }
-    try {
-      if (this.device?.gatt?.connected) {
-        this.device.gatt.disconnect();
-      }
-    } catch { /* ignore */ }
+    this.safeGattDisconnect();
     this.txChar = null;
     this.rxChar = null;
     this.device = null;

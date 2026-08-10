@@ -7,7 +7,7 @@ import { formatAddr0x } from './utils/address';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { DevicePickerModal } from './components/DevicePickerModal';
 import { UnprovisionedBanner } from './components/UnprovisionedBanner';
-import { StatusDot } from './components/StatusDot';
+import { StatusDot, STATE_LABELS } from './components/StatusDot';
 import { GnssDot } from './components/GnssDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer, showToast, dismissToast } from './components/Toast';
@@ -24,6 +24,12 @@ import styles from './styles/App.module.css';
 const Map = lazy(() => import('./pages/Map/Map').then(m => ({ default: m.Map })));
 
 type Tab = 'chat' | 'nodes' | 'map' | 'config' | 'stats';
+
+// Status pill copy: same map as the StatusDot beside it, so the visible text
+// can never contradict the dot's title/aria-label.
+export function statusLabelFor(state: ReturnType<typeof useStore.getState>['connectionState']): string {
+  return STATE_LABELS[state];
+}
 
 export function tabFromShortcut(key: string): Tab | null {
   if (key === '1') return 'chat';
@@ -197,9 +203,7 @@ export default function App() {
         <span className={styles.statusArea}>
           <StatusDot state={connectionState} />
           <span className={styles.statusLabel}>
-            {connectionState === 'connected' ? 'Connected'
-             : connectionState === 'error' ? 'Reconnecting…'
-             : connectionState}
+            {statusLabelFor(connectionState)}
           </span>
           {/* Ahead of the node label because the label is the one item in this
               row designed to give way: it ellipsizes, while the indicator can

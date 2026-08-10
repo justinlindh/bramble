@@ -151,6 +151,20 @@
   cursor: not-allowed;
 }
 
+/* Pairing prompt callout: accent-toned rather than danger, because it asks
+   for an action (type the code) rather than reporting a failure. */
+.pairingBanner {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: rgba(31, 111, 235, 0.12);
+  border: 1px solid var(--accent-blue);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  text-align: left;
+}
+
 .error {
   width: 100%;
   padding: 0.6rem 0.75rem;
