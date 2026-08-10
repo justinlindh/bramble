@@ -217,7 +217,7 @@ function scheduleSentStatusTimeout(msgId: string): void {
 }
 
 const DEFAULT_DELIVERY_EVENT_RETENTION_DAYS = 30;
-const DELIVERY_EVENT_RETENTION_DAYS = Number((import.meta as any).env?.VITE_DELIVERY_EVENT_RETENTION_DAYS ?? DEFAULT_DELIVERY_EVENT_RETENTION_DAYS);
+const DELIVERY_EVENT_RETENTION_DAYS = Number(import.meta.env.VITE_DELIVERY_EVENT_RETENTION_DAYS ?? DEFAULT_DELIVERY_EVENT_RETENTION_DAYS);
 const DELIVERY_EVENT_SYNC_SEQ_KEY_PREFIX = 'bramble:delivery-event-sync:last-seq:';
 
 interface DeliveryReplayEventWire {

@@ -27,7 +27,7 @@ vi.mock('../../store/index', async (importOriginal) => ({
 describe('buildChannelItems', () => {
   it('keeps metadata name when present and does not fallback to ch-{index}', () => {
     const items = buildChannelItems(
-      { channels: [{ index: 2, name: '  alpha-team  ', hasPsk: true }] },
+      { channels: [{ index: 2, name: '  alpha-team  ', hasPsk: true, epoch: 0, isDefault: false }] },
       new Map<string, Conversation>()
     );
 
@@ -38,7 +38,7 @@ describe('buildChannelItems', () => {
 
   it('falls back only when name is missing/blank', () => {
     const items = buildChannelItems(
-      { channels: [{ index: 5, name: '   ', hasPsk: false }] },
+      { channels: [{ index: 5, name: '   ', hasPsk: false, epoch: 0, isDefault: false }] },
       new Map<string, Conversation>()
     );
 
