@@ -46,6 +46,25 @@ export async function loadConnectionCapabilities(): Promise<void> {
   useStore.getState().setConnectionCapabilities(capabilities);
 }
 
+// The per-node data refresh shared by the initial (network) connect and by
+// auto-reconnect. Both paths must pull the same store slices from the node, so
+// keeping them in one place is what stops the two lists drifting: reconnect
+// used to hand-copy a subset and had already fallen behind, silently skipping
+// status and peer locations. Best-effort throughout via the caller's `opt`
+// wrapper so a slow RPC cannot abort the load. Must run after initMessageStore
+// so loadMessages persists its rows into the right per-node DB namespace.
+async function refreshNodeData(opt: (p: Promise<void>) => Promise<void>): Promise<void> {
+  await Promise.all([
+    opt(loadStatus()),
+    opt(loadAirtime()),
+    opt(loadNeighbors()),
+    opt(loadRoutes()),
+    opt(loadMessages()),
+    opt(loadPeerLocations()),
+  ]);
+  await opt(syncDeliveryEventReplay());
+}
+
 // ─── Connection ─────────────────────────────────────────────────────────
 
 const SERIAL_RPC_READY_ATTEMPTS = 8;
@@ -202,10 +221,9 @@ export async function connect(
               ? formatAddrHex(nodeAddr)
               : readLastKnownNodeAddrHex();
             await initMessageStore(addrHex);
-            await Promise.all([loadNeighbors(), loadRoutes(), loadAirtime()]);
-            // Keep loadMessages after initMessageStore so reconnect fetches persist into the right DB namespace.
-            await opt(loadMessages());
-            await opt(syncDeliveryEventReplay());
+            // refreshNodeData runs after initMessageStore so loadMessages
+            // persists into the right per-node DB namespace.
+            await refreshNodeData(opt);
           } catch { /* best effort */ }
         },
       });
@@ -316,6 +334,9 @@ export async function connect(
     await initMessageStore(addrHex);
 
     if (type === 'serial') {
+      // Serial stages the load rather than fanning out: the link is a single
+      // slow UART, so status and airtime go first, then neighbours/routes, then
+      // messages/peer-locations, instead of six RPCs contending at once.
       await opt(loadStatus());
       await opt(loadAirtime());
       await Promise.all([
@@ -326,18 +347,10 @@ export async function connect(
         opt(loadMessages()),
         opt(loadPeerLocations()),
       ]);
+      await opt(syncDeliveryEventReplay());
     } else {
-      await Promise.all([
-        opt(loadStatus()),
-        opt(loadAirtime()),
-        opt(loadNeighbors()),
-        opt(loadRoutes()),
-        opt(loadMessages()),
-        opt(loadPeerLocations()),
-      ]);
+      await refreshNodeData(opt);
     }
-
-    await opt(syncDeliveryEventReplay());
 
     store.setConnectionState('connected');
 
