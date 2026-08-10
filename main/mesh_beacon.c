@@ -356,21 +356,26 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         return;
     }
 
-    /* Update neighbor table: track if this is a new neighbor */
+    /* Update neighbor table: track if this is a new neighbor.
+     *
+     * "New" is asked of the entry, not of the table's size. Once the table
+     * holds MAX_NEIGHBORS a new address is admitted by evicting the oldest, so
+     * the count never changes and a count comparison stops reporting new peers
+     * at all: on a full mesh that would silently take away the join tone and,
+     * worse, the rejoin flush, which is the only trigger a message parked for
+     * an absent peer has. */
     uint32_t t = now_ms();
-    int old_count = neighbor_count(&s_neighbors);
-    int idx =
-        neighbor_update(&s_neighbors, beacon.src_addr, (int8_t)rssi, snr, beacon.pubkey_hash, t);
-    int new_count = neighbor_count(&s_neighbors);
-    bool is_new_peer = (new_count > old_count);
-
-    /* Store peer name if present */
-    if (idx >= 0 && beacon.name_len > 0) {
-        memcpy(s_neighbors.entries[idx].name, beacon.name, beacon.name_len);
-        s_neighbors.entries[idx].name[beacon.name_len] = '\0';
-    } else if (idx >= 0) {
-        s_neighbors.entries[idx].name[0] = '\0';
-    }
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+    /* Sampled before the update because the update is what fills the last
+     * slot. Only the join tone needs it; see where it is used. */
+    bool table_was_full = neighbor_count(&s_neighbors) >= MAX_NEIGHBORS;
+#endif
+    /* Admission and the peer's name go in together under s_state_mutex (see
+     * mesh_neighbor_update_locked): both write the entry another task can be
+     * reading through mesh_get_peer_name. */
+    int idx = mesh_neighbor_update_locked(beacon.src_addr, (int8_t)rssi, snr, beacon.pubkey_hash, t,
+                                          beacon.name, beacon.name_len);
+    bool is_new_peer = neighbor_is_newly_admitted(&s_neighbors, idx, t);
 
     /* Feed timesync from beacon: requires corroboration from multiple sources */
     if (beacon.network_time != 0 && beacon.time_confidence != 0xFFFF) {
@@ -406,8 +411,19 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
                  snr, neighbor_count(&s_neighbors), is_new_peer ? " [NEW]" : "");
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
-        /* Play peer join tone for new neighbors */
-        if (is_new_peer && audio_is_available()) {
+        /* Play peer join tone for new neighbors.
+         *
+         * Deliberately a NARROWER rule than the flush below uses, and not an
+         * oversight to tidy up: once the table is full it holds the 32 most
+         * recently heard of however many peers are in earshot, so admissions
+         * are that set rotating rather than anyone arriving. At 40 peers in
+         * earshot that is roughly eight admissions a minute, and a chime each
+         * is noise a user feels immediately. The flush wants every admission
+         * because a rotation still means the peer is reachable right now; a
+         * human wants only arrivals, and once the table is saturated this node
+         * can no longer tell an arrival from a rotation. Suppressing the tone
+         * there is the honest answer to that. */
+        if (is_new_peer && !table_was_full && audio_is_available()) {
             audio_play_tone(AUDIO_TONE_PEER_JOIN);
         }
 #endif
@@ -415,6 +431,37 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         /* Mailbox: flush any stored messages for this newly-seen neighbor */
         if (s_mailbox_enabled) {
             mailbox_flush_for(beacon.src_addr);
+        }
+
+        /* Two edges deliver a parked message, and neither flushes per beacon
+         * (that would retry every 60s against a peer that is present but
+         * unreachable): the rejoin edge, is_new_peer, which is this beacon
+         * ADMITTING the address to the table; and a peer armed by a park while
+         * it was already in the table, rate limited to one attempt per
+         * PARKED_RETRY_COOLDOWN_MS. Without the second, a peer whose ACKs are
+         * being lost keeps beaconing, so it never leaves the table and can
+         * never newly join it, and its parked messages never go out at all.
+         * mesh_flush_parked_for transmits, so it stays outside every lock.
+         *
+         * Known bound, accepted, and airtime only: the armed field lives in
+         * the neighbor entry and dies with it, so once the table is full and
+         * rotating, every readmission is a fresh rejoin edge that the cooldown
+         * cannot govern. The retry interval for one peer degrades to roughly
+         * the beacon interval times N/(N-MAX_NEIGHBORS) for N peers in
+         * earshot: about 5 minutes at N=40 (what the cooldown allows anyway),
+         * 2 minutes at N=64, 88 seconds at N=100. It only bites past about 50,
+         * a regime where this project's own measured delivery is already at or
+         * below 10 percent. RAISING MAX_NEIGHBORS moves that threshold with
+         * it. What it costs is repeated attempts, never one message put on the
+         * air twice: an attempt landing while the last one is still waiting for
+         * a route or a session is refused by the send queue, which holds at
+         * most one entry per uid, and one landing while the last one has been
+         * transmitted and is still awaiting an ACK is skipped by
+         * mesh_flush_parked_for, which asks the pending-ack table. A
+         * transmitted frame holds no queue entry, so it takes both. */
+        if (mesh_parked_retry_decide_flush_locked(beacon.src_addr, is_new_peer, t)) {
+            int found = mesh_flush_parked_for(beacon.src_addr);
+            mesh_parked_retry_flushed_locked(beacon.src_addr, found, t);
         }
     }
 

@@ -1,0 +1,54 @@
+{
+  "name": "emu-parked-delivery",
+  "description": "Proves send-when-online end to end: a peer that is genuinely off the mesh, two failed DMs that get parked, the peer rejoining, and both DMs arriving. park-a addresses park-b by its real, randomly-generated address without ever having heard a beacon from it (EMU_AUTO_SEND_TO=file:peer_addr.txt: park-b writes its own address to a handoff file at boot, well before its EMU_MESH_START_DELAY_MS elapses; see main.c's emu_write_addr_handoff_file and emu_autosend.c's resolve_dest_from_file). This matters because mesh_flush_parked_for only fires on an is_new_peer edge (mesh_beacon.c), which is a first-ever admission to the neighbor table; if park-a had ever heard a beacon from park-b before the failure phase, the eventual rejoin would just be a table update, not a fresh admission, and the redelivery trigger would never fire. park-b holds mesh_task_start (and therefore radio_init, which runs inside it) for EMU_MESH_START_DELAY_MS, so it transmits and receives nothing at all during that window: a genuinely faithful outage, not a beacon-suppression trick. park-a's EMU_PARK_TEST sends 'PARK ALPHA' then 'PARK BETA' a few seconds apart to that address; with park-b off the mesh, dest is never a neighbor, route discovery finds nothing, and each queued-for-route entry expires MSG_STATUS_FAILED after the flat 60s route TTL, checked on mesh_task's 60s purge cadence (worst case just under two purge intervals if a send lands right after a tick fires, so up to ~120s). Once both rows read FAILED, EMU_AUTO_PARK=1 parks each individually via mesh_park_message, the only available lever here: the T-Deck's LVGL Queue button (scr_chat_messages.c) is not compiled for the virtual-pager board this emulator uses, so this scenario proves the mesh-level path (park, rejoin, redeliver), not the button that reaches it on real hardware. EMU_MESH_START_DELAY_MS (180s) comfortably exceeds the ~120s worst-case FAILED window with margin, so both rows are reliably parked before park-b ever starts beaconing. When the delay elapses, park-b joins the mesh; park-a's next beacon reception from it is a genuine first-ever admission, mesh_flush_parked_for fires, and both parked DMs go out via a fresh DM handshake. run_scenarios.sh asserts both distinct message bodies arrive at park-b by grepping its console log for the two individually-identified delivery records, not a count or the absence of a crash.",
+  "mode": "deterministic",
+  "duration_ms": 300000,
+  "nodes": [],
+  "firmware_nodes": [
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [
+        [
+          0,
+          0
+        ]
+      ],
+      "label": "park-a",
+      "env": {
+        "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "EMU_BEACON_INTERVAL_MS": "3000",
+        "EMU_PARK_TEST": "1",
+        "EMU_AUTO_PARK": "1",
+        "EMU_AUTO_SEND": "PARK ALPHA",
+        "EMU_AUTO_SEND2": "PARK BETA",
+        "EMU_AUTO_SEND_TO": "file:peer_addr.txt"
+      }
+    },
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [
+        [
+          30,
+          0
+        ]
+      ],
+      "label": "park-b",
+      "env": {
+        "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "EMU_BEACON_INTERVAL_MS": "3000",
+        "EMU_MESH_START_DELAY_MS": "180000",
+        "EMU_ADDR_HANDOFF_FILE": "peer_addr.txt"
+      }
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": []
+}

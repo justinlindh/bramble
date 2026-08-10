@@ -25,6 +25,15 @@ typedef struct {
     char name[17];             /* node name from beacon (max 16 chars + null) */
     uint32_t first_seen_ms;    /* timestamp of first beacon from this address (tenure start) */
     uint16_t beacon_count;     /* beacons received from this address, saturates at 0xFFFF */
+    /* Uptime after which a beacon from this peer re-sends what is parked for
+     * it, or 0 for nothing parked. In RAM only, never persisted and never on
+     * the wire. Owned by parked_retry.c (main/parked_retry.h), which is the
+     * only thing that reads or writes it. It lives on the entry because the
+     * entry is the thing whose lifetime it should share: a peer that leaves
+     * the table takes its pending retry with it, and one readmitted comes back
+     * without a stale one. Checking it costs a table lookup and, importantly,
+     * never a walk of the message store. */
+    uint32_t parked_retry_after_ms;
 } neighbor_entry_t;
 
 typedef struct {
@@ -59,6 +68,19 @@ int neighbor_count(const neighbor_table_t* table);
  * (post-purge) starts fresh, since neighbor_update resets tenure on a new
  * entry. */
 bool neighbor_is_established(const neighbor_table_t* table, uint32_t addr, uint32_t now_ms);
+
+/* True iff the entry at idx was CREATED by a neighbor_update at now_ms, which
+ * is the "this peer just joined" edge. Pass the index neighbor_update returned
+ * and the timestamp it was given.
+ *
+ * Not the same question as "did the table grow": at MAX_NEIGHBORS a new
+ * address is admitted by evicting the oldest entry, so count is unchanged and
+ * a count comparison reports a full mesh's new peers as familiar ones,
+ * silently and only once the table is full. neighbor_update stamps a created
+ * entry with beacon_count 1 and first_seen_ms == now_ms, and bumps
+ * beacon_count on every refresh, so that pair identifies an admission exactly
+ * whether or not a slot had to be reclaimed for it. */
+bool neighbor_is_newly_admitted(const neighbor_table_t* table, int idx, uint32_t now_ms);
 
 #define MAX_ROUTES 64
 #define ROUTE_ACTIVE_TIMEOUT_MS 300000

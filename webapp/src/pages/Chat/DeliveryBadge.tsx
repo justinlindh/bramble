@@ -7,11 +7,12 @@ interface DeliveryBadgeProps {
 }
 
 const STATUS_META: Record<DeliveryStatus, { label: string; cls: string }> = {
-  sending:   { label: 'Sending…',               cls: 'sending'   },
-  sent:      { label: 'Sent to next hop',       cls: 'pending'   },
-  delivered: { label: 'Delivered',              cls: 'delivered' },
-  failed:    { label: 'Failed – not delivered', cls: 'failed'    },
-  timeout:   { label: 'No confirmation yet',    cls: 'warning'   },
+  sending:   { label: 'Sending…',                       cls: 'sending'   },
+  sent:      { label: 'Sent to next hop',               cls: 'pending'   },
+  delivered: { label: 'Delivered',                      cls: 'delivered' },
+  failed:    { label: 'Failed – not delivered',         cls: 'failed'    },
+  timeout:   { label: 'No confirmation yet',            cls: 'warning'   },
+  parked:    { label: 'Parked, retries automatically',  cls: 'pending'   },
 };
 
 export function DeliveryBadge({ status, broadcastRecipientCount }: DeliveryBadgeProps) {

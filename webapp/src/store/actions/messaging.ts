@@ -130,7 +130,13 @@ export function mergeFirmwareMessages(
       tier: m.tier as MessageTier,
       channelIndex: isBroadcast ? undefined : channelIndex,
       timestampMs: wallMs,
-      status: 'delivered',
+      /* This path has always collapsed every firmware status to 'delivered':
+       * a settled history fetch has no live ack timer behind it, so finer
+       * fidelity for sent/failed isn't tracked here. 'queued' is the one
+       * exception that must survive: it means the node parked the message
+       * because the peer is offline, and labelling that 'delivered' would
+       * claim the opposite of what actually happened. */
+      status: m.status === 'queued' ? 'parked' : 'delivered',
     };
     /* Dedup against the store only, never within the batch. isLikelyDuplicate
      * is a content match, so an intra-batch check would drop a user genuinely

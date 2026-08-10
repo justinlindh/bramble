@@ -13,6 +13,7 @@
 #include "ui_toast.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -38,10 +39,45 @@ static uint32_t s_selected_uid = 0;
  * touching anything. */
 static lv_obj_t* s_presence_dot = NULL;
 
-/* Retry button of the currently expanded failed bubble, or NULL. Rebuilt with
- * the message list on every render, so it is cleared at the top of each pass
- * and only ever points into the widgets that pass created. */
-static lv_obj_t* s_retry_btn = NULL;
+/* Action buttons (Retry, Queue, Cancel) of the currently expanded bubble, or
+ * empty. A failed DM can carry two buttons (Retry and Queue) at once, so this
+ * is a small array rather than a single pointer. Rebuilt with the message
+ * list on every render, so it is cleared at the top of each pass and only
+ * ever points into the widgets that pass created. */
+static lv_obj_t* s_bubble_btns[2] = {NULL, NULL};
+static int s_bubble_btn_count = 0;
+
+/* Registers a bubble action button for the trackball splice. The array is
+ * sized for the worst case one bubble can offer today: Retry+Queue together
+ * on a failed DM, or Cancel alone on a parked one, never more than two,
+ * because can_retry/can_park and is_parked are mutually exclusive on
+ * msg_status_t (FAILED vs QUEUED). That invariant lives in the predicates,
+ * not here.
+ *
+ * The bound below is an explicit runtime check, not assert(): ESP-IDF's
+ * ASSERTIONS_DISABLE compiles assert() out entirely (see the s_dm_table
+ * allocation comment in main/mesh_task.c for the same lesson), and an
+ * overrun here would be an out-of-bounds write into whatever static follows
+ * s_bubble_btns, memory corruption rather than a clean crash. In EVERY
+ * build configuration, a bubble that somehow earns a third button has that
+ * button deleted outright rather than spliced in: a button reachable by
+ * touch but not the trackball is the exact defect this screen's other
+ * buttons are careful to avoid (see the Retry/Queue/Cancel comments below),
+ * so a button this code cannot safely track is not left on screen either.
+ * assert() is kept alongside for the debug case, where it turns the same
+ * condition into an immediate crash during development rather than waiting
+ * on the log line; every shipped sdkconfig has ASSERTIONS_ENABLE=y today,
+ * so that is the path actually exercised right now. */
+static void bubble_btn_add(lv_obj_t* btn) {
+    if (s_bubble_btn_count >= (int)(sizeof(s_bubble_btns) / sizeof(s_bubble_btns[0]))) {
+        ESP_LOGE(TAG, "bubble_btn_add: s_bubble_btns is full (%d), dropping a bubble button",
+                 s_bubble_btn_count);
+        assert(false);
+        lv_obj_delete(btn);
+        return;
+    }
+    s_bubble_btns[s_bubble_btn_count++] = btn;
+}
 
 /* Key-change interstitial (DM forward-secrecy + SAS, Task 8): which DM this
  * interstitial's buttons act on. Set right before it is shown, read only from
@@ -63,6 +99,11 @@ extern uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uin
 extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len);
 extern uint32_t mesh_resend_message(uint32_t dest_addr, const uint8_t* data, size_t len,
                                     uint32_t uid);
+extern bool mesh_park_message(uint32_t uid);
+/* Only so the refusal can name its reason; mesh_park_message enforces the
+ * window itself. See main/mesh_task.h. */
+extern bool mesh_park_window_open(uint32_t uid);
+extern bool mesh_cancel_parked_message(uint32_t uid);
 extern bool mesh_route_is_usable(uint32_t dest_addr);
 extern bool mesh_get_neighbor(uint32_t addr, neighbor_entry_t* out);
 extern int mesh_get_channel_count(void);
@@ -334,6 +375,83 @@ static void retry_click_cb(lv_event_t* e) {
      * send itself can update the row: both have to happen out of the button's
      * own CLICKED dispatch. See ui_defer. */
     ui_defer(retry_async, lv_event_get_user_data(e));
+}
+
+/* Queue: park a failed DM instead of retyping it. mesh_park_message only
+ * gates on uid != 0 and otherwise parks unconditionally: msg_store's sticky
+ * rule protects a QUEUED row against being demoted back to FAILED, but does
+ * nothing to stop a DELIVERED or SENT row from being promoted to QUEUED. So
+ * without a re-read here, a late ACK landing between the bubble being drawn
+ * and the tap would re-park a message that already arrived, and the next
+ * rejoin would resend it, a real duplicate on the wire, not just a stale
+ * button. Re-read the row and re-check chat_message_is_parkable against its
+ * current state before calling, mirroring retry_async's guard above for
+ * exactly the same reason. */
+static void park_async(void* arg) {
+    uint32_t uid = (uint32_t)(uintptr_t)arg;
+    if (uid == 0)
+        return;
+
+    stored_msg_t msg;
+    bool found = false;
+    for (int i = msg_store_count() - 1; i >= 0; i--) {
+        if (msg_store_get_copy(i, &msg) && msg.uid == uid) {
+            found = true;
+            break;
+        }
+    }
+    if (!found || !chat_message_is_parkable(msg.direction == MSG_DIR_OUTGOING, msg.channel_index,
+                                            msg.status, msg.uid)) {
+        /* The row moved on between the render and the tap (a late ACK, or the
+         * ring rotated it out). Say so rather than no-opping: a button that
+         * silently does nothing reads as broken hardware. */
+        ESP_LOGW(TAG, "park uid=%lu: found=%d no longer a parkable DM", (unsigned long)uid,
+                 (int)found);
+        ui_toast_show("Nothing to queue");
+        render_messages_for_target(false);
+        return;
+    }
+
+    /* Asked before parking so the refusal can say which refusal it is. A
+     * message past the park window is not "nothing to queue": it is right
+     * there, the user is looking at it, and it is simply too old to be worth
+     * retrying. Telling them nothing was found would read as a broken button
+     * on a message they can see. mesh_park_message refuses it anyway; this is
+     * only about which words the user gets. */
+    if (!mesh_park_window_open(uid)) {
+        ESP_LOGW(TAG, "park uid=%lu: past the park window", (unsigned long)uid);
+        ui_toast_show("Too old to retry");
+        render_messages_for_target(false);
+        return;
+    }
+
+    if (mesh_park_message(uid)) {
+        /* Not "when back": ACK-retry exhaustion, the common way a DM ends
+         * up here, happens while the peer keeps beaconing normally, so the
+         * peer is frequently not away at all. "Automatically" is the part
+         * that is always true, on the beacon-driven rejoin edge and on the
+         * cooldown-limited retry for a peer that never left the neighbor
+         * table (main/mesh_beacon.c). */
+        ui_toast_show("Will retry automatically");
+    } else {
+        ui_toast_show("Nothing to queue");
+    }
+    render_messages_for_target(false);
+}
+
+static void park_click_cb(lv_event_t* e) { ui_defer(park_async, lv_event_get_user_data(e)); }
+
+/* Cancel: pull a parked DM back out of the queue. */
+static void cancel_park_async(void* arg) {
+    uint32_t uid = (uint32_t)(uintptr_t)arg;
+    if (uid == 0)
+        return;
+    mesh_cancel_parked_message(uid);
+    render_messages_for_target(false);
+}
+
+static void cancel_park_click_cb(lv_event_t* e) {
+    ui_defer(cancel_park_async, lv_event_get_user_data(e));
 }
 
 static void msg_bubble_click_cb(lv_event_t* e) {
@@ -617,12 +735,19 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         chat_delivery_badge_t badge = chat_message_delivery_badge(msg->status);
         const char* badge_sym = LV_SYMBOL_BULLET;
 
+        /* Adding a badge kind means adding a branch HERE too. This is a chain,
+         * not a switch, so a new kind falls through to the bullet silently with
+         * no compiler warning, which is exactly how the QUEUED badge shipped
+         * without a renderer. test_chat_message_ui.c pins each kind's symbol
+         * and colour role; keep adding a case there with every new kind. */
         if (badge.kind == CHAT_DELIVERY_BADGE_SINGLE_CHECK) {
             badge_sym = LV_SYMBOL_OK;
         } else if (badge.kind == CHAT_DELIVERY_BADGE_DOUBLE_CHECK) {
             badge_sym = LV_SYMBOL_OK " " LV_SYMBOL_OK;
         } else if (badge.kind == CHAT_DELIVERY_BADGE_FAILED) {
             badge_sym = LV_SYMBOL_CLOSE;
+        } else if (badge.kind == CHAT_DELIVERY_BADGE_QUEUED) {
+            badge_sym = LV_SYMBOL_ENVELOPE;
         }
 
         if (badge.color_role == CHAT_DELIVERY_COLOR_DELIVERED) {
@@ -674,7 +799,10 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
      * is also why a retryable message has to be able to expand on its own
      * (chat_message_is_retryable), independent of having a packet id. */
     bool can_retry = chat_message_is_retryable(is_mine, msg->channel_index, msg->status, msg->uid);
-    bool can_expand = chat_message_has_details_toggle(is_mine, msg->packet_id) || can_retry;
+    bool can_park = chat_message_is_parkable(is_mine, msg->channel_index, msg->status, msg->uid);
+    bool is_parked = chat_message_is_parked(is_mine, msg->channel_index, msg->status, msg->uid);
+    bool can_expand =
+        chat_message_has_details_toggle(is_mine, msg->packet_id) || can_retry || is_parked;
     bool route_expanded = can_expand && msg->uid != 0 && msg->uid == s_selected_uid;
 
     /* Hug a single line that fits under the cap; wrap (and cap the bubble
@@ -716,9 +844,21 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
             /* Room for "Delivered to 4: " plus four full node names and
              * separators; 128 truncated the "+N" tail once names stopped
-             * being clipped to 7 chars. */
+             * being clipped to 7 chars. A parked message has no receipts to
+             * report: it says why it is waiting instead, without claiming
+             * anything about the peer's whereabouts. ACK-retry exhaustion,
+             * the common way a DM ends up parkable, happens while the peer
+             * keeps beaconing normally, so "the peer is away" is false in
+             * the common case; the peer's name is dropped rather than
+             * anchoring that false claim to a specific person, and this
+             * thread already says whose bubble it is. */
             char receipt_buf[192];
-            build_receipt_summary(receipt_buf, sizeof(receipt_buf), msg->packet_id, msg->status);
+            if (is_parked) {
+                snprintf(receipt_buf, sizeof(receipt_buf), "Will retry automatically");
+            } else {
+                build_receipt_summary(receipt_buf, sizeof(receipt_buf), msg->packet_id,
+                                      msg->status);
+            }
 
             lv_obj_t* receipt_lbl = lv_label_create(bubble);
             lv_label_set_text(receipt_lbl, receipt_buf);
@@ -728,34 +868,88 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
             lv_obj_set_style_text_color(receipt_lbl, BR_COLOR_TEXT_SEC, 0);
 
             /* A message that exhausted its delivery attempts is a dead end
-             * otherwise: the only recourse was to retype it. */
-            if (can_retry) {
-                lv_obj_t* retry_btn = lv_btn_create(bubble);
-                lv_obj_set_size(retry_btn, 72, BR_TAP_TARGET_MIN);
-                lv_obj_set_style_bg_color(retry_btn, BR_COLOR_SURFACE_2, 0);
-                lv_obj_set_style_radius(retry_btn, BR_RADIUS, 0);
-                lv_obj_set_style_shadow_width(retry_btn, 0, 0);
-                lv_obj_set_style_pad_all(retry_btn, 2, 0);
+             * otherwise: the only recourse was to retype it. Retry sends it
+             * again right now; Queue parks it for a beacon-driven flush once
+             * the peer rejoins the mesh. Both fit one row: 100px each, 6px
+             * gap, inside the 208px bubble inner width. A parked row swaps
+             * both for a single Cancel, its only way back out of the queue. */
+            if (can_retry || can_park) {
+                lv_obj_t* btn_row = lv_obj_create(bubble);
+                lv_obj_set_width(btn_row, LV_PCT(100));
+                lv_obj_set_height(btn_row, LV_SIZE_CONTENT);
+                lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, 0);
+                lv_obj_set_style_border_width(btn_row, 0, 0);
+                lv_obj_set_style_pad_all(btn_row, 0, 0);
+                lv_obj_set_style_pad_column(btn_row, 6, 0);
+                lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+                lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
 
-                /* Same focus border every other content widget carries. The
-                 * button is walked by the trackball (spliced into the content
-                 * group below), and without this the cursor lands on it
-                 * invisibly. */
-                ui_zone_style_content(retry_btn);
+                if (can_retry) {
+                    lv_obj_t* retry_btn = lv_btn_create(btn_row);
+                    lv_obj_set_size(retry_btn, 100, BR_TAP_TARGET_MIN);
+                    lv_obj_set_style_bg_color(retry_btn, BR_COLOR_SURFACE_2, 0);
+                    lv_obj_set_style_radius(retry_btn, BR_RADIUS, 0);
+                    lv_obj_set_style_shadow_width(retry_btn, 0, 0);
+                    lv_obj_set_style_pad_all(retry_btn, 2, 0);
 
-                lv_obj_t* retry_lbl = lv_label_create(retry_btn);
-                lv_label_set_text(retry_lbl, LV_SYMBOL_REFRESH " Retry");
-                lv_obj_set_style_text_font(retry_lbl, &lv_font_montserrat_12, 0);
-                lv_obj_set_style_text_color(retry_lbl, BR_COLOR_TEXT, 0);
-                lv_obj_center(retry_lbl);
+                    /* Same focus border every other content widget carries.
+                     * The button is walked by the trackball (spliced into
+                     * the content group below), and without this the
+                     * cursor lands on it invisibly. */
+                    ui_zone_style_content(retry_btn);
 
-                lv_obj_add_event_cb(retry_btn, retry_click_cb, LV_EVENT_CLICKED,
+                    lv_obj_t* retry_lbl = lv_label_create(retry_btn);
+                    lv_label_set_text(retry_lbl, LV_SYMBOL_REFRESH " Retry");
+                    lv_obj_set_style_text_font(retry_lbl, &lv_font_montserrat_12, 0);
+                    lv_obj_set_style_text_color(retry_lbl, BR_COLOR_TEXT, 0);
+                    lv_obj_center(retry_lbl);
+
+                    lv_obj_add_event_cb(retry_btn, retry_click_cb, LV_EVENT_CLICKED,
+                                        (void*)(uintptr_t)msg->uid);
+                    bubble_btn_add(retry_btn);
+                }
+
+                if (can_park) {
+                    lv_obj_t* queue_btn = lv_btn_create(btn_row);
+                    lv_obj_set_size(queue_btn, 100, BR_TAP_TARGET_MIN);
+                    lv_obj_set_style_bg_color(queue_btn, BR_COLOR_SURFACE_2, 0);
+                    lv_obj_set_style_radius(queue_btn, BR_RADIUS, 0);
+                    lv_obj_set_style_shadow_width(queue_btn, 0, 0);
+                    lv_obj_set_style_pad_all(queue_btn, 2, 0);
+
+                    ui_zone_style_content(queue_btn);
+
+                    lv_obj_t* queue_lbl = lv_label_create(queue_btn);
+                    lv_label_set_text(queue_lbl, LV_SYMBOL_ENVELOPE " Queue");
+                    lv_obj_set_style_text_font(queue_lbl, &lv_font_montserrat_12, 0);
+                    lv_obj_set_style_text_color(queue_lbl, BR_COLOR_TEXT, 0);
+                    lv_obj_center(queue_lbl);
+
+                    lv_obj_add_event_cb(queue_btn, park_click_cb, LV_EVENT_CLICKED,
+                                        (void*)(uintptr_t)msg->uid);
+                    bubble_btn_add(queue_btn);
+                }
+            }
+
+            if (is_parked) {
+                lv_obj_t* cancel_btn = lv_btn_create(bubble);
+                lv_obj_set_size(cancel_btn, 100, BR_TAP_TARGET_MIN);
+                lv_obj_set_style_bg_color(cancel_btn, BR_COLOR_SURFACE_2, 0);
+                lv_obj_set_style_radius(cancel_btn, BR_RADIUS, 0);
+                lv_obj_set_style_shadow_width(cancel_btn, 0, 0);
+                lv_obj_set_style_pad_all(cancel_btn, 2, 0);
+
+                ui_zone_style_content(cancel_btn);
+
+                lv_obj_t* cancel_lbl = lv_label_create(cancel_btn);
+                lv_label_set_text(cancel_lbl, LV_SYMBOL_CLOSE " Cancel");
+                lv_obj_set_style_text_font(cancel_lbl, &lv_font_montserrat_12, 0);
+                lv_obj_set_style_text_color(cancel_lbl, BR_COLOR_TEXT, 0);
+                lv_obj_center(cancel_lbl);
+
+                lv_obj_add_event_cb(cancel_btn, cancel_park_click_cb, LV_EVENT_CLICKED,
                                     (void*)(uintptr_t)msg->uid);
-                /* At most one bubble is expanded at a time (s_selected_uid
-                 * is a single value), so one pointer is enough for
-                 * chat_sync_content_group to splice this into the trackball
-                 * walk right after its own bubble. */
-                s_retry_btn = retry_btn;
+                bubble_btn_add(cancel_btn);
             }
         }
 
@@ -763,6 +957,18 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         lv_obj_add_event_cb(bubble, msg_bubble_click_cb, LV_EVENT_CLICKED,
                             (void*)(uintptr_t)msg->uid);
     }
+}
+
+/* Is obj somewhere inside bubble's subtree? Retry and Queue sit in a row
+ * container nested one level inside the bubble, while Cancel sits directly
+ * in it, so a plain parent-equality check would miss the nested pair; walk
+ * the ancestor chain instead. */
+static bool obj_is_in_bubble(lv_obj_t* obj, lv_obj_t* bubble) {
+    for (lv_obj_t* p = obj ? lv_obj_get_parent(obj) : NULL; p; p = lv_obj_get_parent(p)) {
+        if (p == bubble)
+            return true;
+    }
+    return false;
 }
 
 /* Rebuild the content focus group after the message list is (re)built so the
@@ -794,11 +1000,14 @@ static void chat_sync_content_group(void) {
         lv_group_add_obj(cg, target);
         if (foc_uid && (uint32_t)(uintptr_t)lv_obj_get_user_data(target) == foc_uid)
             restore = target;
-        /* Retry sits inside its bubble, so the row walk above would skip it and
-         * leave it touch-only. Splice it in directly after its own bubble, which
-         * is where a trackball user expects to land next. */
-        if (s_retry_btn && lv_obj_get_parent(s_retry_btn) == target) {
-            lv_group_add_obj(cg, s_retry_btn);
+        /* Retry, Queue, and Cancel sit inside their bubble, so the row walk
+         * above would skip them and leave them touch-only. Splice each in
+         * directly after its own bubble, in creation order, which is where a
+         * trackball user expects to land next. */
+        for (int j = 0; j < s_bubble_btn_count; j++) {
+            if (s_bubble_btns[j] && obj_is_in_bubble(s_bubble_btns[j], target)) {
+                lv_group_add_obj(cg, s_bubble_btns[j]);
+            }
         }
     }
 
@@ -826,10 +1035,12 @@ static void render_messages_for_target(bool scroll_to_bottom) {
     bool was_at_bottom = (lv_obj_get_scroll_bottom(s_msg_list) <= 8);
 
     lv_refr_now(lv_display_get_default());
-    /* The clean below deletes the previous pass's retry button, so drop the
-     * pointer before it dangles; this pass sets it again if a failed bubble is
+    /* The clean below deletes the previous pass's action buttons, so drop the
+     * pointers before they dangle; this pass sets them again if a bubble is
      * expanded. */
-    s_retry_btn = NULL;
+    s_bubble_btns[0] = NULL;
+    s_bubble_btns[1] = NULL;
+    s_bubble_btn_count = 0;
     lv_obj_clean(s_msg_list);
 
     uint32_t now_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);

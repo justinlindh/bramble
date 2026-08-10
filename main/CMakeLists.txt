@@ -7,7 +7,7 @@ set(main_srcs
     "rpc_methods.c" "topology_export.c" "ws_server.c"
     "rpc_token.c" "ws_origin.c" "ws_auth_credential.c"
     "secure_nvs.c" "board.c" "util.c" "rreq_pseudonym.c" "beacon_policy_calc.c"
-    "probe_results.c" "probe_reply.c" "rerr_ack_fastfail.c")
+    "probe_results.c" "probe_reply.c" "rerr_ack_fastfail.c" "parked_retry.c")
 
 idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "linux")

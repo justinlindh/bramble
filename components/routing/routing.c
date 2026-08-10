@@ -94,6 +94,13 @@ bool neighbor_is_established(const neighbor_table_t* table, uint32_t addr, uint3
     return false;
 }
 
+bool neighbor_is_newly_admitted(const neighbor_table_t* table, int idx, uint32_t now_ms) {
+    if (!table || idx < 0 || idx >= table->count)
+        return false;
+    const neighbor_entry_t* e = &table->entries[idx];
+    return e->beacon_count == 1 && e->first_seen_ms == now_ms;
+}
+
 /* ── Routing table ── */
 
 void route_init(routing_table_t* table) { memset(table, 0, sizeof(*table)); }

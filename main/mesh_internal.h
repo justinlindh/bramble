@@ -39,6 +39,7 @@
 #include "beacon_policy_calc.h"
 #include "probe_results.h"
 #include "probe_reply.h"
+#include "parked_retry.h"
 #include "broadcast_delivery_receipt.h"
 #include "radio.h"
 #include "tx_gate.h"
@@ -205,6 +206,9 @@ typedef struct {
 extern bramble_identity_t* s_identity;
 extern uint8_t s_beacon_key[BRAMBLE_KEY_SIZE];
 extern neighbor_table_t s_neighbors;
+/* Parked-message sweep schedule. Mesh task only: the sweep writes it from the
+ * maintenance tick and the beacon handler reads it, both on that task. */
+extern parked_sweep_t s_parked_sweep;
 extern dedup_buffer_t s_dedup;
 extern dedup_buffer_t s_flood_dedup;
 extern replay_table_t s_replay;
@@ -281,6 +285,21 @@ uint32_t now_ms(void);
  * must pass an address the frame's own authentication covers, never a
  * relay-mutable hint. */
 void mesh_note_peer_heard(uint32_t addr, int16_t rssi, int8_t snr);
+
+/* Admit or refresh a neighbor and store its name, under s_state_mutex.
+ * s_neighbors has cross-task readers, so every write to it happens under that
+ * mutex rather than touching the table directly; see the comment on the
+ * wrappers in mesh_task.c for why the mutex is safe to take on the RX path.
+ * Returns the entry index, or negative if there is none. */
+int mesh_neighbor_update_locked(uint32_t addr, int8_t rssi, int8_t snr, uint32_t pubkey_hash,
+                                uint32_t t, const char* name, uint8_t name_len);
+
+/* The parked-retry pair, under the same mutex and for the same reason: both
+ * write a neighbor entry's retry deadline. Kept as two calls because
+ * mesh_flush_parked_for runs between them and transmits, so it stays outside
+ * every lock. Mesh task only. */
+bool mesh_parked_retry_decide_flush_locked(uint32_t peer_addr, bool is_new_peer, uint32_t t);
+void mesh_parked_retry_flushed_locked(uint32_t peer_addr, int found, uint32_t t);
 uint32_t next_packet_id(void);
 int mesh_tx(const uint8_t* buf, uint8_t len, tx_kind_t kind);
 uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, size_t payload_len,

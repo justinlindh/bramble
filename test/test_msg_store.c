@@ -140,6 +140,464 @@ void test_count_outgoing_delivered_tracks_receipted_dms_only(void) {
     TEST_ASSERT_EQUAL_UINT32(1, msg_store_count_outgoing_delivered());
 }
 
+void test_parked_uids_selects_only_this_peers_parked_outgoing_dms(void) {
+    msg_store_init();
+    /* Oldest first in insertion order. */
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "one", 3, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    msg_store_add_dm_uid(0xBBBB, MSG_DIR_OUTGOING, "other peer", 10, 0, 0, 0, MSG_STATUS_QUEUED, 2);
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_INCOMING, "incoming", 8, 0, 0, 0, MSG_STATUS_QUEUED, 3);
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "failed", 6, 0, 0, 0, MSG_STATUS_FAILED, 4);
+    msg_store_add_channel(0xAAAA, MSG_DIR_OUTGOING, "channel", 7, 0, 0, 0, MSG_STATUS_QUEUED, 0);
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "two", 3, 0, 0, 0, MSG_STATUS_QUEUED, 5);
+
+    uint32_t uids[8];
+    int n = msg_store_parked_uids_for_peer(0xAAAA, uids, 8, 0);
+    TEST_ASSERT_EQUAL_INT(2, n);
+    TEST_ASSERT_EQUAL_UINT32(1, uids[0]);
+    TEST_ASSERT_EQUAL_UINT32(5, uids[1]);
+}
+
+void test_parked_uids_respects_the_output_bound(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "a", 1, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "b", 1, 0, 0, 0, MSG_STATUS_QUEUED, 2);
+
+    uint32_t uids[1];
+    TEST_ASSERT_EQUAL_INT(1, msg_store_parked_uids_for_peer(0xAAAA, uids, 1, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, uids[0]);
+}
+
+void test_parked_uids_empty_when_nothing_is_parked(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "sent", 4, 0, 0, 0, MSG_STATUS_SENT, 1);
+    uint32_t uids[4];
+    TEST_ASSERT_EQUAL_INT(0, msg_store_parked_uids_for_peer(0xAAAA, uids, 4, 0));
+    TEST_ASSERT_EQUAL_INT(0, msg_store_parked_uids_for_peer(0xAAAA, NULL, 4, 0));
+    TEST_ASSERT_EQUAL_INT(0, msg_store_parked_uids_for_peer(0xAAAA, uids, 0, 0));
+}
+
+void test_parked_uids_survive_ring_wrap(void) {
+    msg_store_init();
+    /* Push filler rows through the ring so it wraps at least once, landing the
+     * two target rows on opposite sides of the physical wrap boundary
+     * (physical index MSG_STORE_MAX - 1, then back to physical index 0). A
+     * walk over the raw array (s_msgs[0..count)) instead of from the ring's
+     * logical start would read the newer row (uid 200, physical 0) before the
+     * older one (uid 100, physical MSG_STORE_MAX - 1): exactly backwards. */
+    for (int i = 0; i < 2 * MSG_STORE_MAX - 1; i++) {
+        msg_store_add(0x9999, MSG_DIR_INCOMING, "filler", 6, -70, 5);
+    }
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "wrap-old", 8, 0, 0, 0, MSG_STATUS_QUEUED, 100);
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "wrap-new", 8, 0, 0, 0, MSG_STATUS_QUEUED, 200);
+
+    uint32_t uids[4];
+    int n = msg_store_parked_uids_for_peer(0xAAAA, uids, 4, 0);
+    TEST_ASSERT_EQUAL_INT(2, n);
+    TEST_ASSERT_EQUAL_UINT32(100, uids[0]);
+    TEST_ASSERT_EQUAL_UINT32(200, uids[1]);
+}
+
+void test_get_copy_by_uid_finds_row_and_rejects_unknown_or_zero(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "hello", 5, 0, 0, 0, MSG_STATUS_QUEUED, 7);
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(7, &out));
+    TEST_ASSERT_EQUAL_STRING("hello", out.text);
+    TEST_ASSERT_EQUAL_UINT32(0xAAAA, out.peer_addr);
+
+    TEST_ASSERT_FALSE(msg_store_get_copy_by_uid(999, &out));
+    TEST_ASSERT_FALSE(msg_store_get_copy_by_uid(0, &out));
+    TEST_ASSERT_FALSE(msg_store_get_copy_by_uid(7, NULL));
+}
+
+void test_get_copy_by_uid_survives_ring_wrap(void) {
+    msg_store_init();
+    for (int i = 0; i < 2 * MSG_STORE_MAX - 1; i++) {
+        msg_store_add(0x9999, MSG_DIR_INCOMING, "filler", 6, -70, 5);
+    }
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "wrap-old", 8, 0, 0, 0, MSG_STATUS_QUEUED, 100);
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "wrap-new", 8, 0, 0, 0, MSG_STATUS_QUEUED, 200);
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(100, &out));
+    TEST_ASSERT_EQUAL_STRING("wrap-old", out.text);
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(200, &out));
+    TEST_ASSERT_EQUAL_STRING("wrap-new", out.text);
+}
+
+void test_peer_for_uid_reads_the_recipient_without_a_row_copy(void) {
+    /* What arming a parked retry needs from a uid, and all it needs: parking
+     * runs on the UI or RPC task, and a stored_msg_t is too big to put on
+     * those stacks just to learn who a message was for. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xC0FFEE, MSG_DIR_OUTGOING, "who", 3, 0, 0, 0, MSG_STATUS_QUEUED, 11);
+
+    uint32_t peer = 0;
+    TEST_ASSERT_TRUE(msg_store_peer_for_uid(11, &peer));
+    TEST_ASSERT_EQUAL_UINT32(0xC0FFEE, peer);
+
+    TEST_ASSERT_FALSE(msg_store_peer_for_uid(999, &peer));
+    TEST_ASSERT_FALSE(msg_store_peer_for_uid(0, &peer));
+    TEST_ASSERT_FALSE(msg_store_peer_for_uid(11, NULL));
+    TEST_ASSERT_EQUAL_UINT32(0xC0FFEE, peer); /* a rejected read leaves it alone */
+}
+
+void test_peer_for_uid_survives_ring_wrap(void) {
+    msg_store_init();
+    for (int i = 0; i < 2 * MSG_STORE_MAX - 1; i++) {
+        msg_store_add(0x9999, MSG_DIR_INCOMING, "filler", 6, -70, 5);
+    }
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "wrap-old", 8, 0, 0, 0, MSG_STATUS_QUEUED, 100);
+    msg_store_add_dm_uid(0xBBBB, MSG_DIR_OUTGOING, "wrap-new", 8, 0, 0, 0, MSG_STATUS_QUEUED, 200);
+
+    uint32_t peer = 0;
+    TEST_ASSERT_TRUE(msg_store_peer_for_uid(100, &peer));
+    TEST_ASSERT_EQUAL_UINT32(0xAAAA, peer);
+    TEST_ASSERT_TRUE(msg_store_peer_for_uid(200, &peer));
+    TEST_ASSERT_EQUAL_UINT32(0xBBBB, peer);
+}
+
+void test_next_parked_peer_rotates_over_every_parked_peer_and_wraps(void) {
+    msg_store_init();
+    /* Stored out of address order on purpose: the rotation is defined by
+     * address, not by insertion. */
+    msg_store_add_dm_uid(0x300, MSG_DIR_OUTGOING, "c", 1, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    msg_store_add_dm_uid(0x100, MSG_DIR_OUTGOING, "a", 1, 0, 0, 0, MSG_STATUS_QUEUED, 2);
+    msg_store_add_dm_uid(0x200, MSG_DIR_OUTGOING, "b", 1, 0, 0, 0, MSG_STATUS_QUEUED, 3);
+    msg_store_add_dm_uid(0x200, MSG_DIR_OUTGOING, "b2", 2, 0, 0, 0, MSG_STATUS_QUEUED, 4);
+
+    uint32_t peer = 0;
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer, 0));
+    TEST_ASSERT_EQUAL_HEX32(0x100, peer);
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer, 0));
+    TEST_ASSERT_EQUAL_HEX32(0x200, peer); /* two rows, still one turn */
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer, 0));
+    TEST_ASSERT_EQUAL_HEX32(0x300, peer);
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(peer, &peer, 0));
+    TEST_ASSERT_EQUAL_HEX32(0x100, peer); /* wrapped */
+}
+
+void test_next_parked_peer_ignores_everything_that_is_not_a_parked_dm(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0x100, MSG_DIR_OUTGOING, "failed", 6, 0, 0, 0, MSG_STATUS_FAILED, 1);
+    msg_store_add_dm_uid(0x200, MSG_DIR_INCOMING, "in", 2, 0, 0, 0, MSG_STATUS_NONE, 2);
+    msg_store_add_channel(0x300, MSG_DIR_OUTGOING, "ch", 2, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    /* channel_index 0 is the boundary that matters: it is the unicast default
+     * a DM arrives on, so filing by the raw channel id rather than by
+     * MSG_STORE_DM_CHANNEL puts a channel-0 broadcast here looking exactly
+     * like a DM. Only a NEGATIVE index is a DM. */
+    msg_store_add_channel(0x350, MSG_DIR_OUTGOING, "ch0", 3, 0, 0, 0, MSG_STATUS_QUEUED, 0);
+
+    uint32_t peer = 0xDEAD;
+    TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, &peer, 0));
+    TEST_ASSERT_EQUAL_HEX32(0xDEAD, peer); /* untouched when nothing is parked */
+
+    /* One real parked DM and it is found regardless of where the cursor is. */
+    msg_store_add_dm_uid(0x400, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 3);
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer, 0));
+    TEST_ASSERT_EQUAL_HEX32(0x400, peer);
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0xFFFFFFFF, &peer, 0));
+    TEST_ASSERT_EQUAL_HEX32(0x400, peer);
+    TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, NULL, 0));
+}
+
+/* The park TTL bounds how long a message keeps retrying. Without it a parked
+ * row is re-sent once per cooldown forever, and on an asymmetric link every one
+ * of those renders at the peer, so one written message becomes an unbounded
+ * number of copies in their thread. */
+void test_parked_row_past_the_ttl_is_not_selected(void) {
+    uint32_t uids[4];
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "old", 3, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    /* One second past the TTL: no longer offered to the flush. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        0, msg_store_parked_uids_for_peer(0xAAAA, uids, 4, MSG_STORE_PARK_TTL_S + 1),
+        "a parked row past the TTL was still selected, so it keeps being re-sent and keeps "
+        "rendering at the peer with nothing ending it");
+
+    /* The rotation must not spend a turn on a peer whose rows have all expired. */
+    uint32_t peer = 0xDEAD;
+    TEST_ASSERT_FALSE(msg_store_next_parked_peer(0, &peer, MSG_STORE_PARK_TTL_S + 1));
+}
+
+/* The failure mode that would look like success everywhere else: a bound so
+ * broad it switches the feature off. A row inside the window must still be
+ * selected, at both ends of it. */
+void test_parked_row_inside_the_ttl_is_still_selected(void) {
+    uint32_t uids[4];
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "fresh", 5, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    /* Just parked. */
+    TEST_ASSERT_EQUAL_INT(1, msg_store_parked_uids_for_peer(0xAAAA, uids, 4, 0));
+    /* Most of the way through the window, which is the case the feature exists
+     * for: a peer who has been out of range for a long while. */
+    TEST_ASSERT_EQUAL_INT(
+        1, msg_store_parked_uids_for_peer(0xAAAA, uids, 4, MSG_STORE_PARK_TTL_S - 1));
+    /* Exactly at the TTL is still inside it: the row expires once it is OLDER
+     * than the window, not on the boundary. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        1, msg_store_parked_uids_for_peer(0xAAAA, uids, 4, MSG_STORE_PARK_TTL_S),
+        "the TTL comparison is off by one and drops a row that is exactly at the boundary");
+
+    uint32_t peer = 0;
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer, MSG_STORE_PARK_TTL_S));
+    TEST_ASSERT_EQUAL_HEX32(0xAAAA, peer);
+}
+
+/* Expiry has to be VISIBLE. The user was told the message would go when the
+ * peer came back; when the node stops trying, the thread must stop saying that.
+ * FAILED is the right end state because it is still retryable and still
+ * re-parkable by hand. */
+void test_expire_parked_makes_an_overdue_row_visibly_failed(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "old", 3, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    msg_store_add_dm_uid(0xBBBB, MSG_DIR_OUTGOING, "also old", 8, 0, 0, 0, MSG_STATUS_QUEUED, 2);
+
+    TEST_ASSERT_EQUAL_INT(0, msg_store_expire_parked(MSG_STORE_PARK_TTL_S)); /* inside: untouched */
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, out.status);
+
+    /* Past it: both rows give up, and the count says how many. */
+    TEST_ASSERT_EQUAL_INT(2, msg_store_expire_parked(MSG_STORE_PARK_TTL_S + 1));
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_FAILED, out.status,
+                              "an expired parked row must read FAILED, not stay QUEUED under a "
+                              "promise the node has stopped keeping, and not vanish");
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(2, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_FAILED, out.status);
+
+    /* Idempotent: a second pass finds nothing left to give up on. */
+    TEST_ASSERT_EQUAL_INT(0, msg_store_expire_parked(MSG_STORE_PARK_TTL_S + 1));
+}
+
+/* Expiry must not become a back door through the sticky rule for anything
+ * except age, and must leave the user's own Cancel working. */
+void test_expire_parked_leaves_everything_that_is_not_an_overdue_park_alone(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "sent", 4, 0, 0, 42, MSG_STATUS_SENT, 1);
+    msg_store_add_dm_uid(0xBBBB, MSG_DIR_INCOMING, "theirs", 6, 0, 0, 0, MSG_STATUS_NONE, 2);
+    msg_store_add_channel(0xCCCC, MSG_DIR_OUTGOING, "ch", 2, 0, 0, 0, MSG_STATUS_QUEUED, 0);
+    msg_store_add_dm_uid(0xDDDD, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 4);
+
+    /* Only the outgoing parked DM is a candidate, and only for its age. */
+    TEST_ASSERT_EQUAL_INT(1, msg_store_expire_parked(MSG_STORE_PARK_TTL_S + 1));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_SENT, out.status);
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(2, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_NONE, out.status);
+
+    /* Cancel still works on a fresh park, and expiry did not race it. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "mine", 4, 0, 0, 0, MSG_STATUS_QUEUED, 9);
+    TEST_ASSERT_TRUE(msg_store_unpark(9));
+    TEST_ASSERT_EQUAL_INT(0, msg_store_expire_parked(MSG_STORE_PARK_TTL_S + 1));
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(9, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_FAILED, out.status);
+}
+
+/* The park window runs from when the message was STORED, so a DM that failed
+ * and then sat unattended past the TTL has none of it left. Parking it would
+ * show a queued badge and promise a retry that the expiry pass cancels within
+ * one sweep interval, having never attempted it once: the promise this whole
+ * feature exists to stop the node making. So it must be refused up front. */
+void test_park_window_is_closed_for_a_message_already_past_the_ttl(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "this morning", 12, 0, 0, 0, MSG_STATUS_FAILED,
+                         1);
+
+    TEST_ASSERT_TRUE_MESSAGE(msg_store_park_window_open(1, MSG_STORE_PARK_TTL_S),
+                             "a message still inside the window must be parkable, or the guard "
+                             "has switched the feature off");
+    TEST_ASSERT_FALSE_MESSAGE(msg_store_park_window_open(1, MSG_STORE_PARK_TTL_S + 1),
+                              "a message older than the park window was accepted for parking, so "
+                              "the user is promised a retry that expiry cancels before a single "
+                              "attempt is made");
+
+    /* Unknown rows and uid 0 are refused rather than treated as fresh. */
+    TEST_ASSERT_FALSE(msg_store_park_window_open(0, 0));
+    TEST_ASSERT_FALSE(msg_store_park_window_open(999, 0));
+}
+
+void test_next_parked_peer_survives_ring_wrap(void) {
+    msg_store_init();
+    for (int i = 0; i < 2 * MSG_STORE_MAX - 1; i++) {
+        msg_store_add(0x9999, MSG_DIR_INCOMING, "filler", 6, -70, 5);
+    }
+    msg_store_add_dm_uid(0x500, MSG_DIR_OUTGOING, "late", 4, 0, 0, 0, MSG_STATUS_QUEUED, 77);
+
+    uint32_t peer = 0;
+    TEST_ASSERT_TRUE(msg_store_next_parked_peer(0, &peer, 0));
+    TEST_ASSERT_EQUAL_HEX32(0x500, peer);
+}
+
+void test_update_by_uid_refuses_queued_to_failed(void) {
+    /* Parked is sticky: a send attempt failing must never silently un-park a
+     * QUEUED row, or a parked message stops flushing on the next rejoin
+     * after its very first failed retry. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 0, MSG_STATUS_FAILED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, out.status);
+}
+
+void test_update_by_uid_refuses_queued_to_sent_but_still_stamps_the_packet_id(void) {
+    /* SENT is refused for a parked row, and this is the transition the whole
+     * parked-retry feature turns on. Allowing it strands the message: the row
+     * leaves QUEUED, so when the ACK never arrives and the retry tick reports
+     * FAILED against this packet_id the sticky rule no longer protects it, the
+     * row goes FAILED, and nothing in the tree ever re-parks a row.
+     *
+     * The packet_id must still be stamped, or the fix would trade a stranded
+     * message for an unresolvable one: it is what a real ACK is correlated
+     * against, and it is written before the status is considered. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 42, MSG_STATUS_SENT));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_QUEUED, out.status,
+                              "a parked row marked SENT is one unacknowledged attempt away from "
+                              "being stranded FAILED forever");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(42, out.packet_id,
+                                     "the attempt's packet_id must still be stamped, or a real "
+                                     "ACK for this attempt can never resolve the row");
+}
+
+void test_update_status_by_packet_id_refuses_every_non_delivered_status(void) {
+    /* The packet_id path's own rule, exercised where it actually differs from
+     * the FAILED-only rule it replaced. FAILED alone does not distinguish them:
+     * the old rule blocked that too, so reverting this site and testing only
+     * ACK exhaustion leaves the suite green. SENT is the discriminator, and it
+     * matters because the rule this function documents is "a QUEUED row accepts
+     * DELIVERED and nothing else" for BOTH entry points, not a narrower rule on
+     * one of them that happens to be enough for today's callers. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 42, MSG_STATUS_SENT)); /* stamps packet_id 42 */
+
+    TEST_ASSERT_TRUE(msg_store_update_status(42, MSG_STATUS_SENT));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_QUEUED, out.status,
+                              "the packet_id path let a parked row out of QUEUED on a status that "
+                              "is not DELIVERED, so the row is one ACK timeout from FAILED");
+}
+
+void test_update_status_by_packet_id_cannot_fail_a_parked_row(void) {
+    /* The ACK retry tick's exact call: it reports FAILED against a packet_id,
+     * not a uid. This is the path that stranded the message, and it has to be
+     * closed on the packet_id side too, not only the uid side. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 42, MSG_STATUS_SENT)); /* stamps packet_id 42 */
+
+    TEST_ASSERT_TRUE(msg_store_update_status(42, MSG_STATUS_FAILED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL_MESSAGE(MSG_STATUS_QUEUED, out.status,
+                              "ACK exhaustion un-parked the message through the packet_id path");
+
+    /* And a real ACK for that same attempt still resolves it. */
+    TEST_ASSERT_TRUE(msg_store_update_status(42, MSG_STATUS_DELIVERED));
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, out.status);
+}
+
+void test_update_by_uid_allows_queued_to_delivered(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 42, MSG_STATUS_DELIVERED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, out.status);
+}
+
+void test_update_by_uid_sent_to_failed_is_not_sticky(void) {
+    /* The sticky rule must not leak to normal (non-parked) rows: a message
+     * that actually reached the air and then exhausted its ACK retries is a
+     * genuine failure and must still show as FAILED. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "on-air", 6, 0, 0, 42, MSG_STATUS_SENT, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_by_uid(1, 0, MSG_STATUS_FAILED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_FAILED, out.status);
+}
+
+void test_update_status_refuses_queued_to_failed_for_a_reparked_send(void) {
+    /* This pins invariant hardening, not a reachable-today code path: no
+     * caller of msg_store_update_status(..., MSG_STATUS_FAILED) can
+     * currently reach a row this way, since both drive off a pending-ack
+     * entry that is already deactivated by the time a row can be parked
+     * (see msg_store_update_status_with_route's comment). The guard is
+     * pinned anyway so a future caller of this packet_id door cannot
+     * quietly un-park a row the uid door already protects. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "reparked", 8, 0, 0, 42, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_status(42, MSG_STATUS_FAILED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_QUEUED, out.status);
+}
+
+void test_update_status_allows_queued_to_delivered_for_a_reparked_send(void) {
+    /* A late ACK for a since-parked message really was delivered, so this
+     * transition must still go through even though FAILED is refused. */
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "reparked", 8, 0, 0, 42, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_update_status(42, MSG_STATUS_DELIVERED));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_DELIVERED, out.status);
+}
+
+void test_unpark_moves_queued_row_to_failed(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "parked", 6, 0, 0, 0, MSG_STATUS_QUEUED, 1);
+
+    TEST_ASSERT_TRUE(msg_store_unpark(1));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_FAILED, out.status);
+}
+
+void test_unpark_refuses_non_queued_or_unknown_uid(void) {
+    msg_store_init();
+    msg_store_add_dm_uid(0xAAAA, MSG_DIR_OUTGOING, "on-air", 6, 0, 0, 42, MSG_STATUS_SENT, 1);
+
+    TEST_ASSERT_FALSE(msg_store_unpark(1));
+    TEST_ASSERT_FALSE(msg_store_unpark(999));
+    TEST_ASSERT_FALSE(msg_store_unpark(0));
+
+    stored_msg_t out;
+    TEST_ASSERT_TRUE(msg_store_get_copy_by_uid(1, &out));
+    TEST_ASSERT_EQUAL(MSG_STATUS_SENT, out.status);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_msg_store_default_channel_index_is_minus_one);
@@ -150,5 +608,31 @@ int main(void) {
     RUN_TEST(test_ring_keeps_newest_window_at_capacity);
     RUN_TEST(test_get_copy_snapshots_message_and_bounds_check);
     RUN_TEST(test_count_outgoing_delivered_tracks_receipted_dms_only);
+    RUN_TEST(test_parked_uids_selects_only_this_peers_parked_outgoing_dms);
+    RUN_TEST(test_parked_uids_respects_the_output_bound);
+    RUN_TEST(test_parked_uids_empty_when_nothing_is_parked);
+    RUN_TEST(test_parked_uids_survive_ring_wrap);
+    RUN_TEST(test_get_copy_by_uid_finds_row_and_rejects_unknown_or_zero);
+    RUN_TEST(test_get_copy_by_uid_survives_ring_wrap);
+    RUN_TEST(test_peer_for_uid_reads_the_recipient_without_a_row_copy);
+    RUN_TEST(test_peer_for_uid_survives_ring_wrap);
+    RUN_TEST(test_next_parked_peer_rotates_over_every_parked_peer_and_wraps);
+    RUN_TEST(test_next_parked_peer_ignores_everything_that_is_not_a_parked_dm);
+    RUN_TEST(test_parked_row_past_the_ttl_is_not_selected);
+    RUN_TEST(test_parked_row_inside_the_ttl_is_still_selected);
+    RUN_TEST(test_expire_parked_makes_an_overdue_row_visibly_failed);
+    RUN_TEST(test_expire_parked_leaves_everything_that_is_not_an_overdue_park_alone);
+    RUN_TEST(test_park_window_is_closed_for_a_message_already_past_the_ttl);
+    RUN_TEST(test_next_parked_peer_survives_ring_wrap);
+    RUN_TEST(test_update_by_uid_refuses_queued_to_failed);
+    RUN_TEST(test_update_by_uid_refuses_queued_to_sent_but_still_stamps_the_packet_id);
+    RUN_TEST(test_update_status_by_packet_id_refuses_every_non_delivered_status);
+    RUN_TEST(test_update_status_by_packet_id_cannot_fail_a_parked_row);
+    RUN_TEST(test_update_by_uid_allows_queued_to_delivered);
+    RUN_TEST(test_update_by_uid_sent_to_failed_is_not_sticky);
+    RUN_TEST(test_update_status_refuses_queued_to_failed_for_a_reparked_send);
+    RUN_TEST(test_update_status_allows_queued_to_delivered_for_a_reparked_send);
+    RUN_TEST(test_unpark_moves_queued_row_to_failed);
+    RUN_TEST(test_unpark_refuses_non_queued_or_unknown_uid);
     return UNITY_END();
 }

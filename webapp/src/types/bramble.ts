@@ -59,7 +59,8 @@ export type DeliveryStatus =
   | 'sent'        // node accepted (packet_id returned)
   | 'delivered'   // delivery receipt received (ACK from dest)
   | 'failed'      // all retries exhausted
-  | 'timeout';    // no receipt within UI timeout
+  | 'timeout'     // no receipt within UI timeout
+  | 'parked';     // node parked it: retries automatically, not necessarily because the peer left
 
 export interface RelayHop {
   addr: number;

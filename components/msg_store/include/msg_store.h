@@ -42,7 +42,58 @@ typedef enum {
     MSG_STATUS_SENT = 1,      /* Transmitted over radio */
     MSG_STATUS_DELIVERED = 2, /* ACK received from recipient */
     MSG_STATUS_FAILED = 3,    /* Max retries exhausted */
+    /* Parked by the user: delivery is deferred until the peer rejoins the
+     * mesh. Deliberately an added VALUE and not a new field: the persistence
+     * backend validates record_size == sizeof(stored_msg_t) and rejects the
+     * file on mismatch, so widening the row would discard every device's
+     * message history on upgrade. Persistence of the parked state therefore
+     * costs nothing: msg_store already writes status changes back to flash. */
+    MSG_STATUS_QUEUED = 4,
 } msg_status_t;
+
+/* How old a message may get before the node stops trying to deliver it, in
+ * seconds of uptime.
+ *
+ * Measured from when the message was STORED, not from when it was parked:
+ * timestamp_s is stamped once by msg_store_add_full and nothing restamps it.
+ * So this bounds the whole life of a message that will not go through, which
+ * is the interval that matters for the peer's thread and for airtime, and a
+ * row parked late gets whatever is left of the window rather than a fresh one.
+ * msg_store_park_window_open exists so a row with nothing left cannot be
+ * parked at all, instead of being parked and cancelled minutes later.
+ *
+ * A parked row is retried once per PARKED_RETRY_COOLDOWN_MS (main/parked_retry.h,
+ * 300s) for as long as it stays parked, and every retry that reaches the peer
+ * renders there: each carries a fresh packet_id, and the receiver's duplicate
+ * suppression is packet_id-keyed over a 60s window, so consecutive retries
+ * never look like the same frame. On an asymmetric link, where this node's
+ * transmit arrives but the peer's ACK does not, that is one visible copy per
+ * cooldown with nothing ending it. The bound is therefore worth roughly
+ * TTL / cooldown copies in the worst case, and at two hours that is 24.
+ *
+ * Two hours is the trade, not a round number. The feature exists for a peer who
+ * is out of range for a while, so a short TTL guts it: at one hour the ceiling
+ * only halves, to 12, while the window stops covering an ordinary walk out of
+ * range and back. Going the other way, anything that covers "overnight" implies
+ * 96 copies at eight hours and 288 at a day, and a thread with 288 copies of
+ * one message in it is a worse outcome than the message failing. 24 is a number
+ * a user can read as a broken link rather than as the app destroying the
+ * conversation, and expiry is not a loss: the row becomes visibly FAILED, which
+ * is still retryable and still re-parkable by hand.
+ *
+ * The ring's own eviction does not substitute for this. It bounds only a BUSY
+ * node, arrives at a load-dependent time nobody can predict, and its outcome is
+ * strictly worse: the row leaves history entirely rather than reporting that it
+ * was not delivered. On a quiet node, which is the normal case for a small
+ * mesh, eviction may never happen at all.
+ *
+ * UPTIME, NOT WALL CLOCK. timestamp_s comes from the boot-relative uptime
+ * clock, and msg_store_load_from_flash deliberately zeroes restored timestamps
+ * because a previous boot's uptime is meaningless in this one. So a reboot
+ * restarts a parked row's TTL from zero. That is accepted: the point is to
+ * bound one continuous stretch of retrying, and a node that reboots has already
+ * stopped retrying for as long as it was down. */
+#define MSG_STORE_PARK_TTL_S 7200u
 
 typedef struct {
     uint32_t peer_addr; /* Remote address (sender or recipient) */
@@ -150,8 +201,148 @@ void msg_store_add_dm_uid(uint32_t peer_addr, msg_direction_t dir, const char* t
  * packet_id onto the row an earlier stage already created, so ACK correlation
  * (which is still by packet_id) lands on that one row.
  * Returns true if a row with this uid was found. uid 0 never matches.
+ *
+ * Parked is sticky: MSG_STATUS_DELIVERED is the ONLY status a row currently
+ * MSG_STATUS_QUEUED will accept. Anything else, including MSG_STATUS_SENT, is
+ * refused and the row stays QUEUED. A parked message therefore leaves the
+ * parked state exactly three ways: it is genuinely delivered, the user cancels
+ * it via msg_store_unpark(), or it ages out of the park window and
+ * msg_store_expire_parked() gives up on it. The last two write the row's status
+ * directly rather than coming through here, which is what keeps this rule from
+ * blocking the two deliberate exits.
+ *
+ * SENT is refused rather than allowed, which is the part that is easy to get
+ * wrong. Marking a parked row SENT looks like honest progress, and it is fatal:
+ * an attempt that reaches the air but is never acknowledged ends with the ACK
+ * retry tick reporting MSG_STATUS_FAILED against that packet_id, and a row
+ * sitting at SENT is no longer protected by this rule, so it goes FAILED. Since
+ * mesh_park_message is the only producer of QUEUED anywhere in the tree,
+ * nothing would ever re-park it and the message is stranded after exactly ONE
+ * attempt, under a promise to the user that it will keep trying. An
+ * unacknowledged attempt is the normal outcome on a marginal link, which is the
+ * very situation parking exists for.
+ *
+ * Staying QUEUED across the transmit costs nothing, because the packet_id this
+ * function stamps is written before the status is considered: ACK correlation
+ * still lands on the row, so a real delivery still resolves it. What it means
+ * for the caller is that a parked row's status does not report attempt
+ * progress, only the outcome, and the badge keeps telling the user the truth,
+ * which is that the message is still waiting.
+ *
+ * Without the rule, every failure path in the send pipeline (payload too large,
+ * handshake cap, session queue TTL, ACK exhaustion) calls this function with
+ * MSG_STATUS_FAILED on the same uid it parked. Transitions between non-QUEUED
+ * statuses, including SENT -> FAILED for an ordinary unparked message, are
+ * unaffected.
  */
 bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t status);
+
+/**
+ * Un-park a message: sets a MSG_STATUS_QUEUED row to MSG_STATUS_FAILED
+ * unconditionally, bypassing the sticky rule in msg_store_update_by_uid().
+ * This is the only door out of QUEUED that a failed send cannot walk through
+ * by accident; it exists so the user's explicit Cancel can still work.
+ * Returns false, and changes nothing, if the row is not currently QUEUED or
+ * uid is unknown (including uid 0).
+ */
+bool msg_store_unpark(uint32_t uid);
+
+/**
+ * Collect the uids of messages parked for a peer, oldest first.
+ *
+ * Selects outgoing DMs (channel_index < 0) to peer_addr whose status is
+ * MSG_STATUS_QUEUED and whose age against now_s is under MSG_STORE_PARK_TTL_S.
+ * Returns the number of uids written, never more than max_out. Returns 0 for a
+ * NULL out_uids or a non-positive max_out.
+ *
+ * now_s is the caller's uptime in seconds, the same clock timestamp_s is
+ * stamped from. Passed in rather than read here so the rule is testable on a
+ * host, where that clock does not run.
+ *
+ * A row past the TTL is skipped but NOT changed here: this is a pure read, and
+ * a selector that quietly rewrote rows would be the "mutating query" hazard
+ * this feature has already been bitten by. msg_store_expire_parked is what
+ * makes the row visibly failed. Skipping here as well as there means the
+ * beacon path cannot re-send an expired row in the window before the next
+ * expiry pass runs.
+ *
+ * The selection rule lives here, not in the mesh task, so it is host-testable
+ * and so the flush path stays a loop over uids.
+ */
+int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int max_out,
+                                   uint32_t now_s);
+
+/**
+ * Copy the row carrying this uid. Returns false for uid 0 or an unknown uid.
+ * The flush path needs a row's text and recipient from its uid; without this
+ * every caller would open-code a ring walk, and the ring is circular, so an
+ * open-coded walk is a bug waiting to happen.
+ */
+bool msg_store_get_copy_by_uid(uint32_t uid, stored_msg_t* out);
+
+/**
+ * Read just the peer address of the row carrying this uid. Returns false for
+ * uid 0, a NULL out, or an unknown uid.
+ *
+ * A stored_msg_t is over 700 bytes, so a caller that wants nothing but the
+ * recipient should not be putting one on a task stack to get it (the flush
+ * path keeps its copy static for the same reason). Parking a message runs on
+ * whichever task drove the UI or the RPC, and those stacks are not sized for
+ * a message-sized frame.
+ */
+bool msg_store_peer_for_uid(uint32_t uid, uint32_t* out_peer_addr);
+
+/**
+ * Rotate to the next peer that has parked messages: the lowest peer address
+ * above after_peer_addr, or the lowest of all of them if nothing sorts above
+ * it. Returns false only when nothing at all is parked.
+ *
+ * Passing back the previous answer walks every distinct parked peer in turn
+ * and then wraps, which is what lets a caller give each one a turn from a
+ * single uint32 of state. Ascending address order is arbitrary but stable,
+ * and stable is the property that matters: it cannot starve a peer or visit
+ * one twice per lap. Selects the same rows msg_store_parked_uids_for_peer
+ * does (outgoing, channel-less, MSG_STATUS_QUEUED, inside the park TTL), so a
+ * peer whose only parked rows have expired does not consume a turn.
+ */
+bool msg_store_next_parked_peer(uint32_t after_peer_addr, uint32_t* out_peer_addr, uint32_t now_s);
+
+/**
+ * Give up on every parked row older than MSG_STORE_PARK_TTL_S: move it to
+ * MSG_STATUS_FAILED and persist that. Returns how many rows it expired.
+ *
+ * Separate from the selectors on purpose. They must not mutate, and this must,
+ * because an expired row has to become VISIBLY failed rather than silently
+ * stop being retried: the user was told the message would be sent when the peer
+ * came back, so when the node stops trying, the thread has to stop saying that.
+ * A failed row is the right end state, since it is still retryable and still
+ * re-parkable by hand.
+ *
+ * Writes the row's status directly, as msg_store_unpark does, so it is not
+ * blocked by the sticky
+ * rule that (correctly) refuses QUEUED -> FAILED from a send path.
+ *
+ * Call it on a periodic tick, not per packet: it walks the ring.
+ */
+int msg_store_expire_parked(uint32_t now_s);
+
+/**
+ * Could parking the row carrying this uid still achieve anything: is it inside
+ * the park window measured from when the message was stored? False for uid 0
+ * and for an unknown uid.
+ *
+ * Ask BEFORE parking. The window runs from the message's own age, not from the
+ * moment it is parked, so a message that failed and then sat unattended for
+ * longer than MSG_STORE_PARK_TTL_S is already past it. Parking such a row would
+ * promise a retry that the next expiry pass cancels within one sweep interval,
+ * having never selected it once: the exact "we said we would send it" failure
+ * this whole feature exists to remove, arriving through a new door. Refusing up
+ * front lets the caller say something true instead.
+ *
+ * This is about age alone. Whether the row is a failed outgoing DM at all is
+ * the UI's question (chat_message_is_parkable).
+ */
+bool msg_store_park_window_open(uint32_t uid, uint32_t now_s);
 
 /**
  * Update delivery status for a message by packet_id.

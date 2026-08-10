@@ -2469,8 +2469,8 @@ static int handle_get_messages(const cJSON* params, cJSON* result) {
             cJSON_AddNumberToObject(obj, "rssi", m->rssi);
         if (m->snr != 0)
             cJSON_AddNumberToObject(obj, "snr", m->snr);
-        static const char* status_names[] = {"none", "sent", "delivered", "failed"};
-        if (m->status > 0 && m->status <= 3) {
+        static const char* status_names[] = {"none", "sent", "delivered", "failed", "queued"};
+        if (m->status > 0 && m->status <= 4) {
             cJSON_AddStringToObject(obj, "status", status_names[m->status]);
         }
         cJSON_AddItemToArray(arr, obj);

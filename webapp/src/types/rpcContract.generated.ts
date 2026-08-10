@@ -1658,10 +1658,10 @@ export interface components {
             /** @description SNR at receive time (omitted when 0/unknown). */
             snr?: number;
             /**
-             * @description Delivery status for outgoing messages (omitted when none).
+             * @description Delivery status for outgoing messages (omitted when none). queued means the user parked a failed message and the node re-sends it on its own until it is delivered, the user cancels it, or it ages out of the retry window. Not necessarily because the peer left: the common cause is a message that exhausted its acknowledgement retries while the peer was reachable throughout.
              * @enum {string}
              */
-            status?: "sent" | "delivered" | "failed";
+            status?: "sent" | "delivered" | "failed" | "queued";
         };
         /**
          * @description Location sharing tier.

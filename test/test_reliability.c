@@ -320,8 +320,53 @@ void test_receipt_air_attempt_resets_defers_and_increments_attempts(void) {
     TEST_ASSERT_EQUAL_UINT8(0, item.defers);
 }
 
+/* Whether a frame is still outstanding is a question the parked-message retry
+ * has to ask before putting the same message on the air a second time: a
+ * transmitted frame holds no send-queue entry, so the queue's uid keying cannot
+ * see it, and only this table knows it is unresolved. */
+void test_pending_ack_is_active_tracks_the_frames_lifetime(void) {
+    pending_ack_table_t table;
+    pending_ack_init(&table);
+    const uint8_t frame[4] = {1, 2, 3, 4};
+
+    TEST_ASSERT_FALSE(pending_ack_is_active(&table, 0xABCD));
+
+    TEST_ASSERT_EQUAL_INT(
+        0, pending_ack_add(&table, 0xABCD, 0x1111, MSG_TIER_NORMAL, frame, sizeof(frame), 1000));
+    TEST_ASSERT_TRUE(pending_ack_is_active(&table, 0xABCD));
+    TEST_ASSERT_FALSE(pending_ack_is_active(&table, 0xABCE)); /* a different frame */
+
+    /* Resolved by an ACK: no longer outstanding, so the row may be retried. */
+    TEST_ASSERT_TRUE(pending_ack_remove(&table, 0xABCD));
+    TEST_ASSERT_FALSE(pending_ack_is_active(&table, 0xABCD));
+}
+
+/* packet_id 0 is the value a message-store row carries when no frame has ever
+ * gone out for it, so it must never be reported outstanding. Asked against a
+ * table that genuinely HOLDS an active entry stamped 0, because against an
+ * empty table the answer is false either way and the question is not really
+ * being put: the early return has to do the work, rather than the search
+ * merely failing to find anything. */
+void test_pending_ack_is_active_never_matches_the_never_sent_packet_id(void) {
+    pending_ack_table_t table;
+    pending_ack_init(&table);
+    const uint8_t frame[4] = {1, 2, 3, 4};
+
+    TEST_ASSERT_EQUAL_INT(
+        0, pending_ack_add(&table, 0, 0x1111, MSG_TIER_NORMAL, frame, sizeof(frame), 1000));
+    TEST_ASSERT_TRUE(table.entries[0].active);
+    TEST_ASSERT_EQUAL_UINT32(0, table.entries[0].packet_id);
+
+    TEST_ASSERT_FALSE_MESSAGE(pending_ack_is_active(&table, 0),
+                              "packet_id 0 matched a table entry, so a parked row that has never "
+                              "been transmitted would read as still in flight and be skipped by "
+                              "every flush");
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_pending_ack_is_active_tracks_the_frames_lifetime);
+    RUN_TEST(test_pending_ack_is_active_never_matches_the_never_sent_packet_id);
     RUN_TEST(test_tier_max_retries);
     RUN_TEST(test_pending_ack_add_and_remove);
     RUN_TEST(test_key_exchange_send_path_uses_critical_tier);

@@ -42,6 +42,30 @@
 #                         wall-clock variance, so CI gates on the symptom + heal
 #                         trigger, not the final post-heal render. See the
 #                         scenario file.)
+#   emu-parked-delivery   park-b holds its own mesh_task_start (no radio at
+#                         all) for a fixed window, so it is genuinely
+#                         unreachable; park-a targets park-b's real address via
+#                         a handoff file (never a beacon, so the eventual
+#                         rejoin is a genuine is_new_peer edge, not a table
+#                         update) and sends two DMs that fail and get parked.
+#                         When park-b's window ends and it joins the mesh,
+#                         park-a's rejoin-triggered flush redelivers both.
+#                         Asserts both distinct message bodies land in park-b's
+#                         console log, individually identified, not a count.
+#                         One run, no retries; any node death fails the suite.
+#                         See the scenario file for the full construction.
+#   emu-parked-delivery-live  the companion case: b2-b never leaves the mesh,
+#                         so the rejoin edge can never fire again for it.
+#                         b2-a and b2-b establish a normal DM session, b2-b
+#                         drops its own session half (EMU_DROP_DM_SESSION_AT_MS)
+#                         while staying fully up and beaconing on schedule
+#                         (an ACK-loss condition, not an outage), and b2-a's
+#                         next DM fails via its own ACTIVE-session pending-ack
+#                         exhaustion and gets parked. Only the beacon-armed
+#                         retry (main/parked_retry.c), not the rejoin edge, can
+#                         ever redeliver it. Asserts the specific message body
+#                         lands in b2-b's console log. One run, no retries;
+#                         any node death fails the suite.
 #
 # PREREQUISITES:
 #   1. The linux node binary: emulator/node/build/bramble-node.elf
@@ -577,7 +601,267 @@ location_suite() {
     return 1
 }
 
-# --- Scenario 5: the playground fleet boots inert -------------------------
+# --- Scenario 5: parked delivery -------------------------------------------
+# park-b holds its own mesh_task_start (main.c's EMU_MESH_START_DELAY_MS,
+# 180s) for the whole failure phase, so it transmits and receives nothing at
+# all: a genuinely faithful outage, not a beacon-suppression trick. park-a
+# resolves park-b's real, randomly-generated address from a handoff file
+# (EMU_AUTO_SEND_TO=file:peer_addr.txt, written by park-b at boot well before
+# its mesh delay elapses; see emu_autosend.c's resolve_dest_from_file) rather
+# than "neighbor" resolution, because "neighbor" blocks on an actual beacon by
+# design and park-a must never have heard one before the rejoin:
+# mesh_flush_parked_for only fires on an is_new_peer edge (mesh_beacon.c),
+# which is a first-ever admission to the neighbor table, not a refresh of an
+# existing one. With park-b genuinely off the mesh, park-a's two scripted DMs
+# ('PARK ALPHA', 'PARK BETA', a few seconds apart) can find no route, and each
+# queued-for-route entry expires MSG_STATUS_FAILED after the flat 60s route
+# TTL, checked on mesh_task's 60s purge cadence (so up to ~120s worst case if
+# a send lands right after a tick fires; see emu_autosend.c's park_test_task
+# for the full derivation). park-a's EMU_AUTO_PARK=1 parks each individually
+# via mesh_park_message once FAILED, the only lever available here: the
+# T-Deck's LVGL Queue button (scr_chat_messages.c) is not compiled for the
+# virtual-pager board this emulator uses, so this scenario proves the
+# mesh-level path (park, rejoin, redeliver), not the button that reaches it on
+# real hardware.
+#
+# The wait is EVENT-DRIVEN like the other suites: poll the growing log for
+# the two individually-identified '[MSG from <addr>] PARK ALPHA' / '... PARK
+# BETA' lines (main/mesh_task.c's CLI stdout echo, emitted only once a
+# message is actually received, decrypted and stored: genuine delivery, not a
+# count or the absence of a crash) and stop the instant both are present. The
+# budget is sized as a multiple of the nominal schedule, not a duration:
+# park-b's fixed 180s mesh delay must exceed both the ~120s worst-case FAILED
+# window AND the time both sends are actually parked, because
+# mesh_flush_parked_for only fires on an is_new_peer edge and that edge fires
+# EXACTLY ONCE per admission (see is_new_peer in mesh_beacon.c); if park-b
+# became reachable before both rows were parked, that edge would find nothing
+# to flush (confirmed empirically: a 20s mesh delay still let the two sends
+# reach their real ~120s FAILED TTL untouched, because nothing rescues a
+# route-queued entry just because the destination becomes reachable, but the
+# early is_new_peer never re-fires once the rows are later parked, so nothing
+# would ever redeliver them). 180s comfortably exceeds that ~120-125s
+# park-completion point with margin, plus settle time for the post-rejoin DM
+# handshake (session-less, so it needs a fresh KE exchange). 900s gives
+# roughly 4x the ~200-220s nominal completion, matching this suite's practice
+# of a wide margin for CPU-starvation slack. A genuine regression (flush never
+# fires, or the sticky-park guard breaks) simply never produces both lines and
+# the wait times out.
+#
+# NEGATIVE CONTROL (run by hand, not in CI, so the gate stays one run): the
+# same scenario with the parking step disabled and everything else identical
+# must NOT produce either marker. Verified 2026-08-09 at 86c07401: both DMs
+# were sent and neither was ever received, no "[MSG from ...]" line appeared
+# at all, and final_metrics reported delivered 0. So the delivery in the
+# positive run is attributable to the park plus the rejoin-edge flush and to
+# nothing else, rather than to a send that would have succeeded anyway.
+parked_suite() {
+    echo "[5] emu-parked-delivery"
+    local budget_s="${EMU_PARKED_BUDGET_S:-900}"
+    local sim_ms="${EMU_PARKED_SIM_CAP_MS:-600000}"
+    local scen="$SCEN_DIR/emu-parked-delivery.json"
+    [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
+    local PARKED_LOG; PARKED_LOG="$LOG_DIR/emu-parked-delivery-$(date +%s).log"
+
+    info "running emu-parked-delivery (marker budget ${budget_s}s, sim cap $((sim_ms / 1000))s)..."
+    EMU_SCENARIO_DURATION_MS="$sim_ms" \
+        timeout "$budget_s" "$GOSIM_BIN" -headless -scenario "$scen" >"$PARKED_LOG" 2>&1 &
+    local pid=$!
+    CHILD_PIDS+=("$pid")
+
+    # Matches mesh_task.c's "Also print to stdout for CLI users" line
+    # ('[MSG from %08X] %s'), emitted only once a message is actually
+    # received, decrypted and stored (main/mesh_task.c ~line 1040, and the
+    # fragment-reassembly path at ~line 956). Deliberately NOT the ESP_LOGI
+    # '>>> %s' decode-log line right above it: gosim's console capture wraps
+    # every line as a JSON string, and Go's default JSON encoder HTML-escapes
+    # '>' to >, so a literal '>>> ' pattern silently never matches the
+    # log on disk. The bracket line has no such characters. The hex address
+    # is a wildcard (park-b's real address is only known at runtime, and
+    # differs every run), so this cannot match park-a's own outbound
+    # 'park-test DM to <addr> (n/2): PARK ALPHA' log line, a different format
+    # that never contains '[MSG from '.
+    parked_markers_present() {
+        grep -qE '\[MSG from [0-9A-Fa-f]+\] PARK ALPHA' "$PARKED_LOG" &&
+            grep -qE '\[MSG from [0-9A-Fa-f]+\] PARK BETA' "$PARKED_LOG"
+    }
+
+    local seen=1 deadline
+    deadline=$(( $(date +%s) + budget_s ))
+    while :; do
+        if parked_markers_present; then
+            seen=0
+            break
+        fi
+        kill -0 "$pid" 2>/dev/null || break
+        [ "$(date +%s)" -lt "$deadline" ] || break
+        # 3s cadence, matching dm_suite: the check is a cheap grep here (no
+        # frame decoding), but a tighter loop would still steal CPU from the
+        # very nodes it waits on over a run this long.
+        sleep 3
+    done
+
+    # Snapshot the scenario window BEFORE any teardown signal: the death rule
+    # below judges only lines logged up to this point, so the suite's own
+    # kill cannot manufacture a "death" (see check_no_deaths).
+    local scenario_lines
+    scenario_lines="$(wc -l < "$PARKED_LOG")"
+
+    # Reap by PROCESS GROUP via the recorded pid, then any direct children:
+    # never a name-wide pkill (see the cleanup() comment at the top of this
+    # file for why that pattern is unsafe with concurrent suites on one host).
+    kill "$pid" 2>/dev/null || true
+    pkill -P "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+
+    # Final check in case the last marker landed in the frames flushed as
+    # gosim exited.
+    if [ "$seen" -ne 0 ] && parked_markers_present; then
+        seen=0
+    fi
+
+    # STRICT death rule: deaths fail the run regardless of assertions.
+    check_no_deaths "$PARKED_LOG" 2 "emu-parked-delivery" "$scenario_lines" || return 1
+
+    if [ "$seen" -eq 0 ]; then
+        green "PASS: emu-parked-delivery: both parked DMs delivered after park-b rejoined"
+        return 0
+    fi
+    red "FAIL: emu-parked-delivery: did not see both parked DMs delivered within ${budget_s}s"
+    dump_diagnostics "$PARKED_LOG" "emu-parked-delivery"
+    return 1
+}
+
+# --- Scenario 6: parked delivery, peer never left --------------------------
+# The companion case to Scenario 5: b2-b never leaves the mesh, so the rejoin
+# edge (is_new_peer) can only fire once, on first contact, and never again
+# while b2-b stays a known neighbor. b2-a and b2-b establish a normal DM
+# session first with a SINGLE 'NEVERLEFT SETUP' DM (EMU_AUTO_SEND, resolved
+# via the live neighbor table: this scenario needs an ACTIVE session, not an
+# absent peer). Once that is confirmed delivered, b2-b drops its own session
+# half in-process (EMU_DROP_DM_SESSION_AT_MS, the same deterministic
+# construction emu-dm-desync.json uses) while staying fully up and beaconing
+# on schedule: an ACK-loss condition, not an outage. b2-a then sends
+# EMU_AUTO_SEND2 ('NEVERLEFT PAYLOAD') under its own still-ACTIVE (now stale)
+# session; b2-b cannot decrypt it, so b2-a's pending-ack retries
+# (MSG_TIER_NORMAL: 3 attempts, exponential backoff from a 2s base) exhaust
+# and the row reads MSG_STATUS_FAILED well under a minute in, no route-queue
+# TTL involved. EMU_AUTO_PARK=1 parks it, which arms b2-b's still-present
+# neighbor entry (main/parked_retry.c's parked_retry_arm): the peer was never
+# absent, so nothing but the beacon-armed retry trigger could ever redeliver
+# this row. b2-b's failed decrypt also fires its own #138 self-heal re-INIT
+# toward b2-a, which heals b2-a's stale session but does NOT rescue the
+# payload (b2-a's retries are retransmissions of ciphertext already sealed
+# under the dead session), and then b2-a's next beacon received FROM b2-b
+# (still a known neighbor, so is_new_peer is false) is recognised as armed
+# and resends the parked row over the now-healed session.
+#
+# TWO PARTS OF THAT ARE CONSTRUCTED, NOT ASSUMED, AND BOTH WERE OBSERVED
+# SILENTLY BREAKING THE SCENARIO BEFORE THEY WERE:
+#
+#   1. The self-heal above only works if b2-a holds an ATTESTATION PIN for
+#      b2-b. b2-b's re-INIT is a first-contact INIT with a zero auth tag, and
+#      dm_verify_init refuses a zero tag against a known identity by design,
+#      so mesh_dm.c's pinned-peer branch is the only route to a heal. The
+#      firmware re-attests every 15 minutes, far outside this run, and the
+#      single post-boot attestation is a coin flip against the peer's own
+#      half-duplex beacon TX: one run lost it, b2-a logged "INIT verify
+#      failed" twice, and the flushed payload was encrypted under the dead
+#      session and lost. b2-b therefore re-announces on a compressed cadence
+#      (EMU_ATTEST_EVERY_MS) and b2-a holds phase 2 until the pin actually
+#      exists (EMU_WAIT_PEER_PINNED), so a missing pin fails the gate instead
+#      of quietly voiding it.
+#   2. Phase 1 is ONE send. b2-b's drop task fires once any incoming DM has
+#      landed, so with a phase-1 burst the second copy can still be in flight
+#      at the drop; its post-drop arrival becomes the first failed decrypt,
+#      the heal completes seconds BEFORE phase 2 is sent, and the payload
+#      then goes out over a healthy session and is delivered first try with
+#      nothing ever parked. That run still prints the marker, so it passes
+#      while proving nothing. Observed directly on a 2-send phase 1.
+#
+# The wait is EVENT-DRIVEN like the other suites: poll the growing log for
+# the '[MSG from <addr>] NEVERLEFT PAYLOAD' line (main/mesh_task.c's CLI
+# stdout echo, the same receive-only marker Scenario 5 uses, emitted only on
+# a genuine decoded receive) and stop the instant it appears.
+#
+# BUDGET AS A STARVATION MULTIPLE, not a duration (dm_suite's reasoning).
+# Measured nominal completion is 63-72s on an unloaded box: SETUP delivers in
+# seconds, PAYLOAD fails after ~36s of ACK-retry exhaustion, and the
+# beacon-armed flush lands within ~2s of the park. The critical path is
+# mostly CPU and airtime bound (neighbor discovery, the KE handshake, the
+# attestation exchange), which is exactly what a loaded runner pod stretches,
+# and the historical IO-storm starvation on these pods ran ~4x, so a 4x
+# budget would leave no headroom at all. 600s is ~8x the measured schedule,
+# the same margin class channel_suite and dm_suite run at. Cost on a healthy
+# box is nothing (it still exits at ~70s). The outer budget runs 30s past the
+# sim cap so a capped run self-exits and flushes its final lines before
+# timeout SIGTERMs it, mirroring channel_suite's 180/150 gap. A genuine
+# regression (the beacon-armed trigger never fires, or the sticky-park guard
+# breaks) simply never produces the line and the wait times out.
+#
+# NEGATIVE CONTROL (run by hand, not in CI, so the gate stays one run): the
+# same scenario with EMU_AUTO_PARK=0 and everything else identical must NOT
+# produce the marker. Verified 2026-08-08 at dc371a31: the control reproduced
+# the failure and the self-heal identically ("Message ... failed after 3
+# attempts", "re-accepting as first contact"), then sat for the full 300s
+# with no park, no flush and no delivery. So the delivery in the positive run
+# is attributable to the park plus the beacon-armed flush and to nothing else.
+parked_live_suite() {
+    echo "[6] emu-parked-delivery-live"
+    local budget_s="${EMU_PARKED_LIVE_BUDGET_S:-600}"
+    local sim_ms="${EMU_PARKED_LIVE_SIM_CAP_MS:-570000}"
+    local scen="$SCEN_DIR/emu-parked-delivery-live.json"
+    [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
+    local LIVE_LOG; LIVE_LOG="$LOG_DIR/emu-parked-delivery-live-$(date +%s).log"
+
+    info "running emu-parked-delivery-live (marker budget ${budget_s}s, sim cap $((sim_ms / 1000))s)..."
+    EMU_SCENARIO_DURATION_MS="$sim_ms" \
+        timeout "$budget_s" "$GOSIM_BIN" -headless -scenario "$scen" >"$LIVE_LOG" 2>&1 &
+    local pid=$!
+    CHILD_PIDS+=("$pid")
+
+    live_marker_present() {
+        grep -qE '\[MSG from [0-9A-Fa-f]+\] NEVERLEFT PAYLOAD' "$LIVE_LOG"
+    }
+
+    local seen=1 deadline
+    deadline=$(( $(date +%s) + budget_s ))
+    while :; do
+        if live_marker_present; then
+            seen=0
+            break
+        fi
+        kill -0 "$pid" 2>/dev/null || break
+        [ "$(date +%s)" -lt "$deadline" ] || break
+        sleep 3
+    done
+
+    # Snapshot the scenario window BEFORE any teardown signal (see
+    # check_no_deaths).
+    local scenario_lines
+    scenario_lines="$(wc -l < "$LIVE_LOG")"
+
+    # Reap by PROCESS GROUP via the recorded pid, then any direct children:
+    # never a name-wide pkill.
+    kill "$pid" 2>/dev/null || true
+    pkill -P "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+
+    if [ "$seen" -ne 0 ] && live_marker_present; then
+        seen=0
+    fi
+
+    check_no_deaths "$LIVE_LOG" 2 "emu-parked-delivery-live" "$scenario_lines" || return 1
+
+    if [ "$seen" -eq 0 ]; then
+        green "PASS: emu-parked-delivery-live: parked DM delivered via the beacon-armed retry"
+        return 0
+    fi
+    red "FAIL: emu-parked-delivery-live: did not see the parked DM delivered within ${budget_s}s"
+    dump_diagnostics "$LIVE_LOG" "emu-parked-delivery-live"
+    return 1
+}
+
+# --- Scenario 7: the playground fleet boots inert -------------------------
 # The playground is the only emulator scenario with no EMU_NETWORK_KEY, and
 # that is its whole teaching point: real hardware ships unprovisioned and inert,
 # and the guided tour shows that before it shows anything else. This gate holds
@@ -594,7 +878,7 @@ location_suite() {
 # their own pace; a headless run caps itself well below that, since every
 # assertion is settled once the three nodes have booted.
 playground_suite() {
-    echo "[5] emu-playground"
+    echo "[7] emu-playground"
     local scen="$SCEN_DIR/emu-playground.json"
     [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
     local budget_s="${EMU_PLAYGROUND_BUDGET_S:-180}"
@@ -636,6 +920,10 @@ gps_suite; gps_rc=$?
 echo
 location_suite; loc_rc=$?
 echo
+parked_suite; parked_rc=$?
+echo
+parked_live_suite; parked_live_rc=$?
+echo
 playground_suite; play_rc=$?
 echo
 
@@ -643,6 +931,8 @@ echo
 [ "$dm_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$gps_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$loc_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
+[ "$parked_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
+[ "$parked_live_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$play_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 
 # --- verdict --------------------------------------------------------------

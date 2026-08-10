@@ -71,6 +71,16 @@ bool pending_ack_remove(pending_ack_table_t* table, uint32_t packet_id) {
     return false;
 }
 
+bool pending_ack_is_active(const pending_ack_table_t* table, uint32_t packet_id) {
+    if (packet_id == 0)
+        return false;
+    for (int i = 0; i < MAX_PENDING_ACKS; i++) {
+        if (table->entries[i].active && table->entries[i].packet_id == packet_id)
+            return true;
+    }
+    return false;
+}
+
 static uint32_t jitter_25(uint32_t base) {
     uint32_t quarter = base / 4;
     if (quarter == 0)

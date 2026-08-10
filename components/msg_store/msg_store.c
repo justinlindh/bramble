@@ -264,8 +264,19 @@ bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
     for (int i = s_count - 1; i >= 0; i--) {
         int idx = (start + i) % MSG_STORE_MAX;
         if (s_msgs && s_msgs[idx].packet_id == packet_id) {
-            changed = s_msgs[idx].status != status;
-            s_msgs[idx].status = status;
+            /* Parked is sticky here too, on exactly the rule
+             * msg_store_update_by_uid's doc comment states: DELIVERED is the
+             * only status a QUEUED row accepts. This is the path that used to
+             * strand a parked message. The ACK retry tick reports FAILED
+             * against a packet_id, and a parked row that had been marked SENT
+             * by its own retry was no longer QUEUED when that landed, so the
+             * old FAILED-only guard did not fire and the row left the parked
+             * state for good. Keeping the row QUEUED through the transmit is
+             * what makes this guard the one that catches it. */
+            bool sticky = s_msgs[idx].status == MSG_STATUS_QUEUED && status != MSG_STATUS_DELIVERED;
+            changed = !sticky && s_msgs[idx].status != status;
+            if (!sticky)
+                s_msgs[idx].status = status;
             if (route_hops && route_hop_count > 0) {
                 uint8_t bounded =
                     (route_hop_count > MSG_ROUTE_MAX_HOPS) ? MSG_ROUTE_MAX_HOPS : route_hop_count;
@@ -315,8 +326,15 @@ bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t stat
             /* The wire packet_id this stamps rides along on whatever write a
              * status change earns; it is correlation state, not something a
              * reboot has any use for on its own. */
-            changed = s_msgs[idx].status != status;
-            s_msgs[idx].status = status;
+            /* Parked is sticky: DELIVERED is the ONLY status a QUEUED row
+             * accepts (see the doc comment on this function). A send attempt
+             * must never un-park a row, and the packet_id stamped just above
+             * is what lets the attempt's eventual ACK still find it. Only
+             * msg_store_unpark() may move a QUEUED row out any other way. */
+            bool sticky = s_msgs[idx].status == MSG_STATUS_QUEUED && status != MSG_STATUS_DELIVERED;
+            changed = !sticky && s_msgs[idx].status != status;
+            if (!sticky)
+                s_msgs[idx].status = status;
             found = true;
             found_idx = idx;
             from_end = s_count - 1 - i;
@@ -327,6 +345,239 @@ bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t stat
     if (found && changed)
         persist_row_update(found_idx, from_end);
     return found;
+}
+
+bool msg_store_unpark(uint32_t uid) {
+    if (uid == 0)
+        return false;
+    msg_store_ensure_alloc();
+    if (!s_msgs)
+        return false;
+    bool found = false;
+    bool changed = false;
+    int found_idx = 0;
+    int from_end = 0;
+    MSG_LOCK();
+    int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+    for (int i = s_count - 1; i >= 0; i--) {
+        int idx = (start + i) % MSG_STORE_MAX;
+        if (s_msgs[idx].uid == uid) {
+            found = s_msgs[idx].status == MSG_STATUS_QUEUED;
+            if (found) {
+                s_msgs[idx].status = MSG_STATUS_FAILED;
+                changed = true;
+                found_idx = idx;
+                from_end = s_count - 1 - i;
+            }
+            break;
+        }
+    }
+    MSG_UNLOCK();
+    if (found && changed)
+        persist_row_update(found_idx, from_end);
+    return found;
+}
+
+/* An outgoing DM currently parked for a peer. The shared half of what all three
+ * parked-row walks below select on. */
+static bool is_parked_dm(const stored_msg_t* m) {
+    return m->direction == MSG_DIR_OUTGOING && m->channel_index < 0 &&
+           m->status == MSG_STATUS_QUEUED && m->uid != 0;
+}
+
+/* Is this row past the park window, measured from when it was STORED?
+ *
+ * Not "how long it has been parked": timestamp_s is stamped once by
+ * msg_store_add_full and nothing restamps it, so this is the message's age. Two
+ * callers depend on that being the same question. A row already parked is asked
+ * whether to keep retrying it, and a row about to be parked is asked whether
+ * parking it could achieve anything, and the second only works because both
+ * measure from the same origin. Parking a row that is already past the window
+ * would otherwise promise a retry the expiry pass cancels minutes later without
+ * ever attempting it.
+ *
+ * Exactly at the TTL is still inside it, so the window means what it says.
+ *
+ * A row stamped ahead of now_s is treated as NOT past the window rather than as
+ * enormously old. Unsigned subtraction would turn that into a huge age and
+ * expire a message the user just parked, which is the worse direction to be
+ * wrong in by far. It should not arise (restored rows are zeroed on load and a
+ * fresh stamp cannot exceed a later read of the same clock), so this is a guard
+ * against a future clock change, not a live case. */
+static bool past_park_window(const stored_msg_t* m, uint32_t now_s) {
+    if (now_s < m->timestamp_s)
+        return false;
+    return (now_s - m->timestamp_s) > MSG_STORE_PARK_TTL_S;
+}
+
+bool msg_store_park_window_open(uint32_t uid, uint32_t now_s) {
+    if (uid == 0)
+        return false;
+    msg_store_ensure_alloc();
+    if (!s_msgs)
+        return false;
+    bool open = false;
+    MSG_LOCK();
+    int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+    for (int i = s_count - 1; i >= 0; i--) {
+        int idx = (start + i) % MSG_STORE_MAX;
+        if (s_msgs[idx].uid == uid) {
+            open = !past_park_window(&s_msgs[idx], now_s);
+            break;
+        }
+    }
+    MSG_UNLOCK();
+    return open;
+}
+
+int msg_store_expire_parked(uint32_t now_s) {
+    msg_store_ensure_alloc();
+    if (!s_msgs)
+        return 0;
+    int expired = 0;
+    /* One row per lock cycle, the same shape every other status write in this
+     * file uses: take the lock, change one row, release, then persist outside
+     * it, because persistence is flash I/O and this lock is a spinlock on the
+     * ESP target. Repeating until a pass finds nothing needs no buffer of
+     * pending indices, which matters because this can be reached from the mesh
+     * task and MSG_STORE_MAX rows' worth of scratch does not belong on that
+     * stack. Normally the first pass finds nothing at all. */
+    for (;;) {
+        bool found = false;
+        int found_idx = 0;
+        int from_end = 0;
+        MSG_LOCK();
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        for (int i = 0; i < s_count; i++) {
+            int idx = (start + i) % MSG_STORE_MAX;
+            stored_msg_t* m = &s_msgs[idx];
+            if (!is_parked_dm(m) || !past_park_window(m, now_s)) {
+                continue;
+            }
+            /* The same door msg_store_unpark uses, and for the same reason:
+             * the sticky rule refuses QUEUED -> FAILED from a send path, which
+             * is right, and giving up on age is not a send failing. */
+            m->status = MSG_STATUS_FAILED;
+            found = true;
+            found_idx = idx;
+            from_end = s_count - 1 - i;
+            break;
+        }
+        MSG_UNLOCK();
+        if (!found)
+            break;
+        persist_row_update(found_idx, from_end);
+        expired++;
+    }
+    return expired;
+}
+
+int msg_store_parked_uids_for_peer(uint32_t peer_addr, uint32_t* out_uids, int max_out,
+                                   uint32_t now_s) {
+    if (!out_uids || max_out <= 0) {
+        return 0;
+    }
+    int n = 0;
+    MSG_LOCK();
+    if (s_msgs) {
+        /* The ring is circular: index 0 is the OLDEST row and lives at
+         * s_head - s_count, not at s_msgs[0]. Same walk msg_store_get_copy
+         * does. Oldest first, because a parked conversation should arrive in
+         * the order it was written. */
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        for (int i = 0; i < s_count && n < max_out; i++) {
+            const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
+            if (!is_parked_dm(m) || m->peer_addr != peer_addr) {
+                continue;
+            }
+            /* Skipped, not rewritten: this is a read. msg_store_expire_parked
+             * is what makes an overdue row visibly failed. Skipping here too
+             * means the beacon path cannot re-send one in the window between
+             * its TTL passing and the next expiry pass. */
+            if (past_park_window(m, now_s)) {
+                continue;
+            }
+            out_uids[n++] = m->uid;
+        }
+    }
+    MSG_UNLOCK();
+    return n;
+}
+
+bool msg_store_next_parked_peer(uint32_t after_peer_addr, uint32_t* out_peer_addr, uint32_t now_s) {
+    if (!out_peer_addr) {
+        return false;
+    }
+    bool found_any = false;
+    uint32_t lowest = 0;     /* lowest parked peer overall, for the wrap */
+    uint32_t next_above = 0; /* lowest parked peer above after_peer_addr */
+    bool found_above = false;
+    MSG_LOCK();
+    if (s_msgs) {
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        for (int i = 0; i < s_count; i++) {
+            const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
+            if (!is_parked_dm(m) || past_park_window(m, now_s)) {
+                continue;
+            }
+            if (!found_any || m->peer_addr < lowest) {
+                lowest = m->peer_addr;
+                found_any = true;
+            }
+            if (m->peer_addr > after_peer_addr && (!found_above || m->peer_addr < next_above)) {
+                next_above = m->peer_addr;
+                found_above = true;
+            }
+        }
+    }
+    MSG_UNLOCK();
+    if (!found_any) {
+        return false;
+    }
+    *out_peer_addr = found_above ? next_above : lowest;
+    return true;
+}
+
+bool msg_store_peer_for_uid(uint32_t uid, uint32_t* out_peer_addr) {
+    if (!out_peer_addr || uid == 0) {
+        return false;
+    }
+    bool ok = false;
+    MSG_LOCK();
+    if (s_msgs) {
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        for (int i = 0; i < s_count; i++) {
+            const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
+            if (m->uid == uid) {
+                *out_peer_addr = m->peer_addr;
+                ok = true;
+                break;
+            }
+        }
+    }
+    MSG_UNLOCK();
+    return ok;
+}
+
+bool msg_store_get_copy_by_uid(uint32_t uid, stored_msg_t* out) {
+    if (!out || uid == 0) {
+        return false;
+    }
+    bool ok = false;
+    MSG_LOCK();
+    if (s_msgs) {
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        for (int i = 0; i < s_count; i++) {
+            const stored_msg_t* m = &s_msgs[(start + i) % MSG_STORE_MAX];
+            if (m->uid == uid) {
+                *out = *m;
+                ok = true;
+                break;
+            }
+        }
+    }
+    MSG_UNLOCK();
+    return ok;
 }
 
 int msg_store_count(void) {
