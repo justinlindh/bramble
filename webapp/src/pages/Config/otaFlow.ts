@@ -3,7 +3,7 @@
 // journey without mounting React.
 import { compareVersions } from '../../lib/otaIndex';
 
-export type OtaFlowPhase = 'idle' | 'running' | 'rebooting' | 'done' | 'failed';
+type OtaFlowPhase = 'idle' | 'running' | 'rebooting' | 'done' | 'failed';
 
 export interface OtaFlowState {
   phase: OtaFlowPhase;
