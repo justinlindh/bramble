@@ -89,6 +89,45 @@ func TestTwinJSONToAFileKeepsTheReportOnStdout(t *testing.T) {
 	}
 }
 
+// TestTwinJSONReportsOneWayLinkCount pins the one bound the assumptions block
+// used to drop on the floor: a measured one-way link shows up in the text
+// report but was hardcoded to zero in the JSON, so a consumer reading only the
+// machine-readable output was told the reconstruction was symmetric when it was
+// not. The graph here is the same shape as the merge test: 0A1B2C3D hears
+// 3D4E5F60, and 3D4E5F60 exports an empty neighbour table, so the asymmetry is
+// measured (one-way), not assumed reciprocal.
+func TestTwinJSONReportsOneWayLinkCount(t *testing.T) {
+	dir := t.TempDir()
+	heard := filepath.Join(dir, "0A1B2C3D.json")
+	silent := filepath.Join(dir, "3D4E5F60.json")
+	if err := os.WriteFile(heard,
+		twinDoc("0A1B2C3D", []map[string]any{twinNeighborEntry("3D4E5F60", -95, 7)}, nil),
+		0o644); err != nil {
+		t.Fatalf("write export: %v", err)
+	}
+	if err := os.WriteFile(silent, twinDoc("3D4E5F60", nil, nil), 0o644); err != nil {
+		t.Fatalf("write export: %v", err)
+	}
+
+	var out, errw bytes.Buffer
+	if code := runTwinIO([]string{"-skip-capacity", "-json", "-", heard, silent}, &out, &errw); code != 0 {
+		t.Fatalf("twin exited %d\n%s", code, errw.String())
+	}
+	var payload twinReportJSON
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("stdout is not one JSON document: %v\n%s", err, out.String())
+	}
+	// Measured asymmetry: one one-way link, and nothing was assumed reciprocal.
+	if payload.Assumptions.OneWayLinks != 1 || payload.Assumptions.ReciprocalLinks != 0 {
+		t.Fatalf("assumptions %+v, want one one-way link and no assumed reciprocity",
+			payload.Assumptions)
+	}
+	// The text report and the JSON must agree on the count.
+	if !strings.Contains(errw.String(), "One-way links, heard at one end and not the other (1)") {
+		t.Fatalf("text report does not name the one-way link:\n%s", errw.String())
+	}
+}
+
 func TestTwinRefusesAnUnusableInvocation(t *testing.T) {
 	cases := []struct {
 		name string
