@@ -46,22 +46,36 @@ export async function loadConnectionCapabilities(): Promise<void> {
   useStore.getState().setConnectionCapabilities(capabilities);
 }
 
-// The per-node data refresh shared by the initial (network) connect and by
-// auto-reconnect. Both paths must pull the same store slices from the node, so
-// keeping them in one place is what stops the two lists drifting: reconnect
-// used to hand-copy a subset and had already fallen behind, silently skipping
-// status and peer locations. Best-effort throughout via the caller's `opt`
-// wrapper so a slow RPC cannot abort the load. Must run after initMessageStore
-// so loadMessages persists its rows into the right per-node DB namespace.
-async function refreshNodeData(opt: (p: Promise<void>) => Promise<void>): Promise<void> {
-  await Promise.all([
-    opt(loadStatus()),
-    opt(loadAirtime()),
-    opt(loadNeighbors()),
-    opt(loadRoutes()),
-    opt(loadMessages()),
-    opt(loadPeerLocations()),
-  ]);
+// The per-node loader set, grouped into ordered stages. This one list is what
+// every connect and reconnect path pulls from, so a new loader added here is
+// picked up by all of them: keeping the set in one place is what stops the
+// lists drifting (reconnect and the serial path had each hand-copied a subset
+// and fallen behind, silently skipping status and peer locations). The grouping
+// only matters for the staged (serial) walk below; the fan-out flattens it.
+const NODE_LOAD_STAGES: Array<Array<() => Promise<void>>> = [
+  [loadStatus],
+  [loadAirtime],
+  [loadNeighbors, loadRoutes],
+  [loadMessages, loadPeerLocations],
+];
+
+// The per-node data refresh shared by the initial connect and by
+// auto-reconnect. Network and BLE fan out every loader at once; serial walks the
+// stages in order (`staged`) so a single slow UART is not contended by all RPCs
+// at once. Best-effort throughout via the caller's `opt` wrapper so a slow RPC
+// cannot abort the load. Must run after initMessageStore so loadMessages
+// persists its rows into the right per-node DB namespace.
+async function refreshNodeData(
+  opt: (p: Promise<void>) => Promise<void>,
+  staged = false,
+): Promise<void> {
+  if (staged) {
+    for (const stage of NODE_LOAD_STAGES) {
+      await Promise.all(stage.map((load) => opt(load())));
+    }
+  } else {
+    await Promise.all(NODE_LOAD_STAGES.flat().map((load) => opt(load())));
+  }
   await opt(syncDeliveryEventReplay());
 }
 
@@ -363,24 +377,10 @@ export async function connect(
 
     await initMessageStore(addrHex);
 
-    if (type === 'serial') {
-      // Serial stages the load rather than fanning out: the link is a single
-      // slow UART, so status and airtime go first, then neighbours/routes, then
-      // messages/peer-locations, instead of six RPCs contending at once.
-      await opt(loadStatus());
-      await opt(loadAirtime());
-      await Promise.all([
-        opt(loadNeighbors()),
-        opt(loadRoutes()),
-      ]);
-      await Promise.all([
-        opt(loadMessages()),
-        opt(loadPeerLocations()),
-      ]);
-      await opt(syncDeliveryEventReplay());
-    } else {
-      await refreshNodeData(opt);
-    }
+    // Serial stages the load rather than fanning out (see NODE_LOAD_STAGES):
+    // the link is a single slow UART, so the loaders go in ordered groups
+    // instead of contending all at once.
+    await refreshNodeData(opt, type === 'serial');
 
     store.setConnectionState('connected');
 
