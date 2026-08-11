@@ -14,7 +14,7 @@ import (
 )
 
 // fakeSerial stands in for a real passthrough-mode node reached over serial.
-// It speaks the JSON-RPC phy.* protocol the firmware exposes (DESIGN.md
+// It speaks the JSON-RPC phy.* protocol the firmware exposes (../../emulator/DESIGN.md
 // section 10): it answers phy.enable (optionally refusing until forced, exactly
 // like a node that holds a live identity), records phy.tx frames the gateway
 // pushes down for the real radio, and can emit bramble.onPhyFrame notifications

@@ -199,7 +199,7 @@ func (s *Supervisor) Stop() {
 func buildNodeEnv(brokerAddr, nodeDir, nodeLabel string, extra map[string]string) []string {
 	env := append([]string(nil), os.Environ()...)
 	// EMU_BROKER carries a scheme ("unix:/path"), the contract the node's
-	// emu_link client parses (emu_link.h, DESIGN.md section 8). The broker
+	// emu_link client parses (emu_link.h, ../../emulator/DESIGN.md section 8). The broker
 	// always listens on a unix socket, so the scheme is always unix.
 	//
 	// BRAMBLE_EMU_NODE is the hello id the node reports. A linux node derives

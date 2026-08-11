@@ -1,6 +1,6 @@
 package main
 
-// Gateway is the serial-attached PHY-passthrough bridge (DESIGN.md section 10):
+// Gateway is the serial-attached PHY-passthrough bridge (../../emulator/DESIGN.md section 10):
 // a real hardware node reached over serial whose radio becomes one more member
 // of the emulated ether. It speaks two protocols and shuttles frames between
 // them:
@@ -10,7 +10,7 @@ package main
 //     frames the ether hands it (phy.tx), and consumes the node's inbound
 //     "bramble.onPhyFrame" notifications (a real-mesh reception plus rssi/snr/
 //     freq);
-//   - the emu-link ether (DESIGN.md section 8): it attaches to the broker as
+//   - the emu-link ether (../../emulator/DESIGN.md section 8): it attaches to the broker as
 //     an ordinary external node (hello/tx/rx), so a frame the hardware hears
 //     from the real fleet is injected as this node's transmission (every
 //     in-range virtual pager receives it), and a frame the ether routes to the
@@ -39,7 +39,7 @@ import (
 )
 
 // gatewayTTLSec is the passthrough window the gateway requests. The node
-// auto-expires the mode after this (a hard safety property, DESIGN.md section
+// auto-expires the mode after this (a hard safety property, ../../emulator/DESIGN.md section
 // 10), so the gateway re-enables at half the interval to keep a long bridging
 // session alive without ever leaving the window open longer than one TTL.
 const gatewayTTLSec = 1800 // 30 minutes
@@ -119,7 +119,7 @@ type onPhyFrameParams struct {
 	Freq  int64  `json:"freq"` // carrier in Hz
 }
 
-// --- emu-link (ether) wire types (subset; see DESIGN.md section 8) ---
+// --- emu-link (ether) wire types (subset; see ../../emulator/DESIGN.md section 8) ---
 
 // etherInbound is the broker->node message shape the gateway consumes. Only rx
 // drives the bridge; time/txdone/cadres are read and ignored.

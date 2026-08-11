@@ -21,12 +21,12 @@ import (
 )
 
 // EmuLinkVersion is the emu-link wire protocol version the broker speaks
-// (DESIGN.md section 8). It rides in every node's hello; a node that reports a
+// (../../emulator/DESIGN.md section 8). It rides in every node's hello; a node that reports a
 // different version is refused loudly (the broker logs the mismatch and closes
 // the connection) rather than silently mis-parsing a future dialect.
 const EmuLinkVersion = 1
 
-// emuInbound is the union of every node->broker message shape (DESIGN.md
+// emuInbound is the union of every node->broker message shape (../../emulator/DESIGN.md
 // section 8). "t" discriminates; the other fields are populated per type. A
 // flat struct keeps decoding a single json.Unmarshal and makes unknown message
 // types trivially ignorable (an unrecognized "t" simply matches no case).
@@ -52,7 +52,7 @@ type emuInbound struct {
 	Line    string `json:"line"` // log: one console line
 }
 
-// Broker->node message envelopes (DESIGN.md section 8). Each is marshaled as
+// Broker->node message envelopes (../../emulator/DESIGN.md section 8). Each is marshaled as
 // one JSON line onto the target connection's buffered send channel.
 type rxMsg struct {
 	T       string `json:"t"`
