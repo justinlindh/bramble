@@ -1,20 +1,21 @@
 package main
 
-// Gateway is the serial-attached PHY-passthrough bridge (../../emulator/DESIGN.md section 10):
-// a real hardware node reached over serial whose radio becomes one more member
-// of the emulated ether. It speaks two protocols and shuttles frames between
-// them:
+// Gateway is the serial-attached PHY-passthrough bridge
+// (../../emulator/DESIGN.md section 10): a real hardware node reached over
+// serial whose radio becomes one more member of the emulated ether. It speaks
+// two protocols and shuttles frames between them:
 //
 //   - the node's JSON-RPC serial link (the phy.* methods): it enables
 //     passthrough (authenticated over serial by physical access), transmits
 //     frames the ether hands it (phy.tx), and consumes the node's inbound
 //     "bramble.onPhyFrame" notifications (a real-mesh reception plus rssi/snr/
 //     freq);
-//   - the emu-link ether (../../emulator/DESIGN.md section 8): it attaches to the broker as
-//     an ordinary external node (hello/tx/rx), so a frame the hardware hears
-//     from the real fleet is injected as this node's transmission (every
-//     in-range virtual pager receives it), and a frame the ether routes to the
-//     gateway's position goes back out the real radio via phy.tx.
+//   - the emu-link ether (../../emulator/DESIGN.md section 8): it attaches to
+//     the broker as an ordinary external node (hello/tx/rx), so a frame the
+//     hardware hears from the real fleet is injected as this node's
+//     transmission (every in-range virtual pager receives it), and a frame the
+//     ether routes to the gateway's position goes back out the real radio via
+//     phy.tx.
 //
 // The two directions are symmetric, so a channel message from the physical
 // fleet lands on the virtual pagers, and a reply composed on a virtual pager
@@ -39,9 +40,10 @@ import (
 )
 
 // gatewayTTLSec is the passthrough window the gateway requests. The node
-// auto-expires the mode after this (a hard safety property, ../../emulator/DESIGN.md section
-// 10), so the gateway re-enables at half the interval to keep a long bridging
-// session alive without ever leaving the window open longer than one TTL.
+// auto-expires the mode after this (a hard safety property,
+// ../../emulator/DESIGN.md section 10), so the gateway re-enables at half the
+// interval to keep a long bridging session alive without ever leaving the
+// window open longer than one TTL.
 const gatewayTTLSec = 1800 // 30 minutes
 
 // gatewayDefaultBaud is the ESP32-S3 console baud (both the V3 CP2102 bridge
@@ -119,7 +121,8 @@ type onPhyFrameParams struct {
 	Freq  int64  `json:"freq"` // carrier in Hz
 }
 
-// --- emu-link (ether) wire types (subset; see ../../emulator/DESIGN.md section 8) ---
+// --- emu-link (ether) wire types (subset; see ../../emulator/DESIGN.md
+// section 8) ---
 
 // etherInbound is the broker->node message shape the gateway consumes. Only rx
 // drives the bridge; time/txdone/cadres are read and ignored.
