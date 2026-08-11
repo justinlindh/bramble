@@ -69,7 +69,6 @@ typedef struct {
 typedef struct {
     ui_screen_t current_screen;
     ui_screen_t prev_screen;
-    uint32_t screen_enter_time;
     uint32_t last_activity;
     bool screen_dirty;
     /* E-paper ghosting cleanup (see UI_FULL_REFRESH_EVERY_N_SCREENS below):

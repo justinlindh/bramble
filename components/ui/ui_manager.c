@@ -236,7 +236,6 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
             state->current_screen != SCREEN_MESSAGES) {
             state->prev_screen = state->current_screen;
             state->current_screen = SCREEN_MESSAGES;
-            state->screen_enter_time = now_ms;
             state->screen_dirty = true;
             break;
         }
@@ -247,7 +246,6 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
             next = (ui_screen_t)((next + 1) % SCREEN_COUNT);
         }
         state->current_screen = next;
-        state->screen_enter_time = now_ms;
         state->screen_dirty = true;
         break;
     }
@@ -261,7 +259,6 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
             next = (ui_screen_t)((next + SCREEN_COUNT - 1) % SCREEN_COUNT);
         }
         state->current_screen = next;
-        state->screen_enter_time = now_ms;
         state->screen_dirty = true;
         break;
     }
@@ -275,7 +272,6 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
             /* Enter compose mode */
             state->prev_screen = state->current_screen;
             state->current_screen = SCREEN_COMPOSE;
-            state->screen_enter_time = now_ms;
             state->compose_len = 0;
             state->compose_buf[0] = '\0';
             state->compose_active = true;
@@ -293,7 +289,6 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
         ui_screen_t cur = state->current_screen;
         state->current_screen = state->prev_screen;
         state->prev_screen = cur;
-        state->screen_enter_time = now_ms;
         state->screen_dirty = true;
         break;
     }
@@ -372,7 +367,6 @@ void ui_on_message_received(ui_state_t* state, uint32_t now_ms) {
         bool was_nodes = state->current_screen == SCREEN_NODES;
         state->prev_screen = state->current_screen;
         state->current_screen = SCREEN_MESSAGES;
-        state->screen_enter_time = now_ms;
         state->unread_count = 0;
         state->msg_scroll = 0;
         state->message_auto_switch_time = now_ms;
@@ -395,7 +389,6 @@ void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
         state->msg_scroll == 0 &&
         (now_ms - state->message_auto_switch_time) >= UI_MESSAGE_AUTO_RESTORE_TIMEOUT_MS) {
         state->current_screen = state->prev_screen;
-        state->screen_enter_time = now_ms;
         state->screen_dirty = true;
         state->message_auto_switch_time = 0;
         if (state->current_screen != SCREEN_NODES) {
@@ -418,7 +411,6 @@ void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
         (now_ms - state->last_activity) >= inactivity_limit) {
         state->prev_screen = state->current_screen;
         state->current_screen = SCREEN_MAIN;
-        state->screen_enter_time = now_ms;
         state->screen_dirty = true;
         state->last_activity = now_ms;
         state->message_auto_switch_time = 0;
