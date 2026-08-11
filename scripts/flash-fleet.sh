@@ -3,7 +3,7 @@
 # per-node encryption rule automatically.
 #
 #   bash scripts/flash-fleet.sh          # flash all detected nodes
-#   bash scripts/flash-fleet.sh build    # rebuild both board images first
+#   bash scripts/flash-fleet.sh build    # rebuild every board image first
 #
 #   BRAMBLE_ENCRYPTED_ADDRS="11223344 55667788" bash scripts/flash-fleet.sh
 #
@@ -66,8 +66,12 @@ read_crypt_state() {
 }
 
 if [[ "${1:-}" == "build" ]]; then
-  bash scripts/flash.sh local heltec-v4 build
-  bash scripts/flash.sh local heltec-v3 build
+  # Build every shipped board, not a subset: a detected node is flashed from
+  # its own board image below, so any board omitted here would either be
+  # flashed from a stale image or skipped outright.
+  for board in heltec-v3 heltec-v4 tdeck-plus bramble-pager; do
+    bash scripts/flash.sh local "$board" build
+  done
 fi
 
 failed=0
@@ -109,9 +113,22 @@ except Exception:
     fi
   fi
 
-  build_dir="build-heltec-v4"
-  [[ "$hw" == "heltec_v3" ]] && build_dir="build-heltec-v3"
-  [[ "$hw" == "tdeck_plus" ]] && build_dir="build-tdeck-plus"
+  # Map the node's reported hardware (underscored short_name, e.g. heltec_v3)
+  # to its build directory (hyphenated, e.g. build-heltec-v3), the same naming
+  # flash.sh writes. Deriving it mechanically covers every board without a
+  # per-board list here that silently falls behind the board matrix: the old
+  # two-board list defaulted every other node (a real bramble-pager included)
+  # to the heltec-v4 image. If the derived image is absent, SKIP rather than
+  # fall back to another board's binary; flashing the wrong firmware is the
+  # same class of harm as the mis-encrypted flash this script already refuses
+  # to guess at.
+  build_dir="build-${hw//_/-}"
+  if [[ -z "$hw" || ! -e "$build_dir/bramble.bin" ]]; then
+    echo "$port: $addr ($hw) -> SKIPPED, no image at $build_dir/bramble.bin" >&2
+    echo "  build it first ('scripts/flash-fleet.sh build'); refusing to flash another board's image." >&2
+    failed=1
+    continue
+  fi
   if [[ "$crypt" == "encrypted" ]]; then
     echo "$port: $addr ($hw) -> ENCRYPTED app-only flash from $build_dir (eFuse-detected)"
     "$ESPTOOL" --chip esp32s3 --port "$port" -b 460800 \
