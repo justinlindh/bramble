@@ -1,10 +1,10 @@
 // epaperModel.ts
 //
 // Modeled e-paper physics for the virtual pager display (Bramble emulator,
-// DESIGN.md section 9). The firmware node streams packed 1bpp framebuffers over
-// emu-link tagged "partial" or "full"; this module turns each frame into a
-// schedule of canvas paints that mimics how a real GDEY0213B74 SSD1680 panel
-// updates:
+// emulator/DESIGN.md section 9). The firmware node streams packed 1bpp
+// framebuffers over emu-link tagged "partial" or "full"; this module turns each
+// frame into a schedule of canvas paints that mimics how a real GDEY0213B74
+// SSD1680 panel updates:
 //
 //   - partial refresh: the new image latches after the panel's busy window with
 //     NO inversion flash. Each partial leaves a faint residue of the prior image
@@ -80,7 +80,7 @@ export function initialEpaperState(): EpaperState {
 
 // applyFrame turns an incoming framebuffer update into a paint schedule and the
 // resulting ghost state. `fb` (the base64 payload) is opaque to the model; only
-// `kind` and `busyMs` drive the schedule. See DESIGN.md section 9.
+// `kind` and `busyMs` drive the schedule. See emulator/DESIGN.md section 9.
 export function applyFrame(
   state: EpaperState,
   _fb: string | null,
