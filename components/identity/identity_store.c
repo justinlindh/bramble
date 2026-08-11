@@ -150,7 +150,6 @@ identity_pin_result_t identity_store_pin(identity_store_t* s, uint32_t address,
     e->address = address;
     memcpy(e->ed25519_pub, ed25519_pub, 32);
     memcpy(e->x25519_pub, x25519_pub, 32);
-    e->pinned_at_ms = now_ms;
     e->last_confirmed_ms = now_ms;
     return IDENTITY_PIN_NEW;
 }
