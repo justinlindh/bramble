@@ -106,7 +106,6 @@ static void test_first_pin_stores_and_lookup_returns_it(void) {
     TEST_ASSERT_EQUAL_HEX32(0xA1u, e->address);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(ed, e->ed25519_pub, 32);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(x, e->x25519_pub, 32);
-    TEST_ASSERT_EQUAL_UINT32(1000, e->pinned_at_ms);
     TEST_ASSERT_EQUAL_UINT32(1000, e->last_confirmed_ms);
 }
 
@@ -121,10 +120,9 @@ static void test_identical_repin_is_idempotent_refresh(void) {
 
     const identity_pin_t* e = identity_store_lookup(&s_store, 0xA1u);
     TEST_ASSERT_NOT_NULL(e);
-    /* Keys and pinned_at unchanged (no churn); last_confirmed refreshed
+    /* Keys unchanged (no churn); last_confirmed refreshed
      * (that is what protects a live binding from LRU eviction). */
     TEST_ASSERT_EQUAL_HEX8_ARRAY(ed, e->ed25519_pub, 32);
-    TEST_ASSERT_EQUAL_UINT32(1000, e->pinned_at_ms);
     TEST_ASSERT_EQUAL_UINT32(5000, e->last_confirmed_ms);
     TEST_ASSERT_EQUAL_UINT32(0, s_store.conflicts);
 }

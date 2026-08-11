@@ -35,8 +35,8 @@
  *   - The RAM store is authoritative; the binding + its verified bit and
  *     SAS-at-verification also persist to NVS (identity_store_serialize /
  *     _deserialize, driven by mesh_task.c) so a "verified once, stays
- *     verified" model survives reboot. The LRU bookkeeping (pinned_at_ms /
- *     last_confirmed_ms) is not persisted and legitimately resets on reboot.
+ *     verified" model survives reboot. The LRU bookkeeping (last_confirmed_ms)
+ *     is not persisted and legitimately resets on reboot.
  *
  * Phase 4 (address rebind): the node address derives from the Ed25519
  * identity key, and identity_store_handle_attestation additionally
@@ -105,7 +105,6 @@ typedef struct {
     uint32_t address;
     uint8_t ed25519_pub[32];
     uint8_t x25519_pub[32];
-    uint32_t pinned_at_ms;      /* when the binding was first stored */
     uint32_t last_confirmed_ms; /* last identical re-attestation (LRU key) */
     /* SAS verification state (DM forward-secrecy + SAS). The bit and the
      * SAS-at-verification-time persist to NVS with the pin (see
@@ -214,7 +213,7 @@ void identity_store_init(identity_store_t* s, uint32_t now_ms);
  * Raw TOFU pin of an already-VERIFIED binding (callers must have checked
  * the Ed25519 signature; identity_store_handle_attestation below does).
  * Returns NEW/REFRESHED/CONFLICT per the TOFU rules above. On CONFLICT
- * the stored entry is untouched (keys, pinned_at AND last_confirmed: a
+ * the stored entry is untouched (keys and last_confirmed: a
  * conflicting frame is not a confirmation and must not move the entry's
  * LRU position).
  */
@@ -345,8 +344,8 @@ bool identity_store_key_changed(const identity_store_t* s, uint32_t address);
  * nvs_open/nvs_set_blob/nvs_commit around these, mirroring identity.c: the
  * IN-MEMORY store is authoritative, so a store-write failure never loses the
  * live pins. Only the durable fields are written (address, both pubkeys, the
- * verified bit, and the SAS); pinned_at_ms / last_confirmed_ms are LRU
- * bookkeeping that legitimately resets on reboot.
+ * verified bit, and the SAS); last_confirmed_ms is LRU bookkeeping that
+ * legitimately resets on reboot.
  *
  * serialize writes a 1-byte format version, a 1-byte used-entry count, then one
  * fixed record per used entry; returns the byte count written, or -1 if buf is
