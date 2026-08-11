@@ -18,9 +18,9 @@ import (
 // (../../emulator/DESIGN.md section 10): it answers phy.enable (optionally
 // refusing until forced, exactly like a node that holds a live identity),
 // records phy.tx frames the gateway pushes down for the real radio, and can
-// emit bramble.onPhyFrame notifications
-// (a real-mesh reception) up the link. It runs over an in-memory net.Pipe, so
-// the test drives the gateway with zero real hardware.
+// emit bramble.onPhyFrame notifications (a real-mesh reception) up the link. It
+// runs over an in-memory net.Pipe, so the test drives the gateway with zero
+// real hardware.
 type fakeSerial struct {
 	conn net.Conn
 	r    *bufio.Reader
