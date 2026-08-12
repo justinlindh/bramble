@@ -4,9 +4,9 @@
 #include <stddef.h>
 
 /*
- * PHY passthrough gate state. All module-global, never persisted (DESIGN.md
- * section 10: passthrough must never survive a reboot, so there is deliberately
- * no NVS read or write anywhere in this file).
+ * PHY passthrough gate state. All module-global, never persisted
+ * (emulator/DESIGN.md section 10: passthrough must never survive a reboot, so
+ * there is deliberately no NVS read or write anywhere in this file).
  *
  * Concurrency: enable/disable run on the RPC task; is_active / forward_rx run
  * on the radio RX task. No mutex (host tests have no RTOS, and the RX path must
@@ -26,8 +26,8 @@ static volatile uint32_t s_ttl_s = 0;
 /*
  * One-shot latch for the auto-expiry (live->off) transition. is_active() folds
  * a TTL elapse into a disable() with no way to log from here (this module has
- * no logging dependency by design, DESIGN.md section 10). Instead the transition
- * is latched and drained by a logging-capable caller via
+ * no logging dependency by design, emulator/DESIGN.md section 10). Instead the
+ * transition is latched and drained by a logging-capable caller via
  * phy_passthrough_consume_auto_expired(), so the expiry is logged exactly once
  * rather than on every poll.
  */
