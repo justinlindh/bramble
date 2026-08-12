@@ -1,5 +1,5 @@
 /*
- * PHY passthrough gating matrix (DESIGN.md section 10).
+ * PHY passthrough gating matrix (emulator/DESIGN.md section 10).
  *
  * The gating IS the product, so every clause of section 10 has an assertion:
  *   - disabled by default                         -> test_default_off,

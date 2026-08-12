@@ -183,7 +183,7 @@ static int send_locked(cJSON* msg) {
 
 /* Parses one NUL-terminated line and dispatches it to its registered
  * handler, if any. Unknown types and malformed JSON are silently ignored
- * (DESIGN.md section 8: forward compatibility). */
+ * (emulator/DESIGN.md section 8: forward compatibility). */
 static void dispatch_line(char* line) {
     cJSON* msg = cJSON_Parse(line);
     if (!msg)

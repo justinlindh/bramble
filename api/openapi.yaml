@@ -1868,7 +1868,7 @@ paths:
       operationId: phyEnable
       summary: Enable PHY passthrough (hardware bridge)
       description: >
-        Enables the hardware-bridge passthrough mode (DESIGN.md section 10):
+        Enables the hardware-bridge passthrough mode (emulator/DESIGN.md section 10):
         received frames are forwarded up as bramble.onPhyFrame notifications
         and phy.tx transmits raw frames. Gated hard: authenticated only,
         auto-expires after a TTL (default 30 min), never persists across
@@ -1995,7 +1995,7 @@ components:
 
     PhyStatusResponse:
       type: object
-      description: PHY passthrough gate state (DESIGN.md section 10).
+      description: PHY passthrough gate state (emulator/DESIGN.md section 10).
       required: [enabled, forced, ttl_s, remaining_s]
       properties:
         enabled:

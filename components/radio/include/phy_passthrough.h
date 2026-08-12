@@ -6,7 +6,7 @@
 #include "radio.h"
 
 /*
- * PHY passthrough: the hardware-bridge mode (DESIGN.md section 10).
+ * PHY passthrough: the hardware-bridge mode (emulator/DESIGN.md section 10).
  *
  * When active, every raw frame the radio receives is forwarded up the
  * RPC/serial link with its radio metadata (rssi/snr/freq) BEFORE mesh

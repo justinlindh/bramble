@@ -3,7 +3,7 @@
  * the host (IDF linux target and the plain-gcc harness). Each setter emits one
  * emu-link `ind` message carrying the FULL (led, buzzer_hz, vibra) state, so
  * the frontend renders a complete snapshot on every change regardless of which
- * field moved (DESIGN.md sections 5 and 8).
+ * field moved (emulator/DESIGN.md sections 5 and 8).
  *
  * Thread-safety: indicator_* may be called from any firmware task. s_ind_mu is
  * held across the read-modify-send so concurrent callers can never interleave
