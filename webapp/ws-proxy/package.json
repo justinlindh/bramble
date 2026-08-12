@@ -8,6 +8,6 @@
     "start": "node server.mjs"
   },
   "dependencies": {
-    "ws": "^8.21.1"
+    "ws": "^8.21.3"
   }
 }
