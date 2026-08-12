@@ -376,7 +376,7 @@ void test_closed_authed_fd_does_not_leak_privilege_to_its_reuse(void) {
     TEST_ASSERT_EQUAL(RPC_ERR_UNAUTHORIZED, last_reply_error_code());
 }
 
-/* Belt and braces for the same hazard: even if the close was missed and the
+/* A second guard for the same hazard: even if the close was missed and the
  * table entry survived, re-handshaking the fd must overwrite its auth flag
  * rather than keeping the stale one. */
 void test_rehandshake_overwrites_stale_auth_flag(void) {

@@ -254,7 +254,7 @@ updates:
   # image tag, and because firmware is only lightly compiled on pull requests
   # the breakage would surface late and be hard to attribute.
   #
-  # This ignore is load-bearing, not cruft. Moving ESP-IDF is a deliberate,
+  # This ignore is deliberate, not cruft. Moving ESP-IDF is a deliberate,
   # human-driven change that has to land together with CLAUDE.md, the runner
   # image, and the CI scripts above. Do not remove it to "unblock" a bump.
   - package-ecosystem: docker

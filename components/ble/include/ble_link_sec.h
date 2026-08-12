@@ -13,7 +13,7 @@
  *
  * The GATT characteristics therefore carry the _ENC flags, and the firmware
  * additionally re-checks the connection's security state in the access
- * callback before touching a payload. Belt and braces: the flags are enforced
+ * callback before touching a payload. Deliberately redundant: the flags are enforced
  * by the NimBLE ATT server, this predicate is enforced by us, and the two
  * disagreeing is a bug we would rather fail closed on.
  *

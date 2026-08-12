@@ -15,7 +15,7 @@
 // and host tasks do not get one, and why that is not a coverage gap for
 // the failure this change targets.
 //
-// Timeout: 60 seconds. This number is load-bearing for DFU safety, not
+// Timeout: 60 seconds. This number is critical for DFU safety, not
 // just hang-detection latency; read "DFU survival" below before changing
 // it. It comfortably covers every legitimate blocking operation in the
 // firmware: the worst is the 4s LoRa TX wait (main/mesh_task.c), NVMC page

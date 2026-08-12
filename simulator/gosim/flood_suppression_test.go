@@ -24,7 +24,7 @@ import (
 // keeps the overhearing deterministic (the point here is the suppression
 // bookkeeping, not the MAC model), mirroring flood_transport_test.go.
 //
-// sf:7/bw_hz:500000 (a fast PHY) is deliberate and load-bearing. Suppression
+// sf:7/bw_hz:500000 (a fast PHY) is deliberate and necessary. Suppression
 // needs FLOOD_SUPPRESS_AFTER (2) other copies fully RECEIVED before a node's
 // own jitter expires: jitter_other + airtime <= jitter_self. Forward jitter is
 // uniform over 50-300ms, so the widest gap between two draws is 250ms, and any

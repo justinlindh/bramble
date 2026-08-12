@@ -34,7 +34,7 @@ if [[ ! "$want" =~ ^[0-9]+$ ]]; then
 fi
 
 # 1. Required pins. Each entry is "<file>::<literal that must appear>". These
-#    are the load-bearing references: the ones that decide which Node actually
+#    are the references that matter: the ones that decide which Node actually
 #    builds or runs a shipped artifact, plus the prose contributors follow. A
 #    pattern sweep alone cannot catch a line that drops its Node context, so
 #    assert the exact expected text.

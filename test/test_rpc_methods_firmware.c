@@ -956,7 +956,7 @@ void test_set_node_name_max_length(void) {
 /* ── phy.tx (the actual RF-TX entrypoint) ─────────────────────────────
  *
  * These drive the real handle_phy_tx via the dispatcher and assert the two
- * security-load-bearing behaviours that the whitebox gate test could not reach
+ * security-critical behaviours that the whitebox gate test could not reach
  * at the handler level: (a) phy.tx is REFUSED and never touches the tx gate when
  * passthrough is inactive; (b) when active, phy.tx routes the exact frame
  * through tx_gate_send (not radio_transmit_raw). The stubbed tx_gate_send

@@ -530,7 +530,7 @@ func TestScenarioReliabilityPathTrace(t *testing.T) {
 //   - every one of the six messages is delivered end to end; 5 percent loss on
 //     three hops must be fully masked by retransmission, not merely survived on
 //     average.
-//   - the ladder is load-bearing, not incidental: at least one message is
+//   - the ladder is deliberate, not incidental: at least one message is
 //     delivered ON a retry (delivered_on_retry > 0), so a regression that
 //     silently re-inerts the pending-ack machine, delivering only the frames
 //     that happened not to drop, fails here even if the average rate still looks

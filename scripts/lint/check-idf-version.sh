@@ -37,7 +37,7 @@ bare="${want#v}"
 major="${bare%%.*}"
 
 # 1. Required pins. Each entry is "<file>::<literal that must appear>". These
-#    are the load-bearing references: the ones that decide which ESP-IDF a
+#    are the references that matter: the ones that decide which ESP-IDF a
 #    build actually uses. A grep-based sweep alone cannot catch a line that
 #    drops its ESP-IDF context word, so assert the exact expected text.
 required=(

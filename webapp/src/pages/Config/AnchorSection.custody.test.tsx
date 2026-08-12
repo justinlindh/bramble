@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-// The load-bearing custody guard: drive the WHOLE enrollment ceremony through
+// The critical custody guard: drive the WHOLE enrollment ceremony through
 // the real UI + real store actions, with only the transport mocked, and prove
 // the anchor SECRET seed never appears in any RPC payload. This mirrors the
 // transport-mock setup in store/__tests__/anchor.test.ts (the client is created

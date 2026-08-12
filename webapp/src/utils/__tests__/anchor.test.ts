@@ -31,7 +31,7 @@ const KAT_SIG_PERMANENT =
 const KAT_ANCHOR_PUB =
   '03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8';
 
-describe('anchor crypto parity KAT (load-bearing)', () => {
+describe('anchor crypto parity KAT (must not regress)', () => {
   it('signs the firmware KAT byte-for-byte', () => {
     const { notAfterHex, sigHex } = signEndorsement(
       KAT_ANCHOR_SEED,

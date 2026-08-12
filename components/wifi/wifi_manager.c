@@ -222,7 +222,7 @@ static int try_station_mode(const char* ssid, const char* password) {
     ESP_ERROR_CHECK(esp_wifi_start());
 
     /* Power: pin station-mode modem power save explicitly. WIFI_PS_MIN_MODEM
-     * (RF off between DTIM beacons) is the IDF default, but it is load-bearing
+     * (RF off between DTIM beacons) is the IDF default, but it matters
      * for battery life, so state it rather than inherit it. WIFI_PS_MAX_MODEM
      * was considered and rejected: it sleeps through beacons up to the AP's
      * listen interval, which adds user-visible latency to the WebSocket RPC

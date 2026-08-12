@@ -45,7 +45,7 @@ minor="${want#*.}"; minor="${minor%%.*}"
 rel="${major}.${minor}.Rel${patch}"
 
 # 1. Required pins. Each entry is "<file>::<literal that must appear>". These are
-#    the load-bearing references: the two that decide which compiler a build
+#    the references that matter: the two that decide which compiler a build
 #    actually checks against, plus the prose a contributor follows to install it.
 #    The build and the CI assert must READ the source of truth, not restate it,
 #    so what is asserted there is the read itself.

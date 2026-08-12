@@ -28,7 +28,7 @@
  * register reads back 0 so the pre-conversion wait loop falls through. Every
  * other SENS register reads 0 / drops writes exactly as the catch-all did, so
  * the ADC-config path the firmware already completed is unchanged. Battery
- * voltage is not load-bearing for the emulator; any finite result that lets the
+ * voltage does not matter for the emulator; any finite result that lets the
  * poll finish is enough. BRAMBLE_ADC_RAW is a mid-scale 12-bit reading (~1.6V
  * at the pin) which maps, through battery.c's calibration and divider, to a
  * sane multi-volt battery level.

@@ -76,7 +76,7 @@ jobs:
       (inputs.webapp_installers_tag == '' && inputs.firmware_factory_tag == '')
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     # Four semantic-release runs over a full-history checkout; the asset builds
-    # live in their own jobs with their own budgets. A cap is load-bearing here
+    # live in their own jobs with their own budgets. A cap is necessary here
     # because concurrency.cancel-in-progress is false: without one, a single
     # wedged run holds the release-components group for the six-hour default and
     # every merge behind it waits.

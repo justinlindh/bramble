@@ -151,7 +151,7 @@ bool mesh_cancel_parked_message(uint32_t uid);
  * failure paths do not share one: the synchronous ones report by uid through
  * msg_store_update_by_uid, while the two that matter most report by packet_id
  * through msg_store_update_status, namely the ACK retry tick and
- * rerr_ack_fastfail.c. Refusing SENT is the load-bearing half rather than
+ * rerr_ack_fastfail.c. Refusing SENT is the half that matters rather than
  * refusing FAILED: a parked row marked SENT by its own transmit would no longer
  * be QUEUED when that transmit's ACK never arrived, and the FAILED report would
  * then land on an unprotected row and strand the message after one attempt.

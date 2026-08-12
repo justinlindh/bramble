@@ -283,7 +283,7 @@ The `bramble_beacon_t.flags` field carries per-feature capability bits:
 
 ## Packet Path (Receive)
 
-Every inbound frame walks the same funnel in `mesh_process_rx_packet` (`main/mesh_task.c`): cheap structural checks first, then dedup, then per-type dispatch, and only then anything expensive like decryption. The ordering is deliberate, and two properties of it are load-bearing.
+Every inbound frame walks the same funnel in `mesh_process_rx_packet` (`main/mesh_task.c`): cheap structural checks first, then dedup, then per-type dispatch, and only then anything expensive like decryption. The ordering is deliberate, and two properties of it are essential.
 
 First, `DATA` frames are authenticated with the network-key HMAC (`data_auth_verify`) **before** the node learns a reverse route from them or forwards them. A relay never decrypts `DATA`, so the AEAD tag cannot gate the forwarding decision; the HMAC is what stops a keyless attacker from poisoning route tables toward a spoofed victim.
 

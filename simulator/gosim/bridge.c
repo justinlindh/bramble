@@ -1121,7 +1121,7 @@ static bool bridge_flood_relay(sim_node_t* rx, const uint8_t* buf, uint16_t len,
      * bad-MAC frames: every duplicate that reaches this path is a genuine
      * re-flood by another honest relay (data_rx_decide's auth gate is assumed
      * already passed, see the DATA_RX_DELIVER comment below). The firmware MAC
-     * gate is the load-bearing fix; this stays a faithful honest-node model. */
+     * gate is the actual fix; this stays a faithful honest-node model. */
     if (is_dup) {
         bridge_flood_pending_note_overheard(rx, flood_key);
     }

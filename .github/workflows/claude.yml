@@ -81,7 +81,7 @@ jobs:
       # use_commit_signing is off, so nothing in this job can write a ref.
       # checkout only needs read. issues and pull-requests stay write because
       # the run posts inline review comments and updates its tracked comment.
-      # id-token: write is load-bearing, not boilerplate: no github_token
+      # id-token: write is required, not boilerplate: no github_token
       # input is set, so the action fetches a GitHub OIDC token and exchanges
       # it for the Claude app's installation token. Remove it and the run
       # cannot authenticate at all.

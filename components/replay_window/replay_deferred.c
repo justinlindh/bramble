@@ -6,7 +6,7 @@ void replay_deferred_init(replay_deferred_t* d) { memset(d, 0, sizeof(*d)); }
 /*
  * Issue #88: pick a slot for a new (src, counter) record.
  *
- * A record only stops being load-bearing once it is older than
+ * A record only stops being needed once it is older than
  * DEFERRED_TTL_S, because past that age replay_deferred_accept rejects the
  * corresponding message on its sent_at check anyway. So an entry younger
  * than the TTL must never be evicted: doing so is exactly the attack in

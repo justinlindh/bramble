@@ -107,7 +107,7 @@ jobs:
             local ref="$1"
             local id size freed=0 deleted=0
 
-            # Load-bearing guard, not a sanity check. The API treats an EMPTY
+            # Required guard, not a sanity check. The API treats an EMPTY
             # `ref=` query value as no filter at all and returns every cache in
             # the repository (verified against the live API: `ref=` returns the
             # full listing, a valid ref returns only its own entries, an

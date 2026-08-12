@@ -50,7 +50,7 @@ describe('mergeFirmwareMessages', () => {
 
     expect(merged).toHaveLength(2);
     expect(merged.map(m => m.text)).toEqual(['first', 'second']);
-    // Distinct ids are the load-bearing part: addMessage dedupes on id, so
+    // Distinct ids are the part that matters: addMessage dedupes on id, so
     // colliding ids would lose the second message on the way into the store.
     expect(new Set(merged.map(m => m.id)).size).toBe(2);
 
