@@ -52,7 +52,7 @@ func writeTwinSources(b *strings.Builder, g *twinGraph, sources []string) {
 	r := g.Radio
 	fmt.Fprintf(b, "Radio: SF%d BW%d CR4/%d, %.1f MHz, %s (%s)\n", r.SF, r.BWHz, r.CodingRate+4,
 		r.FrequencyMHz, r.Region, r.Regulatory)
-	if r.DutyCycleEnforced && r.MaxDutyCyclePct < 100 {
+	if r.appliesDutyCap() {
 		fmt.Fprintf(b, "Duty cycle: %d%%, enforced, and applied to every node in the twin.\n",
 			r.MaxDutyCyclePct)
 	} else {

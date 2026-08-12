@@ -61,6 +61,16 @@ type twinExportRadio struct {
 	DutyCycleEnforced bool    `json:"duty_cycle_enforced"`
 }
 
+// appliesDutyCap reports whether this plan imposes a real airtime ceiling the
+// twin must honor. A cap counts only when it is enforced and lands strictly
+// between 0 and 100: an advisory plan (not enforced), a 100% ceiling (no
+// ceiling), or a malformed 0% both leave the twin at the sim's unlimited
+// default. The scenario builder and the report share this predicate so they
+// never disagree about whether a given plan is capped.
+func (r twinExportRadio) appliesDutyCap() bool {
+	return r.DutyCycleEnforced && r.MaxDutyCyclePct > 0 && r.MaxDutyCyclePct < 100
+}
+
 // twinNeighbor is one entry of the exporting node's neighbor table: a node it
 // heard directly, and the link quality it heard that node at. The RSSI is
 // measured AT THE EXPORTER, so the observation is directed: it describes the

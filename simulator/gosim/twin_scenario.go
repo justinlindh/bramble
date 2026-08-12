@@ -87,7 +87,7 @@ func buildTwinScenario(g *twinGraph, name string, seed uint64, durationMs int64,
 	// what the deployment may transmit, so the twin applies it through the
 	// firmware's own airtime_budget_set_duty_cap. An advisory 100% ceiling is
 	// no ceiling and is left off, which is the sim's unlimited default.
-	if g.Radio.DutyCycleEnforced && g.Radio.MaxDutyCyclePct > 0 && g.Radio.MaxDutyCyclePct < 100 {
+	if g.Radio.appliesDutyCap() {
 		pct := g.Radio.MaxDutyCyclePct
 		sc.Radio.DutyCyclePct = &pct
 	}

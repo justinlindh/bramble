@@ -465,6 +465,37 @@ func TestTwinScenarioAppliesAnEnforcedDutyCycle(t *testing.T) {
 	}
 }
 
+func TestTwinReportAgreesWithScenarioOnAMalformedZeroCap(t *testing.T) {
+	// enforced=true but max_duty_cycle_pct=0 is malformed: a 0% cap is not a
+	// real ceiling, so the scenario builder leaves the twin uncapped. The
+	// report must not then claim the cap was applied to every node; both sides
+	// go through appliesDutyCap, so they agree.
+	doc := twinDoc("0A1B2C3D", []map[string]any{twinNeighborEntry("3D4E5F60", -92, 9)},
+		func(m map[string]any) {
+			r := m["radio"].(map[string]any)
+			r["max_duty_cycle_pct"] = 0
+			r["duty_cycle_enforced"] = true
+		})
+	exp, err := parseTwinExport(doc, "zero")
+	if err != nil {
+		t.Fatalf("parseTwinExport: %v", err)
+	}
+	g, err := buildTwinGraph([]*twinExport{exp})
+	if err != nil {
+		t.Fatalf("buildTwinGraph: %v", err)
+	}
+	if sc := buildTwinScenario(g, "twin-zero", 1, 120000, nil); sc.Radio.DutyCyclePct != nil {
+		t.Fatalf("a 0%% cap must not reach the scenario: %+v", sc.Radio)
+	}
+	report := twinReport(g, nil, nil, []string{"zero.json"})
+	if strings.Contains(report, "applied to every node") {
+		t.Fatalf("report claims a 0%% cap was applied while the scenario dropped it:\n%s", report)
+	}
+	if !strings.Contains(report, "advisory") {
+		t.Fatalf("report does not call the uncapped plan advisory:\n%s", report)
+	}
+}
+
 func TestTwinTrafficEventsFollowThePublishedConstruction(t *testing.T) {
 	addrs := []string{"AAAA0001", "AAAA0002", "AAAA0003", "AAAA0004"}
 	events := twinTrafficEvents(addrs, 600000, 6)
