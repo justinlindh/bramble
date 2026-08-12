@@ -10,18 +10,13 @@ typedef struct {
     uint32_t addr;
     int8_t rssi;
     int8_t snr;
-    uint8_t success_rate;
     uint32_t last_heard;
     uint32_t pubkey_hash;
-    uint16_t tx_count;
-    uint16_t tx_success;
-    bool suspicious;
-    /* Adaptive routing metrics (added for composite route scoring) */
-    uint16_t packets_sent;     /* total packets sent to this neighbor */
-    uint16_t packets_acked;    /* ACKs received from this neighbor */
-    uint8_t delivery_rate;     /* EMA delivery rate 0-255 (255 = 100%) */
-    uint8_t airtime_remaining; /* last reported airtime % (from beacon) */
-    uint16_t avg_latency_ms;   /* EMA round-trip latency */
+    /* Telemetry placeholders serialized by the topology export. Both are stamped
+     * once at neighbor creation and not yet fed from runtime stats, so they
+     * report a healthy default for every neighbor. */
+    uint8_t delivery_rate;     /* delivery rate 0-255 (255 = 100%) */
+    uint8_t airtime_remaining; /* airtime % (100 = fully available) */
     char name[17];             /* node name from beacon (max 16 chars + null) */
     uint32_t first_seen_ms;    /* timestamp of first beacon from this address (tenure start) */
     uint16_t beacon_count;     /* beacons received from this address, saturates at 0xFFFF */
