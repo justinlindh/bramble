@@ -46,7 +46,3 @@ export function useConversation(id: string): { messages: Message[] } {
 
   return { messages };
 }
-
-export function useMyAddress(): number {
-  return useStore(s => s.config?.identity.address ?? 0);
-}
