@@ -13,11 +13,9 @@ static delivery_event_record_t make_event(uint32_t message_id) {
     ev.message_id = message_id;
     ev.timestamp_s = 1700000000u + message_id;
     ev.recipient_addr = 0x01020300u + message_id;
-    ev.source_addr = 0x0A0B0C0Du;
     ev.event_type = (uint8_t)(message_id & 0xFFu);
-    ev.tier = 1u;
     ev.route_len = 1u;
-    ev.route_hops[0] = ev.source_addr;
+    ev.route_hops[0] = 0x0A0B0C0Du;
     return ev;
 }
 
