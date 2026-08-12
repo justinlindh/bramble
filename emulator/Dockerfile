@@ -71,7 +71,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=1 go build -o /bramble-gosim .
 
 # Stage 3: React UI
-FROM node:24-slim AS ui-build
+FROM node:26-slim AS ui-build
 WORKDIR /app/simulator/ui
 COPY simulator/ui/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
