@@ -14,15 +14,11 @@ interface MessageBubbleProps {
   message: Message;
 }
 
-const TIER_CLASS: Record<string, string> = {
-  broadcast: '',
-  normal:    '',
-  critical:  'tierCritical',
-};
-
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isOut = message.direction === 'outgoing';
-  const tierCls = TIER_CLASS[message.tier] ?? '';
+  // Only the critical tier carries a bubble style; broadcast and normal render
+  // with the base bubble.
+  const tierCls = message.tier === 'critical' ? styles.tierCritical : '';
   const showRoutesGlobal = useStore(s => s.showRoutes);
   const [routeExpanded, setRouteExpanded] = useState(false);
   const [deliveryExpanded, setDeliveryExpanded] = useState(false);
@@ -60,7 +56,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       className={[
         styles.bubble,
         isOut ? styles.outgoing : styles.incoming,
-        tierCls ? styles[tierCls as keyof typeof styles] : '',
+        tierCls,
       ].join(' ')}
     >
       {/* Sender label for incoming messages */}
