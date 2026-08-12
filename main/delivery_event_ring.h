@@ -26,11 +26,9 @@ typedef struct {
     uint32_t message_id;
     uint32_t timestamp_s;
     uint32_t recipient_addr; /* 0 when not recipient-specific */
-    uint32_t source_addr;
     uint8_t event_type;
-    uint8_t tier;
     uint8_t route_len;
-    uint8_t reserved0;
+    uint8_t reserved0; /* explicit pad to align route_hops */
     uint32_t route_hops[DELIVERY_EVENT_ROUTE_MAX_HOPS];
 } delivery_event_record_t;
 

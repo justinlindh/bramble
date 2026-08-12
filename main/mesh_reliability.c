@@ -50,9 +50,7 @@ static void record_ack_delivery_event(const bramble_ack_t* ack) {
     evt.message_id = ack->ack_packet_id;
     evt.timestamp_s = now_ms() / 1000u;
     evt.recipient_addr = ack->src_addr;
-    evt.source_addr = s_identity ? s_identity->address : 0u;
     evt.event_type = DELIVERY_EVENT_TYPE_ACK;
-    evt.tier = MSG_TIER_NORMAL;
 
     uint8_t hops = ack->hop_count;
     if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS)
@@ -71,9 +69,7 @@ static void record_broadcast_delivery_event(uint32_t recipient_addr, uint32_t br
     evt.message_id = broadcast_id;
     evt.timestamp_s = now_ms() / 1000u;
     evt.recipient_addr = recipient_addr;
-    evt.source_addr = s_identity ? s_identity->address : 0u;
     evt.event_type = DELIVERY_EVENT_TYPE_BROADCAST_DELIVERY;
-    evt.tier = MSG_TIER_BROADCAST;
 
     uint8_t hops = hop_count;
     if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS)
