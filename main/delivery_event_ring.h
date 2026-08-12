@@ -28,7 +28,9 @@ typedef struct {
     uint32_t recipient_addr; /* 0 when not recipient-specific */
     uint8_t event_type;
     uint8_t route_len;
-    uint8_t reserved0; /* explicit pad to align route_hops */
+    /* The compiler pads here to reach route_hops' 4-byte alignment. The ring is
+     * RAM-only, never persisted and never on the wire, so the padding is the
+     * compiler's business: no named filler byte is carried for it. */
     uint32_t route_hops[DELIVERY_EVENT_ROUTE_MAX_HOPS];
 } delivery_event_record_t;
 
