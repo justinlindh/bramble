@@ -8,7 +8,7 @@
     "start": "node server.mjs"
   },
   "dependencies": {
-    "@noble/hashes": "^2.2.0",
-    "ws": "^8.21.1"
+    "@noble/hashes": "^2.3.0",
+    "ws": "^8.21.3"
   }
 }
