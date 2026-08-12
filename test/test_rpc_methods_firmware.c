@@ -328,8 +328,6 @@ static void export_fill_state(mesh_shared_state_t* out) {
     out->neighbors.entries[0].addr = 0x11112222;
     out->neighbors.entries[0].rssi = -97;
     out->neighbors.entries[0].snr = 6;
-    out->neighbors.entries[0].delivery_rate = 240;
-    out->neighbors.entries[0].airtime_remaining = 71;
     out->neighbors.entries[0].last_heard = 0;
     snprintf(out->neighbors.entries[0].name, sizeof(out->neighbors.entries[0].name), "ridge");
     /* A zeroed slot: the emitter drops address 0 rather than exporting a link
@@ -390,8 +388,6 @@ void test_export_topology_carries_identity_radio_neighbors_and_routes(void) {
     TEST_ASSERT_EQUAL_STRING("11112222", cJSON_GetObjectItem(n0, "address")->valuestring);
     TEST_ASSERT_EQUAL_INT(-97, cJSON_GetObjectItem(n0, "rssi")->valueint);
     TEST_ASSERT_EQUAL_INT(6, cJSON_GetObjectItem(n0, "snr")->valueint);
-    TEST_ASSERT_EQUAL_INT(240, cJSON_GetObjectItem(n0, "deliveryRate")->valueint);
-    TEST_ASSERT_EQUAL_INT(71, cJSON_GetObjectItem(n0, "airtimeRemaining")->valueint);
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(n0, "last_seen_ms"));
     TEST_ASSERT_EQUAL_STRING("ridge", cJSON_GetObjectItem(n0, "name")->valuestring);
 

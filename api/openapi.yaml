@@ -2051,7 +2051,7 @@ components:
     Neighbor:
       type: object
       description: A directly heard radio neighbor.
-      required: [address, rssi, snr, deliveryRate, airtimeRemaining, last_seen_ms]
+      required: [address, rssi, snr, last_seen_ms]
       properties:
         address:
           type: string
@@ -2062,12 +2062,6 @@ components:
         snr:
           type: number
           description: Signal-to-noise ratio (dB).
-        deliveryRate:
-          type: integer
-          description: Link delivery rate metric (0-255).
-        airtimeRemaining:
-          type: integer
-          description: Neighbor-advertised airtime budget remaining.
         last_seen_ms:
           type: integer
           description: Milliseconds since last packet received.

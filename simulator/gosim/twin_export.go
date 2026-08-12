@@ -76,13 +76,11 @@ func (r twinExportRadio) appliesDutyCap() bool {
 // measured AT THE EXPORTER, so the observation is directed: it describes the
 // neighbor-to-exporter direction, not the reverse.
 type twinNeighbor struct {
-	Address          string `json:"address"`
-	RSSI             int    `json:"rssi"`
-	SNR              int    `json:"snr"`
-	DeliveryRate     int    `json:"deliveryRate"`
-	AirtimeRemaining int    `json:"airtimeRemaining"`
-	LastSeenMs       uint64 `json:"last_seen_ms"`
-	Name             string `json:"name,omitempty"`
+	Address    string `json:"address"`
+	RSSI       int    `json:"rssi"`
+	SNR        int    `json:"snr"`
+	LastSeenMs uint64 `json:"last_seen_ms"`
+	Name       string `json:"name,omitempty"`
 }
 
 // twinRoute is one routing-table entry. Routes name nodes the exporter can

@@ -24,8 +24,6 @@
       "address": "3D4E5F60",
       "rssi": -108,
       "snr": 2,
-      "deliveryRate": 203,
-      "airtimeRemaining": 97,
       "last_seen_ms": 47155,
       "name": "tower"
     }

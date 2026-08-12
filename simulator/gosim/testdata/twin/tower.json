@@ -24,8 +24,6 @@
       "address": "0A1B2C3D",
       "rssi": -95,
       "snr": 8,
-      "deliveryRate": 249,
-      "airtimeRemaining": 96,
       "last_seen_ms": 41208,
       "name": "basecamp"
     },
@@ -33,8 +31,6 @@
       "address": "1B2C3D4E",
       "rssi": -99,
       "snr": 5,
-      "deliveryRate": 241,
-      "airtimeRemaining": 95,
       "last_seen_ms": 12744,
       "name": "ridge"
     },
@@ -42,8 +38,6 @@
       "address": "2C3D4E5F",
       "rssi": -110,
       "snr": 1,
-      "deliveryRate": 197,
-      "airtimeRemaining": 97,
       "last_seen_ms": 58301,
       "name": "creek"
     }

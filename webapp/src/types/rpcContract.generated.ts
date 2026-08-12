@@ -1594,10 +1594,6 @@ export interface components {
             rssi: number;
             /** @description Signal-to-noise ratio (dB). */
             snr: number;
-            /** @description Link delivery rate metric (0-255). */
-            deliveryRate: number;
-            /** @description Neighbor-advertised airtime budget remaining. */
-            airtimeRemaining: number;
             /** @description Milliseconds since last packet received. */
             last_seen_ms: number;
             /** @description Neighbor display name (present only when known). */

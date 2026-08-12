@@ -24,8 +24,6 @@
       "address": "3D4E5F60",
       "rssi": -101,
       "snr": 4,
-      "deliveryRate": 238,
-      "airtimeRemaining": 95,
       "last_seen_ms": 9037,
       "name": "tower"
     },
@@ -33,8 +31,6 @@
       "address": "4E5F6071",
       "rssi": -88,
       "snr": 11,
-      "deliveryRate": 253,
-      "airtimeRemaining": 98,
       "last_seen_ms": 30402,
       "name": "north-cabin"
     }
