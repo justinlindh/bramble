@@ -29,7 +29,7 @@ function makeLocation(overrides: Partial<LocationConfig> = {}): LocationConfig {
 }
 
 describe('LocationSection hybrid policy controls', () => {
-  const neighbors: Neighbor[] = [{ addr: 0x1234abcd, rssi: -80, snr: 8, deliveryRate: 255, lastHeardMs: 1000, airtimeRemaining: 100 }];
+  const neighbors: Neighbor[] = [{ addr: 0x1234abcd, rssi: -80, snr: 8, lastHeardMs: 1000 }];
   const channels: Channel[] = [
     { index: 0, name: 'General', hasPsk: false, epoch: 1, isDefault: true },
     { index: 2, name: 'Ops', hasPsk: true, epoch: 2, isDefault: false },

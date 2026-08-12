@@ -35,9 +35,7 @@ export interface Neighbor {
   addr: number;
   rssi: number;
   snr: number;
-  deliveryRate: number;     // 0-255, 255 = 100%
-  lastHeardMs: number;      // milliseconds ago
-  airtimeRemaining: number; // 0-100 %
+  lastHeardMs: number; // milliseconds ago
 }
 
 export interface Route {

@@ -9,16 +9,10 @@ import styles from './NeighborCard.module.css';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Convert delivery rate (0-255) to percentage */
-function pdrPercent(deliveryRate: number): number {
-  return Math.round((deliveryRate / 255) * 100);
-}
-
-/** Compute health tier based on PDR and RSSI */
+/** Compute health tier from RSSI, the only link-quality signal a node measures. */
 function neighborHealth(n: Neighbor): 'good' | 'fair' | 'poor' {
-  const pdr = pdrPercent(n.deliveryRate);
-  if (pdr > 90 && n.rssi > -90) return 'good';
-  if (pdr < 70 || n.rssi < -110) return 'poor';
+  if (n.rssi > -90) return 'good';
+  if (n.rssi < -110) return 'poor';
   return 'fair';
 }
 
@@ -66,7 +60,6 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
   const peerName = usePeerName(neighbor.addr);
   useAgeTick(); // drives 1s re-renders for live age display
   const health = neighborHealth(neighbor);
-  const pdr = pdrPercent(neighbor.deliveryRate);
   const barPct = rssiBarPct(neighbor.rssi);
   const hasLocation = !!peerLocation;
   const stale = isNeighborStale(neighbor.lastHeardMs);
@@ -110,7 +103,6 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
 
       {/* ── Stats row ── */}
       <div className={styles.row}>
-        <span title="Packet Delivery Rate">PDR: {pdr}%</span>
         <span title="Signal-to-Noise Ratio">SNR: {neighbor.snr?.toFixed(1) ?? '-'} dB</span>
         <span title="Last heard"><IconClock size={13} /> {formatAge(neighbor.lastHeardMs)}</span>
         <span
@@ -137,10 +129,6 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
       {/* ── Expanded detail ── */}
       {expanded && (
         <div className={styles.detail} onClick={(e) => e.stopPropagation()}>
-          <div className={styles.detailRow}>
-            <span>Airtime remaining:</span>
-            <strong>{neighbor.airtimeRemaining}%</strong>
-          </div>
           <div className={styles.detailRow}>
             <span>Full address:</span>
             <AddressLabel addr={neighbor.addr} />

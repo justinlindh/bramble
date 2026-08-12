@@ -9,9 +9,7 @@ function makeNeighbor(lastHeardMs: number): Neighbor {
     addr: 0x1234abcd,
     rssi: -82,
     snr: 8.2,
-    deliveryRate: 240,
     lastHeardMs,
-    airtimeRemaining: 93,
   };
 }
 

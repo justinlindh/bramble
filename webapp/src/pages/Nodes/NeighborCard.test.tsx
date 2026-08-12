@@ -9,9 +9,7 @@ function makeNeighbor(): Neighbor {
     addr: 0x1234abcd,
     rssi: -82,
     snr: 8.2,
-    deliveryRate: 240,
     lastHeardMs: 5_000,
-    airtimeRemaining: 93,
   };
 }
 
@@ -34,7 +32,7 @@ describe('NeighborCard keyboard activation', () => {
 
     fireEvent.keyDown(card, { key: 'Enter' });
     expect(card).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('Airtime remaining:')).toBeInTheDocument();
+    expect(screen.getByText('Full address:')).toBeInTheDocument();
 
     fireEvent.keyDown(card, { key: 'Enter' });
     expect(card).toHaveAttribute('aria-expanded', 'false');
@@ -46,7 +44,7 @@ describe('NeighborCard keyboard activation', () => {
 
     fireEvent.keyDown(card, { key: ' ' });
     expect(card).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('Airtime remaining:')).toBeInTheDocument();
+    expect(screen.getByText('Full address:')).toBeInTheDocument();
   });
 
   it('ignores other keys', () => {

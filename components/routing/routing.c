@@ -39,9 +39,6 @@ int neighbor_update(neighbor_table_t* table, uint32_t addr, int8_t rssi, int8_t 
     table->entries[idx].last_heard = now_ms;
     table->entries[idx].first_seen_ms = now_ms;
     table->entries[idx].beacon_count = 1;
-    /* Defaults until reliability/airtime telemetry is populated from runtime stats */
-    table->entries[idx].delivery_rate = 255;     /* 100% */
-    table->entries[idx].airtime_remaining = 100; /* 100% */
     return idx;
 }
 

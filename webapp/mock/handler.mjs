@@ -257,23 +257,23 @@ function normalizeDest(dest) {
 const neighbors = [
   {
     addr: 0xAABBCC01, name: 'Example', // strong direct link (1.8km LOS)
-    rssi: -68, snr: 9.5, deliveryRate: 245,
-    lastHeardMs: 1200, isMailbox: true, airtimeRemaining: 88,
+    rssi: -68, snr: 9.5,
+    lastHeardMs: 1200, isMailbox: true,
   },
   {
     addr: 0xAABBCC02, name: 'Example', // moderate link (3.5km, some obstruction)
-    rssi: -87, snr: 4.8, deliveryRate: 195,
-    lastHeardMs: 8400, isMailbox: false, airtimeRemaining: 72,
+    rssi: -87, snr: 4.8,
+    lastHeardMs: 8400, isMailbox: false,
   },
   {
     addr: 0xAABBCC03, name: 'Example', // weak link (5km through buildings)
-    rssi: -102, snr: 2.1, deliveryRate: 130,
-    lastHeardMs: 34000, isMailbox: false, airtimeRemaining: 45,
+    rssi: -102, snr: 2.1,
+    lastHeardMs: 34000, isMailbox: false,
   },
   {
     addr: 0xAABBCC05, name: 'Ranger', // mobile, marginal link
-    rssi: -109, snr: 0.8, deliveryRate: 85,
-    lastHeardMs: 62000, isMailbox: false, airtimeRemaining: 31,
+    rssi: -109, snr: 0.8,
+    lastHeardMs: 62000, isMailbox: false,
   },
 ];
 
@@ -1077,9 +1077,6 @@ setInterval(() => {
     n.rssi = Math.max(-120, Math.min(-55, n.rssi));
     n.snr += (Math.random() - 0.5) * 0.8;
     n.snr = Math.max(-2, Math.min(14, n.snr));
-    // Delivery rate drifts slowly
-    n.deliveryRate += Math.floor((Math.random() - 0.5) * 8);
-    n.deliveryRate = Math.max(50, Math.min(255, n.deliveryRate));
     n.lastHeardMs = 500 + Math.floor(Math.random() * 3000);
   }
   if (clients.size > 0) notify('bramble.onNeighborChange', {});
