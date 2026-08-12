@@ -64,7 +64,7 @@ type twinExportRadio struct {
 // appliesDutyCap reports whether this plan imposes a real airtime ceiling the
 // twin must honor. A cap counts only when it is enforced and lands strictly
 // between 0 and 100: an advisory plan (not enforced), a 100% ceiling (no
-// ceiling), or a malformed 0% both leave the twin at the sim's unlimited
+// ceiling), and a malformed 0% all leave the twin at the sim's unlimited
 // default. The scenario builder and the report share this predicate so they
 // never disagree about whether a given plan is capped.
 func (r twinExportRadio) appliesDutyCap() bool {

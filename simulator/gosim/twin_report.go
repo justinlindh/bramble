@@ -52,11 +52,19 @@ func writeTwinSources(b *strings.Builder, g *twinGraph, sources []string) {
 	r := g.Radio
 	fmt.Fprintf(b, "Radio: SF%d BW%d CR4/%d, %.1f MHz, %s (%s)\n", r.SF, r.BWHz, r.CodingRate+4,
 		r.FrequencyMHz, r.Region, r.Regulatory)
-	if r.appliesDutyCap() {
+	switch {
+	case r.appliesDutyCap():
 		fmt.Fprintf(b, "Duty cycle: %d%%, enforced, and applied to every node in the twin.\n",
 			r.MaxDutyCyclePct)
-	} else {
+	case !r.DutyCycleEnforced:
 		fmt.Fprintf(b, "Duty cycle: %d%%, advisory, so the twin applies no regulatory cap.\n",
+			r.MaxDutyCyclePct)
+	default:
+		// Enforced, but the percentage is not a ceiling the twin can apply: 100
+		// and above is no ceiling at all, and 0 is a malformed export. Calling
+		// either one advisory would misreport a plan that does say enforced.
+		fmt.Fprintf(b, "Duty cycle: %d%%, enforced, but only a percentage strictly between "+
+			"0 and 100 is a ceiling, so the twin applies no regulatory cap.\n",
 			r.MaxDutyCyclePct)
 	}
 	fmt.Fprintf(b, "\nNodes:\n\n")

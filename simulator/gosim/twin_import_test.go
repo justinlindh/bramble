@@ -469,7 +469,9 @@ func TestTwinReportAgreesWithScenarioOnAMalformedZeroCap(t *testing.T) {
 	// enforced=true but max_duty_cycle_pct=0 is malformed: a 0% cap is not a
 	// real ceiling, so the scenario builder leaves the twin uncapped. The
 	// report must not then claim the cap was applied to every node; both sides
-	// go through appliesDutyCap, so they agree.
+	// go through appliesDutyCap, so they agree. It must not call the plan
+	// advisory either, since the export does say enforced: the malformed case
+	// gets its own line.
 	doc := twinDoc("0A1B2C3D", []map[string]any{twinNeighborEntry("3D4E5F60", -92, 9)},
 		func(m map[string]any) {
 			r := m["radio"].(map[string]any)
@@ -491,8 +493,42 @@ func TestTwinReportAgreesWithScenarioOnAMalformedZeroCap(t *testing.T) {
 	if strings.Contains(report, "applied to every node") {
 		t.Fatalf("report claims a 0%% cap was applied while the scenario dropped it:\n%s", report)
 	}
-	if !strings.Contains(report, "advisory") {
-		t.Fatalf("report does not call the uncapped plan advisory:\n%s", report)
+	if strings.Contains(report, "advisory") {
+		t.Fatalf("report calls an enforced plan advisory:\n%s", report)
+	}
+	if !strings.Contains(report, "only a percentage strictly between 0 and 100 is a ceiling") {
+		t.Fatalf("report does not explain why the enforced plan applies no cap:\n%s", report)
+	}
+	if !strings.Contains(report, "the twin applies no regulatory cap") {
+		t.Fatalf("report does not say the twin is uncapped:\n%s", report)
+	}
+}
+
+func TestTwinReportCallsAnUnenforcedPlanAdvisory(t *testing.T) {
+	// The advisory line is for a plan that does not claim enforcement. Pinning
+	// it here keeps the malformed-enforced case above from being the only
+	// coverage of the uncapped branch, so a future edit cannot collapse the two
+	// back into one message without a test noticing.
+	doc := twinDoc("0A1B2C3D", []map[string]any{twinNeighborEntry("3D4E5F60", -92, 9)},
+		func(m map[string]any) {
+			r := m["radio"].(map[string]any)
+			r["max_duty_cycle_pct"] = 10
+			r["duty_cycle_enforced"] = false
+		})
+	exp, err := parseTwinExport(doc, "advisory")
+	if err != nil {
+		t.Fatalf("parseTwinExport: %v", err)
+	}
+	g, err := buildTwinGraph([]*twinExport{exp})
+	if err != nil {
+		t.Fatalf("buildTwinGraph: %v", err)
+	}
+	if sc := buildTwinScenario(g, "twin-advisory", 1, 120000, nil); sc.Radio.DutyCyclePct != nil {
+		t.Fatalf("an advisory plan must not reach the scenario: %+v", sc.Radio)
+	}
+	report := twinReport(g, nil, nil, []string{"advisory.json"})
+	if !strings.Contains(report, "10%, advisory, so the twin applies no regulatory cap") {
+		t.Fatalf("report does not call the unenforced plan advisory:\n%s", report)
 	}
 }
 
