@@ -116,9 +116,7 @@ function normalizeNeighbor(raw: NeighborWire): Neighbor & { name?: string } {
     addr: parseAddr(raw.address ?? raw.addr),
     rssi: raw.rssi ?? 0,
     snr: raw.snr ?? 0,
-    deliveryRate: raw.deliveryRate ?? 0,
     lastHeardMs: raw.last_seen_ms ?? raw.lastHeardMs ?? 0,
-    airtimeRemaining: raw.airtimeRemaining ?? 0,
     ...(raw.name ? { name: raw.name } : {}),
   } as Neighbor & { name?: string };
 }

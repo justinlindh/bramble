@@ -69,8 +69,7 @@ func twinDoc(addr string, neighbors []map[string]any, mutate func(map[string]any
 
 func twinNeighborEntry(addr string, rssi, snr int) map[string]any {
 	return map[string]any{
-		"address": addr, "rssi": rssi, "snr": snr,
-		"deliveryRate": 250, "airtimeRemaining": 95, "last_seen_ms": 5000,
+		"address": addr, "rssi": rssi, "snr": snr, "last_seen_ms": 5000,
 	}
 }
 
@@ -273,12 +272,10 @@ func TestTwinMergeIsIndependentOfFileOrder(t *testing.T) {
 
 func TestTwinMergeKeepsTheFresherOfTwoConflictingObservations(t *testing.T) {
 	stale := twinDoc("0A1B2C3D", []map[string]any{
-		{"address": "3D4E5F60", "rssi": -120, "snr": 1,
-			"deliveryRate": 200, "airtimeRemaining": 90, "last_seen_ms": 90000},
+		{"address": "3D4E5F60", "rssi": -120, "snr": 1, "last_seen_ms": 90000},
 	}, nil)
 	fresh := twinDoc("0A1B2C3D", []map[string]any{
-		{"address": "3D4E5F60", "rssi": -92, "snr": 9,
-			"deliveryRate": 250, "airtimeRemaining": 95, "last_seen_ms": 4000},
+		{"address": "3D4E5F60", "rssi": -92, "snr": 9, "last_seen_ms": 4000},
 	}, nil)
 
 	staleExp, err := parseTwinExport(stale, "stale")

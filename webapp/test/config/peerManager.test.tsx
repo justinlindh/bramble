@@ -4,7 +4,7 @@ import { PeerManager } from '../../src/pages/Config/PeerManager';
 import type { Neighbor, Route } from '../../src/types/bramble';
 
 describe('PeerManager contact import/export', () => {
-  const neighbors: Neighbor[] = [{ addr: 0x1234abcd, rssi: -70, snr: 10, deliveryRate: 200, lastHeardMs: 1200, airtimeRemaining: 100 }];
+  const neighbors: Neighbor[] = [{ addr: 0x1234abcd, rssi: -70, snr: 10, lastHeardMs: 1200 }];
   const routes: Route[] = [];
 
   beforeEach(() => {

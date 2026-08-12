@@ -29,8 +29,6 @@ void topology_export_neighbors(cJSON* arr, const neighbor_table_t* table, uint32
         cJSON_AddStringToObject(obj, "address", export_addr_hex(n->addr, buf, sizeof(buf)));
         cJSON_AddNumberToObject(obj, "rssi", n->rssi);
         cJSON_AddNumberToObject(obj, "snr", n->snr);
-        cJSON_AddNumberToObject(obj, "deliveryRate", n->delivery_rate);
-        cJSON_AddNumberToObject(obj, "airtimeRemaining", n->airtime_remaining);
         /* Age, not an absolute timestamp: see the header. A last_heard in the
          * future (a clock that moved backwards) reads as zero rather than
          * wrapping into a huge age. */

@@ -12,14 +12,9 @@ typedef struct {
     int8_t snr;
     uint32_t last_heard;
     uint32_t pubkey_hash;
-    /* Telemetry placeholders serialized by the topology export. Both are
-     * stamped once at neighbor creation and no runtime stat feeds them, so
-     * every neighbor reports the same healthy constant. */
-    uint8_t delivery_rate;     /* delivery rate 0-255 (255 = 100%) */
-    uint8_t airtime_remaining; /* airtime % (100 = fully available) */
-    char name[17];             /* node name from beacon (max 16 chars + null) */
-    uint32_t first_seen_ms;    /* timestamp of first beacon from this address (tenure start) */
-    uint16_t beacon_count;     /* beacons received from this address, saturates at 0xFFFF */
+    char name[17];          /* node name from beacon (max 16 chars + null) */
+    uint32_t first_seen_ms; /* timestamp of first beacon from this address (tenure start) */
+    uint16_t beacon_count;  /* beacons received from this address, saturates at 0xFFFF */
     /* Uptime after which a beacon from this peer re-sends what is parked for
      * it, or 0 for nothing parked. In RAM only, never persisted and never on
      * the wire. Owned by parked_retry.c (main/parked_retry.h), which is the

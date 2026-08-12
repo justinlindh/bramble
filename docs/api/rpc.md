@@ -328,7 +328,7 @@ fixed to a place where it hears nothing therefore reports the second place.
 
 - Description: Returns current direct neighbors.
 - Params: none.
-- Response fields: `neighbors` (array; includes `address`, `rssi`, `snr`, `last_seen_ms`, `deliveryRate`, `airtimeRemaining`).
+- Response fields: `neighbors` (array; includes `address`, `rssi`, `snr`, `last_seen_ms`).
 - Example:
 
 ```json
