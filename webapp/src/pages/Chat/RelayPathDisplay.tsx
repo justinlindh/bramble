@@ -1,7 +1,6 @@
 import React from 'react';
 import type { RelayHop } from '../../types/bramble';
 import { useStore } from '../../store/index';
-import { useMyAddress } from '../../store/selectors';
 import { formatAddr0x, formatAddrShort } from '../../utils/address';
 import styles from './RelayPathDisplay.module.css';
 
@@ -17,7 +16,7 @@ function rssiQualityClass(rssi: number): string {
 
 export function RelayPathDisplay({ path }: RelayPathDisplayProps) {
   const peerNames = useStore(s => s.peerNames);
-  const myAddr = useMyAddress();
+  const myAddr = useStore(s => s.config?.identity.address);
   if (path.length === 0) return null;
 
   /* path already includes self as first hop from firmware */

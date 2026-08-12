@@ -19,7 +19,6 @@ vi.mock('../../store/index', async (importOriginal) => ({
 
 vi.mock('../../store/selectors', () => ({
   useConversation: () => ({ messages: [] }),
-  useMyAddress: () => 0,
 }));
 
 vi.mock('../../store/actions', () => ({
