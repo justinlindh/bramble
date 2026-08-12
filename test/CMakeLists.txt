@@ -2656,10 +2656,11 @@ target_include_directories(test_ssd1680_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
 )
 
-# PHY passthrough gating matrix (Task 9, DESIGN.md section 10). Whitebox test
-# of the pure gate state machine (phy_passthrough.c depends only on esp_timer),
-# plus the real rpc_auth policy so the "enable only via an authenticated RPC"
-# clause is asserted against the exact gate the dispatcher enforces, not a mock.
+# PHY passthrough gating matrix (Task 9, emulator/DESIGN.md section 10).
+# Whitebox test of the pure gate state machine (phy_passthrough.c depends only
+# on esp_timer), plus the real rpc_auth policy so the "enable only via an
+# authenticated RPC" clause is asserted against the exact gate the dispatcher
+# enforces, not a mock.
 # ESP_TIMER_CUSTOM_IMPL lets the test drive the clock for the TTL cases.
 add_executable(test_phy_passthrough
     test_phy_passthrough.c

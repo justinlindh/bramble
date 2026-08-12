@@ -3719,7 +3719,7 @@ static int handle_get_beacon_policy(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* ── PHY passthrough (hardware bridge, DESIGN.md section 10) ─────────── */
+/* ── PHY passthrough (hardware bridge, emulator/DESIGN.md section 10) ── */
 
 /* Emit hook registered with phy_passthrough: serialize one received frame as
  * a bramble.onPhyFrame notification (hex frame + rssi/snr/freq) onto every
@@ -3744,11 +3744,11 @@ static void phy_emit_frame_notify(const uint8_t* data, uint8_t len, const radio_
     cJSON_Delete(params);
 }
 
-/* Whether this node holds a live channel identity (DESIGN.md section 10): a
- * provisioned network key OR any channel beyond the always-present public
- * channel (index 0) makes it a real mesh participant, so passthrough refuses
- * without force. A bare, unprovisioned sacrificial gateway holds neither and
- * enables cleanly. */
+/* Whether this node holds a live channel identity (emulator/DESIGN.md section
+ * 10): a provisioned network key OR any channel beyond the always-present
+ * public channel (index 0) makes it a real mesh participant, so passthrough
+ * refuses without force. A bare, unprovisioned sacrificial gateway holds
+ * neither and enables cleanly. */
 static bool phy_has_live_identity(void) {
     return network_key_is_provisioned() || mesh_get_channel_count() > 1;
 }
@@ -3756,7 +3756,7 @@ static bool phy_has_live_identity(void) {
 /* Auto-expiry (the TTL-elapsed live->off transition) happens inside the gate
  * module, which has no logging dependency by design. The module latches that
  * transition; drain and log it here so every state transition is logged
- * (DESIGN.md section 10) exactly once, never per poll. */
+ * (emulator/DESIGN.md section 10) exactly once, never per poll. */
 static void phy_log_if_auto_expired(void) {
     if (phy_passthrough_consume_auto_expired()) {
         ESP_LOGW(TAG, "PHY passthrough AUTO-EXPIRED (TTL elapsed), now DISABLED");
@@ -3964,8 +3964,9 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.setBeaconPolicy", handle_set_beacon_policy);
     rpc_register("bramble.getBeaconPolicy", handle_get_beacon_policy);
 
-    /* PHY passthrough (hardware bridge, DESIGN.md section 10). Registered
-     * normally, so they are authenticated-only (not on the unauth allowlist). */
+    /* PHY passthrough (hardware bridge, emulator/DESIGN.md section 10).
+     * Registered normally, so they are authenticated-only (not on the unauth
+     * allowlist). */
     rpc_register("phy.enable", handle_phy_enable);
     rpc_register("phy.disable", handle_phy_disable);
     rpc_register("phy.status", handle_phy_status);

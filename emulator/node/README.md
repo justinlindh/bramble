@@ -96,7 +96,7 @@ target is a third environment where both `ESP_PLATFORM` and
    boot logs "WiFi init failed" and continues, same as a device with no AP.
    ws_server.c itself compiles fine (esp_http_server supports linux), it is
    just never started without WiFi; a direct host-socket bind is the
-   DESIGN.md follow-up, out of spike scope.
+   `emulator/DESIGN.md` follow-up, out of spike scope.
 9. **OTA**: esp_https_ota/app_update are device-only; the pure sources
    (ota_url/ota_version/ota_origin) build and the device-only entry points
    are "not supported" stubs in null_drivers.
