@@ -102,7 +102,7 @@ void test_tier1_accept_recorded_in_deferred_prevents_later_replay(void) {
 }
 
 /* Without the mark_seen recording, the same replay sequence is (wrongly)
- * accepted: proves mark_seen is load-bearing, not redundant with tier-1's
+ * accepted: proves mark_seen is required, not redundant with tier-1's
  * own dedup, and documents exactly what a future refactor must not drop. */
 void test_without_deferred_recording_replay_is_wrongly_accepted(void) {
     TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_check_and_add(&t, 0xAA, 100, 0));
@@ -335,7 +335,7 @@ void test_idle_slot_is_evictable_and_counted(void) {
 }
 
 /* Deferred (tier-2) table: same attack, same fix. A record inside the 24h
- * TTL is still load-bearing and must not be flooded out. */
+ * TTL is still needed and must not be flooded out. */
 void test_deferred_eviction_flood_cannot_reopen_window(void) {
     const uint32_t base = 1000000;
     TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_deferred_accept(&d, 0xAA, 100, base, base, 1));

@@ -87,7 +87,7 @@ export function AnchorSection() {
 
   // Mandatory-backup gate: a freshly generated anchor is held ONLY here (never
   // persisted, never on a node) until the operator confirms they saved the
-  // backup. Cancelling discards it. This is the load-bearing custody step.
+  // backup. Cancelling discards it. This is the critical custody step.
   const [pendingAnchor, setPendingAnchor] = useState<ClientAnchor | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showPendingQR, setShowPendingQR] = useState(false);

@@ -3,7 +3,7 @@
  *
  * The operator's client holds the fleet anchor PRIVATE seed (offline, never on a
  * node) and signs an endorsement cert over each node's Ed25519 identity key. The
- * single load-bearing property: a cert signed here MUST be byte-accepted by the
+ * single property that matters: a cert signed here MUST be byte-accepted by the
  * firmware's identity_endorsement_verify. The parity KAT in anchor.test.ts pins
  * that: it reproduces the firmware's exact signature bytes from a fixed seed.
  *

@@ -11,7 +11,7 @@
  * The page holds MANY boots, not one. Each boot appends a BT_BOOT_BEGIN
  * record carrying its RESETREAS and then its own stage tags; the page is
  * erased only when it runs out of room. Two properties depend on that, and
- * both are load-bearing:
+ * both are essential:
  *
  *   - A reset LOOP is otherwise indistinguishable from a single hang. When
  *     init erases the page every boot, a device that resets ten times a

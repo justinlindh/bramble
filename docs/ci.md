@@ -321,7 +321,7 @@ The ARM cross-compiler is pinned the same way and for a sharper reason.
 compiler the nRF52840 target builds with; `scripts/lint/check-arm-gcc-version.sh`
 gates every reference against it, and both the `nRF52840 build` job's assert
 step and `nrf/CMakeLists.txt` read that file rather than restating the version.
-The pin is load-bearing because that job's memory gate fails the build on a byte
+The pin matters because that job's memory gate fails the build on a byte
 count, and a byte count is a property of the compiler as much as of the source:
 across GCC releases the same commit differs by more than the headroom the
 T1000-E build runs at. Without the pin, a developer's distro compiler produces a

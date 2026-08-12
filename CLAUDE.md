@@ -92,7 +92,7 @@ suites), `scripts/`, `docs/`, `api/openapi.yaml` (the RPC contract).
   how it got there. No running monologue, no per-iteration narration, no
   rebase or CI-flake or incident commentary, no restating the diff line by
   line. Keep each template section to the minimum a reviewer needs: What and
-  why in a sentence or two, Changes as the load-bearing points, Validation
+  why in a sentence or two, Changes as the points that matter, Validation
   as the commands run and their results. Before merge, edit the body to its
   final state; if the PR evolved, rewrite the body, do not append to it.
 

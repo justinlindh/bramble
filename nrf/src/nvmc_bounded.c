@@ -40,7 +40,7 @@ bool nvmc_bounded_words_write(uint32_t addr, const uint32_t* src, uint32_t num_w
     for (uint32_t i = 0; i < num_words; i++) {
         /* Write enable is latched around the store ONLY, never across the
          * ready wait. nrfx brackets its single-word public entry point the
-         * same way, and here it is load-bearing rather than stylistic: the
+         * same way, and here it is necessary rather than stylistic: the
          * wait is where a yield hook can hand the CPU to another task, and
          * leaving flash write-enabled while somebody else runs would let a
          * stray store reach flash instead of being ignored. Dropping the mode

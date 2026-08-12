@@ -26,7 +26,7 @@ let autoSelectExpected: { id?: string; name?: string } | null = null;
 // here, and anything absent is denied: geolocation, notifications, MIDI,
 // pointer lock, idle detection, and the rest.
 //
-// 'media' is on the list because it is load-bearing, not incidental: the
+// 'media' is on the list because it is required, not incidental: the
 // camera QR scanner (src/components/QRScanModal.tsx, used by the network-key
 // and channel import flows) calls navigator.mediaDevices.getUserMedia. Dropping
 // it from the request handler would break scanning on desktop, since the

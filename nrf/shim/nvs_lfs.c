@@ -46,7 +46,7 @@ static const struct lfs_file_config s_file_cfg = {.buffer = s_file_buffer};
  * may be taken while holding it. That is what makes it deadlock-free despite
  * the iterator holding it across a caller's whole loop body.
  *
- * The invariant is load-bearing, not decorative. Two reverse orderings exist
+ * The invariant is necessary, not decorative. Two reverse orderings exist
  * and both are reachable: mesh_add_channel() holds s_state_mutex across
  * channel_storage_save() (mesh_channels.c), and sendMessage holds s_dm_mutex
  * then s_nonce_mutex across nonce_counter_next()'s reserve-ceiling flush,

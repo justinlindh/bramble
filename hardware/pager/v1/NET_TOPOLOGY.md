@@ -1,6 +1,6 @@
 # Bramble Pager v1 -- Net Topology
 
-Why every load-bearing net exists and how each block is wired. This covers the nets that
+Why every net that matters exists and how each block is wired. This covers the nets that
 carry real current, RF, or a safety property, plus the strap/gate nets that gate a block
 on or off. Per-pin decoupling caps are catalogued in `COMPONENTS.md` and not repeated
 here. Net names are the schematic labels; where the DRU or a hard rule keys on the
@@ -153,7 +153,7 @@ The panel needs several bias rails generated on-sheet from `+3V3`. The switch no
 R302 2.2R 1% is the RESE current-sense resistor for THIS panel (2.2 ohm, not the 0.47
 ohm of other GoodDisplay refs). Q301's source lands on the R302 top node, and that node
 is the RESE net routed back to panel pin 3 (`EPD_RESE`, connector pin 22) as a kelvin
-sense (do-not-regress invariant). Value and 1% tolerance are load-bearing.
+sense (do-not-regress invariant). Value and 1% tolerance are critical.
 
 ### EPD connector mirror
 

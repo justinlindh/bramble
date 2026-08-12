@@ -355,7 +355,7 @@ void test_conn_mode_resolve_boot_off_valid_on_every_build(void) {
 
 void test_conn_mode_ui_index_round_trip(void) {
     /* The enum is sparse (legacy BOTH occupies 2, Off sits at 3), so the
-     * UI index mapping is load-bearing; a direct cast regressed once. */
+     * UI index mapping matters; a direct cast regressed once. */
     conn_mode_t modes[] = {CONN_MODE_WIFI, CONN_MODE_BLE, CONN_MODE_OFF};
     for (int i = 0; i < 3; i++) {
         TEST_ASSERT_EQUAL(modes[i], conn_mode_from_ui_index(conn_mode_to_ui_index(modes[i])));

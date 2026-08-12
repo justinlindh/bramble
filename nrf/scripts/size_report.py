@@ -112,7 +112,7 @@ def main():
     ap.add_argument("--budget-kb", type=int, default=252)
     # 104: raised from 100 when the NimBLE msys pool went 12 -> 24 blocks
     # (3.5KB of statics) after a real phone session exhausted the smaller
-    # pool. The heap floor below is the load-bearing gate; this one only
+    # pool. The heap floor below is the real gate; this one only
     # catches static creep, and 104 restores the same ~2KB of slack the 100
     # figure had when it was set.
     ap.add_argument("--static-budget-kb", type=int, default=104)

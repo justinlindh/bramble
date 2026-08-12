@@ -32,7 +32,7 @@ schematic or the doc.
 | 2 | `kicad/pager.kicad_pcb` | Canonical physical placement and routing. Authoritative for positions, layers, copper geometry. |
 | 3 | `DESIGN.md` | Requirements, pin map, block rationale, do-not-regress invariants. |
 | 4 | `COMPONENTS.md` | Per-component catalogue: value, package, LCSC part, nets, purpose, datasheet pinout citation. |
-| 5 | `NET_TOPOLOGY.md` | Net-by-net prose for the load-bearing nets: why each exists, how each block is wired. |
+| 5 | `NET_TOPOLOGY.md` | Net-by-net prose for the nets that matter: why each exists, how each block is wired. |
 
 `COMPONENTS.md` and `NET_TOPOLOGY.md` are derived docs. They mirror the schematic; if
 either disagrees with a `.kicad_sch`, the schematic is right and the doc is a bug.

@@ -36,7 +36,7 @@ int mesh_nonce_write(uint64_t ceiling, void* ctx) {
     if (nvs_open(NVS_NS_NONCE, NVS_READWRITE, &h) != ESP_OK) {
         return -1;
     }
-    /* Both results are checked, and the set is the load-bearing one. This is
+    /* Both results are checked, and the set is the one that matters. This is
      * nonce_counter's durability callback: reporting success for a write that
      * did not land lets issuance run past the ceiling storage actually holds,
      * and after a reboot that is nonce reuse under the same key. On the nRF

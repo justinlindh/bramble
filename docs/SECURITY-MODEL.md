@@ -1189,7 +1189,7 @@ the ACK) per overheard flood duplicate, the same bar the re-ACK carve-out above
 already pays, and closes the *keyless* suppression-cancellation attack, not the
 keyed insider (residuals below). The gosim bridge counts overheard copies
 without this gate, but it models only honest, key-holding nodes and never
-injects forged frames, so the firmware MAC gate is the load-bearing check and
+injects forged frames, so the firmware MAC gate is the decisive check and
 the bridge stays a faithful honest-node model.
 
 ## 4. Known gaps in the implementation
@@ -1444,7 +1444,7 @@ These do not go away when section 4 empties out.
   `src_addr` must derive from the frame's own Ed25519 key); an established
   UNPINNED peer corroborates ONLY within a bounded per-boot grace
   (`QUORUM_BOOTSTRAP_GRACE_MS`, 5 minutes, measured from this node's boot),
-  and NEVER after it. The bound is load-bearing: an UNBOUNDED "zero pins
+  and NEVER after it. The bound is essential: an UNBOUNDED "zero pins
   held, trust every established peer" fallback would let a node holding
   zero verified pins corroborate time from any established peer forever,
   so an unattested or Sybil node could dominate the quorum and skew the

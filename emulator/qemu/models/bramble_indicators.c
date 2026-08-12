@@ -19,7 +19,7 @@
  * plays, components/indicators/include/alerts.h) when channel 1 is driven, else
  * 0. The exact tone is NOT recovered from the LEDC clock divider: the pager
  * lets the driver auto-select the low-speed source (default RC_FAST, which is
- * imprecise and unmodeled in QEMU), so on/off is the load-bearing, reliable
+ * imprecise and unmodeled in QEMU), so on/off is the meaningful, reliable
  * signal for "sound is functioning" and the tone is pinned to the known
  * firmware constant. See the LEDC model note below.
  *
@@ -160,7 +160,7 @@ struct BrambleLedcState {
 
     MemoryRegion iomem;
 
-    uint32_t ch1_conf0;    /* LSCH1_CONF0 latched (SIG_OUT_EN is load-bearing) */
+    uint32_t ch1_conf0;    /* LSCH1_CONF0 latched (SIG_OUT_EN matters) */
     uint32_t ch1_duty;     /* LSCH1_DUTY latched (0 = silent) */
     uint32_t timer1_conf;  /* LSTIMER1_CONF latched (duty_res must round-trip) */
     uint32_t conf;         /* LEDC_CONF latched (apb_clk_sel must round-trip) */

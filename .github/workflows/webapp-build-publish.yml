@@ -174,7 +174,7 @@ jobs:
           docker buildx inspect --bootstrap "$BUILDER"
 
           # oci-mediatypes=true on both the image and the cache export, and
-          # image-manifest=true on the cache export, are load bearing: the
+          # image-manifest=true on the cache export, are required: the
           # registry implements the OCI dist spec without Docker
           # schema2 compatibility and rejects a Docker manifest with
           # "manifest invalid". A plain `--push` emits schema2 and always

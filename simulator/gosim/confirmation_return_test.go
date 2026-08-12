@@ -46,7 +46,7 @@ import (
 // for gosim to reproduce here), so a literal "drop the first ACK, observe a
 // second one arrive" run is still not constructible here. Per the brief's
 // explicit fallback, the assertions below instead prove the weaker,
-// still-load-bearing claim directly off this same run: every relay on the
+// still meaningful claim directly off this same run: every relay on the
 // forward path (B, C) installs a reverse route to A as a side effect of
 // A's DATA transiting it, BEFORE any delivery receipt is ever sent. That
 // route does not depend on a receipt having arrived, which is exactly why

@@ -66,7 +66,7 @@ bool chat_message_is_parkable(bool is_outgoing, int16_t channel_index, msg_statu
  *
  * hop_count counts endpoints, so a relayed path is 3 or more.
  *
- * is_outgoing is load-bearing, not a convenience: a received broadcast is
+ * is_outgoing is required, not a convenience: a received broadcast is
  * stored channel-less exactly like a DM, so channel_index alone cannot tell
  * them apart. Only an outgoing message can be classified from it. */
 bool chat_message_route_is_informative(bool is_outgoing, int16_t channel_index,

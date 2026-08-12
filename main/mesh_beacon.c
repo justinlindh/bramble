@@ -159,7 +159,7 @@ int send_beacon(void) {
  * bramble_identity_attestation_signed_msg builds (packet.h), then
  * relay-gated under the network-key MAC (Phase 3, ident_relay_sign): the
  * Ed25519 sig carries the claim's truth, the MAC carries relay privilege
- * (see the struct comment in packet.h). Ordering is load-bearing: seq is
+ * (see the struct comment in packet.h). Ordering matters: seq is
  * drawn and the Ed25519 sig computed BEFORE ident_relay_sign, because the
  * MAC covers both. seq is drawn once here at origination and never
  * re-drawn by relays (the frame floods unmodified except hop_limit).
