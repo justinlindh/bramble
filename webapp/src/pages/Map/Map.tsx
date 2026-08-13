@@ -19,40 +19,52 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-/** Convert coarse grid square (e.g. "AB12cd") to approximate center lat/lon */
-export function gridSquareToLatLon(grid: string): [number, number] | null {
+interface GridCell {
+  latBase: number;
+  lonBase: number;
+  latStep: number;
+  lonStep: number;
+}
+
+/**
+ * Decode a Maidenhead grid locator to its south-west corner and cell size.
+ * Uses field + square resolution for a 4-char locator and adds the subsquare
+ * for 6 chars. Returns null when there are too few chars to decode.
+ */
+function decodeGridCell(grid: string): GridCell | null {
   if (!grid || grid.length < 4) return null;
   const A = grid.charCodeAt(0) - 65;
   const B = grid.charCodeAt(1) - 65;
   const n1 = parseInt(grid[2], 10);
   const n2 = parseInt(grid[3], 10);
-  let lon = A * 20 - 180 + n1 * 2 + 1;
-  let lat = B * 10 - 90 + n2 * 1 + 0.5;
+  let lonBase = A * 20 - 180 + n1 * 2;
+  let latBase = B * 10 - 90 + n2 * 1;
+  let lonStep = 2;
+  let latStep = 1;
   if (grid.length >= 6) {
-    const a = grid.charCodeAt(4) - 97;
-    const b = grid.charCodeAt(5) - 97;
-    lon = A * 20 - 180 + n1 * 2 + a * (2 / 24) + (1 / 24);
-    lat = B * 10 - 90 + n2 * 1 + b * (1 / 24) + (0.5 / 24);
+    lonStep = 2 / 24;
+    latStep = 1 / 24;
+    lonBase += (grid.charCodeAt(4) - 97) * lonStep;
+    latBase += (grid.charCodeAt(5) - 97) * latStep;
   }
-  return [lat, lon];
+  return { latBase, lonBase, latStep, lonStep };
+}
+
+/** Convert coarse grid square (e.g. "AB12cd") to approximate center lat/lon */
+export function gridSquareToLatLon(grid: string): [number, number] | null {
+  const cell = decodeGridCell(grid);
+  if (!cell) return null;
+  return [cell.latBase + cell.latStep / 2, cell.lonBase + cell.lonStep / 2];
 }
 
 /** ~1km grid rectangle bounds for a 6-char grid square */
 export function gridSquareBounds(grid: string): L.LatLngBoundsExpression | null {
   if (!grid || grid.length < 6) return null;
-  const A = grid.charCodeAt(0) - 65;
-  const B = grid.charCodeAt(1) - 65;
-  const n1 = parseInt(grid[2], 10);
-  const n2 = parseInt(grid[3], 10);
-  const a = grid.charCodeAt(4) - 97;
-  const b = grid.charCodeAt(5) - 97;
-  const lonStep = 2 / 24;
-  const latStep = 1 / 24;
-  const lonBase = A * 20 - 180 + n1 * 2 + a * lonStep;
-  const latBase = B * 10 - 90 + n2 * 1 + b * latStep;
+  const cell = decodeGridCell(grid);
+  if (!cell) return null;
   return [
-    [latBase, lonBase],
-    [latBase + latStep, lonBase + lonStep],
+    [cell.latBase, cell.lonBase],
+    [cell.latBase + cell.latStep, cell.lonBase + cell.lonStep],
   ];
 }
 
