@@ -192,8 +192,7 @@ export interface PeerLocation {
   addr: number;
   name: string;
   tier: LocationTier;
-  position: Position | null;    // null for presence-only
-  gridSquare?: string;          // set for coarse tier
+  position: Position | null;    // null for presence-only; quantized for coarse
   online: boolean;
   lastUpdatedMs: number;
 }

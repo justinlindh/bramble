@@ -19,52 +19,49 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-interface GridCell {
-  latBase: number;
-  lonBase: number;
-  latStep: number;
-  lonStep: number;
-}
+/*
+ * Coarse ("zone") tier geometry.
+ *
+ * A coarse share carries a quantized position, not a locator string. The
+ * firmware (location_serialize_coarse in components/location/location.c)
+ * divides latitude_e7 and longitude_e7 by 10000, giving units of one
+ * thousandth of a degree, then groups those units in threes for latitude and
+ * sixes for longitude. What arrives is the decoded corner of that cell, so
+ * the peer is somewhere inside it and nowhere more precise.
+ */
+const COARSE_UNIT_DEG = 0.001;
+export const COARSE_CELL_LAT_DEG = 3 * COARSE_UNIT_DEG;
+export const COARSE_CELL_LON_DEG = 6 * COARSE_UNIT_DEG;
 
 /**
- * Decode a Maidenhead grid locator to its south-west corner and cell size.
- * Uses field + square resolution for a 4-char locator and adds the subsquare
- * for 6 chars. Returns null when there are too few chars to decode.
+ * Lower edge of the cell whose decoded corner is `deg`. The firmware divides
+ * a signed e7 value with C semantics, which truncate toward zero rather than
+ * flooring, so a cell at or below zero also holds true positions one unit
+ * further from zero than its decoded corner. Widening by that unit keeps the
+ * drawn zone a superset of where the peer can be, which is the only safe
+ * direction to be wrong on a privacy control.
  */
-function decodeGridCell(grid: string): GridCell | null {
-  if (!grid || grid.length < 4) return null;
-  const A = grid.charCodeAt(0) - 65;
-  const B = grid.charCodeAt(1) - 65;
-  const n1 = parseInt(grid[2], 10);
-  const n2 = parseInt(grid[3], 10);
-  let lonBase = A * 20 - 180 + n1 * 2;
-  let latBase = B * 10 - 90 + n2 * 1;
-  let lonStep = 2;
-  let latStep = 1;
-  if (grid.length >= 6) {
-    lonStep = 2 / 24;
-    latStep = 1 / 24;
-    lonBase += (grid.charCodeAt(4) - 97) * lonStep;
-    latBase += (grid.charCodeAt(5) - 97) * latStep;
-  }
-  return { latBase, lonBase, latStep, lonStep };
+function coarseCellLow(deg: number): number {
+  return deg > 0 ? deg : deg - COARSE_UNIT_DEG;
 }
 
-/** Convert coarse grid square (e.g. "AB12cd") to approximate center lat/lon */
-export function gridSquareToLatLon(grid: string): [number, number] | null {
-  const cell = decodeGridCell(grid);
-  if (!cell) return null;
-  return [cell.latBase + cell.latStep / 2, cell.lonBase + cell.lonStep / 2];
-}
-
-/** ~1km grid rectangle bounds for a 6-char grid square */
-export function gridSquareBounds(grid: string): L.LatLngBoundsExpression | null {
-  if (!grid || grid.length < 6) return null;
-  const cell = decodeGridCell(grid);
-  if (!cell) return null;
+/** Rectangle covering every position that quantizes to this coarse share. */
+export function coarseZoneBounds(lat: number, lon: number): L.LatLngBoundsExpression {
+  const latLow = coarseCellLow(lat);
+  const lonLow = coarseCellLow(lon);
   return [
-    [cell.latBase, cell.lonBase],
-    [cell.latBase + cell.latStep, cell.lonBase + cell.lonStep],
+    [latLow, lonLow],
+    [lat + COARSE_CELL_LAT_DEG, lon + COARSE_CELL_LON_DEG],
+  ];
+}
+
+/** Center of the coarse zone, for fitting bounds and drawing a marker. */
+export function coarseZoneCenter(lat: number, lon: number): [number, number] {
+  const latLow = coarseCellLow(lat);
+  const lonLow = coarseCellLow(lon);
+  return [
+    (latLow + lat + COARSE_CELL_LAT_DEG) / 2,
+    (lonLow + lon + COARSE_CELL_LON_DEG) / 2,
   ];
 }
 
@@ -89,9 +86,9 @@ function addrToLatLng(
   if (peer.tier === 'full' && peer.position) {
     return L.latLng(peer.position.lat, peer.position.lon);
   }
-  if (peer.tier === 'coarse' && peer.gridSquare) {
-    const c = gridSquareToLatLon(peer.gridSquare);
-    if (c) return L.latLng(c[0], c[1]);
+  if (peer.tier === 'coarse' && peer.position) {
+    const c = coarseZoneCenter(peer.position.lat, peer.position.lon);
+    return L.latLng(c[0], c[1]);
   }
   return null;
 }
@@ -174,10 +171,8 @@ export function Map() {
     ml.clearLayers();
     const bounds: L.LatLng[] = [];
     const visiblePeerKey = peerLocations
-      .filter(peer => (selfAddr === undefined || peer.addr !== selfAddr) && (
-        (peer.tier === 'full' && !!peer.position) ||
-        ((peer.tier === 'coarse' || peer.tier === 'presence') && !!peer.gridSquare)
-      ))
+      .filter(peer => (selfAddr === undefined || peer.addr !== selfAddr) &&
+        (peer.tier === 'full' || peer.tier === 'coarse') && !!peer.position)
       .map(peer => peer.addr)
       .sort((a, b) => a - b)
       .join(',');
@@ -218,40 +213,22 @@ export function Map() {
           nodeLabel(peer.addr, peerDisplayName),
           { permanent: true, direction: 'top', offset: [0, -10], className: styles.nodeLabelTooltip }
         ).addTo(ml);
-      } else if (peer.tier === 'coarse' && peer.gridSquare) {
-        const rectBounds = gridSquareBounds(peer.gridSquare);
-        if (rectBounds) {
-          L.rectangle(rectBounds, {
-            color: '#ffc107', fillColor: '#ffc107', fillOpacity: 0.25, weight: 2,
-          }).bindPopup(
-            `<b>${nodeLabel(peer.addr, peerDisplayName)}</b><br/>Tier: zone<br/>Grid: ${peer.gridSquare}`
-          ).bindTooltip(
-            nodeLabel(peer.addr, peerDisplayName),
-            { permanent: true, direction: 'center', className: styles.nodeLabelTooltip }
-          ).addTo(ml);
-          const center = gridSquareToLatLon(peer.gridSquare);
-          if (center) bounds.push(L.latLng(center[0], center[1]));
-        }
-      } else if (peer.tier === 'presence' && peer.gridSquare) {
-        const center = gridSquareToLatLon(peer.gridSquare);
-        if (center) {
-          const ll = L.latLng(center[0], center[1]);
-          bounds.push(ll);
-          L.circleMarker(ll, {
-            radius: 6,
-            color: '#9aa4b2',
-            fillColor: '#9aa4b2',
-            fillOpacity: 0.35,
-            weight: 2,
-            dashArray: '3 3',
-          }).bindPopup(
-            `<b>${nodeLabel(peer.addr, peerDisplayName)}</b><br/>Tier: presence<br/>Approximate location (grid: ${peer.gridSquare})`
-          ).bindTooltip(
-            `${nodeLabel(peer.addr, peerDisplayName)} · approximate location`,
-            { permanent: true, direction: 'top', offset: [0, -10], className: styles.nodeLabelTooltip }
-          ).addTo(ml);
-        }
+      } else if (peer.tier === 'coarse' && peer.position) {
+        const { lat, lon } = peer.position;
+        L.rectangle(coarseZoneBounds(lat, lon), {
+          color: '#ffc107', fillColor: '#ffc107', fillOpacity: 0.25, weight: 2,
+        }).bindPopup(
+          `<b>${nodeLabel(peer.addr, peerDisplayName)}</b><br/>Tier: zone<br/>` +
+          'Somewhere in this area, not at a point inside it.'
+        ).bindTooltip(
+          nodeLabel(peer.addr, peerDisplayName),
+          { permanent: true, direction: 'center', className: styles.nodeLabelTooltip }
+        ).addTo(ml);
+        const center = coarseZoneCenter(lat, lon);
+        bounds.push(L.latLng(center[0], center[1]));
       }
+      /* A presence-tier peer shares no coordinates at all, so there is
+       * nothing to place: the Nodes list is where that peer shows up. */
     }
 
     if (bounds.length > 0 && lastFitPeerKeyRef.current !== visiblePeerKey) {

@@ -10,7 +10,7 @@ interface ShareLocationToggleProps {
 
 const OPTIONS: { value: LocationAttach; label: string; title: string }[] = [
   { value: 'off',   label: 'Off',   title: 'Off: no location shared' },
-  { value: 'zone',  label: 'Zone',  title: 'Coarse: grid square (~1km zone)' },
+  { value: 'zone',  label: 'Zone',  title: 'Coarse: a cell roughly 330 m north-south by 670 m east-west at the equator, narrower east-west further from it' },
   { value: 'exact', label: 'Exact', title: 'Exact: precise GPS coordinates' },
 ];
 

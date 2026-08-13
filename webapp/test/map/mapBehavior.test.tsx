@@ -3,6 +3,7 @@ import { render } from '@testing-library/react';
 
 const fitBoundsMock = vi.fn();
 const circleMarkerMock = vi.fn();
+const rectangleMock = vi.fn();
 
 const mapMock = {
   setView: vi.fn(function () { return mapMock; }),
@@ -36,7 +37,10 @@ vi.mock('leaflet', () => {
       return markerLikeLayer();
     }),
     circle: vi.fn(() => markerLikeLayer()),
-    rectangle: vi.fn(() => markerLikeLayer()),
+    rectangle: vi.fn((...args: any[]) => {
+      rectangleMock(...args);
+      return markerLikeLayer();
+    }),
     polyline: vi.fn(() => markerLikeLayer()),
   };
   return { __esModule: true, default: L };
@@ -53,6 +57,7 @@ describe('Map behavior', () => {
   beforeEach(() => {
     fitBoundsMock.mockClear();
     circleMarkerMock.mockClear();
+    rectangleMock.mockClear();
     state = {
       config: { identity: { address: 0x11111111, name: 'Self' }, location: { enabled: true, default_tier: 'coarse', interval_s: 300, source: 'gps' } },
       peerLocations: [
@@ -101,16 +106,39 @@ describe('Map behavior', () => {
     expect(getByText(/Sharing coarse updates every 300s via gps/i)).toBeTruthy();
   });
 
-  it('renders a fallback marker for presence-tier peers with grid square', () => {
+  it('draws a coarse-tier peer as a zone rectangle around its quantized position', () => {
     state = {
       ...state,
       peerLocations: [
-        { addr: 0x33333333, tier: 'presence', gridSquare: 'CM87ss' },
+        { addr: 0x33333333, tier: 'coarse', position: { lat: 39.993, lon: -105.042, accuracy: 0 } },
+      ],
+      peerNames: new globalThis.Map<number, string>([[0x33333333, 'Zone Peer']]),
+    };
+
+    render(<MapPage />);
+    expect(rectangleMock).toHaveBeenCalledTimes(1);
+    const [bounds] = rectangleMock.mock.calls[0];
+    expect(bounds[0][0]).toBeCloseTo(39.993, 9);
+    expect(bounds[1][0]).toBeCloseTo(39.996, 9);
+    expect(bounds[0][1]).toBeCloseTo(-105.043, 9);
+    expect(bounds[1][1]).toBeCloseTo(-105.036, 9);
+  });
+
+  /* The node sends no coordinates for a presence share, so there is nothing
+   * to place. The map used to key this tier on a grid-square string that no
+   * firmware has ever sent, which drew a marker under the mock and nothing
+   * at all against real hardware. */
+  it('places nothing for a presence-tier peer', () => {
+    state = {
+      ...state,
+      peerLocations: [
+        { addr: 0x33333333, tier: 'presence', position: null },
       ],
       peerNames: new globalThis.Map<number, string>([[0x33333333, 'Presence Peer']]),
     };
 
     render(<MapPage />);
-    expect(circleMarkerMock).toHaveBeenCalledTimes(1);
+    expect(circleMarkerMock).not.toHaveBeenCalled();
+    expect(rectangleMock).not.toHaveBeenCalled();
   });
 });

@@ -6,8 +6,11 @@
 #include <stddef.h>
 
 /* Privacy tiers */
-#define LOCATION_TIER_FULL 0     /* lat/lon/alt/speed/heading */
-#define LOCATION_TIER_COARSE 1   /* ~1km grid square */
+#define LOCATION_TIER_FULL 0 /* lat/lon/alt/speed/heading */
+/* 0.003 deg lat by 0.006 deg lon cell: about 334 m north-south, and 668 m
+ * east-west at the equator narrowing to 334 m at 60 deg. See
+ * location_serialize_coarse for the quantization this describes. */
+#define LOCATION_TIER_COARSE 1
 #define LOCATION_TIER_PRESENCE 2 /* online/offline only */
 
 /* Packet sizes */
@@ -88,7 +91,7 @@ typedef struct {
 /* Location sharing mode for Settings UI */
 typedef enum {
     LOC_SHARE_OFF = 0,    /* no location shared */
-    LOC_SHARE_COARSE = 1, /* ~1km grid square */
+    LOC_SHARE_COARSE = 1, /* quantized cell, see LOCATION_TIER_COARSE */
     LOC_SHARE_EXACT = 2,  /* precise GPS */
     LOC_SHARE_COUNT = 3
 } loc_share_mode_t;

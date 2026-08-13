@@ -144,8 +144,6 @@ export function showOnMap(addr: number): void {
 type LocationPeerWire = WirePartial<Omit<RpcSchemas['LocationPeer'], 'position'>> & {
   address?: string | number;
   node_name?: string;
-  gridSquare?: string;
-  grid_square?: string;
   last_updated_ms?: number;
   position?:
     | (WirePartial<RpcSchemas['Position']> & {
@@ -177,7 +175,6 @@ function normalizePeerLocation(raw: LocationPeerWire | null | undefined): PeerLo
     name: String(raw?.name ?? raw?.node_name ?? ''),
     tier: (raw?.tier ?? 'presence') as PeerLocation['tier'],
     position,
-    gridSquare: raw?.gridSquare ?? raw?.grid_square,
     online: Boolean(raw?.online ?? true),
     lastUpdatedMs: Number(raw?.lastUpdatedMs ?? raw?.last_updated_ms ?? Date.now()),
   };

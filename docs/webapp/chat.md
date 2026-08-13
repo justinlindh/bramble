@@ -50,8 +50,11 @@ Transport-specific in overlay while connecting:
 
 Location sharing tiers used in Config/Map/Chat:
 
-- **Presence**: online status only
-- **Zone (coarse)**: grid-square level (~1 km)
+- **Presence**: online status only, no coordinates
+- **Zone (coarse)**: a quantized cell of 0.003° latitude by 0.006° longitude, about 334 m north-south and 668 m east-west at the equator, narrowing east-west toward the poles
 - **Exact (full)**: full GPS coordinates
 
-Map legend uses distinct markers for exact, zone, and self position.
+The map draws an exact share as a point marker and a zone share as a
+rectangle covering the whole cell, because a zone share names an area and not
+a point inside it. A presence share carries no coordinates, so the map cannot
+place it and the Nodes list is where that peer appears.

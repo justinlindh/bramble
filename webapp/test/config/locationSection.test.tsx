@@ -144,7 +144,9 @@ describe('LocationSection hybrid policy controls', () => {
   it('shows tier description for the selected default tier', () => {
     render(<LocationSection location={makeLocation()} neighbors={[]} channels={channels} gpsAvailable />);
 
-    expect(screen.getByText('Approximate area (grid square ~1km).')).toBeInTheDocument();
+    // Pinned on the size the coarse tier actually quantizes to, not the
+    // "~1km" it used to claim, which was roughly three times too fuzzy.
+    expect(screen.getByText(/330 m north-south by 670 m east-west/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Default tier'), { target: { value: 'presence' } });
     expect(screen.getByText('Online status only; no coordinates.')).toBeInTheDocument();
