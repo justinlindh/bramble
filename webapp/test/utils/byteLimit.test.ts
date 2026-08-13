@@ -76,6 +76,18 @@ describe('clampToUtf8Bytes', () => {
     expect(clampToUtf8Bytes('abc', -1)).toBe('');
   });
 
+  /*
+   * ConversationList's submit guard rejects a name over the budget. It is
+   * unreachable by typing now that the input clamps, but it is the check that
+   * would catch a value arriving another way, so its unit has to be bytes:
+   * measured in UTF-16 units it would pass a name the node then refuses.
+   */
+  it('disagrees with a UTF-16 guard exactly where the node would reject', () => {
+    const name = '日'.repeat(7); // 7 characters, 7 UTF-16 units, 21 bytes
+    expect(name.length).toBeLessThanOrEqual(CHANNEL_NAME_BUDGET_BYTES);
+    expect(utf8Length(name)).toBeGreaterThan(CHANNEL_NAME_BUDGET_BYTES);
+  });
+
   it('holds a channel name inside the budget the node will accept', () => {
     // Each of these is 3 bytes, so five fit in the 16-byte budget and a
     // sixth would need 18.

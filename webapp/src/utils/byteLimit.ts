@@ -21,6 +21,15 @@ export const NODE_NAME_MAX_BYTES = 32;
  */
 export const CHANNEL_NAME_BUDGET_BYTES = 16;
 
+/**
+ * Fallback cap for the roll-call payload, used only until the node reports
+ * its own max_text_bytes. It mirrors ROLLCALL_TEXT_MAX in
+ * components/rollcall/include/rollcall.h. The reported value always wins once
+ * the ledger loads: this exists so the window before that first response does
+ * not leave the field unbounded.
+ */
+export const ROLLCALL_TEXT_FALLBACK_BYTES = 48;
+
 const encoder = new TextEncoder();
 
 /** Length of `s` in UTF-8 bytes, the unit the node's limits are written in. */

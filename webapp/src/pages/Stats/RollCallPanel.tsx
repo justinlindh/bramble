@@ -4,7 +4,11 @@ import { loadRollCall, startRollCall } from '../../store/actions';
 import { AddressLabel } from '../../components/AddressLabel';
 import { NamedAddress } from '../../components/NamedAddress';
 import { formatAddrShort } from '../../utils/address';
-import { clampToUtf8Bytes, utf8Length } from '../../utils/byteLimit';
+import {
+  clampToUtf8Bytes,
+  utf8Length,
+  ROLLCALL_TEXT_FALLBACK_BYTES,
+} from '../../utils/byteLimit';
 import type { RollCallLedger } from '../../types/bramble';
 import styles from './RollCallPanel.module.css';
 
@@ -155,7 +159,14 @@ export function RollCallPanel() {
     return () => clearInterval(id);
   }, [isConnected, ledger?.active, ledger?.open, refresh]);
 
-  const maxBytes = ledger?.maxTextBytes && ledger.maxTextBytes > 0 ? ledger.maxTextBytes : undefined;
+  /* The node reports its own cap, but only once getRollCall has answered.
+   * Typing is possible before that, so fall back to the firmware's constant
+   * rather than leaving the field unbounded in that window; the reported
+   * value takes over as soon as it arrives. */
+  const maxBytes =
+    ledger?.maxTextBytes && ledger.maxTextBytes > 0
+      ? ledger.maxTextBytes
+      : ROLLCALL_TEXT_FALLBACK_BYTES;
 
   const handleStart = useCallback(async () => {
     setStarting(true);
@@ -216,10 +227,10 @@ export function RollCallPanel() {
           /* maxBytes is a byte cap the node enforces with strlen, so clamp
              on bytes here. maxLength would count UTF-16 units and let a
              non-ASCII payload through for the node to reject as malformed. */
-          onChange={e => setText(maxBytes ? clampToUtf8Bytes(e.target.value, maxBytes) : e.target.value)}
+          onChange={e => setText(clampToUtf8Bytes(e.target.value, maxBytes))}
           disabled={!isConnected || starting || collecting}
         />
-        {maxBytes !== undefined && text.length > 0 && (
+        {text.length > 0 && (
           <span className={styles.byteCount} data-testid="rollcall-byte-count">
             {utf8Length(text)}/{maxBytes} bytes
           </span>
