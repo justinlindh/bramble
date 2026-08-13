@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 )
 
@@ -54,20 +53,7 @@ func TestIdentityAttestationMultiHopPinAndAddrMismatch(t *testing.T) {
 		]
 	}`
 
-	tmp, err := os.CreateTemp("", "phase4-identity-attestation-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(scenarioJSON); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, "phase4-identity-attestation", scenarioJSON)
 
 	var addrA, ed8A, ed8E string
 	pinned := map[string]string{}   // node -> ed8 pinned for A's address
@@ -198,20 +184,7 @@ func TestIdentityAttestationX25519RotationConflict(t *testing.T) {
 		]
 	}`
 
-	tmp, err := os.CreateTemp("", "phase4-identity-rotation-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(scenarioJSON); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, "phase4-identity-rotation", scenarioJSON)
 
 	var addrA, ed8A string
 	for _, line := range result.Lines() {
@@ -295,19 +268,11 @@ func TestSimNodeAddressesDeriveFromIdentityKeys(t *testing.T) {
 		"radio": {"range": 150, "loss_pct": 0}
 	}`
 
-	tmp, err := os.CreateTemp("", "phase4-addr-derivation-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(scenarioJSON); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
+	path := writeScenarioFile(t, "phase4-addr-derivation", scenarioJSON)
 
 	h := newRadioHarness()
 	defer h.free()
-	if _, ok := loadScenario(tmp.Name(), h.nodes, h.radio, h.events, h.rng); !ok {
+	if _, ok := loadScenario(path, h.nodes, h.radio, h.events, h.rng); !ok {
 		t.Fatalf("loadScenario failed")
 	}
 	if h.nodeCount() != 3 {

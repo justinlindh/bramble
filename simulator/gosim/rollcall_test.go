@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 )
 
@@ -45,25 +44,6 @@ const rollcallLineTopology = `
 		},
 		"flood_transport": true,`
 
-func runRollCallScenario(t *testing.T, name, scenarioJSON string) *scenarioRunResult {
-	t.Helper()
-	tmp, err := os.CreateTemp("", name+"-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(scenarioJSON); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
-	return result
-}
-
 // TestRollCallAttestsEveryMemberOverMultipleHops is the primitive's headline
 // proof: A floods one roll-call, and all three members (one, two and three
 // hops out) answer with a unicast whose Ed25519 signature verifies against
@@ -83,7 +63,7 @@ func TestRollCallAttestsEveryMemberOverMultipleHops(t *testing.T) {
 		]
 	}`
 
-	result := runRollCallScenario(t, "rollcall-4node-line", scenarioJSON)
+	result := writeAndRunScenario(t, "rollcall-4node-line", scenarioJSON)
 
 	ledger, ok := result.RollCall("A")
 	if !ok {
@@ -195,7 +175,7 @@ func TestRollCallReportsAPartitionedMemberMissing(t *testing.T) {
 		]
 	}`
 
-	result := runRollCallScenario(t, "rollcall-partitioned-member", scenarioJSON)
+	result := writeAndRunScenario(t, "rollcall-partitioned-member", scenarioJSON)
 
 	ledger, ok := result.RollCall("A")
 	if !ok {
