@@ -2085,7 +2085,7 @@ components:
           description: Number of hops to destination.
         metric:
           type: integer
-          description: Route cost metric (lower is better).
+          description: Route quality metric (0-255, higher is better), accumulated from per-hop RSSI/SNR link penalties.
         state:
           type: string
           enum: [discovering, unverified, active, stale, broken, unknown]
