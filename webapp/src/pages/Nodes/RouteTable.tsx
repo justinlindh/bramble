@@ -92,7 +92,7 @@ export function RouteTable({ routes }: RouteTableProps) {
             <Th label="Destination" title="The node this route leads to." sortKey="dest" current={sortKey} dir={sortDir} onSort={handleSort} />
             <Th label="Next Hop" title="The neighbor node that will relay messages toward the destination." sortKey="nextHop" current={sortKey} dir={sortDir} onSort={handleSort} />
             <Th label="Hops" title="Number of relay nodes between you and the destination. Fewer hops = faster delivery." sortKey="hopCount" current={sortKey} dir={sortDir} onSort={handleSort} />
-            <Th label="Metric" title="Route quality score (0–255, lower is better). Combines delivery rate, airtime usage, and latency." sortKey="metric" current={sortKey} dir={sortDir} onSort={handleSort} />
+            <Th label="Metric" title="Route quality score (0–255, higher is better), accumulated from per-hop RSSI and SNR link penalties." sortKey="metric" current={sortKey} dir={sortDir} onSort={handleSort} />
             <Th label="State" title="Route status: Active (in use), Stale (not recently confirmed), or Broken (failed delivery)." sortKey="state" current={sortKey} dir={sortDir} onSort={handleSort} />
             <Th label="Age" title="Time since this route was last used or confirmed." sortKey="lastUsedMs" current={sortKey} dir={sortDir} onSort={handleSort} />
           </tr>

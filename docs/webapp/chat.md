@@ -24,7 +24,7 @@ Route table columns:
 - **Destination**: node this route reaches
 - **Next Hop**: neighbor used for forwarding
 - **Hops**: relay count (lower is generally better)
-- **Metric**: route quality score (lower is better)
+- **Metric**: route quality score (0-255, higher is better), accumulated from per-hop RSSI/SNR link penalties
 - **State**:
   - `active`: currently usable
   - `stale`: not recently confirmed

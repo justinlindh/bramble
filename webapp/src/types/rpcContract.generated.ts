@@ -1607,7 +1607,7 @@ export interface components {
             next_hop: string;
             /** @description Number of hops to destination. */
             hop_count: number;
-            /** @description Route cost metric (lower is better). */
+            /** @description Route quality metric (0-255, higher is better), accumulated from per-hop RSSI/SNR link penalties. */
             metric: number;
             /**
              * @description Route state.
