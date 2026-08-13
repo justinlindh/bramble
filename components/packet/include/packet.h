@@ -444,7 +444,6 @@ esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, u
 bool bramble_packet_origin_addr(uint8_t type, const uint8_t* buf, size_t len, uint32_t* out);
 #define BRAMBLE_DATA_PREV_HOP_OFFSET (HEADER_SIZE + 4)
 #define BRAMBLE_DATA_AUTH_HMAC_OFFSET (HEADER_SIZE + 8)
-#define BRAMBLE_DATA_AUTH_HMAC_SIZE 8
 #define BRAMBLE_DATA_NONCE_OFFSET (HEADER_SIZE + 16)
 /* header + src_addr + prev_hop + auth_hmac, i.e. where the AEAD nonce begins */
 #define BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE (HEADER_SIZE + 16)
