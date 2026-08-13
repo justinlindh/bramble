@@ -73,11 +73,15 @@ int send_beacon(void) {
         beacon.time_confidence = 0xFFFF; /* no confidence */
     }
 
-    /* Include node name in beacon (if set) */
+    /* Include node name in beacon (if set). A name may be up to
+     * BRAMBLE_NODE_NAME_MAX bytes and the beacon carries at most
+     * BEACON_NAME_MAX, so cut it back to a character boundary: a raw byte cut
+     * splits a multi-byte character and puts invalid UTF-8 on the air, which
+     * neighbours store and render as a replacement character. */
     if (s_node_name[0] != '\0') {
-        beacon.name_len = (uint8_t)strlen(s_node_name);
-        if (beacon.name_len > BEACON_NAME_MAX)
-            beacon.name_len = BEACON_NAME_MAX;
+        size_t have = strlen(s_node_name);
+        beacon.name_len =
+            (uint8_t)bramble_utf8_trunc_len((const uint8_t*)s_node_name, have, BEACON_NAME_MAX);
         memcpy(beacon.name, s_node_name, beacon.name_len);
         beacon.name[beacon.name_len] = '\0';
     }

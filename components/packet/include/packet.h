@@ -187,6 +187,20 @@ typedef struct {
 
 #define BEACON_NAME_MAX 16
 
+/* Largest prefix of the first `len` bytes of `s` that fits in `max_bytes`
+ * without ending in the middle of a UTF-8 sequence.
+ *
+ * A node name may be up to BRAMBLE_NODE_NAME_MAX bytes while a beacon carries
+ * at most BEACON_NAME_MAX, so a name gets cut for the air. Cutting on a raw
+ * byte count splits a multi-byte character, and what goes out is then not
+ * valid UTF-8: neighbours store the broken tail and render a replacement
+ * character. Bytes that are not a valid lead byte are passed through one at a
+ * time, so a name that is not UTF-8 at all still gets capped rather than
+ * dropped. A trailing partial sequence is dropped even when `len` already
+ * fits, because the input may itself have been cut on a byte count upstream.
+ * Returns 0 for a NULL pointer. */
+size_t bramble_utf8_trunc_len(const uint8_t* s, size_t len, size_t max_bytes);
+
 typedef struct {
     bramble_header_t header;
     uint32_t src_addr;

@@ -246,9 +246,47 @@ esp_err_t bramble_rerr_deserialize(bramble_rerr_t* p, const uint8_t* buf, size_t
     return ESP_OK;
 }
 
+size_t bramble_utf8_trunc_len(const uint8_t* s, size_t len, size_t max_bytes) {
+    if (s == NULL)
+        return 0;
+
+    /* Scanned even when len already fits: the input may itself end in a
+     * partial sequence because an earlier caller cut it on a byte count, and
+     * this is the last gate before the air. A well-formed name inside the
+     * budget walks to len and is returned whole. */
+    size_t i = 0;
+    while (i < len) {
+        uint8_t c = s[i];
+        size_t seq;
+        if ((c & 0x80) == 0x00)
+            seq = 1;
+        else if ((c & 0xE0) == 0xC0)
+            seq = 2;
+        else if ((c & 0xF0) == 0xE0)
+            seq = 3;
+        else if ((c & 0xF8) == 0xF0)
+            seq = 4;
+        else
+            seq = 1; /* continuation or invalid lead: pass through opaquely */
+
+        if (i + seq > len || i + seq > max_bytes)
+            break;
+        i += seq;
+    }
+    return i;
+}
+
+/* Name length this beacon puts on the wire: the cap, pulled back to a
+ * character boundary. bramble_beacon_wire_size has to agree byte for byte,
+ * because beacon_compute_hmac derives its input length from it. */
+static uint8_t beacon_wire_name_len(const bramble_beacon_t* p) {
+    size_t have = p->name_len > BEACON_NAME_MAX ? BEACON_NAME_MAX : p->name_len;
+    return (uint8_t)bramble_utf8_trunc_len((const uint8_t*)p->name, have, BEACON_NAME_MAX);
+}
+
 /* BEACON (BEACON_SIZE bytes fixed + optional name) */
 esp_err_t bramble_beacon_serialize(const bramble_beacon_t* p, uint8_t* buf, size_t len) {
-    uint8_t nlen = p->name_len > BEACON_NAME_MAX ? BEACON_NAME_MAX : p->name_len;
+    uint8_t nlen = beacon_wire_name_len(p);
     size_t need = BEACON_SIZE + (nlen > 0 ? 1 + nlen : 0);
     if (len < need)
         return ESP_ERR_INVALID_SIZE;
@@ -277,7 +315,7 @@ esp_err_t bramble_beacon_serialize(const bramble_beacon_t* p, uint8_t* buf, size
 }
 
 size_t bramble_beacon_wire_size(const bramble_beacon_t* p) {
-    uint8_t nlen = p->name_len > BEACON_NAME_MAX ? BEACON_NAME_MAX : p->name_len;
+    uint8_t nlen = beacon_wire_name_len(p);
     return BEACON_SIZE + (nlen > 0 ? 1 + nlen : 0);
 }
 
