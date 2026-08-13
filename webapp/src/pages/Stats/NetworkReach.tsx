@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useStore } from '../../store/index';
 import { sendProbe } from '../../store/actions';
 import { IconProbe } from '../../components/Icons';
-import { AddressLabel } from '../../components/AddressLabel';
+import { NamedAddress } from '../../components/NamedAddress';
 import { formatAddrShort } from '../../utils/address';
 import type { ProbeResponse, ProbeResult } from '../../types/bramble';
 import styles from './NetworkReach.module.css';
@@ -97,10 +97,7 @@ function ResultsTable({ rows }: { rows: ProbeRow[] }) {
           <tr key={responderAddr}>
             <td>
               <div className={styles.nodeCell}>
-                <AddressLabel addr={responderAddr} name={name} short={!name} />
-                {name && (
-                  <span className={styles.nodeSub}>{formatAddrShort(responderAddr)}</span>
-                )}
+                <NamedAddress addr={responderAddr} name={name} subClassName={styles.nodeSub} />
               </div>
             </td>
             <td>

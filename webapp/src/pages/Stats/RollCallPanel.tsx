@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store/index';
 import { loadRollCall, startRollCall } from '../../store/actions';
 import { AddressLabel } from '../../components/AddressLabel';
+import { NamedAddress } from '../../components/NamedAddress';
 import { formatAddrShort } from '../../utils/address';
 import type { RollCallLedger } from '../../types/bramble';
 import styles from './RollCallPanel.module.css';
@@ -62,10 +63,7 @@ function Ledger({ ledger }: { ledger: RollCallLedger }) {
               <tr key={r.addr}>
                 <td>
                   <div className={styles.memberCell}>
-                    <AddressLabel addr={r.addr} name={peerNames.get(r.addr)} short={!peerNames.get(r.addr)} />
-                    {peerNames.get(r.addr) && (
-                      <span className={styles.memberSub}>{formatAddrShort(r.addr)}</span>
-                    )}
+                    <NamedAddress addr={r.addr} name={peerNames.get(r.addr)} subClassName={styles.memberSub} />
                   </div>
                 </td>
                 <td>{formatAt(r.atMs)}</td>
