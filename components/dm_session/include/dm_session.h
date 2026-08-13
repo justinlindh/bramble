@@ -42,7 +42,6 @@ int dm_derive_identity_sas(const uint8_t id_x25519_a[32], const uint8_t id_x2551
  * dm_ratchet_dh advances the root on an epoch bump: RK_{e+1} folds a fresh
  * X25519 output dh into RK_e (post-compromise recovery at epoch granularity).
  */
-#define DM_KEY_SIZE 32
 int dm_ratchet_init(const uint8_t ikm[128], uint32_t addr_a, uint32_t addr_b, uint8_t rk_out[32],
                     uint8_t ck_lohi_out[32], uint8_t ck_hilo_out[32]);
 int dm_ratchet_step(const uint8_t ck_in[32], uint16_t index_n, uint8_t mk_out[32],

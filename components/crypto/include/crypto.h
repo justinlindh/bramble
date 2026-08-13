@@ -6,10 +6,8 @@
 #include <stdbool.h>
 
 #define BRAMBLE_KEY_SIZE 32
-#define BRAMBLE_ADDR_SIZE 4
 #define BRAMBLE_NONCE_SIZE 12
 #define BRAMBLE_TAG_SIZE 16
-#define BRAMBLE_HMAC_TRUNC 4
 
 /* Ed25519 signature primitive (RFC 8032). The 64-byte secret key uses the
  * libsodium layout: seed (32) || public key (32). Both backends (device
