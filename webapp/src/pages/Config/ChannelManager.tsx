@@ -11,6 +11,7 @@ import { EscapeDialog } from '../../components/EscapeDialog';
 import { IconLock } from '../../components/Icons';
 import type { ScanResult } from '../../components/QRScanModal';
 import { encodeChannelShare } from '../../utils/channelShare';
+import { clampToUtf8Bytes, utf8Length, CHANNEL_NAME_BUDGET_BYTES } from '../../utils/byteLimit';
 import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './ChannelManager.module.css';
 
@@ -242,12 +243,14 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
             type="text"
             placeholder="Channel name"
             value={newName}
-            maxLength={16}
-            onChange={(e) => setNewName(e.target.value)}
+            /* handle_add_channel measures the name with strlen, so the budget
+               is bytes. maxLength would count UTF-16 units and let a
+               non-ASCII name past the client into a -32602. */
+            onChange={(e) => setNewName(clampToUtf8Bytes(e.target.value, CHANNEL_NAME_BUDGET_BYTES))}
             aria-label="New channel name"
           />
           {newName.length > 0 && (
-            <span className={styles.charCount}>{newName.length}/16</span>
+            <span className={styles.charCount}>{utf8Length(newName)}/{CHANNEL_NAME_BUDGET_BYTES}</span>
           )}
         </div>
         <input

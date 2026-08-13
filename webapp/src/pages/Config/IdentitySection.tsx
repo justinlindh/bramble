@@ -5,6 +5,7 @@ import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
 import { encodeNodeShare } from '../../utils/channelShare';
 import { formatAddr0x } from '../../utils/address';
+import { clampToUtf8Bytes, NODE_NAME_MAX_BYTES } from '../../utils/byteLimit';
 import { IconKey, IconNodes } from '../../components/Icons';
 import { useTimedFlag } from '../../hooks/useTimedFlag';
 import { friendlyErrorFrom } from '../../lib/errors';
@@ -32,7 +33,10 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
     setError('');
     resetSaved();
     try {
-      await saveNodeName(name.trim().slice(0, 32));
+      // Trimming can only shorten, but the bound still has to be re-applied
+      // in bytes: slice(0, 32) counts UTF-16 units and can cut a surrogate
+      // pair in half, which sends a lone surrogate to the node.
+      await saveNodeName(clampToUtf8Bytes(name.trim(), NODE_NAME_MAX_BYTES));
       flashSaved();
     } catch (err) {
       setError(friendlyErrorFrom(err));
@@ -96,9 +100,11 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
             className={styles.nameInput}
             type="text"
             value={name}
-            maxLength={32}
-            placeholder="Up to 32 chars"
-            onChange={(e) => setName(e.target.value)}
+            placeholder="Up to 32 bytes"
+            /* bramble.setNodeName rejects a name over BRAMBLE_NODE_NAME_MAX
+               bytes, measured with strlen, so clamp on bytes rather than on
+               the UTF-16 units maxLength would count. */
+            onChange={(e) => setName(clampToUtf8Bytes(e.target.value, NODE_NAME_MAX_BYTES))}
             aria-label="Node name"
           />
           <button className={styles.saveBtn} type="submit" disabled={saving}>

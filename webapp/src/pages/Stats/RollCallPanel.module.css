@@ -58,6 +58,15 @@
   padding: 0.4rem 0.5rem;
 }
 
+/* The node bounds the payload in bytes, so the counter reads in bytes: a
+   non-ASCII message runs out of room sooner than its character count says. */
+.byteCount {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
 .startBtn {
   background: var(--accent-blue);
   color: #fff;

@@ -6,6 +6,7 @@ import { addChannel } from '../../store/actions';
 import { useStore, parseConversationId } from '../../store/index';
 import { friendlyErrorFrom } from '../../lib/errors';
 import { tryParseAddr } from '../../lib/addr';
+import { clampToUtf8Bytes, utf8Length, CHANNEL_NAME_BUDGET_BYTES } from '../../utils/byteLimit';
 import { EscapeDialog } from '../../components/EscapeDialog';
 import styles from './ConversationList.module.css';
 
@@ -162,8 +163,11 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
       setChannelError('Channel name is required');
       return;
     }
-    if (name.length > 16) {
-      setChannelError('Channel name must be 16 characters or less');
+    // Bytes, matching handle_add_channel's strlen bound and the clamp on the
+    // input above. Trimming can push a name back under the budget but never
+    // over it, so this only fires for a value that did not come from typing.
+    if (utf8Length(name) > CHANNEL_NAME_BUDGET_BYTES) {
+      setChannelError(`Channel name must be ${CHANNEL_NAME_BUDGET_BYTES} bytes or less`);
       return;
     }
     setIsCreating(true);
@@ -304,9 +308,13 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
           <input
             className={styles.dialogInput}
             value={channelName}
-            onChange={e => { setChannelName(e.target.value); setChannelError(''); }}
+            /* Byte budget, not a character count: handle_add_channel measures
+               the name with strlen. */
+            onChange={e => {
+              setChannelName(clampToUtf8Bytes(e.target.value, CHANNEL_NAME_BUDGET_BYTES));
+              setChannelError('');
+            }}
             placeholder="Channel name"
-            maxLength={16}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleCreateChannel()}
             autoFocus
           />
