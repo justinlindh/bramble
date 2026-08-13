@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"testing"
 )
 
@@ -72,20 +71,7 @@ func floodHopLimitLineScenario(nodeCount, dest, floodHopLimit int) string {
 // returns whether the destination node received the message A originated.
 func runFloodHopLimitScenario(t *testing.T, nodeCount, dest, floodHopLimit int) bool {
 	t.Helper()
-	tmp, err := os.CreateTemp("", "flood-hop-limit-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(floodHopLimitLineScenario(nodeCount, dest, floodHopLimit)); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, "flood-hop-limit", floodHopLimitLineScenario(nodeCount, dest, floodHopLimit))
 
 	destID := fmt.Sprintf("N%d", dest)
 	var packetIDHex string

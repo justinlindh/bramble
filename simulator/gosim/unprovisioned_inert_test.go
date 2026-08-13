@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 )
 
@@ -48,20 +47,7 @@ func TestUnprovisionedNodeIsInert(t *testing.T) {
 		]
 	}`
 
-	tmp, err := os.CreateTemp("", "prov-inert-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(scenarioJSON); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, "prov-inert", scenarioJSON)
 
 	var (
 		bDelivered       bool // B delivered A's broadcast: the fleet still meshes

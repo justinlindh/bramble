@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 )
 
@@ -66,20 +65,7 @@ func floodClusterScenario() string {
 }
 
 func TestFloodSuppressionCancelsRedundantRelay(t *testing.T) {
-	tmp, err := os.CreateTemp("", "flood-suppression-cluster-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(floodClusterScenario()); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, "flood-suppression-cluster", floodClusterScenario())
 
 	suppressed := 0
 	deliveredNodes := map[string]bool{}
@@ -153,20 +139,7 @@ func TestFloodModelAlsoSuppresses(t *testing.T) {
 		]
 	}`
 
-	tmp, err := os.CreateTemp("", "flood-model-suppression-cluster-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(scenario); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, "flood-model-suppression-cluster", scenario)
 
 	var canceled float64 = -1
 	for _, line := range result.Lines() {

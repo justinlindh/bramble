@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"testing"
 )
 
@@ -90,11 +89,6 @@ func TestDutyCycleCapScenarioSchemaAppliesThroughBridge(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()
 
-	tmp, err := os.CreateTemp("", "duty-cycle-scenario-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
 	const scenarioJSON = `{
 		"name": "duty-cycle-smoke",
 		"duration_ms": 1000,
@@ -102,12 +96,9 @@ func TestDutyCycleCapScenarioSchemaAppliesThroughBridge(t *testing.T) {
 		"radio": {"duty_cycle_pct": 1},
 		"nodes": [{"id": "A", "x": 0, "y": 0}]
 	}`
-	if _, err := tmp.WriteString(scenarioJSON); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
+	path := writeScenarioFile(t, "duty-cycle-scenario", scenarioJSON)
 
-	if _, ok := loadScenario(tmp.Name(), h.nodes, h.radio, h.events, h.rng); !ok {
+	if _, ok := loadScenario(path, h.nodes, h.radio, h.events, h.rng); !ok {
 		t.Fatalf("loadScenario failed for a valid duty_cycle_pct scenario")
 	}
 	if !h.dutyCycleSet() {

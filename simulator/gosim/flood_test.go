@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 )
 
@@ -40,20 +39,7 @@ func TestFloodModeMultiHopDeliveryAndConfirmation(t *testing.T) {
 		]
 	}`
 
-	tmp, err := os.CreateTemp("", "flood-5hop-line-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(scenarioJSON); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, "flood-5hop-line", scenarioJSON)
 
 	var reachedE, confirmedA bool
 	var finalMetrics map[string]any
@@ -123,20 +109,7 @@ func TestFloodModeHopLimitExpiryStopsRelay(t *testing.T) {
 		]
 	}`
 
-	tmp, err := os.CreateTemp("", "flood-hop-limit-floor-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(scenarioJSON); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, "flood-hop-limit-floor", scenarioJSON)
 
 	var reachedD bool
 	for _, line := range result.Lines() {

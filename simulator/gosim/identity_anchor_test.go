@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 )
 
@@ -47,20 +46,7 @@ func TestIdentityAnchorEndorsedPinsUnendorsedRejected(t *testing.T) {
 		]
 	}`
 
-	tmp, err := os.CreateTemp("", "p2-trust-anchor-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(scenarioJSON); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, "p2-trust-anchor", scenarioJSON)
 
 	// First pass: capture the two originators' addresses and key prefixes.
 	var addrA, ed8A, addrD, ed8D string
@@ -205,20 +191,7 @@ func TestRuntimeSetAnchorDropsStalePins(t *testing.T) {
 		]
 	}`
 
-	tmp, err := os.CreateTemp("", "p2-runtime-setanchor-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(scenarioJSON); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, "p2-runtime-setanchor", scenarioJSON)
 
 	var addrA string
 	sawUnanchored := false

@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 )
 
@@ -25,20 +24,7 @@ type originationEvidence struct {
 
 func runFloodOriginationScenario(t *testing.T, namePrefix string, floodTransport bool) originationEvidence {
 	t.Helper()
-	tmp, err := os.CreateTemp("", namePrefix+"-*.json")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(floodTransportLineScenario(floodTransport)); err != nil {
-		t.Fatalf("write scenario file: %v", err)
-	}
-	tmp.Close()
-
-	result, err := runScenarioHeadless(tmp.Name())
-	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
-	}
+	result := writeAndRunScenario(t, namePrefix, floodTransportLineScenario(floodTransport))
 
 	var ev originationEvidence
 	for _, line := range result.Lines() {
