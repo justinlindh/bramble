@@ -79,7 +79,7 @@ int location_deserialize_full(const uint8_t* buf, size_t len, bramble_position_t
     return LOCATION_FULL_SIZE;
 }
 
-/* Coarse: quantize to ~1km grid by dividing e7 by 10000.
+/* Coarse: quantize to a fixed cell by dividing e7 by 10000.
  * Values are stored as int32 packed into 2 bytes each via modular truncation
  * for lat (range ±90000) and lon (range ±180000), use 4 bytes total.
  * Actually we split into high/low to fit the 5-byte format. */
@@ -91,7 +91,11 @@ int location_serialize_coarse(const bramble_position_t* pos, uint8_t* buf, size_
      * Store as unsigned by adding offset, then pack into 2 bytes.
      * lat: add 90000 -> 0..180000 -> divide by 3 -> 0..60000 fits uint16
      * lon: add 180000 -> 0..360000 -> divide by 6 -> 0..60000 fits uint16
-     * This gives ~3.3km lat resolution, ~6.6km lon resolution. */
+     * A unit here is a thousandth of a degree, so the cell is 0.003 deg of
+     * latitude by 0.006 deg of longitude: about 334 m north-south, and 668 m
+     * east-west at the equator narrowing to 334 m at 60 deg. Note the division
+     * truncates toward zero, so a cell at or below zero holds true positions
+     * one unit further out than its decoded corner. */
     int32_t grid_lat = pos->latitude_e7 / 10000;  /* ±90000 */
     int32_t grid_lon = pos->longitude_e7 / 10000; /* ±180000 */
     uint16_t enc_lat = (uint16_t)((grid_lat + 90000) / 3);

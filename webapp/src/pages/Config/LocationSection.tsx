@@ -27,7 +27,7 @@ interface LocationSectionProps {
 const TIER_OPTIONS: Array<{ value: LocationTier; label: string }> = [
   { value: 'off', label: 'Off (share nothing)' },
   { value: 'presence', label: 'Presence only' },
-  { value: 'coarse', label: 'Zone (~1km grid)' },
+  { value: 'coarse', label: 'Zone (a few hundred metres)' },
   { value: 'full', label: 'Exact coordinates' },
 ];
 
@@ -40,7 +40,7 @@ const SOURCE_OPTIONS: Array<{ value: LocationSource; label: string }> = [
 const TIER_DESCRIPTIONS: Record<LocationTier, string> = {
   off: 'Location not shared.',
   presence: 'Online status only; no coordinates.',
-  coarse: 'Approximate area (grid square ~1km).',
+  coarse: 'A quantized cell, about 330 m north-south by 670 m east-west at the equator and narrower east-west further from it. Peers see the cell, not a point inside it.',
   full: 'Precise GPS coordinates.',
 };
 

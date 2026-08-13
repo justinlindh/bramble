@@ -650,7 +650,7 @@ Encrypted per-contact location sharing with three privacy tiers. Location update
 | Tier | Constant | Payload | Serialized size |
 | ------ | ---------- | --------- | ----------------- |
 | Full | `LOCATION_TIER_FULL` (0) | lat, lon, alt, accuracy, speed, heading, timestamp | 17 bytes |
-| Coarse | `LOCATION_TIER_COARSE` (1) | ~1 km grid square (lat/lon quantized to 0.01°) + low-res timestamp | 5 bytes |
+| Coarse | `LOCATION_TIER_COARSE` (1) | Cell of 0.003° latitude by 0.006° longitude (about 334 m north-south, 668 m east-west at the equator) + low-res timestamp | 5 bytes |
 | Presence | `LOCATION_TIER_PRESENCE` (2) | Online/offline status byte only | 1 byte |
 
 **Tier hiding:** the sizes above are what the serializers return, not what goes on the wire. The tier is carried inside the encrypted plaintext (at `LOCATION_INNER_TIER_OFFSET`), and every tier is padded up to one canonical inner size, `L_LOC_INNER` = 18 bytes (a 1-byte tier prefix plus a payload padded to `LOCATION_FULL_SIZE`). The session path pads once more, to `L_LOC_INNER + CHANNEL_MSG_OVERHEAD`. The point is that an observer cannot infer the tier from ciphertext length, and therefore cannot infer how much a sender trusts a given recipient.

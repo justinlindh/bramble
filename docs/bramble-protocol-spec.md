@@ -755,8 +755,8 @@ Total: 17 bytes
 ```text
 Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
-0       2     grid_lat         Quantized latitude (~1 km resolution)
-2       2     grid_lon         Quantized longitude (~1 km resolution)
+0       2     grid_lat         Quantized latitude (0.003 deg, about 334 m)
+2       2     grid_lon         Quantized longitude (0.006 deg, 668 m at equator)
 4       1     ts_low           Low byte of timestamp
 ──────────────────────────────────────────────────────────
 Total: 5 bytes
@@ -777,7 +777,7 @@ Total: 1 byte
 | Tier | Constant | Data Shared | Resolution |
 | ------ | ---------- | ------------- | ------------ |
 | Full | `LOCATION_TIER_FULL` (0) | lat, lon, alt, speed, heading, accuracy | ~1m (GPS) |
-| Coarse | `LOCATION_TIER_COARSE` (1) | Grid square | ~1 km |
+| Coarse | `LOCATION_TIER_COARSE` (1) | Quantized cell corner | 0.003° lat by 0.006° lon (about 334 m by 668 m at the equator, narrower east-west toward the poles) |
 | Presence | `LOCATION_TIER_PRESENCE` (2) | Online/offline only | None |
 
 **Sharing policy:**

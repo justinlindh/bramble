@@ -18,8 +18,9 @@ function makePeerLocation(online: boolean, lastUpdatedMs: number): PeerLocation 
     addr: 0x1234abcd,
     name: 'Test Peer',
     tier: 'coarse',
-    position: null,
-    gridSquare: 'FN31',
+    // A coarse share carries a quantized position, so the corner lands on a
+    // multiple of the cell size rather than on a precise fix.
+    position: { lat: 41.997, lon: -72.006, alt: 0, accuracy: 0, speed: 0, heading: 0, timestampMs: 0 },
     online,
     lastUpdatedMs,
   };

@@ -134,10 +134,14 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
               <strong>{peerLocation.position.lat.toFixed(6)}, {peerLocation.position.lon.toFixed(6)}</strong>
             </div>
           )}
-          {peerLocation && isLocationFresh(peerLocation) && peerLocation.gridSquare && (
+          {peerLocation && isLocationFresh(peerLocation) && peerLocation.position && peerLocation.tier === 'coarse' && (
             <div className={styles.detailRow}>
-              <span>Grid square:</span>
-              <strong>{peerLocation.gridSquare}</strong>
+              <span>Zone:</span>
+              {/* Printed to the quantization granularity (a thousandth of a
+                  degree), so the row cannot read as a precise fix. */}
+              <strong>
+                {peerLocation.position.lat.toFixed(3)}, {peerLocation.position.lon.toFixed(3)} (area)
+              </strong>
             </div>
           )}
           {onOpenDM && (

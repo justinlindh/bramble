@@ -88,8 +88,7 @@ const PEERS = {
   },
   0xAABBCC03: {
     name: 'Downtown',   // node in the town center
-    pos: null,
-    gridSquare: 'JJ00aa',  // coarse town-center grid square
+    pos: { lat: 39.9950, lon: -105.0400, alt: 0, accuracy: 0 },
     locTier: 'coarse',
   },
   0xAABBCC04: {
@@ -308,6 +307,22 @@ const locationConfig = {
   stationaryBackoff: 4,
 };
 
+/*
+ * Mirror of location_serialize_coarse / location_deserialize_coarse in
+ * components/location/location.c. A coarse share is quantized to units of a
+ * thousandth of a degree, grouped in threes for latitude and sixes for
+ * longitude, and what a peer receives is that cell's decoded corner. The mock
+ * has to quantize the same way: it previously handed the webapp a Maidenhead
+ * locator string, which no node has ever sent, so the zone tier looked fine
+ * here and rendered nothing at all against real hardware.
+ */
+function quantizeCoarse(deg, groupUnits, offset) {
+  const e7 = Math.round(deg * 1e7);
+  const units = Math.trunc(e7 / 10000); // C integer division truncates toward zero
+  const enc = Math.floor((units + offset) / groupUnits);
+  return ((enc * groupUnits - offset) * 10000) / 1e7;
+}
+
 // Build peer location array from PEERS data
 function buildPeerLocations() {
   return PEER_ADDRS.map(addr => {
@@ -327,8 +342,15 @@ function buildPeerLocations() {
         speed: addr === 0xAABBCC05 ? 3 + Math.random() * 8 : Math.random() * 2,
         heading: Math.floor(Math.random() * 360),
         timestampMs: Date.now() - Math.floor(Math.random() * 60000),
+      } : isCoarse ? {
+        lat: quantizeCoarse(p.pos.lat, 3, 90000),
+        lon: quantizeCoarse(p.pos.lon, 6, 180000),
+        alt: 0,
+        accuracy: 0,
+        speed: 0,
+        heading: 0,
+        timestampMs: Date.now() - Math.floor(Math.random() * 60000),
       } : null,
-      gridSquare: isCoarse ? p.gridSquare : undefined,
       online: isOnline,
       lastUpdatedMs: Date.now() - Math.floor(Math.random() * 120000),
     };
