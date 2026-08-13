@@ -16,6 +16,7 @@
 #include "ble_pairing_policy.h"
 #include "ble_pairing_store.h"
 #include "crypto.h"
+#include "packet.h" /* bramble_utf8_trunc_len */
 #include "rpc_dispatcher.h"
 #include "rpc_auth.h"
 #include "ct_strcmp.h"
@@ -468,10 +469,18 @@ static void start_advertising(void) {
      * someone renamed it over a transport they could no longer reach. Send
      * the shortened-name form instead, which is exactly what it is for; the
      * complete name is still readable from the GAP characteristic. */
+    /* Cut on a character boundary, the same rule the LoRa beacon uses in
+     * main/mesh_beacon.c. s_device_name is the operator-set node name and may
+     * hold any UTF-8; trimming it on a raw byte count splits whatever
+     * multi-byte character straddles byte BLE_ADV_NAME_MAX, and the partial
+     * sequence goes out in the advertisement for every scanner to render as a
+     * replacement character. */
     size_t name_len = strlen(s_device_name);
+    size_t adv_name_len =
+        bramble_utf8_trunc_len((const uint8_t*)s_device_name, name_len, BLE_ADV_NAME_MAX);
     fields.name = (uint8_t*)s_device_name;
-    fields.name_is_complete = name_len <= BLE_ADV_NAME_MAX;
-    fields.name_len = (uint8_t)(fields.name_is_complete ? name_len : BLE_ADV_NAME_MAX);
+    fields.name_is_complete = adv_name_len == name_len;
+    fields.name_len = (uint8_t)adv_name_len;
     fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
     fields.tx_pwr_lvl_is_present = 1;
 
