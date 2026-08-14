@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { BrambleConfig, Channel, Conversation } from '../../types/bramble';
-import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock, IconWarning } from '../../components/Icons';
-import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
+import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock } from '../../components/Icons';
+import { usePeerInfo, usePeerVerification } from '../../hooks/usePeer';
+import { PeerStatusDot, PeerVerificationBadge } from './peerBadges';
 import { addChannel } from '../../store/actions';
 import { useStore, parseConversationId } from '../../store/index';
 import { friendlyErrorFrom } from '../../lib/errors';
@@ -72,20 +73,13 @@ function DmItem({ conv, active, onSelect }: { conv: Conversation; active: boolea
     >
       <span className={styles.icon}><IconUser size={16} /></span>
       <span className={styles.label}>{displayName}</span>
-      {verification?.keyChanged ? (
-        <span className={styles.verifiedBadgeWarn} title="Safety number changed">
-          <IconWarning size={12} />
-        </span>
-      ) : verification?.verified ? (
-        <span className={styles.verifiedBadgeOk} title="Verified">
-          <IconLock size={12} />
-        </span>
-      ) : null}
-      <span
-        className={styles.statusDot}
-        style={{ background: STATUS_COLORS[status] }}
-        title={status === 'online' ? 'Online' : status === 'reachable' ? 'Reachable' : 'Unknown'}
+      <PeerVerificationBadge
+        verification={verification}
+        okClassName={styles.verifiedBadgeOk}
+        warnClassName={styles.verifiedBadgeWarn}
+        size={12}
       />
+      <PeerStatusDot status={status} className={styles.statusDot} />
       {conv.unreadCount > 0 && (
         <span className={styles.badge}>{conv.unreadCount}</span>
       )}
