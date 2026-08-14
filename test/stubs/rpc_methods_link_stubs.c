@@ -413,16 +413,12 @@ bool ota_rollback_get_floor(char* out, size_t out_len) {
     return false;
 }
 /* Link-only stub: these targets exercise other handlers, not the traffic
- * event serializer, and they already provide their own addr_hex. Targets that
- * do test the serializer link the real main/util.c instead. */
+ * event serializer. Targets that do test the serializer link the real
+ * main/util.c instead. addr_hex needs no stub: it is a dependency-free inline
+ * in main/addr_hex.h that every caller pulls in. */
 void traffic_event_add_json(void* obj, const void* evt) {
     (void)obj;
     (void)evt;
-}
-
-const char* addr_hex(uint32_t addr, char* buf, size_t len) {
-    snprintf(buf, len, "%08X", addr);
-    return buf;
 }
 bool mesh_supports_delivery_event_sync(void) { return false; }
 uint32_t mesh_delivery_events_latest_seq(void) { return 0; }

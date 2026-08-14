@@ -1,19 +1,14 @@
 #include "topology_export.h"
 
-#include <inttypes.h>
-#include <stdio.h>
+#include "addr_hex.h"
 
 /*
  * Addresses in this document are 8 uppercase hex digits, the format
  * api/openapi.yaml fixes and simulator/gosim/twin_export.go's
- * normalizeTwinAddr parses. Written here rather than through main/util.c's
- * addr_hex so this file compiles into the simulator (simulator/gosim/all.c)
- * without dragging util.h's traffic_debug dependency along with it.
+ * normalizeTwinAddr parses. addr_hex lives in its own dependency-free header
+ * so this file, which compiles into the simulator (simulator/gosim/all.c), can
+ * share it without dragging util.h's traffic_debug dependency along.
  */
-static const char* export_addr_hex(uint32_t addr, char* buf, size_t len) {
-    snprintf(buf, len, "%08" PRIX32, addr);
-    return buf;
-}
 
 void topology_export_neighbors(cJSON* arr, const neighbor_table_t* table, uint32_t now_ms) {
     if (!arr || !table) {
@@ -26,7 +21,7 @@ void topology_export_neighbors(cJSON* arr, const neighbor_table_t* table, uint32
             continue;
         }
         cJSON* obj = cJSON_CreateObject();
-        cJSON_AddStringToObject(obj, "address", export_addr_hex(n->addr, buf, sizeof(buf)));
+        cJSON_AddStringToObject(obj, "address", addr_hex(n->addr, buf, sizeof(buf)));
         cJSON_AddNumberToObject(obj, "rssi", n->rssi);
         cJSON_AddNumberToObject(obj, "snr", n->snr);
         /* Age, not an absolute timestamp: see the header. A last_heard in the
@@ -50,8 +45,8 @@ void topology_export_routes(cJSON* arr, const routing_table_t* table) {
     for (int i = 0; i < table->count; i++) {
         const route_entry_t* r = &table->entries[i];
         cJSON* obj = cJSON_CreateObject();
-        cJSON_AddStringToObject(obj, "dest", export_addr_hex(r->dest_addr, buf, sizeof(buf)));
-        cJSON_AddStringToObject(obj, "next_hop", export_addr_hex(r->next_hop, buf, sizeof(buf)));
+        cJSON_AddStringToObject(obj, "dest", addr_hex(r->dest_addr, buf, sizeof(buf)));
+        cJSON_AddStringToObject(obj, "next_hop", addr_hex(r->next_hop, buf, sizeof(buf)));
         cJSON_AddNumberToObject(obj, "hop_count", r->hop_count);
         cJSON_AddNumberToObject(obj, "metric", r->metric);
         cJSON_AddStringToObject(obj, "state",
@@ -72,7 +67,7 @@ void topology_export_document(cJSON* result, const topology_export_identity_t* i
     cJSON_AddNumberToObject(result, "twin_schema", TOPOLOGY_EXPORT_SCHEMA);
 
     cJSON* node = cJSON_AddObjectToObject(result, "node");
-    cJSON_AddStringToObject(node, "address", export_addr_hex(identity->address, buf, sizeof(buf)));
+    cJSON_AddStringToObject(node, "address", addr_hex(identity->address, buf, sizeof(buf)));
     if (identity->name && identity->name[0] != '\0') {
         cJSON_AddStringToObject(node, "name", identity->name);
     }

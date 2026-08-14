@@ -1,13 +1,5 @@
 #include "util.h"
 
-#include <inttypes.h>
-#include <stdio.h>
-
-const char* addr_hex(uint32_t addr, char* buf, size_t len) {
-    snprintf(buf, len, "%08" PRIX32, addr);
-    return buf;
-}
-
 void traffic_event_add_json(cJSON* obj, const traffic_event_t* evt) {
     cJSON_AddNumberToObject(obj, "seq", evt->seq);
     cJSON_AddNumberToObject(obj, "timestamp_ms", evt->timestamp_ms);
