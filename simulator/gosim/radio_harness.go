@@ -203,11 +203,12 @@ func (h *radioHarness) nextBeaconDue(node *C.sim_node_t) uint64 {
 // BEACON_SIZE), for computing the real ToA of a beacon in tests.
 func beaconWireSize() int { return int(C.BEACON_SIZE) }
 
-// setBeaconAdaptive toggles the harness's shared beacon policy between
-// firmware's shipped fixed cadence (false, the default) and the opt-in
-// adaptive policy driven by beacon_interval_decide (true).
-func (h *radioHarness) setBeaconAdaptive(adaptive bool) {
-	h.beacon.adaptive = C.bool(adaptive)
+// enableBeaconAdaptive switches the harness's shared beacon policy from
+// firmware's shipped fixed cadence (the default, set by sim_beacon_policy_init)
+// to the opt-in adaptive policy driven by beacon_interval_decide. Nothing needs
+// the reverse: a fresh harness already starts fixed.
+func (h *radioHarness) enableBeaconAdaptive() {
+	h.beacon.adaptive = C.bool(true)
 }
 
 // setNeighborCount inflates or shrinks a node's neighbor table to exactly n
