@@ -57,3 +57,13 @@ export const STATUS_COLORS: Record<PeerStatus, string> = {
   reachable: '#eab308', // yellow
   unknown: '#6b7280',   // gray
 };
+
+// The label that names each status in the presence dot's tooltip. Kept beside
+// STATUS_COLORS so the color and its wording are owned in one place: they render
+// together (dot + title), rather than a hand-written label ternary at each call
+// site.
+export const STATUS_LABELS: Record<PeerStatus, string> = {
+  online: 'Online',
+  reachable: 'Reachable',
+  unknown: 'Unknown',
+};

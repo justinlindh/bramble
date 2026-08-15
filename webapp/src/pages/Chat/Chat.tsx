@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import { useStore, parseConversationId, formatConversationLabel } from '../../store/index';
 import { useConversation } from '../../store/selectors';
 import { IconChat, IconBroadcast, IconHash, IconRoutes, IconLock, IconWarning } from '../../components/Icons';
-import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
+import { usePeerInfo, usePeerVerification } from '../../hooks/usePeer';
+import { PeerStatusDot, PeerVerificationBadge } from './peerBadges';
 import { ConversationList } from './ConversationList';
 import { MessageBubble } from './MessageBubble';
 import { ComposeBar } from './ComposeBar';
@@ -169,9 +170,6 @@ function KeyChangedBanner({ onOpenVerify }: { onOpenVerify: () => void }) {
 function DmHeaderInfo({ addr }: { addr: number }) {
   const { displayName, fullHex, status, lastSeen } = usePeerInfo(addr);
   const verification = usePeerVerification(addr);
-  const statusLabel = status === 'online' ? 'Online'
-    : status === 'reachable' ? 'Reachable'
-    : 'Unknown';
   const statusText = status === 'online' ? 'Online'
     : lastSeen ? `Last seen ${lastSeen}`
     : 'Unknown';
@@ -179,21 +177,14 @@ function DmHeaderInfo({ addr }: { addr: number }) {
   return (
     <>
       <span className={styles.chatTitle}>
-        <span
-          className={styles.statusDot}
-          style={{ background: STATUS_COLORS[status] }}
-          title={statusLabel}
-        />
+        <PeerStatusDot status={status} className={styles.statusDot} />
         {displayName}
-        {verification?.keyChanged ? (
-          <span className={styles.verifyGlyphWarn} title="Safety number changed">
-            <IconWarning size={13} />
-          </span>
-        ) : verification?.verified ? (
-          <span className={styles.verifyGlyphOk} title="Verified">
-            <IconLock size={13} />
-          </span>
-        ) : null}
+        <PeerVerificationBadge
+          verification={verification}
+          okClassName={styles.verifyGlyphOk}
+          warnClassName={styles.verifyGlyphWarn}
+          size={13}
+        />
       </span>
       <span className={styles.chatSubtitle}>{statusText} · {fullHex}</span>
     </>
