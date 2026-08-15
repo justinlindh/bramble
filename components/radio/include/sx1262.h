@@ -256,16 +256,11 @@ static inline uint8_t sx1262_bw_reg_from_hz(uint32_t bw_hz) {
 
 /* Lifecycle */
 int sx1262_init(void);
-int sx1262_reset(void);
-void sx1262_hard_reset(void);
 bool sx1262_needs_reinit(void);
 void sx1262_clear_reinit(void);
 void sx1262_request_reinit(void);
-int sx1262_wait_busy(uint32_t timeout_ms);
 
 /* Low-level SPI */
-int sx1262_write_command(uint8_t cmd, const uint8_t* data, size_t len);
-int sx1262_read_command(uint8_t cmd, uint8_t* data, size_t len);
 int sx1262_write_register(uint16_t addr, const uint8_t* data, size_t len);
 int sx1262_read_register(uint16_t addr, uint8_t* data, size_t len);
 int sx1262_write_buffer(uint8_t offset, const uint8_t* data, size_t len);
@@ -283,14 +278,12 @@ int sx1262_clear_device_errors(void);
 
 /* Configuration */
 int sx1262_set_standby(uint8_t mode);
-int sx1262_set_packet_type(uint8_t type);
 int sx1262_set_rf_frequency(float freq_mhz);
 int sx1262_set_pa_config(int8_t power_dbm);
 int sx1262_set_tx_params(int8_t power_dbm, uint8_t ramp_time);
 int sx1262_set_modulation_params(uint8_t sf, uint32_t bw_hz, uint8_t cr, uint8_t ldro);
 int sx1262_set_packet_params(uint16_t preamble, uint8_t header_type, uint8_t payload_len,
                              uint8_t crc_on, uint8_t invert_iq);
-int sx1262_set_buffer_base_address(uint8_t tx_base, uint8_t rx_base);
 int sx1262_set_dio_irq_params(uint16_t irq_mask, uint16_t dio1_mask, uint16_t dio2_mask,
                               uint16_t dio3_mask);
 int sx1262_clear_irq_status(uint16_t mask);
@@ -307,10 +300,7 @@ int sx1262_get_packet_status(int16_t* rssi, int8_t* snr);
 int sx1262_set_sleep(uint8_t config);
 
 /* Heltec V3 specific */
-int sx1262_set_dio3_as_tcxo(float voltage, uint32_t timeout_ms);
-int sx1262_calibrate(uint8_t cal_mask);
 int sx1262_calibrate_image(float freq_mhz);
-int sx1262_set_regulator_mode(uint8_t mode);
 int sx1262_set_dio2_as_rf_switch(bool enable);
 
 #endif /* BRAMBLE_SX1262_H */
