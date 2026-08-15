@@ -48,7 +48,7 @@ func TestBeaconPolicyAdaptiveStretchesOnDenseMesh(t *testing.T) {
 	const addr = 0x000000E1
 	h.addNode(addr, 0, 0)
 	n := h.activateNode(addr)
-	h.setBeaconAdaptive(true)
+	h.enableBeaconAdaptive()
 
 	// First beacon: sparse mesh, forced due at t=0. Base interval expected.
 	h.setNeighborCount(n, 3, 0)
