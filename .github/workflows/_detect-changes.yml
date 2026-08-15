@@ -209,10 +209,12 @@ jobs:
           # board-build jobs invoke (source ci-source-idf.sh, run ci-ensure-idf.sh,
           # flash.sh / flash-all, ensure-ota-signing-key.sh, and ci-ccache-env.sh,
           # which both jobs run to configure the compiler cache) plus the
-          # .esp-idf-version pin ci-source-idf.sh reads to pick the toolchain.
+          # .esp-idf-version pin ci-source-idf.sh reads to pick the toolchain
+          # and scripts/lib/, whose helpers those wrappers source at startup
+          # (flash.sh sources crypt-state.sh for every action, build included).
           # Editing them must re-run those two build jobs even when no firmware
           # source changed; host tests and gosim use no IDF, so they stay out.
-          idf_build_scripts=$(area_changed '^scripts/(ci-source-idf|ci-ensure-idf|ci-ccache-env|flash|flash-all|ensure-ota-signing-key)|^\.esp-idf-version$')
+          idf_build_scripts=$(area_changed '^scripts/(ci-source-idf|ci-ensure-idf|ci-ccache-env|flash|flash-all|ensure-ota-signing-key)|^scripts/lib/|^\.esp-idf-version$')
           # release_config is what the Release config job loads: the per-component
           # .releaserc.*.cjs files, the release scripts (the squash-expander),
           # and the ROOT package.json/package-lock.json, which pin the

@@ -117,6 +117,11 @@ jobs:
         run: bash scripts/lint/check-node-version.sh
       - name: Required shellcheck (strict wrapper)
         run: bash scripts/lint/run-shellcheck.sh --strict
+      - name: Flash-encryption eFuse parser tests
+        # Fixture tests for scripts/lib/crypt-state.sh, the parser flash.sh and
+        # flash-fleet.sh consult before writing an image; a wrong verdict
+        # bricks a board, and this is the only hardware-free check of it.
+        run: bash scripts/test-crypt-state.sh
       - name: Ruff (required baseline profile)
         # Baked into the runner image (bramble#222); the uvx invocation this
         # replaced downloaded ruff from PyPI inside an always-run required
