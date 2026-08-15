@@ -25,12 +25,6 @@ const Map = lazy(() => import('./pages/Map/Map').then(m => ({ default: m.Map }))
 
 type Tab = 'chat' | 'nodes' | 'map' | 'config' | 'stats';
 
-// Status pill copy: same map as the StatusDot beside it, so the visible text
-// can never contradict the dot's title/aria-label.
-export function statusLabelFor(state: ReturnType<typeof useStore.getState>['connectionState']): string {
-  return STATE_LABELS[state];
-}
-
 export function tabFromShortcut(key: string): Tab | null {
   if (key === '1') return 'chat';
   if (key === '2') return 'nodes';
@@ -202,8 +196,10 @@ export default function App() {
 
         <span className={styles.statusArea}>
           <StatusDot state={connectionState} />
+          {/* Same label map as the StatusDot beside it, so the visible text
+              can never contradict the dot's title/aria-label. */}
           <span className={styles.statusLabel}>
-            {statusLabelFor(connectionState)}
+            {STATE_LABELS[connectionState]}
           </span>
           {/* Ahead of the node label because the label is the one item in this
               row designed to give way: it ellipsizes, while the indicator can
