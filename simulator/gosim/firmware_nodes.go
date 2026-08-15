@@ -14,7 +14,7 @@ import (
 //	]
 //
 // It is parsed Go-side, exactly like the other scenario extensions
-// (loadNodeFlagIDs, loadRoutingConfig), so the C scenario loader
+// (loadNodeTrustFlags, loadRoutingConfig), so the C scenario loader
 // (sim_scenario.c) needs no change and every existing scenario, which has no
 // "firmware_nodes" key, is entirely unaffected.
 type firmwareNodesConfigJSON struct {
