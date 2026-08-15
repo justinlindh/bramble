@@ -16,8 +16,10 @@ if ! command -v shellcheck >/dev/null 2>&1; then
 fi
 
 if (( strict )); then
-  # Keep required gate on a low-noise, actively maintained subset.
-  mapfile -t files < <(git ls-files 'scripts/lint/*.sh')
+  # Keep required gate on a low-noise, actively maintained subset. scripts/lib
+  # holds helpers the flash paths source before a flash-or-brick decision, so
+  # it is held to the same strict bar, along with its fixture tests.
+  mapfile -t files < <(git ls-files 'scripts/lint/*.sh' 'scripts/lib/*.sh' 'scripts/test-crypt-state.sh')
 else
   # Broader visibility in advisory mode.
   mapfile -t files < <(git ls-files '*.sh')

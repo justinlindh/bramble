@@ -57,13 +57,16 @@ ENCRYPTED_ADDRS="${BRAMBLE_ENCRYPTED_ADDRS:-}"   # optional cross-check only
 
 # Echo "encrypted", "plaintext", or "" (unreadable) for the chip on $1. The
 # summary is parsed by crypt_state_from_summary (scripts/lib/crypt-state.sh),
-# the same odd-parity rule flash.sh applies, so the two paths cannot diverge.
+# the same rule flash.sh applies, so the parse rule cannot diverge (the two
+# scripts still acquire the summary through different espefuse installs).
 read_crypt_state() {
   local port="$1" summary
-  # Swallow an espefuse failure to an empty summary (|| true) so the parser
-  # echoes "" and the caller skips this node, rather than pipefail aborting the
-  # whole fleet run mid-loop.
-  summary=$("$ESPEFUSE" --port "$port" summary 2>/dev/null || true)
+  # A failed espefuse read must come back "" (unreadable, caller skips the
+  # node), never a verdict parsed from whatever partial output the failed run
+  # printed: a value token truncated mid-row can flip the parity.
+  if ! summary=$("$ESPEFUSE" --port "$port" summary 2>/dev/null); then
+    return 0
+  fi
   printf '%s\n' "$summary" | crypt_state_from_summary
 }
 
