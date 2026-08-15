@@ -8,7 +8,7 @@ if [[ -n "$staged_c" ]] && command -v clang-format >/dev/null 2>&1; then
 fi
 
 # Em dashes are banned repo-wide (see CLAUDE.md); check added lines only
-if git diff --cached -U0 | grep -q $'^\+.*\xe2\x80\x94'; then
+if git diff --cached -U0 | grep -q $'^+.*\xe2\x80\x94'; then
     echo "pre-commit: em dash found in staged changes (banned repo-wide)" >&2
     exit 1
 fi
