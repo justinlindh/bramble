@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store/index';
 import { loadRollCall, startRollCall } from '../../store/actions';
-import { AddressLabel } from '../../components/AddressLabel';
 import { NamedAddress } from '../../components/NamedAddress';
 import { formatAddrShort } from '../../utils/address';
 import {
@@ -88,7 +87,7 @@ function Ledger({ ledger }: { ledger: RollCallLedger }) {
         <div className={styles.missing} data-testid="rollcall-missing">
           <span className={styles.missingLabel}>No answer ({ledger.missingCount}):</span>
           {ledger.missing.map(addr => (
-            <AddressLabel key={addr} addr={addr} name={peerNames.get(addr)} short={!peerNames.get(addr)} />
+            <NamedAddress key={addr} addr={addr} name={peerNames.get(addr)} />
           ))}
         </div>
       )}
