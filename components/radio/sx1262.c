@@ -71,7 +71,7 @@ static void nss_high(void) {
 /*  Hard reset: recover from stuck BUSY / wedged state machine        */
 /* ------------------------------------------------------------------ */
 
-void sx1262_hard_reset(void) {
+static void sx1262_hard_reset(void) {
     if (!s_board || s_board->radio.rst < 0) {
         ESP_LOGE(TAG, "Cannot hard reset: no RST pin configured");
         /* No reset possible, but the chip is wedged. Raise the reinit
@@ -102,7 +102,7 @@ void sx1262_hard_reset(void) {
 /*  BUSY                                                               */
 /* ------------------------------------------------------------------ */
 
-int sx1262_wait_busy(uint32_t timeout_ms) {
+static int sx1262_wait_busy(uint32_t timeout_ms) {
     uint32_t start = xTaskGetTickCount();
     uint32_t wdt_fed = 0;
     while (gpio_get_level(s_board->radio.busy)) {
@@ -170,7 +170,7 @@ static inline void spi_mutex_give(void) {
         xSemaphoreGive(g_spi_mutex);
 }
 
-int sx1262_write_command(uint8_t cmd, const uint8_t* data, size_t len) {
+static int sx1262_write_command(uint8_t cmd, const uint8_t* data, size_t len) {
     spi_mutex_take();
 
     /* 2000ms: covers TCXO startup (≤32ms) + calibration overhead on TCXO
@@ -194,7 +194,7 @@ int sx1262_write_command(uint8_t cmd, const uint8_t* data, size_t len) {
     return rc;
 }
 
-int sx1262_read_command(uint8_t cmd, uint8_t* data, size_t len) {
+static int sx1262_read_command(uint8_t cmd, uint8_t* data, size_t len) {
     spi_mutex_take();
 
     int busy_rc = sx1262_wait_busy(2000);
@@ -350,7 +350,7 @@ int sx1262_clear_device_errors(void) {
 /*  Reset                                                              */
 /* ------------------------------------------------------------------ */
 
-int sx1262_reset(void) {
+static int sx1262_reset(void) {
     gpio_set_level(s_board->radio.rst, 0);
     vTaskDelay(pdMS_TO_TICKS(1));
     gpio_set_level(s_board->radio.rst, 1);
@@ -367,7 +367,7 @@ int sx1262_set_standby(uint8_t mode) {
     return sx1262_write_command(SX1262_CMD_SET_STANDBY, &data, 1);
 }
 
-int sx1262_set_packet_type(uint8_t type) {
+static int sx1262_set_packet_type(uint8_t type) {
     return sx1262_write_command(SX1262_CMD_SET_PKT_TYPE, &type, 1);
 }
 
@@ -444,7 +444,7 @@ int sx1262_set_packet_params(uint16_t preamble, uint8_t header_type, uint8_t pay
     return sx1262_write_command(SX1262_CMD_SET_PKT_PARAMS, data, 6);
 }
 
-int sx1262_set_buffer_base_address(uint8_t tx_base, uint8_t rx_base) {
+static int sx1262_set_buffer_base_address(uint8_t tx_base, uint8_t rx_base) {
     uint8_t data[2] = {tx_base, rx_base};
     return sx1262_write_command(SX1262_CMD_SET_BUFF_BASE_ADDR, data, 2);
 }
@@ -564,7 +564,7 @@ int sx1262_set_sleep(uint8_t config) {
 /*  Heltec V3 specific                                                 */
 /* ------------------------------------------------------------------ */
 
-int sx1262_set_dio3_as_tcxo(float voltage, uint32_t timeout_ms) {
+static int sx1262_set_dio3_as_tcxo(float voltage, uint32_t timeout_ms) {
     /* Voltage encoding: 1.6V=0x00, 1.7V=0x01, 1.8V=0x02, 2.2V=0x03,
        2.4V=0x04, 2.7V=0x05, 3.0V=0x06, 3.3V=0x07 */
     uint8_t volt_code;
@@ -598,7 +598,7 @@ int sx1262_set_dio3_as_tcxo(float voltage, uint32_t timeout_ms) {
     return sx1262_write_command(SX1262_CMD_SET_DIO3_AS_TCXO, data, 4);
 }
 
-int sx1262_calibrate(uint8_t cal_mask) {
+static int sx1262_calibrate(uint8_t cal_mask) {
     /* Calibrating all blocks (0x7F) on a TCXO board keeps BUSY high while
      * each sub-block calibrates against the TCXO.  RadioLib uses 5000ms for
      * this wait.  100ms (the default write_command BUSY wait) is not enough.
@@ -656,7 +656,7 @@ int sx1262_calibrate_image(float freq_mhz) {
     return sx1262_write_command(SX1262_CMD_CALIBRATE_IMAGE, data, 2);
 }
 
-int sx1262_set_regulator_mode(uint8_t mode) {
+static int sx1262_set_regulator_mode(uint8_t mode) {
     return sx1262_write_command(SX1262_CMD_SET_REGULATOR_MODE, &mode, 1);
 }
 
