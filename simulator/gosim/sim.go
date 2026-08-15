@@ -904,17 +904,17 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// Trust overrides, applied to each listed node AFTER join (join defaults
 	// every node to the trusted state: provisioned, endorsed, and anchored).
 	// Each entry flips one trust bit for the nodes the scenario names under its
-	// flag key and announces it; see the loadNodeFlagIDs notes above for what
+	// flag key and announces it; see the loadNodeTrustFlags notes above for what
 	// each override models.
-	trustFlags := loadNodeFlagIDs(scenarioData, "unprovisioned", "unendorsed", "unanchored")
+	trustFlags := loadNodeTrustFlags(scenarioData)
 	trustOverrides := []struct {
 		nodes     map[string]bool
 		mark      func(int)
 		eventType string
 	}{
-		{trustFlags["unprovisioned"], nodeMarkUnprovisioned, "node_unprovisioned"},
-		{trustFlags["unendorsed"], nodeMarkUnendorsed, "node_unendorsed"},
-		{trustFlags["unanchored"], nodeMarkUnanchored, "node_unanchored"},
+		{trustFlags.unprovisioned, nodeMarkUnprovisioned, "node_unprovisioned"},
+		{trustFlags.unendorsed, nodeMarkUnendorsed, "node_unendorsed"},
+		{trustFlags.unanchored, nodeMarkUnanchored, "node_unanchored"},
 	}
 
 	// Broadcast node_joined for each initial node

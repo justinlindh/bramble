@@ -5,22 +5,35 @@ import (
 )
 
 // nodeFlagConfigJSON reads the scenario bytes just far enough to recover each
-// node's id plus its optional per-node boolean flags. Flag values are kept as
-// raw JSON so a single loader can pull out whichever flag a caller names,
-// instead of one typed struct + loader per flag.
+// node's id plus its optional per-node trust flags. Each flag defaults false
+// (absent == not set), so plain bools capture the "flag off" case; the three
+// degraded trust states are a closed protocol concept, so they are named fields
+// rather than an open flag map.
 type nodeFlagConfigJSON struct {
-	Nodes []map[string]json.RawMessage `json:"nodes"`
+	Nodes []struct {
+		ID            string `json:"id"`
+		Unprovisioned bool   `json:"unprovisioned"`
+		Unendorsed    bool   `json:"unendorsed"`
+		Unanchored    bool   `json:"unanchored"`
+	} `json:"nodes"`
 }
 
-// loadNodeFlagIDs returns, for each named boolean flag, the set of node IDs
-// whose flag is true in the scenario bytes. It parses the scenario once for all
-// requested flags rather than once per flag. Any parse failure (or a scenario
-// with no such field) yields empty sets, the fail-open-to-today's-default
-// convention shared with loadFloodTransportConfig / loadIntermediateRREPConfig.
-// Every requested flag is always present as a key in the returned map.
+// nodeTrustFlags holds, for each degraded trust state, the set of node IDs the
+// scenario marks with that state. See loadNodeTrustFlags for what each models.
+type nodeTrustFlags struct {
+	unprovisioned map[string]bool
+	unendorsed    map[string]bool
+	unanchored    map[string]bool
+}
+
+// loadNodeTrustFlags returns, for each degraded trust state, the set of node IDs
+// whose corresponding flag is true in the scenario bytes. It parses the scenario
+// once. Any parse failure (or a scenario with no such field) yields empty sets,
+// the fail-open-to-today's-default convention shared with loadFloodTransportConfig
+// / loadIntermediateRREPConfig.
 //
-// The recognised flags select which nodes boot in a degraded trust state; every
-// flag defaults false, matching a fleet where each node is fully provisioned:
+// The flags select which nodes boot in a degraded trust state; every flag
+// defaults false, matching a fleet where each node is fully provisioned:
 //
 //   - "unprovisioned" (mandatory-provisioning Task 2): boots WITHOUT the network
 //     key and is INERT. It originates no network-key-authenticated frame (DATA,
@@ -37,32 +50,29 @@ type nodeFlagConfigJSON struct {
 //
 // Read Go-side like the other scenario extensions (loadFloodTransportConfig in
 // flood.go), so no C-side sim_scenario change is needed.
-func loadNodeFlagIDs(data []byte, flags ...string) map[string]map[string]bool {
-	out := make(map[string]map[string]bool, len(flags))
-	for _, flag := range flags {
-		out[flag] = map[string]bool{}
+func loadNodeTrustFlags(data []byte) nodeTrustFlags {
+	flags := nodeTrustFlags{
+		unprovisioned: map[string]bool{},
+		unendorsed:    map[string]bool{},
+		unanchored:    map[string]bool{},
 	}
 	var cfg nodeFlagConfigJSON
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return out
+		return flags
 	}
 	for _, n := range cfg.Nodes {
-		var id string
-		if raw, ok := n["id"]; ok {
-			_ = json.Unmarshal(raw, &id)
-		}
-		if id == "" {
+		if n.ID == "" {
 			continue
 		}
-		for _, flag := range flags {
-			var set bool
-			if raw, ok := n[flag]; ok {
-				_ = json.Unmarshal(raw, &set)
-			}
-			if set {
-				out[flag][id] = true
-			}
+		if n.Unprovisioned {
+			flags.unprovisioned[n.ID] = true
+		}
+		if n.Unendorsed {
+			flags.unendorsed[n.ID] = true
+		}
+		if n.Unanchored {
+			flags.unanchored[n.ID] = true
 		}
 	}
-	return out
+	return flags
 }
