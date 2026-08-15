@@ -24,6 +24,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# shellcheck source=scripts/lib/crypt-state.sh
+source scripts/lib/crypt-state.sh
+
 ESPTOOL="${ESPTOOL:-esptool}"
 ESPEFUSE="${ESPEFUSE:-espefuse}"
 for tool in "$ESPTOOL" "$ESPEFUSE"; do
@@ -52,17 +55,16 @@ fi
 PY="$ESPTOOL_PYTHON"
 ENCRYPTED_ADDRS="${BRAMBLE_ENCRYPTED_ADDRS:-}"   # optional cross-check only
 
-# Echo "encrypted", "plaintext", or "" (unreadable) for the chip on $1.
-# Flash encryption is active when an ODD number of CRYPT_CNT bits is set
-# (0b001 and 0b111 enable it; 0b011 does not).
+# Echo "encrypted", "plaintext", or "" (unreadable) for the chip on $1. The
+# summary is parsed by crypt_state_from_summary (scripts/lib/crypt-state.sh),
+# the same odd-parity rule flash.sh applies, so the two paths cannot diverge.
 read_crypt_state() {
-  local port="$1" bits ones
-  bits=$("$ESPEFUSE" --port "$port" summary 2>/dev/null \
-         | grep -E "SPI_BOOT_CRYPT_CNT" \
-         | grep -oE "0b[01]+" | tail -1 || true)
-  [[ -n "$bits" ]] || return 0
-  ones=${bits//[^1]/}
-  if (( ${#ones} % 2 == 1 )); then echo "encrypted"; else echo "plaintext"; fi
+  local port="$1" summary
+  # Swallow an espefuse failure to an empty summary (|| true) so the parser
+  # echoes "" and the caller skips this node, rather than pipefail aborting the
+  # whole fleet run mid-loop.
+  summary=$("$ESPEFUSE" --port "$port" summary 2>/dev/null || true)
+  printf '%s\n' "$summary" | crypt_state_from_summary
 }
 
 if [[ "${1:-}" == "build" ]]; then

@@ -8,6 +8,9 @@ set -euo pipefail
 
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+# shellcheck source=scripts/lib/crypt-state.sh
+source "$LOCAL_DIR/scripts/lib/crypt-state.sh"
+
 BOARD="heltec-v3"
 ACTION="flash"
 PORT=""
@@ -276,7 +279,7 @@ assert_encryption_matches_action() {
   fi
 
   echo "==> Reading flash-encryption eFuse on $PORT..."
-  local summary crypt_line bits ones encrypted
+  local summary crypt_line state encrypted
   if ! summary=$(run_serial_cmd python -m espefuse --port "$PORT" summary 2>/dev/null); then
     echo "flash.sh: could not read eFuses on $PORT, refusing to flash." >&2
     echo "  A plaintext image on a flash-encrypted board bricks it, and this" >&2
@@ -285,27 +288,20 @@ assert_encryption_matches_action() {
     exit 3
   fi
 
-  # Parse the bit pattern, not the prose. The line reads
-  #   SPI_BOOT_CRYPT_CNT (BLOCK0)  ...  = Enable R/W (0b001)
-  # and an earlier version keyed off the literal word "Enable", which made the
-  # check fail OPEN the day esptool reworded that column: an unmatched string
-  # simply meant "not encrypted". The (0b...) pattern is the value itself, and
-  # the odd-parity rule below is the hardware's own definition, so a wording
-  # change cannot silently flip the verdict. A line or pattern we cannot parse
-  # at all is refused rather than assumed safe.
-  crypt_line=$(printf '%s\n' "$summary" | grep -E "SPI_BOOT_CRYPT_CNT|FLASH_CRYPT_CNT" | head -1)
-  bits=$(printf '%s\n' "$crypt_line" | sed -n 's/.*(0b\([01]\+\)).*/\1/p')
-  if [[ -z "$bits" ]]; then
+  # crypt_state_from_summary (scripts/lib/crypt-state.sh) reads the bit pattern,
+  # not the prose, and applies the odd-parity rule shared with flash-fleet.sh.
+  # It echoes "" for a summary with no CRYPT_CNT bits, which this refuses rather
+  # than assuming safe: the same fail-closed stance as an unreadable eFuse.
+  state=$(printf '%s\n' "$summary" | crypt_state_from_summary)
+  if [[ -z "$state" ]]; then
+    crypt_line=$(printf '%s\n' "$summary" | grep -E "SPI_BOOT_CRYPT_CNT|FLASH_CRYPT_CNT" | head -1)
     echo "flash.sh: could not parse the flash-encryption eFuse on $PORT, refusing to flash." >&2
     echo "  Expected a (0b...) bit pattern on the SPI_BOOT_CRYPT_CNT line, got:" >&2
     echo "    ${crypt_line:-<no SPI_BOOT_CRYPT_CNT line at all>}" >&2
     echo "  Re-run with BRAMBLE_SKIP_ENCRYPTION_CHECK=1 only if you are certain." >&2
     exit 3
   fi
-  # Encryption is on when an ODD number of bits is set (1 or 3), per the eFuse
-  # definition the espefuse summary states on that same line.
-  ones=${bits//0/}
-  encrypted=$(( ${#ones} % 2 ))
+  if [[ "$state" == "encrypted" ]]; then encrypted=1; else encrypted=0; fi
 
   if [[ "$encrypted" == "1" && "$ACTION" == "flash" ]]; then
     echo "flash.sh: $PORT has flash encryption enabled; a plaintext flash bricks it." >&2
