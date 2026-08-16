@@ -351,9 +351,9 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         attempt_identity_attestation(now_ms());
         /* Notify webapp */
         cJSON* params = cJSON_CreateObject();
-        char addr_buf[12];
-        snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, s_identity->address);
-        cJSON_AddStringToObject(params, "new_address", addr_buf);
+        char addr_buf[9];
+        cJSON_AddStringToObject(params, "new_address",
+                                addr_hex(s_identity->address, addr_buf, sizeof(addr_buf)));
         cJSON_AddStringToObject(params, "reason", "address_collision");
         rpc_notify("bramble.onIdentityChange", params);
         cJSON_Delete(params);
