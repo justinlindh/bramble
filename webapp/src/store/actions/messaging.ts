@@ -6,6 +6,7 @@ import { useStore, conversationIdForMessage, parseConversationId } from '../inde
 import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
+import { utf8Length } from '../../utils/byteLimit';
 import { parseAddr } from '../../lib/addr';
 import { isUnknownMethodError } from '../../lib/errors';
 import { mergeBroadcastRecipient } from '../../lib/broadcastRecipients';
@@ -469,10 +470,6 @@ interface BroadcastDeliveryNotification {
 const SINGLE_PACKET_MAX_BYTES = 203;
 const FRAGMENTED_MAX_BYTES = 616;
 
-function utf8ByteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
-
 export function registerBroadcastSendTelemetry(msgId: string, meta: { packetId?: string; broadcastId?: string }): void {
   const { packetId, broadcastId } = meta;
   if (packetId || broadcastId) {
@@ -549,7 +546,7 @@ export async function sendMessage(
   const client = requireClient();
   const store = useStore.getState();
 
-  const messageBytes = utf8ByteLength(text);
+  const messageBytes = utf8Length(text);
   if (messageBytes > FRAGMENTED_MAX_BYTES) {
     throw new Error(`Message too long (${messageBytes} bytes). Max is ${FRAGMENTED_MAX_BYTES} bytes.`);
   }
