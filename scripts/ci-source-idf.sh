@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
+# This helper must be SOURCED, never executed: it exports ESP-IDF into the
+# caller's shell (`source scripts/ci-source-idf.sh`), so a subprocess run would
+# discard the very environment it sets up. Every caller sources it, so it exits
+# with `return`; running it directly errors out, which is the intended signal.
 set -euo pipefail
-
-sourced=0
-if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
-  sourced=1
-fi
 
 # If idf.py is already on PATH, no explicit export script is required.
 if command -v idf.py >/dev/null 2>&1; then
   echo "[ci-idf] idf.py already available on PATH"
-  if (( sourced )); then return 0; else exit 0; fi
+  return 0
 fi
 
 candidates=()
@@ -33,7 +32,7 @@ for export_sh in "${candidates[@]}"; do
     source "$export_sh"
     if command -v idf.py >/dev/null 2>&1; then
       echo "[ci-idf] Loaded ESP-IDF from: $export_sh"
-      if (( sourced )); then return 0; else exit 0; fi
+      return 0
     fi
   fi
 done
@@ -42,4 +41,4 @@ echo "[ci-idf] ERROR: Unable to locate a working ESP-IDF export.sh; tried:" >&2
 for export_sh in "${candidates[@]}"; do
   echo "  - $export_sh" >&2
 done
-if (( sourced )); then return 1; else exit 1; fi
+return 1
