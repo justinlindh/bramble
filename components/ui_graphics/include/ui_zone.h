@@ -103,10 +103,6 @@ void ui_zone_bind_indevs(lv_group_t* g);
  * (settings, stats) build it in here instead. */
 lv_obj_t* ui_zone_scroll_column(lv_obj_t* parent);
 
-/* Bind every keypad/encoder indev to a zone's group and make it current.
- * A hop into an empty zone is refused (focus is never stranded). */
-void ui_zone_activate(ui_zone_t zone);
-
 /* Re-assert the one-visible-cursor invariant for whichever zone is current.
  *
  * A screen that rebuilds ITSELF, without a zone switch to reset things (the
