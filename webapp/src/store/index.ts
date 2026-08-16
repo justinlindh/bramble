@@ -158,6 +158,33 @@ export function formatConversationLabel(id: string, peerNames?: Map<number, stri
   }
 }
 
+// Number of leading characters of a message kept as a conversation's preview.
+const CONVERSATION_PREVIEW_CHARS = 60;
+
+// Assemble a conversation summary row from a message and its resolved bucket.
+// addMessage and loadCachedMessages build the identical shape around the shared
+// classifier (conversationTargetForMessage) and labeler (formatConversationLabel);
+// the only field that differs between them is unreadCount (a live increment vs
+// a persisted count), so it stays a parameter. Centralizing the assembly keeps
+// the preview length and the label/peer/channel derivation from drifting apart.
+export function buildConversationEntry(
+  target: ConversationTarget,
+  msg: Message,
+  peerNames: Map<number, string> | undefined,
+  config: BrambleConfig | null | undefined,
+  unreadCount: number,
+): Conversation {
+  return {
+    id: target.id,
+    label: formatConversationLabel(target.id, peerNames, config),
+    peerAddr: target.peerAddr,
+    channelIndex: target.channelIndex,
+    lastMessage: msg.text.slice(0, CONVERSATION_PREVIEW_CHARS),
+    lastMessageTime: msg.timestampMs,
+    unreadCount,
+  };
+}
+
 function persistUnreads(conversations: Map<string, Conversation>, config: BrambleConfig | null): void {
   if (!config?.identity?.address) return;
   const nodeAddr = formatAddrHex(config.identity.address);
@@ -324,18 +351,14 @@ export const useStore = create<AppState & Actions>((set) => ({
       const isActive = state.activeConversationId === convId;
       const shouldIncrementUnread = msg.direction === 'incoming' && !isActive;
       
-      const newConv = {
-        id: convId,
-        label: formatConversationLabel(convId, state.peerNames, state.config),
-        peerAddr: target.peerAddr,
-        channelIndex: target.channelIndex,
-        lastMessage: msg.text.slice(0, 60),
-        lastMessageTime: msg.timestampMs,
-        unreadCount:
-          (prev?.unreadCount ?? 0) +
-          (shouldIncrementUnread ? 1 : 0),
-      };
-      
+      const newConv = buildConversationEntry(
+        target,
+        msg,
+        state.peerNames,
+        state.config,
+        (prev?.unreadCount ?? 0) + (shouldIncrementUnread ? 1 : 0),
+      );
+
       debugLog('[addMessage] Creating conversation:', newConv);
       convs.set(convId, newConv);
 
@@ -442,15 +465,10 @@ export const useStore = create<AppState & Actions>((set) => ({
         const prev = convs.get(convId);
         const shouldUpdate = !prev || !prev.lastMessageTime || msg.timestampMs > prev.lastMessageTime;
         if (shouldUpdate) {
-          convs.set(convId, {
-            id: convId,
-            label: formatConversationLabel(convId, state.peerNames, state.config),
-            peerAddr: target.peerAddr,
-            channelIndex: target.channelIndex,
-            lastMessage: msg.text.slice(0, 60),
-            lastMessageTime: msg.timestampMs,
-            unreadCount: savedUnreads[convId] ?? 0,
-          });
+          convs.set(
+            convId,
+            buildConversationEntry(target, msg, state.peerNames, state.config, savedUnreads[convId] ?? 0),
+          );
         }
       }
       return { messages: msgs.slice(-500), conversations: convs };
