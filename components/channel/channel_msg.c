@@ -1,4 +1,4 @@
-#include "include/channel_msg.h"
+#include "channel_msg.h"
 #include <string.h>
 
 _Static_assert(CHANNEL_MSG_MAX_PLAINTEXT_SIZE >=

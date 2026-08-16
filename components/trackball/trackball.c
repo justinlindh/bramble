@@ -3,7 +3,7 @@
  * Hall effect sensor trackball with interrupt-driven event counters
  */
 
-#include "include/trackball.h"
+#include "trackball.h"
 #include "board_config.h"
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS

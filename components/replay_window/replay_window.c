@@ -1,4 +1,4 @@
-#include "include/replay_window.h"
+#include "replay_window.h"
 #include <string.h>
 
 void replay_table_init(replay_table_t* t) { memset(t, 0, sizeof(*t)); }
