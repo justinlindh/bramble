@@ -1,5 +1,4 @@
 #include "include/public_channel.h"
-#include <string.h>
 
 int public_channel_init(bramble_channel_t* channels, int* num_channels) {
     if (!channels || !num_channels)

@@ -11,7 +11,6 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
-#include <string.h>
 
 static const char* TAG = "trackball";
 static const bramble_board_config_t* s_board = NULL;

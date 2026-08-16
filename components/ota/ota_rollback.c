@@ -1,7 +1,5 @@
 #include "ota_rollback.h"
 
-#include <string.h>
-
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "nvs.h"

@@ -16,7 +16,6 @@
 #include "mbedtls/ecp.h"
 #include "mbedtls/platform_util.h"
 #include "esp_random.h"
-#include "esp_log.h"
 #include "crypto_entropy.h"
 #include "bramble_ed25519_provider.h"
 #include <string.h>
