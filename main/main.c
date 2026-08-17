@@ -24,6 +24,7 @@
 #endif
 #include "secure_nvs.h"
 #include "esp_partition.h"
+#include "addr_hex.h"
 #include "identity.h"
 #include "mesh_task.h"
 #include "cli.h"
@@ -789,7 +790,7 @@ static void render_screen(ui_state_t* ui) {
                 if (nb && nb->name[0])
                     snprintf(nl, sizeof(nl), "%.24s", nb->name);
                 else
-                    snprintf(nl, sizeof(nl), "%08" PRIX32, addr);
+                    addr_hex(addr, nl, sizeof(nl));
                 display_draw_text(2, y, nl);
                 y += LINE_H + 4;
 
@@ -1399,7 +1400,7 @@ void app_main(void) {
      * "Node address" log format above. */
     {
         char emu_node_id[9];
-        snprintf(emu_node_id, sizeof(emu_node_id), "%08" PRIX32, my_addr);
+        addr_hex(my_addr, emu_node_id, sizeof(emu_node_id));
         emu_link_set_fw_version(esp_app_get_description()->version);
         if (emu_link_connect(emu_node_id, "radio,display,buttons,gps,battery") == 0) {
             ESP_LOGI(TAG, "emu-link: attached to broker as %s", emu_node_id);
@@ -1661,7 +1662,7 @@ void app_main(void) {
                  * connecting: addr is the full address (the hostname only
                  * carries the low 16 bits), name is the friendly name. */
                 char addr_txt[9];
-                snprintf(addr_txt, sizeof(addr_txt), "%08" PRIX32, my_addr);
+                addr_hex(my_addr, addr_txt, sizeof(addr_txt));
                 const char* node_name = mesh_get_node_name();
                 mdns_txt_item_t txt[2] = {
                     {"addr", addr_txt},

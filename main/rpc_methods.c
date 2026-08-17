@@ -554,7 +554,7 @@ static int handle_get_delivery_events(const cJSON* params, cJSON* result) {
         snprintf(id_buf, sizeof(id_buf), "fw:%" PRIu32, e->event_seq);
         cJSON_AddStringToObject(obj, "event_id", id_buf);
 
-        char msg_buf[12];
+        char msg_buf[9];
         snprintf(msg_buf, sizeof(msg_buf), "%08" PRIX32, e->message_id);
 
         cJSON* payload = cJSON_CreateObject();
@@ -573,9 +573,9 @@ static int handle_get_delivery_events(const cJSON* params, cJSON* result) {
             cJSON* path = cJSON_AddArrayToObject(payload, "relayPath");
             for (uint8_t h = 0; h < e->route_len && h < DELIVERY_EVENT_ROUTE_MAX_HOPS; h++) {
                 cJSON* hop = cJSON_CreateObject();
-                char hop_buf[12];
-                snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, e->route_hops[h]);
-                cJSON_AddStringToObject(hop, "addr", hop_buf);
+                char hop_buf[9];
+                cJSON_AddStringToObject(hop, "addr",
+                                        addr_hex(e->route_hops[h], hop_buf, sizeof(hop_buf)));
                 cJSON_AddNumberToObject(hop, "rssi", 0);
                 cJSON_AddItemToArray(path, hop);
             }
