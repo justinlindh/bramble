@@ -162,12 +162,9 @@ export function formatConversationLabel(id: string, peerNames?: Map<number, stri
 const CONVERSATION_PREVIEW_CHARS = 60;
 
 // Assemble a conversation summary row from a message and its resolved bucket.
-// addMessage and loadCachedMessages build the identical shape around the shared
-// classifier (conversationTargetForMessage) and labeler (formatConversationLabel);
-// the only field that differs between them is unreadCount (a live increment vs
-// a persisted count), so it stays a parameter. Centralizing the assembly keeps
-// the preview length and the label/peer/channel derivation from drifting apart.
-export function buildConversationEntry(
+// unreadCount is a parameter because callers derive it differently: a live
+// increment in addMessage, the persisted count in loadCachedMessages.
+function buildConversationEntry(
   target: ConversationTarget,
   msg: Message,
   peerNames: Map<number, string> | undefined,
