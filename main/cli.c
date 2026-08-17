@@ -35,6 +35,25 @@
 static const char* TAG = "cli";
 static bramble_identity_t* s_identity;
 
+/* Join argv[start..argc) into out as one space-separated string, NUL
+ * terminated and truncated to fit out_sz. Returns the byte length written,
+ * excluding the terminator. Shared by the commands that take a free-text tail
+ * (broadcast, send, name) so they all truncate the same way. */
+static int cli_join_args(char** argv, int start, int argc, char* out, size_t out_sz) {
+    int pos = 0;
+    for (int i = start; i < argc && pos < (int)out_sz - 1; i++) {
+        if (i > start)
+            out[pos++] = ' ';
+        int len = strlen(argv[i]);
+        if (pos + len >= (int)out_sz - 1)
+            len = (int)out_sz - 1 - pos;
+        memcpy(out + pos, argv[i], len);
+        pos += len;
+    }
+    out[pos] = '\0';
+    return pos;
+}
+
 /* ── Command: peers ─────────────────────────────────────────────────── */
 
 static int cmd_peers(int argc, char** argv) {
@@ -84,17 +103,7 @@ static int cmd_broadcast(int argc, char** argv) {
 
     /* Concatenate all args as message */
     char msg[256];
-    int pos = 0;
-    for (int i = 1; i < argc && pos < (int)sizeof(msg) - 1; i++) {
-        if (i > 1)
-            msg[pos++] = ' ';
-        int len = strlen(argv[i]);
-        if (pos + len >= (int)sizeof(msg) - 1)
-            len = sizeof(msg) - 1 - pos;
-        memcpy(msg + pos, argv[i], len);
-        pos += len;
-    }
-    msg[pos] = '\0';
+    int pos = cli_join_args(argv, 1, argc, msg, sizeof(msg));
 
     printf("Broadcasting: \"%s\"\n", msg);
     int ret = mesh_send_broadcast((const uint8_t*)msg, pos);
@@ -123,17 +132,7 @@ static int cmd_send(int argc, char** argv) {
 
     /* Concatenate remaining args as message */
     char msg[256];
-    int pos = 0;
-    for (int i = 2; i < argc && pos < (int)sizeof(msg) - 1; i++) {
-        if (i > 2)
-            msg[pos++] = ' ';
-        int len = strlen(argv[i]);
-        if (pos + len >= (int)sizeof(msg) - 1)
-            len = sizeof(msg) - 1 - pos;
-        memcpy(msg + pos, argv[i], len);
-        pos += len;
-    }
-    msg[pos] = '\0';
+    int pos = cli_join_args(argv, 2, argc, msg, sizeof(msg));
 
     printf("Sending to %08" PRIX32 ": \"%s\"\n", dest_addr, msg);
     int ret = mesh_send_message(dest_addr, (const uint8_t*)msg, pos);
@@ -226,12 +225,7 @@ static int cmd_name(int argc, char** argv) {
 
     /* Join all args as the name (allows spaces) */
     static char name_buf[64];
-    name_buf[0] = '\0';
-    for (int i = 1; i < argc; i++) {
-        if (i > 1)
-            strncat(name_buf, " ", sizeof(name_buf) - strlen(name_buf) - 1);
-        strncat(name_buf, argv[i], sizeof(name_buf) - strlen(name_buf) - 1);
-    }
+    cli_join_args(argv, 1, argc, name_buf, sizeof(name_buf));
 
     int ret = mesh_set_node_name_persist(name_buf);
     if (ret == 0) {
