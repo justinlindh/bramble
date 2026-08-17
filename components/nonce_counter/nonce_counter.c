@@ -1,4 +1,4 @@
-#include "include/nonce_counter.h"
+#include "nonce_counter.h"
 #include <stdbool.h>
 
 static uint32_t s_src;

@@ -4,8 +4,8 @@
  * 16-bit RGB565 framebuffer in PSRAM
  */
 
-#include "include/display.h"
-#include "include/font_6x8.h"
+#include "display.h"
+#include "font_6x8.h"
 #include "board_config.h"
 #include "driver/spi_master.h"
 #include "freertos/semphr.h"

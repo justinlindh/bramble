@@ -1,6 +1,6 @@
 #ifndef ESP_PLATFORM
 
-#include "include/crypto.h"
+#include "crypto.h"
 #include <string.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>

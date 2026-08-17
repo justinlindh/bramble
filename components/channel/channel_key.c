@@ -1,4 +1,4 @@
-#include "include/channel_key.h"
+#include "channel_key.h"
 #include <string.h>
 
 int channel_derive_key(const char* psk, bramble_channel_t* ch) {

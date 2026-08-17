@@ -3,7 +3,7 @@
  * Polling-based with debounce, long press, and double press detection.
  */
 
-#include "include/button.h"
+#include "button.h"
 #include "board_config.h"
 #include "driver/gpio.h"
 #include "esp_log.h"

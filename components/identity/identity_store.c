@@ -4,13 +4,13 @@
  * struct: host-testable directly, one instance per node in gosim, one
  * static instance in mesh_task.c.
  */
-#include "include/identity_store.h"
+#include "identity_store.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include "crypto.h"           /* crypto_ed25519_verify */
-#include "include/identity.h" /* identity_endorsement_verify (trust-anchor P2) */
+#include "crypto.h"   /* crypto_ed25519_verify */
+#include "identity.h" /* identity_endorsement_verify (trust-anchor P2) */
 
 void identity_store_init(identity_store_t* s, uint32_t now_ms) {
     memset(s, 0, sizeof(*s));
