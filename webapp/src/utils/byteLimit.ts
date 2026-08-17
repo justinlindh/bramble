@@ -30,6 +30,18 @@ export const CHANNEL_NAME_BUDGET_BYTES = 16;
  */
 export const ROLLCALL_TEXT_FALLBACK_BYTES = 48;
 
+/**
+ * Fragmentation budgets for a message body, aligned with the firmware's
+ * components/fragment. A body up to SINGLE_PACKET_MAX_BYTES rides in one
+ * packet; anything longer is split into at most MAX_FRAGMENTS packets of
+ * FRAGMENT_PAYLOAD_BYTES, so FRAGMENTED_MAX_BYTES is the largest body the
+ * receiving node can reassemble.
+ */
+export const SINGLE_PACKET_MAX_BYTES = 203;
+export const FRAGMENT_PAYLOAD_BYTES = 154;
+export const MAX_FRAGMENTS = 4;
+export const FRAGMENTED_MAX_BYTES = FRAGMENT_PAYLOAD_BYTES * MAX_FRAGMENTS;
+
 const encoder = new TextEncoder();
 
 /** Length of `s` in UTF-8 bytes, the unit the node's limits are written in. */

@@ -6,7 +6,7 @@ import { useStore, conversationIdForMessage, parseConversationId } from '../inde
 import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
-import { utf8Length } from '../../utils/byteLimit';
+import { utf8Length, FRAGMENTED_MAX_BYTES } from '../../utils/byteLimit';
 import { parseAddr } from '../../lib/addr';
 import { isUnknownMethodError } from '../../lib/errors';
 import { mergeBroadcastRecipient } from '../../lib/broadcastRecipients';
@@ -461,13 +461,6 @@ interface BroadcastDeliveryNotification {
   hop_count?: number;
   delivered_at_ms?: number;
 }
-
-// Fragmentation limits (aligned with firmware components/fragment):
-// - Single packet max: 203 bytes
-// - Fragment payload: 154 bytes/fragment
-// - Max fragments: 4
-// - True fragmented max: 154 × 4 = 616 bytes
-const FRAGMENTED_MAX_BYTES = 616;
 
 export function registerBroadcastSendTelemetry(msgId: string, meta: { packetId?: string; broadcastId?: string }): void {
   const { packetId, broadcastId } = meta;
