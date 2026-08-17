@@ -1,3 +1,5 @@
+import { IdbStore } from './idbStore';
+
 export interface DeliveryEventRecord {
   eventId: string;
   messageId: string;
@@ -7,31 +9,20 @@ export interface DeliveryEventRecord {
   payload?: unknown;
 }
 
-class DeliveryEventStore {
-  private db: IDBDatabase | null = null;
-  private readonly DB_VERSION = 3;
-  private readonly STORE_NAME = 'delivery_events';
-  private nodeAddr = '';
+const STORE_NAME = 'delivery_events';
 
-  async open(nodeAddr?: string): Promise<void> {
-    const addr = nodeAddr || 'default';
-    if (this.db && this.nodeAddr !== addr) {
-      this.db.close();
-      this.db = null;
-    }
-    this.nodeAddr = addr;
-    if (this.db) return;
-    if (typeof indexedDB === 'undefined') return;
+function byTs(events: DeliveryEventRecord[]): DeliveryEventRecord[] {
+  return events.sort((a, b) => a.ts - b.ts);
+}
 
-    const dbName = `bramble-delivery-events-${addr}`;
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(dbName, this.DB_VERSION);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        const store = db.objectStoreNames.contains(this.STORE_NAME)
-          ? req.transaction!.objectStore(this.STORE_NAME)
-          : db.createObjectStore(this.STORE_NAME, { keyPath: 'eventId' });
-
+class DeliveryEventStore extends IdbStore {
+  constructor() {
+    super({
+      dbPrefix: 'bramble-delivery-events',
+      version: 3,
+      storeName: STORE_NAME,
+      keyPath: 'eventId',
+      migrate(store) {
         if (!store.indexNames.contains('by-message')) {
           store.createIndex('by-message', 'messageId', { unique: false });
         }
@@ -49,73 +40,44 @@ class DeliveryEventStore {
         if (store.indexNames.contains('by-node-addr')) {
           store.deleteIndex('by-node-addr');
         }
-      };
-      req.onsuccess = () => {
-        this.db = req.result;
-        resolve();
-      };
-      req.onerror = () => reject(req.error);
+      },
     });
   }
 
   async upsertDeliveryEvent(event: DeliveryEventRecord): Promise<void> {
-    if (!this.db) return;
-    return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction(this.STORE_NAME, 'readwrite');
-      tx.objectStore(this.STORE_NAME).put(event);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    return this.write(store => store.put(event));
   }
 
   async upsertDeliveryEvents(events: DeliveryEventRecord[]): Promise<void> {
-    if (!this.db || events.length === 0) return;
-    return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction(this.STORE_NAME, 'readwrite');
-      const store = tx.objectStore(this.STORE_NAME);
+    if (events.length === 0) return;
+    return this.write(store => {
       for (const event of events) {
         store.put(event);
       }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
     });
   }
 
   async listByMessage(messageId: string): Promise<DeliveryEventRecord[]> {
-    if (!this.db) return [];
-    return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction(this.STORE_NAME, 'readonly');
-      const req = tx.objectStore(this.STORE_NAME).index('by-message').getAll(messageId);
-      req.onsuccess = () => {
-        const events = (req.result as DeliveryEventRecord[]).sort((a, b) => a.ts - b.ts);
-        resolve(events);
-      };
-      req.onerror = () => reject(req.error);
-    });
+    return this.read(
+      store => store.index('by-message').getAll(messageId),
+      raw => byTs(raw as DeliveryEventRecord[]),
+      [],
+    );
   }
 
   async listByPacketId(packetId: string): Promise<DeliveryEventRecord[]> {
-    if (!this.db) return [];
-    return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction(this.STORE_NAME, 'readonly');
-      const req = tx.objectStore(this.STORE_NAME).index('by-packet').getAll(packetId);
-      req.onsuccess = () => {
-        const events = (req.result as DeliveryEventRecord[]).sort((a, b) => a.ts - b.ts);
-        resolve(events);
-      };
-      req.onerror = () => reject(req.error);
-    });
+    return this.read(
+      store => store.index('by-packet').getAll(packetId),
+      raw => byTs(raw as DeliveryEventRecord[]),
+      [],
+    );
   }
 
   async pruneOldEvents(cutoffTs: number): Promise<number> {
-    if (!this.db) return 0;
-    return new Promise((resolve, reject) => {
-      let deleted = 0;
-      const tx = this.db!.transaction(this.STORE_NAME, 'readwrite');
-      const index = tx.objectStore(this.STORE_NAME).index('by-ts');
+    let deleted = 0;
+    await this.write(store => {
       const range = IDBKeyRange.upperBound(cutoffTs, true);
-      const req = index.openCursor(range);
-
+      const req = store.index('by-ts').openCursor(range);
       req.onsuccess = () => {
         const cursor = req.result;
         if (!cursor) return;
@@ -123,20 +85,8 @@ class DeliveryEventStore {
         deleted += 1;
         cursor.continue();
       };
-
-      tx.oncomplete = () => resolve(deleted);
-      tx.onerror = () => reject(tx.error);
     });
-  }
-
-  async clearAll(): Promise<void> {
-    if (!this.db) return;
-    return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction(this.STORE_NAME, 'readwrite');
-      tx.objectStore(this.STORE_NAME).clear();
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    return deleted;
   }
 }
 
