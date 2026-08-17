@@ -467,7 +467,6 @@ interface BroadcastDeliveryNotification {
 // - Fragment payload: 154 bytes/fragment
 // - Max fragments: 4
 // - True fragmented max: 154 × 4 = 616 bytes
-const SINGLE_PACKET_MAX_BYTES = 203;
 const FRAGMENTED_MAX_BYTES = 616;
 
 export function registerBroadcastSendTelemetry(msgId: string, meta: { packetId?: string; broadcastId?: string }): void {
