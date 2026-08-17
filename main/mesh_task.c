@@ -1060,11 +1060,11 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
 
                         /* Emit onMessage notification via RPC */
                         {
-                            char addr_buf[12];
-                            snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, info.src_addr);
-
+                            char addr_buf[9];
                             cJSON* params = cJSON_CreateObject();
-                            cJSON_AddStringToObject(params, "from", addr_buf);
+                            cJSON_AddStringToObject(
+                                params, "from",
+                                addr_hex(info.src_addr, addr_buf, sizeof(addr_buf)));
                             /* Sender display name when the neighbor table
                              * knows it (from beacons): clients then never
                              * have to show a bare hex address for a peer
@@ -1150,11 +1150,10 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
 
         /* Emit onMessage notification via RPC */
         {
-            char addr_buf[12];
-            snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, info.src_addr);
-
+            char addr_buf[9];
             cJSON* params = cJSON_CreateObject();
-            cJSON_AddStringToObject(params, "from", addr_buf);
+            cJSON_AddStringToObject(params, "from",
+                                    addr_hex(info.src_addr, addr_buf, sizeof(addr_buf)));
             /* Sender display name when the neighbor table knows it. */
             {
                 neighbor_entry_t* nb = neighbor_lookup(&s_neighbors, info.src_addr);
@@ -1995,7 +1994,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
             probe_result_t* r = &s_probe_results[i];
             int seen_rounds = __builtin_popcount((unsigned)r->seen_round_mask);
             cJSON* item = cJSON_CreateObject();
-            char addr_buf[12];
+            char addr_buf[9];
             cJSON_AddStringToObject(item, "address", addr_hex(r->addr, addr_buf, sizeof(addr_buf)));
             cJSON_AddNumberToObject(item, "hops", r->hops);
             cJSON_AddNumberToObject(item, "rssi", r->rssi);
