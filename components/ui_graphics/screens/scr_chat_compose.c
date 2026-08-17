@@ -3,7 +3,6 @@
 #include "ui_zone.h"
 #include "ui_shared_state.h"
 #include "theme/bramble_theme.h"
-#include "esp_log.h"
 #include <stdio.h>
 
 extern void scr_chat_messages_open(bramble_layout_t* layout, int channel_idx);

@@ -3,7 +3,6 @@
 #include "theme/bramble_theme.h"
 #include "chat_unread.h"
 #include "msg_store.h"
-#include "esp_log.h"
 #include <stdio.h>
 #include <stdint.h>
 

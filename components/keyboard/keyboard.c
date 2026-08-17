@@ -24,7 +24,6 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "nvs_keys.h"
-#include <string.h>
 
 static const char* TAG = "keyboard";
 static const bramble_board_config_t* s_board = NULL;

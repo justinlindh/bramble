@@ -7,7 +7,6 @@
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
 #include "sdmmc_cmd.h"
-#include <string.h>
 
 static const char* TAG = "sdcard";
 static const char* MOUNT_POINT = "/sdcard";

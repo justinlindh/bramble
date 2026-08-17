@@ -4,7 +4,6 @@
 #include "ui_shared_state.h"
 #include "node_presence.h"
 #include "theme/bramble_theme.h"
-#include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
 #include <stdlib.h>

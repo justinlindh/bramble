@@ -1,7 +1,6 @@
 #include "ota_version.h"
 
 #include <ctype.h>
-#include <stdlib.h>
 #include <string.h>
 
 /* Parse a non-negative decimal integer with no sign and no leading garbage.
