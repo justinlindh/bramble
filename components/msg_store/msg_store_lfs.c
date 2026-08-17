@@ -20,8 +20,8 @@
  */
 #ifdef BRAMBLE_PLATFORM_NRF
 
-#include "include/msg_store.h"
-#include "include/msg_store_spiffs.h"
+#include "msg_store.h"
+#include "msg_store_spiffs.h"
 
 #include <string.h>
 

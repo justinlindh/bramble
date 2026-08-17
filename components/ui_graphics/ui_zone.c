@@ -239,7 +239,9 @@ static void zone_focus_changed(lv_group_t* g) {
         apply_focus_visual(live);
 }
 
-void ui_zone_activate(ui_zone_t zone) {
+/* Bind every keypad/encoder indev to a zone's group and make it current.
+ * A hop into an empty zone is refused (focus is never stranded). */
+static void ui_zone_activate(ui_zone_t zone) {
     lv_group_t* g = (zone == UI_ZONE_CHROME) ? s_chrome : s_content;
     if (group_empty(g))
         return; /* never strand focus in an empty zone */

@@ -1,6 +1,6 @@
-#include "include/channel_flood.h"
-#include "include/discovery.h"
-#include "include/routing.h" /* ROUTE_HOP_LIMIT_MAX (reactive origination budget) */
+#include "channel_flood.h"
+#include "discovery.h"
+#include "routing.h" /* ROUTE_HOP_LIMIT_MAX (reactive origination budget) */
 
 #include <string.h>
 

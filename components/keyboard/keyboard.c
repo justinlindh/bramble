@@ -10,7 +10,7 @@
  * guarded (see trackball.c for the spinlock pattern).
  */
 
-#include "include/keyboard.h"
+#include "keyboard.h"
 #include "board_config.h"
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS

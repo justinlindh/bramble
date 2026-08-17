@@ -645,22 +645,20 @@ void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
 #endif
         record_ack_delivery_event(&ack);
         /* Notify webapp with full relay path from ACK */
-        char addr_buf[12];
-        snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, ack.src_addr);
+        char addr_buf[9];
         cJSON* params = cJSON_CreateObject();
-        cJSON_AddStringToObject(params, "from", addr_buf);
-        char pkt_buf[12];
+        cJSON_AddStringToObject(params, "from", addr_hex(ack.src_addr, addr_buf, sizeof(addr_buf)));
+        char pkt_buf[9];
         snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, ack.ack_packet_id);
         cJSON_AddStringToObject(params, "packet_id", pkt_buf);
         cJSON_AddStringToObject(params, "status", "delivered");
         cJSON_AddNumberToObject(params, "rssi_at_dest", ack.rssi_at_dest);
 
         cJSON* path = cJSON_AddArrayToObject(params, "relayPath");
-        char hop_buf[12];
+        char hop_buf[9];
         for (uint8_t i = 0; i < route_hop_count; i++) {
             cJSON* hop = cJSON_CreateObject();
-            snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, route_hops[i]);
-            cJSON_AddStringToObject(hop, "addr", hop_buf);
+            cJSON_AddStringToObject(hop, "addr", addr_hex(route_hops[i], hop_buf, sizeof(hop_buf)));
             cJSON_AddNumberToObject(hop, "rssi",
                                     (i == (route_hop_count - 1)) ? ack.rssi_at_dest : 0);
             cJSON_AddItemToArray(path, hop);
@@ -886,11 +884,10 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr, uint32_t broad
         return;
     }
 
-    char src_buf[12], id_buf[12], hop_buf[12];
+    char src_buf[9], id_buf[9], hop_buf[9];
     cJSON* params = cJSON_CreateObject();
-    snprintf(src_buf, sizeof(src_buf), "%08" PRIX32, src_addr);
     snprintf(id_buf, sizeof(id_buf), "%08" PRIX32, broadcast_id);
-    cJSON_AddStringToObject(params, "recipient", src_buf);
+    cJSON_AddStringToObject(params, "recipient", addr_hex(src_addr, src_buf, sizeof(src_buf)));
     cJSON_AddStringToObject(params, "broadcast_id", id_buf);
     cJSON_AddStringToObject(params, "status", "delivered");
     cJSON_AddNumberToObject(params, "rssi_at_dest", rssi_at_dest);
@@ -902,8 +899,7 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr, uint32_t broad
         cJSON* path = cJSON_AddArrayToObject(params, "relayPath");
         for (uint8_t i = 0; i < bounded_hops; i++) {
             cJSON* hop = cJSON_CreateObject();
-            snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, relay_path[i]);
-            cJSON_AddStringToObject(hop, "addr", hop_buf);
+            cJSON_AddStringToObject(hop, "addr", addr_hex(relay_path[i], hop_buf, sizeof(hop_buf)));
             cJSON_AddItemToArray(path, hop);
         }
     }

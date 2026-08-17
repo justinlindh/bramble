@@ -1,4 +1,4 @@
-#include "include/radio_mock.h"
+#include "radio_mock.h"
 #include <string.h>
 
 static bool mock_radio_valid_node(const mock_radio_t* radio, int idx) {

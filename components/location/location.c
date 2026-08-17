@@ -206,7 +206,8 @@ int location_cache_update(location_manager_t* mgr, uint32_t peer_addr,
     return 0;
 }
 
-void location_cache_drop(location_manager_t* mgr, uint32_t peer_addr) {
+/* Forget everything cached for one peer. */
+static void location_cache_drop(location_manager_t* mgr, uint32_t peer_addr) {
     for (int i = 0; i < mgr->cache_count; i++) {
         if (mgr->cache[i].peer_addr == peer_addr) {
             mgr->cache[i] = mgr->cache[--mgr->cache_count];

@@ -3,8 +3,8 @@
  * Uses ESP-IDF I2C master driver.
  */
 
-#include "include/display.h"
-#include "include/font_6x8.h"
+#include "display.h"
+#include "font_6x8.h"
 #include "board_config.h"
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"

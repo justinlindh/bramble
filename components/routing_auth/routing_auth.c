@@ -1,4 +1,4 @@
-#include "include/routing_auth.h"
+#include "routing_auth.h"
 #include "network_key.h"
 #include "crypto.h"
 #include <string.h>

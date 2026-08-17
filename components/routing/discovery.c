@@ -1,4 +1,4 @@
-#include "include/discovery.h"
+#include "discovery.h"
 #include "network_key.h"
 #include "crypto.h"
 #include <string.h>

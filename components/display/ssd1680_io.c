@@ -20,9 +20,9 @@
  */
 #if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)
 
-#include "include/display.h"
-#include "include/font_6x8.h"
-#include "include/ssd1680_engine.h"
+#include "display.h"
+#include "font_6x8.h"
+#include "ssd1680_engine.h"
 #include "board_config.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"

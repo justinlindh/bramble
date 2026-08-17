@@ -1,4 +1,4 @@
-#include "include/beacon.h"
+#include "beacon.h"
 #include "crypto.h"
 #include <string.h>
 

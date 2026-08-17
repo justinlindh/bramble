@@ -1,4 +1,4 @@
-#include "include/network_key.h"
+#include "network_key.h"
 #include "bramble_storage.h"
 #include "crypto.h"
 #include <string.h>

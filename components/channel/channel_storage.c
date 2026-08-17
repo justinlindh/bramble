@@ -3,9 +3,9 @@
  * Stores channel keys, names, and default channel index robustly.
  */
 
-#include "include/channel_storage.h"
-#include "include/channel_key.h"
-#include "include/channel_msg.h"
+#include "channel_storage.h"
+#include "channel_key.h"
+#include "channel_msg.h"
 #include <stdbool.h>
 #include <string.h>
 
