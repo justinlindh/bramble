@@ -149,9 +149,6 @@ int location_cache_update(location_manager_t* mgr, uint32_t peer_addr,
 const location_cache_entry_t* location_cache_get(const location_manager_t* mgr, uint32_t peer_addr);
 void location_cache_purge(location_manager_t* mgr, uint32_t now_ms);
 
-/* Forget everything cached for one peer. */
-void location_cache_drop(location_manager_t* mgr, uint32_t peer_addr);
-
 /*
  * Apply a decoded, authenticated location share to the cache with the tier's
  * own semantics. Every RX path goes through here (firmware handle_location
