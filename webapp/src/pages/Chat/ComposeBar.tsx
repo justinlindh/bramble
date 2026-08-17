@@ -6,30 +6,23 @@ import { useStore, parseConversationId } from '../../store/index';
 import { IconCritical, IconBroadcast, IconSend } from '../../components/Icons';
 import { showToast } from '../../components/Toast';
 import { friendlyErrorFrom } from '../../lib/errors';
+import {
+  utf8Length,
+  SINGLE_PACKET_MAX_BYTES,
+  FRAGMENT_PAYLOAD_BYTES,
+  MAX_FRAGMENTS,
+  FRAGMENTED_MAX_BYTES,
+} from '../../utils/byteLimit';
 import { ShareLocationToggle } from './ShareLocationButton';
 import type { LocationAttach } from './ShareLocationButton';
 import styles from './ComposeBar.module.css';
 
-// Fragmentation limits (aligned with firmware components/fragment):
-// - Single packet max: 203 bytes
-// - Fragment payload: 154 bytes per fragment
-// - Max fragments: 4
-// - True fragmented max: 154 × 4 = 616 bytes
-const SINGLE_PACKET_MAX = 203;
-const FRAGMENTED_MAX = 616;
-
-function byteLength(str: string): number {
-  return new TextEncoder().encode(str).length;
-}
-
 function packetInfo(bytes: number): { count: number; cls: string; label: string } {
   if (bytes === 0) return { count: 0, cls: '', label: '' };
-  if (bytes <= SINGLE_PACKET_MAX) return { count: 1, cls: styles.counterOk, label: '' };
-  // Fragment payload is 154 bytes per packet
-  const FRAGMENT_PAYLOAD = 154;
-  const count = Math.ceil(bytes / FRAGMENT_PAYLOAD);
+  if (bytes <= SINGLE_PACKET_MAX_BYTES) return { count: 1, cls: styles.counterOk, label: '' };
+  const count = Math.ceil(bytes / FRAGMENT_PAYLOAD_BYTES);
   if (count <= 2) return { count, cls: styles.counterWarn, label: `${count} fragments` };
-  if (count <= 4) return { count, cls: styles.counterHigh, label: `${count} fragments` };
+  if (count <= MAX_FRAGMENTS) return { count, cls: styles.counterHigh, label: `${count} fragments` };
   return { count, cls: styles.counterOver, label: 'too long' };
 }
 
@@ -72,9 +65,9 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
   const isBroadcastConv = parseConversationId(conversationId).kind === 'broadcast';
   const effectiveTier: MessageTier = isBroadcastConv ? 'broadcast' : tier;
 
-  const bytes = useMemo(() => byteLength(text), [text]);
+  const bytes = useMemo(() => utf8Length(text), [text]);
   const pkt = packetInfo(bytes);
-  const overLimit = bytes > FRAGMENTED_MAX;
+  const overLimit = bytes > FRAGMENTED_MAX_BYTES;
   const canSend = isConnected && text.trim().length > 0 && !sending && !overLimit;
 
   const handleSend = async () => {
@@ -168,10 +161,10 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
         {bytes > 0 && (
           <div
             className={`${styles.counter} ${pkt.cls}`}
-            title="Messages over 203 bytes are automatically split into fragments (max 4 fragments, 154 bytes each). Fragments are reassembled on the receiving node."
+            title={`Messages over ${SINGLE_PACKET_MAX_BYTES} bytes are automatically split into fragments (max ${MAX_FRAGMENTS} fragments, ${FRAGMENT_PAYLOAD_BYTES} bytes each). Fragments are reassembled on the receiving node.`}
             aria-label="Message size and fragmentation info"
           >
-            <span>{bytes}/{FRAGMENTED_MAX}</span>
+            <span>{bytes}/{FRAGMENTED_MAX_BYTES}</span>
             {pkt.label && <span className={styles.packetLabel}>{pkt.label}</span>}
           </div>
         )}
