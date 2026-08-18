@@ -3,6 +3,7 @@
 // paths under the origin, but bramble.otaUpdate wants origin-relative paths.
 
 import { isElectron } from '../utils/platform';
+import { compareSemver } from './semver';
 
 export interface OtaArtifact { board: string; file: string; sha256?: string; size?: number; notes?: string }
 export interface OtaRelease { version: string; publishedAt: string; channel?: string; artifacts: OtaArtifact[] }
@@ -11,49 +12,9 @@ export function hardwareToBoard(hardware: string): string {
   return hardware.replaceAll('_', '-');
 }
 
-function parseCore(v: string): { core: number[]; pre: string } {
-  const s = v.startsWith('v') ? v.slice(1) : v;
-  const dash = s.indexOf('-');
-  const core = (dash >= 0 ? s.slice(0, dash) : s).split('.').map((n) => Number(n) || 0);
-  while (core.length < 3) core.push(0);
-  return { core: core.slice(0, 3), pre: dash >= 0 ? s.slice(dash + 1) : '' };
-}
-
-// Semver precedence for a single dot-separated prerelease identifier
-// (https://semver.org/#spec-item-11): purely-numeric identifiers compare
-// numerically and always rank below alphanumeric identifiers, which compare
-// lexically (ASCII order).
-function compareIdentifier(a: string, b: string): number {
-  const aNum = /^[0-9]+$/.test(a);
-  const bNum = /^[0-9]+$/.test(b);
-  if (aNum && bNum) return Number(a) - Number(b);
-  if (aNum) return -1;
-  if (bNum) return 1;
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-function comparePrerelease(a: string, b: string): number {
-  if (a === b) return 0;
-  if (a === '') return 1;   // release above prerelease
-  if (b === '') return -1;
-  const aParts = a.split('.');
-  const bParts = b.split('.');
-  const len = Math.min(aParts.length, bParts.length);
-  for (let i = 0; i < len; i++) {
-    const c = compareIdentifier(aParts[i], bParts[i]);
-    if (c !== 0) return c;
-  }
-  return aParts.length - bParts.length; // shorter prerelease ranks lower
-}
-
-export function compareVersions(a: string, b: string): number {
-  const pa = parseCore(a);
-  const pb = parseCore(b);
-  for (let i = 0; i < 3; i++) {
-    if (pa.core[i] !== pb.core[i]) return pa.core[i] - pb.core[i];
-  }
-  return comparePrerelease(pa.pre, pb.pre);
-}
+// Version precedence for the OTA journey uses the shared semver comparator so
+// firmware update ordering and the desktop self-updater cannot drift apart.
+export const compareVersions = compareSemver;
 
 export function relativizeArtifactPath(file: string, origin: string): string | null {
   if (!file.startsWith('/')) return file;
