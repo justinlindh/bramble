@@ -366,7 +366,7 @@ func (m twinMetrics) uint(key string) uint64 {
 // to the broadcast callback, so it does not ride the C-stdout pipe and cannot
 // be dropped the way the C-emitted per-packet lines can.
 func runScenarioFinalMetrics(path string) (twinMetrics, error) {
-	result, err := runScenarioQuiet(path)
+	result, err := runScenario(path)
 	if err != nil {
 		return nil, err
 	}

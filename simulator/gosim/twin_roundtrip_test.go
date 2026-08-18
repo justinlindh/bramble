@@ -124,9 +124,9 @@ func runTwinScenarioFile(t *testing.T, body string) *scenarioRunResult {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write scenario: %v", err)
 	}
-	result, err := runScenarioQuiet(path)
+	result, err := runScenario(path)
 	if err != nil {
-		t.Fatalf("runScenarioQuiet: %v", err)
+		t.Fatalf("runScenario: %v", err)
 	}
 	return result
 }
