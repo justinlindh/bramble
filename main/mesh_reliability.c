@@ -42,6 +42,23 @@ static void delivery_event_ring_append_locked(const delivery_event_record_t* eve
     xSemaphoreGive(s_delivery_event_mutex);
 }
 
+/* Clamp hop_count to the ring's fixed route_hops capacity and copy that many
+ * relay-path entries into evt. Shared by both delivery-event recorders below.
+ * relay_path may be NULL (no path to record), in which case route_len is still
+ * set and no hops are copied. */
+static void delivery_event_set_route(delivery_event_record_t* evt, uint8_t hop_count,
+                                     const uint32_t* relay_path) {
+    uint8_t hops = hop_count;
+    if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS)
+        hops = DELIVERY_EVENT_ROUTE_MAX_HOPS;
+    evt->route_len = hops;
+    if (relay_path) {
+        for (uint8_t i = 0; i < hops; i++) {
+            evt->route_hops[i] = relay_path[i];
+        }
+    }
+}
+
 static void record_ack_delivery_event(const bramble_ack_t* ack) {
     if (!ack)
         return;
@@ -51,14 +68,7 @@ static void record_ack_delivery_event(const bramble_ack_t* ack) {
     evt.timestamp_s = now_ms() / 1000u;
     evt.recipient_addr = ack->src_addr;
     evt.event_type = DELIVERY_EVENT_TYPE_ACK;
-
-    uint8_t hops = ack->hop_count;
-    if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS)
-        hops = DELIVERY_EVENT_ROUTE_MAX_HOPS;
-    evt.route_len = hops;
-    for (uint8_t i = 0; i < hops; i++) {
-        evt.route_hops[i] = ack->relay_path[i];
-    }
+    delivery_event_set_route(&evt, ack->hop_count, ack->relay_path);
 
     delivery_event_ring_append_locked(&evt);
 }
@@ -70,16 +80,7 @@ static void record_broadcast_delivery_event(uint32_t recipient_addr, uint32_t br
     evt.timestamp_s = now_ms() / 1000u;
     evt.recipient_addr = recipient_addr;
     evt.event_type = DELIVERY_EVENT_TYPE_BROADCAST_DELIVERY;
-
-    uint8_t hops = hop_count;
-    if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS)
-        hops = DELIVERY_EVENT_ROUTE_MAX_HOPS;
-    evt.route_len = hops;
-    if (relay_path) {
-        for (uint8_t i = 0; i < hops; i++) {
-            evt.route_hops[i] = relay_path[i];
-        }
-    }
+    delivery_event_set_route(&evt, hop_count, relay_path);
 
     delivery_event_ring_append_locked(&evt);
 }
