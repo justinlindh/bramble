@@ -1935,7 +1935,15 @@ static int handle_set_default_channel(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-static int handle_set_mailbox(const cJSON* params, cJSON* result) {
+/* Shared body for the boolean feature-toggle RPCs that persist an "enabled"
+ * flag to a single-key NVS namespace and then apply it: validate the bool
+ * param, write it, report a persist failure the standard way, run the apply
+ * setter, log, and echo {ok, enabled}. handle_set_mailbox and
+ * handle_set_flood_transport are the same shape apart from the NVS namespace,
+ * the apply function, and their log/error wording. */
+static int rpc_persist_bool_setting(const cJSON* params, const char* ns, void (*apply)(bool),
+                                    const char* log_label, const char* persist_err_msg,
+                                    cJSON* result) {
     if (!params)
         return RPC_ERR_INVALID_PARAMS;
     cJSON* enabled = cJSON_GetObjectItem(params, "enabled");
@@ -1944,55 +1952,35 @@ static int handle_set_mailbox(const cJSON* params, cJSON* result) {
 
     /* Persist to NVS */
     nvs_handle_t nvs;
-    esp_err_t err = nvs_open(NVS_NS_MAILBOX, NVS_READWRITE, &nvs);
+    esp_err_t err = nvs_open(ns, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
         err = nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
         err = rpc_nvs_commit_close(nvs, err);
     }
 
     if (err != ESP_OK) {
-        return rpc_report_persist_failure(result, "mailbox persist failed", err, true,
-                                          "nvs write failed", 0);
+        return rpc_report_persist_failure(result, persist_err_msg, err, true, "nvs write failed",
+                                          0);
     }
 
     bool en = cJSON_IsTrue(enabled);
-    mesh_set_mailbox(en);
+    apply(en);
 
-    ESP_LOGI("rpc", "Mailbox %s", en ? "enabled" : "disabled");
+    ESP_LOGI("rpc", "%s %s", log_label, en ? "enabled" : "disabled");
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddBoolToObject(result, "enabled", en);
     return 0;
 }
 
-/* Flooding F1 Task 1: bramble.setFloodTransport. Same shape/pattern as
- * handle_set_mailbox above (NVS_NS_FLOOD instead of NVS_NS_MAILBOX). */
+static int handle_set_mailbox(const cJSON* params, cJSON* result) {
+    return rpc_persist_bool_setting(params, NVS_NS_MAILBOX, mesh_set_mailbox, "Mailbox",
+                                    "mailbox persist failed", result);
+}
+
+/* Flooding F1 Task 1: bramble.setFloodTransport. */
 static int handle_set_flood_transport(const cJSON* params, cJSON* result) {
-    if (!params)
-        return RPC_ERR_INVALID_PARAMS;
-    cJSON* enabled = cJSON_GetObjectItem(params, "enabled");
-    if (!enabled || !cJSON_IsBool(enabled))
-        return RPC_ERR_INVALID_PARAMS;
-
-    /* Persist to NVS */
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(NVS_NS_FLOOD, NVS_READWRITE, &nvs);
-    if (err == ESP_OK) {
-        err = nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
-        err = rpc_nvs_commit_close(nvs, err);
-    }
-
-    if (err != ESP_OK) {
-        return rpc_report_persist_failure(result, "flood transport persist failed", err, true,
-                                          "nvs write failed", 0);
-    }
-
-    bool en = cJSON_IsTrue(enabled);
-    mesh_set_flood_transport(en);
-
-    ESP_LOGI("rpc", "Flood transport %s", en ? "enabled" : "disabled");
-    cJSON_AddBoolToObject(result, "ok", true);
-    cJSON_AddBoolToObject(result, "enabled", en);
-    return 0;
+    return rpc_persist_bool_setting(params, NVS_NS_FLOOD, mesh_set_flood_transport,
+                                    "Flood transport", "flood transport persist failed", result);
 }
 
 /* Flooding F1 finalize: bramble.setFloodHopLimit {hops}. Sets the operator-
