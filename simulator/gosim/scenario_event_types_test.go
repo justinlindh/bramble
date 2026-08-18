@@ -127,7 +127,7 @@ func TestUnknownEventTypeFailsScenarioLoad(t *testing.T) {
 	if err := os.WriteFile(path, []byte(bad), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
-	if _, err := runScenarioHeadless(path); err == nil {
+	if _, err := runScenario(path); err == nil {
 		t.Fatal("scenario with an unrecognized event type loaded successfully; the engine is " +
 			"skipping unknown events again, which is the root cause behind issues #144 and #166")
 	}
@@ -143,9 +143,9 @@ func TestUnknownEventTypeFailsScenarioLoad(t *testing.T) {
 // the move partitions A-B from D-E. That partition is the whole point of the
 // movement phase, and before this fix none of it happened.
 func TestScenarioPathTraceMovementRuns(t *testing.T) {
-	result, err := runScenarioHeadless("../scenarios/reliability-path-trace.json")
+	result, err := runScenario("../scenarios/reliability-path-trace.json")
 	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
+		t.Fatalf("runScenario: %v", err)
 	}
 
 	type move struct {

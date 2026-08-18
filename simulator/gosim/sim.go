@@ -1733,7 +1733,7 @@ func shouldFilterLine(line []byte) bool {
 
 // loadHeadless starts the C-stdout pipe reader and loads scenarioPath under the
 // sim lock, the prologue both headless entry points (RunHeadless and bridge.go's
-// runScenarioHeadless) share. It flushes stdout and returns an error if the
+// runScenario) share. It flushes stdout and returns an error if the
 // scenario does not reach StateLoaded, so callers cannot drift on the
 // lock/restoreStdout-on-failure ordering. The caller creates the sim first
 // (each supplies its own broadcast callback) and drives the drain afterward.
@@ -1782,7 +1782,7 @@ func RunHeadless(scenarioPath string) error {
 
 // drainInstant runs the virtual-time event loop to completion and then calls
 // complete(), the shared core of both headless entry points (RunHeadless and
-// bridge.go's runScenarioHeadless). Events scheduled past sim.duration are not
+// bridge.go's runScenario). Events scheduled past sim.duration are not
 // dispatched; any generate_message among them is counted as a drop and reported
 // as a sim_ended message_dropped, so a scenario truncated by its duration
 // reports the same drops however it was launched. The caller must hold sim.mu.

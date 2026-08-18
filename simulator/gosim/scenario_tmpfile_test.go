@@ -23,9 +23,9 @@ func writeScenarioFile(t *testing.T, namePrefix, scenarioJSON string) string {
 // failing the test on any write or run error.
 func writeAndRunScenario(t *testing.T, namePrefix, scenarioJSON string) *scenarioRunResult {
 	t.Helper()
-	result, err := runScenarioHeadless(writeScenarioFile(t, namePrefix, scenarioJSON))
+	result, err := runScenario(writeScenarioFile(t, namePrefix, scenarioJSON))
 	if err != nil {
-		t.Fatalf("runScenarioHeadless: %v", err)
+		t.Fatalf("runScenario: %v", err)
 	}
 	return result
 }

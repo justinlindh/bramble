@@ -9,7 +9,7 @@ package main
 // loop) were maintained but never executed and rotted silently.
 //
 // This file runs a curated subset in-process, through the same
-// runScenarioHeadless entry point the rest of the package uses, and asserts the
+// runScenario entry point the rest of the package uses, and asserts the
 // invariant each scenario exists to check. gosim's own CI job already runs
 // `go test -count=1 ./...`, so these gate on every PR with no workflow change.
 //
@@ -58,9 +58,9 @@ type scenarioRun struct {
 func runGatedScenario(t *testing.T, name string) *scenarioRun {
 	t.Helper()
 	path := "../scenarios/" + name + ".json"
-	result, err := runScenarioHeadless(path)
+	result, err := runScenario(path)
 	if err != nil {
-		t.Fatalf("runScenarioHeadless(%s): %v", path, err)
+		t.Fatalf("runScenario(%s): %v", path, err)
 	}
 	run := &scenarioRun{
 		addrOf: map[string]string{},
@@ -664,7 +664,7 @@ func TestGatedScenariosAreDeterministic(t *testing.T) {
 // capture. Go-side events (node_joined, node_left, metrics) go straight to the
 // broadcast callback, while C-side events (message_delivered, anomaly,
 // route_added) are fprintf'd to a pipe drained by a separate goroutine
-// (runScenarioHeadless in bridge.go). The simulation itself is single-threaded
+// (runScenario in bridge.go). The simulation itself is single-threaded
 // over virtual time and fully deterministic, but the order in which those two
 // streams interleave in the captured slice is not. Sorting removes exactly that
 // capture artifact and nothing else: each line still carries its own virtual

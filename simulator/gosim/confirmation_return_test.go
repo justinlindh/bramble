@@ -53,8 +53,8 @@ import (
 // first attempt were lost.
 //
 // (These fallback assertions are folded into this same test, reusing one
-// runScenarioHeadless call, rather than a second scenario-level test: the
-// pipe-based stdout capture runScenarioHeadless uses is only built to be
+// runScenario call, rather than a second scenario-level test: the
+// pipe-based stdout capture runScenario uses is only built to be
 // exercised once per test process, and a second back-to-back invocation
 // in the same package process was observed to lose C-side fprintf lines,
 // a pre-existing harness fragility this task does not attempt to fix.)

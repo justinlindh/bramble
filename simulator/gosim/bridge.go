@@ -194,7 +194,7 @@ func pcg32Seed(rng *C.pcg32_state_t, seed uint64) {
 // _test.go files in this package avoid "C" directly (see radio_harness.go),
 // so a full protocol-level scenario run (discovery + multi-hop forwarding +
 // delivery receipts, as opposed to the narrow radioHarness unit tests) needs
-// a Go-typed entry point. runScenarioHeadless below drives a scenario file
+// a Go-typed entry point. runScenario below drives a scenario file
 // exactly like RunHeadless (main.go's --headless mode) but captures the
 // emitted JSON stream via an in-process callback instead of redirecting the
 // process's real stdout, and keeps the completed *Sim reachable so a test
@@ -209,35 +209,26 @@ type scenarioRunResult struct {
 	sim   *Sim
 }
 
-// runScenarioHeadless loads scenarioPath and drains its event queue to
-// completion (or until the scenario's duration_ms elapses) via the same
-// drainInstant core RunHeadless uses, so a duration-truncated scenario reports
-// identical sim_ended drops here as it does under the real headless binary.
-func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
-	return runScenarioCaptured(scenarioPath, true)
-}
-
-// runScenarioQuiet is runScenarioHeadless with the event stream captured and
-// nothing written to the process's own stdout. What the digital twin's capacity
-// probe (twin_analysis.go) runs on: it drives a scenario per offered rate and
-// then prints a report, and interleaving tens of thousands of simulation events
-// with that report would make it unreadable.
-func runScenarioQuiet(scenarioPath string) (*scenarioRunResult, error) {
-	return runScenarioCaptured(scenarioPath, false)
-}
-
-// runScenarioCaptured is the shared body. echoStdout is the sim's `headless`
-// flag, which decides only one thing (sim.go's emitRaw): whether every emitted
-// event is additionally written to the saved real stdout. Either way the caller
-// gets the full stream back in scenarioRunResult.Lines.
-func runScenarioCaptured(scenarioPath string, echoStdout bool) (*scenarioRunResult, error) {
+// runScenario loads scenarioPath and drains its event queue to completion (or
+// until the scenario's duration_ms elapses) via the same drainInstant core
+// RunHeadless uses, so a duration-truncated scenario reports identical
+// sim_ended drops here as it does under the real headless binary. The full
+// event stream is captured into scenarioRunResult.Lines for the caller (the
+// scenario tests and the digital twin's capacity probe in twin_analysis.go).
+//
+// NewSim's headless flag is passed false so nothing is echoed to the process's
+// own stdout: the pipe capture that feeds Lines works regardless of the flag
+// (it decides only whether emitRaw additionally writes to the saved real
+// stdout), and every caller reads Lines rather than stdout, so echoing would
+// only bury a test failure or the twin's report under the event stream.
+func runScenario(scenarioPath string) (*scenarioRunResult, error) {
 	var mu sync.Mutex
 	var lines []string
 	sim, err := NewSim("", func(b []byte) {
 		mu.Lock()
 		lines = append(lines, strings.TrimRight(string(b), "\n"))
 		mu.Unlock()
-	}, echoStdout)
+	}, false)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +276,7 @@ func (r *scenarioRunResult) PendingAckActive(nodeID string, packetID uint32) boo
 // destAddr, and if so, its next_hop. Reads the C route table directly
 // (like PendingAckActive reads pending_acks) rather than scraping the
 // route_added JSON log line: route_added is emitted via a C-side fprintf
-// through runScenarioHeadless's pipe-based stdout capture, which is only
+// through runScenario's pipe-based stdout capture, which is only
 // built to be exercised once per test process and has been observed to
 // drop lines under load; a direct struct read has no such race.
 func (r *scenarioRunResult) RouteNextHop(nodeID string, destAddr uint32) (uint32, bool) {
