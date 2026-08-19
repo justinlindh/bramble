@@ -18,6 +18,18 @@ describe('parseNodeShare', () => {
     if (r.ok) expect(r.data.address).toBe(0x12345678);
   });
 
+  it('accepts the all-zero address, which is a value and not a parse failure', () => {
+    const r = parseNodeShare('bramble://node/v1?n=n&a=00000000');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.address).toBe(0);
+  });
+
+  it('accepts uppercase hex, which is how firmware renders addresses', () => {
+    const r = parseNodeShare('bramble://node/v1?n=n&a=DEADBEEF');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.address).toBe(0xdeadbeef);
+  });
+
   it('rejects an address with trailing non-hex garbage instead of truncating it', () => {
     // parseInt('abcz', 16) is 0xabc (2748), a wrong-but-plausible address;
     // tryParseAddr rejects it outright.
