@@ -8,30 +8,42 @@
  * that contract in one place so call sites keep only their own key names and
  * JSON/validation logic.
  *
- * The store defaults to localStorage; pass sessionStorage for the few values
- * (device tokens) that live there. Callers that need to log or otherwise react
- * to a storage failure should keep their own try/catch instead of using these.
+ * The area is named rather than passed as a Storage object because reading the
+ * window.localStorage/sessionStorage property is itself a throwing operation
+ * under a block-all-cookies policy and in sandboxed frames. Resolving it inside
+ * the try is what makes the guard cover that case.
+ *
+ * The area defaults to local; pass 'session' for the few values (device tokens,
+ * probe results) that live in sessionStorage. Callers that need to log or
+ * otherwise react to a storage failure should keep their own try/catch instead
+ * of using these.
  */
 
-export function safeGetItem(key: string, store: Storage = localStorage): string | null {
+export type StorageArea = 'local' | 'session';
+
+function storeFor(area: StorageArea): Storage {
+  return area === 'session' ? sessionStorage : localStorage;
+}
+
+export function safeGetItem(key: string, area: StorageArea = 'local'): string | null {
   try {
-    return store.getItem(key);
+    return storeFor(area).getItem(key);
   } catch {
     return null;
   }
 }
 
-export function safeSetItem(key: string, value: string, store: Storage = localStorage): void {
+export function safeSetItem(key: string, value: string, area: StorageArea = 'local'): void {
   try {
-    store.setItem(key, value);
+    storeFor(area).setItem(key, value);
   } catch {
     /* private mode / quota / blocked: degrade */
   }
 }
 
-export function safeRemoveItem(key: string, store: Storage = localStorage): void {
+export function safeRemoveItem(key: string, area: StorageArea = 'local'): void {
   try {
-    store.removeItem(key);
+    storeFor(area).removeItem(key);
   } catch {
     /* private mode / quota / blocked: degrade */
   }

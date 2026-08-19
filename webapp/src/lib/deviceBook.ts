@@ -74,7 +74,7 @@ export function forgetDevice(address: string): void {
 
 export function getDeviceToken(address: string): string {
   return safeGetItem(TOKEN_PREFIX + address)
-    ?? safeGetItem(TOKEN_PREFIX + address, sessionStorage)
+    ?? safeGetItem(TOKEN_PREFIX + address, 'session')
     ?? '';
 }
 
@@ -84,16 +84,16 @@ export function getDeviceToken(address: string): string {
 // shared devices" promise the Remember checkbox makes.
 export function clearDeviceToken(address: string): void {
   safeRemoveItem(TOKEN_PREFIX + address);
-  safeRemoveItem(TOKEN_PREFIX + address, sessionStorage);
+  safeRemoveItem(TOKEN_PREFIX + address, 'session');
 }
 
 export function setDeviceToken(address: string, token: string, remember: boolean): void {
   const key = TOKEN_PREFIX + address;
   if (remember) {
     safeSetItem(key, token);
-    safeRemoveItem(key, sessionStorage);
+    safeRemoveItem(key, 'session');
   } else {
-    safeSetItem(key, token, sessionStorage);
+    safeSetItem(key, token, 'session');
     safeRemoveItem(key);
   }
 }

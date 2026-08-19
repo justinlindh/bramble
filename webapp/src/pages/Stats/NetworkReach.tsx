@@ -16,7 +16,7 @@ type PersistedProbePayload = {
 };
 
 function loadPersistedProbeResult(): PersistedProbePayload | null {
-  const raw = safeGetItem(PROBE_RESULTS_SESSION_KEY, sessionStorage);
+  const raw = safeGetItem(PROBE_RESULTS_SESSION_KEY, 'session');
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as PersistedProbePayload;
@@ -33,7 +33,7 @@ function savePersistedProbeResult(probeResult: ProbeResult): void {
     probeResult,
     persistedAt: Date.now(),
   };
-  safeSetItem(PROBE_RESULTS_SESSION_KEY, JSON.stringify(payload), sessionStorage);
+  safeSetItem(PROBE_RESULTS_SESSION_KEY, JSON.stringify(payload), 'session');
 }
 
 function formatAgeMinutes(ageMs: number): string {
