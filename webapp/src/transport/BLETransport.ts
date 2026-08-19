@@ -1,15 +1,10 @@
 import type { Transport } from '../types/bramble';
+import { RpcCorrelation } from './rpcCorrelation';
 
 const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const NUS_TX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // write (app → device)
 const NUS_RX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // notify (device → app)
 const BLE_CHUNK_SIZE = 20;
-
-interface Pending {
-  resolve: (v: unknown) => void;
-  reject: (e: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
 
 interface AuthWaiter {
   resolve: () => void;
@@ -104,8 +99,7 @@ export class BLETransport implements Transport {
   private txChar: BluetoothRemoteGATTCharacteristic | null = null;
   private rxChar: BluetoothRemoteGATTCharacteristic | null = null;
   private _connected = false;
-  private rpcId = 0;
-  private pending = new Map<number, Pending>();
+  private readonly rpc = new RpcCorrelation();
   private notifyCb: ((method: string, params: unknown) => void) | null = null;
   private lineBuf = '';
   private readonly token?: string;
@@ -488,13 +482,7 @@ export class BLETransport implements Transport {
         continue;
       }
 
-      if ('id' in msg && typeof msg.id === 'number' && this.pending.has(msg.id)) {
-        const { resolve, reject, timer } = this.pending.get(msg.id)!;
-        clearTimeout(timer);
-        this.pending.delete(msg.id);
-        if (msg.error) reject(new Error((msg.error as { message: string }).message));
-        else resolve(msg.result);
-      } else if (msg.method && !('id' in msg)) {
+      if (!this.rpc.settle(msg) && msg.method && !('id' in msg)) {
         this.notifyCb?.(msg.method as string, msg.params);
       }
     }
@@ -555,23 +543,13 @@ export class BLETransport implements Transport {
 
   async sendRPC<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = 5000): Promise<T> {
     if (!this._connected || !this.txChar) throw new Error('Not connected');
-    const id = ++this.rpcId;
+    const id = this.rpc.nextId();
     const payload = new TextEncoder().encode(
       JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'
     );
     await this.writeChunked(payload);
 
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`RPC timeout: ${method}`));
-      }, timeoutMs);
-      this.pending.set(id, {
-        resolve: resolve as (v: unknown) => void,
-        reject,
-        timer,
-      });
-    });
+    return this.rpc.request<T>(id, method, timeoutMs);
   }
 
   onNotification(cb: (method: string, params: unknown) => void): void {
@@ -579,11 +557,7 @@ export class BLETransport implements Transport {
   }
 
   private rejectAll(err: Error): void {
-    for (const [, { reject, timer }] of this.pending) {
-      clearTimeout(timer);
-      reject(err);
-    }
-    this.pending.clear();
+    this.rpc.rejectAll(err);
     if (this.pendingAuth) {
       const waiter = this.pendingAuth;
       this.pendingAuth = null;
