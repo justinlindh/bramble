@@ -11,6 +11,7 @@ import { parseAddr } from '../../lib/addr';
 import { isUnknownMethodError } from '../../lib/errors';
 import { mergeBroadcastRecipient } from '../../lib/broadcastRecipients';
 import { isAndroidShell } from '../../utils/platform';
+import { safeGetItem, safeSetItem } from '../../utils/safeLocalStorage';
 import type { RelayHop, MessageTier, ProbeResponse, Message } from '../../types/bramble';
 import type { RpcSchemas, WirePartial } from '../../types/rpc';
 import type { NativeMessageNotification } from '../../types/desktop';
@@ -270,22 +271,14 @@ function lastDeliverySeqKey(nodeAddr: string): string {
 }
 
 function loadLastDeliveryEventSeq(nodeAddr: string): number {
-  try {
-    const raw = localStorage.getItem(lastDeliverySeqKey(nodeAddr));
-    const parsed = raw ? Number(raw) : 0;
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  } catch {
-    return 0;
-  }
+  const raw = safeGetItem(lastDeliverySeqKey(nodeAddr));
+  const parsed = raw ? Number(raw) : 0;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
 function saveLastDeliveryEventSeq(nodeAddr: string, seq: number): void {
   if (!Number.isFinite(seq) || seq < 0) return;
-  try {
-    localStorage.setItem(lastDeliverySeqKey(nodeAddr), String(Math.floor(seq)));
-  } catch {
-    // best effort
-  }
+  safeSetItem(lastDeliverySeqKey(nodeAddr), String(Math.floor(seq)));
 }
 
 function asNumber(v: unknown): number | undefined {
@@ -544,14 +537,10 @@ export async function sendMessage(
   }
 
   const fallbackAddr = (() => {
-    try {
-      const raw = localStorage.getItem(LAST_NODE_ADDR_KEY);
-      if (!raw) return undefined;
-      const parsed = parseInt(raw, 16);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    } catch {
-      return undefined;
-    }
+    const raw = safeGetItem(LAST_NODE_ADDR_KEY);
+    if (!raw) return undefined;
+    const parsed = parseInt(raw, 16);
+    return Number.isFinite(parsed) ? parsed : undefined;
   })();
   const myAddr = store.config?.identity?.address ?? fallbackAddr ?? 0;
   const msg = {

@@ -4,6 +4,7 @@ import { sendProbe } from '../../store/actions';
 import { IconProbe } from '../../components/Icons';
 import { NamedAddress } from '../../components/NamedAddress';
 import { formatAddrShort } from '../../utils/address';
+import { safeGetItem, safeSetItem } from '../../utils/safeLocalStorage';
 import type { ProbeResponse, ProbeResult } from '../../types/bramble';
 import styles from './NetworkReach.module.css';
 
@@ -15,9 +16,9 @@ type PersistedProbePayload = {
 };
 
 function loadPersistedProbeResult(): PersistedProbePayload | null {
+  const raw = safeGetItem(PROBE_RESULTS_SESSION_KEY, sessionStorage);
+  if (!raw) return null;
   try {
-    const raw = sessionStorage.getItem(PROBE_RESULTS_SESSION_KEY);
-    if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedProbePayload;
     if (!parsed || typeof parsed !== 'object') return null;
     if (!parsed.probeResult || typeof parsed.persistedAt !== 'number') return null;
@@ -28,15 +29,11 @@ function loadPersistedProbeResult(): PersistedProbePayload | null {
 }
 
 function savePersistedProbeResult(probeResult: ProbeResult): void {
-  try {
-    const payload: PersistedProbePayload = {
-      probeResult,
-      persistedAt: Date.now(),
-    };
-    sessionStorage.setItem(PROBE_RESULTS_SESSION_KEY, JSON.stringify(payload));
-  } catch {
-    // noop
-  }
+  const payload: PersistedProbePayload = {
+    probeResult,
+    persistedAt: Date.now(),
+  };
+  safeSetItem(PROBE_RESULTS_SESSION_KEY, JSON.stringify(payload), sessionStorage);
 }
 
 function formatAgeMinutes(ageMs: number): string {

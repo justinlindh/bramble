@@ -25,6 +25,7 @@ import type { SavedDevice } from '../lib/deviceBook';
 import { formatAddrHex, formatAddr0x } from '../utils/address';
 import { DEFAULT_CAPABILITIES } from '../lib/connectionMode';
 import { mergeBroadcastRecipient } from '../lib/broadcastRecipients';
+import { safeGetItem, safeSetItem } from '../utils/safeLocalStorage';
 
 const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
 const ACTIVE_TAB_KEY = 'bramble-active-tab';
@@ -32,43 +33,23 @@ const ACTIVE_TAB_KEY = 'bramble-active-tab';
 // Verbose per-message tracing is off by default: it logs full message text and
 // would leak content into the console. Enable with localStorage 'bramble:debug'='1'.
 function debugLog(...args: unknown[]): void {
-  try {
-    if (localStorage.getItem('bramble:debug') === '1') console.debug(...args);
-  } catch {
-    // ignore storage access failures
-  }
+  if (safeGetItem('bramble:debug') === '1') console.debug(...args);
 }
 
 function loadShowRoutes(): boolean {
-  try {
-    return localStorage.getItem(ROUTE_VISIBILITY_KEY) === '1';
-  } catch {
-    return false;
-  }
+  return safeGetItem(ROUTE_VISIBILITY_KEY) === '1';
 }
 
 function saveShowRoutes(show: boolean): void {
-  try {
-    localStorage.setItem(ROUTE_VISIBILITY_KEY, show ? '1' : '0');
-  } catch {
-    // noop
-  }
+  safeSetItem(ROUTE_VISIBILITY_KEY, show ? '1' : '0');
 }
 
 function loadActiveTab(): string {
-  try {
-    return localStorage.getItem(ACTIVE_TAB_KEY) || 'chat';
-  } catch {
-    return 'chat';
-  }
+  return safeGetItem(ACTIVE_TAB_KEY) || 'chat';
 }
 
 function saveActiveTab(tab: string): void {
-  try {
-    localStorage.setItem(ACTIVE_TAB_KEY, tab);
-  } catch {
-    // noop
-  }
+  safeSetItem(ACTIVE_TAB_KEY, tab);
 }
 
 // The conversation bucket a message belongs to, plus the peer and channel

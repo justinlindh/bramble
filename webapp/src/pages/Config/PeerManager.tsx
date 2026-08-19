@@ -8,6 +8,7 @@ import { useStore } from '../../store/index';
 import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { tryParseAddr } from '../../lib/addr';
+import { safeGetItem, safeSetItem } from '../../utils/safeLocalStorage';
 import { formatAge } from '../../hooks/useAgeTick';
 import styles from './PeerManager.module.css';
 
@@ -24,9 +25,9 @@ type ContactsExport = {
 };
 
 function loadStringMap(key: string): Map<number, string> {
+  const raw = safeGetItem(key);
+  if (!raw) return new Map();
   try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return new Map();
     const obj = JSON.parse(raw) as Record<string, string>;
     return new Map(Object.entries(obj).map(([k, v]) => [Number(k), String(v)]));
   } catch {
@@ -35,15 +36,11 @@ function loadStringMap(key: string): Map<number, string> {
 }
 
 function saveStringMap(key: string, m: Map<number, string>): void {
-  try {
-    const obj: Record<string, string> = {};
-    m.forEach((v, k) => {
-      if (v) obj[k] = v;
-    });
-    localStorage.setItem(key, JSON.stringify(obj));
-  } catch {
-    // ignore quota errors
-  }
+  const obj: Record<string, string> = {};
+  m.forEach((v, k) => {
+    if (v) obj[k] = v;
+  });
+  safeSetItem(key, JSON.stringify(obj));
 }
 
 function loadNames(): Map<number, string> {

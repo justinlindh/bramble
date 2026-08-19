@@ -3,6 +3,7 @@ import { useStore } from '../../store/index';
 import { loadTrafficDebugStatus, loadTrafficEvents } from '../../store/actions';
 import { usePoll } from '../../hooks/usePoll';
 import type { TrafficEvent, TrafficCategory, TrafficDirection, AirtimeBucket } from '../../types/bramble';
+import { safeGetItem, safeSetItem } from '../../utils/safeLocalStorage';
 import styles from './TrafficMonitor.module.css';
 
 interface RollingMetrics {
@@ -30,9 +31,9 @@ function isValidFilterValue<T extends string>(value: unknown, allowed: readonly 
 
 function loadPersistedFilters(): TrafficFilterState {
   const fallback: TrafficFilterState = { category: 'all', direction: 'all', bucket: 'all' };
+  const raw = safeGetItem(TRAFFIC_FILTERS_KEY);
+  if (!raw) return fallback;
   try {
-    const raw = localStorage.getItem(TRAFFIC_FILTERS_KEY);
-    if (!raw) return fallback;
     const parsed = JSON.parse(raw) as Partial<TrafficFilterState>;
     return {
       category: isValidFilterValue(parsed.category, CATEGORY_FILTER_VALUES) ? parsed.category : 'all',
@@ -45,11 +46,7 @@ function loadPersistedFilters(): TrafficFilterState {
 }
 
 function savePersistedFilters(filters: TrafficFilterState): void {
-  try {
-    localStorage.setItem(TRAFFIC_FILTERS_KEY, JSON.stringify(filters));
-  } catch {
-    // noop
-  }
+  safeSetItem(TRAFFIC_FILTERS_KEY, JSON.stringify(filters));
 }
 
 function computeMetrics(events: TrafficEvent[], windowMs: number): RollingMetrics {
