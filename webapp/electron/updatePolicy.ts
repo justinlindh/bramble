@@ -4,6 +4,10 @@
 // electron-updater wiring) lives in electron/updater.ts, which consumes these
 // helpers.
 
+// The desktop self-updater and the OTA firmware flow must agree on version
+// ordering, so both share one semver comparator (src/lib/semver.ts).
+import { compareSemver } from '../src/lib/semver';
+
 /** Owner/repo of the public GitHub repository releases are cut against. */
 export const GITHUB_OWNER = 'justinlindh';
 export const GITHUB_REPO = 'bramble';
@@ -44,57 +48,7 @@ export type UpdateDecision =
 
 const WEBAPP_TAG_RE = /^webapp-v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 
-interface ParsedVersion {
-  core: [number, number, number];
-  pre: string[];
-}
-
-function parseCore(version: string): ParsedVersion {
-  const clean = version.trim().replace(/^v/, '');
-  const [corePart, prePart] = clean.split('-', 2);
-  const core = corePart.split('.').map((n) => Number.parseInt(n, 10));
-  return {
-    core: [core[0] || 0, core[1] || 0, core[2] || 0],
-    pre: prePart ? prePart.split('.') : [],
-  };
-}
-
-function comparePrerelease(a: string[], b: string[]): number {
-  // A version with no prerelease outranks one that has a prerelease (1.0.0 >
-  // 1.0.0-rc.1), matching semver precedence.
-  if (a.length === 0 && b.length === 0) return 0;
-  if (a.length === 0) return 1;
-  if (b.length === 0) return -1;
-  const len = Math.max(a.length, b.length);
-  for (let i = 0; i < len; i++) {
-    if (i >= a.length) return -1;
-    if (i >= b.length) return 1;
-    const ai = a[i];
-    const bi = b[i];
-    const an = /^\d+$/.test(ai);
-    const bn = /^\d+$/.test(bi);
-    if (an && bn) {
-      const d = Number.parseInt(ai, 10) - Number.parseInt(bi, 10);
-      if (d !== 0) return d;
-    } else if (an !== bn) {
-      // Numeric identifiers have lower precedence than alphanumeric ones.
-      return an ? -1 : 1;
-    } else if (ai !== bi) {
-      return ai < bi ? -1 : 1;
-    }
-  }
-  return 0;
-}
-
-/** Semver-aware compare: negative if a < b, positive if a > b, 0 if equal. */
-export function compareSemver(a: string, b: string): number {
-  const pa = parseCore(a);
-  const pb = parseCore(b);
-  for (let i = 0; i < 3; i++) {
-    if (pa.core[i] !== pb.core[i]) return pa.core[i] - pb.core[i];
-  }
-  return comparePrerelease(pa.pre, pb.pre);
-}
+export { compareSemver };
 
 /** Returns the semver core of a "webapp-vX.Y.Z" tag, or null if it is not one. */
 export function parseWebappTag(tag: string): string | null {
