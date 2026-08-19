@@ -61,6 +61,19 @@ describe('MockTransport (in-page mock for embedded shells)', () => {
     expect(received[0].params).toMatchObject({ addr: 'AABBCC01' });
   });
 
+  it('rejects the call when dispatch into the handler throws', async () => {
+    const transport = new MockTransport();
+    await transport.connect();
+
+    (transport as unknown as { messageListener: (data: string) => void }).messageListener = () => {
+      throw new Error('handler exploded');
+    };
+
+    await expect(transport.sendRPC('bramble.getConfig')).rejects.toThrow(
+      'Mock RPC dispatch failed: handler exploded'
+    );
+  });
+
   it('disconnect() tears down the fake socket and future RPCs fail', async () => {
     const transport = new MockTransport();
     await transport.connect();

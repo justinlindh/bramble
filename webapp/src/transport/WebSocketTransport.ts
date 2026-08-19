@@ -1,10 +1,5 @@
 import type { Transport } from '../types/bramble';
-
-interface Pending {
-  resolve: (v: unknown) => void;
-  reject: (e: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
+import { RpcCorrelation } from './rpcCorrelation';
 
 export interface WsReconnectCallbacks {
   onDisconnect?: () => void;
@@ -14,8 +9,7 @@ export interface WsReconnectCallbacks {
 export class WebSocketTransport implements Transport {
   private ws: WebSocket | null = null;
   private _connected = false;
-  private rpcId = 0;
-  private pending = new Map<number, Pending>();
+  private readonly rpc = new RpcCorrelation();
   private notifyCb: ((method: string, params: unknown) => void) | null = null;
   readonly url: string;
   private readonly authToken?: string;
@@ -133,17 +127,7 @@ export class WebSocketTransport implements Transport {
     }
 
     // RPC response
-    if ('id' in msg && typeof msg.id === 'number' && this.pending.has(msg.id)) {
-      const { resolve, reject, timer } = this.pending.get(msg.id)!;
-      clearTimeout(timer);
-      this.pending.delete(msg.id);
-      if (msg.error) {
-        reject(new Error((msg.error as { message: string }).message));
-      } else {
-        resolve(msg.result);
-      }
-      return;
-    }
+    if (this.rpc.settle(msg)) return;
 
     // Notification (no id)
     if (msg.method && !('id' in msg)) {
@@ -156,24 +140,14 @@ export class WebSocketTransport implements Transport {
       throw new Error('Not connected');
     }
 
-    const id = ++this.rpcId;
+    const id = this.rpc.nextId();
     try {
       this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
     } catch (e) {
       throw new Error(`WebSocket send failed: ${(e as Error).message}`);
     }
 
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`RPC timeout: ${method}`));
-      }, timeoutMs);
-      this.pending.set(id, {
-        resolve: resolve as (v: unknown) => void,
-        reject,
-        timer,
-      });
-    });
+    return this.rpc.request<T>(id, method, timeoutMs);
   }
 
   onNotification(cb: (method: string, params: unknown) => void): void {
@@ -208,7 +182,7 @@ export class WebSocketTransport implements Transport {
       if (this._connected && this.ws?.readyState === WebSocket.OPEN) {
         // Connection looks alive: send an immediate ping to verify
         try {
-          this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: ++this.rpcId, method: 'bramble.ping' }));
+          this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: this.rpc.nextId(), method: 'bramble.ping' }));
         } catch { /* will trigger close → reconnect */ }
         // If no response within 2s, force close
         setTimeout(() => {
@@ -232,19 +206,11 @@ export class WebSocketTransport implements Transport {
   private cleanup(): void {
     this._connected = false;
     this.stopKeepalive();
-    this.rejectAll(new Error('Connection closed'));
+    this.rpc.rejectAll(new Error('Connection closed'));
     if (this.ws) {
       try { this.ws.close(); } catch { /* */ }
       this.ws = null;
     }
-  }
-
-  private rejectAll(err: Error): void {
-    for (const [, { reject, timer }] of this.pending) {
-      clearTimeout(timer);
-      reject(err);
-    }
-    this.pending.clear();
   }
 
   private clearReconnectTimer(): void {
@@ -271,15 +237,11 @@ export class WebSocketTransport implements Transport {
 
       // Send a lightweight ping RPC: any response resets lastPong
       try {
-        this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: ++this.rpcId, method: 'bramble.ping' }));
-        // Set up a timeout to clean up this pending entry
-        const pingId = this.rpcId;
-        const timer = setTimeout(() => { this.pending.delete(pingId); }, 10000);
-        this.pending.set(pingId, {
-          resolve: () => { clearTimeout(timer); },
-          reject: () => { clearTimeout(timer); },
-          timer,
-        });
+        const pingId = this.rpc.nextId();
+        this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: pingId, method: 'bramble.ping' }));
+        // Nothing awaits the pong; any inbound message refreshes lastPong. The
+        // entry clears itself on response, on disconnect, or after 10s.
+        this.rpc.request(pingId, 'bramble.ping', 10_000).catch(() => { /* pong is optional */ });
       } catch {
         // send failed: close event will fire
       }

@@ -206,7 +206,7 @@ describe('BLETransport auth handshake', () => {
     const rpcPromise = transport.sendRPC<{ pong: boolean }>('bramble.ping', {}, 1000);
     // Wait for sendRPC to finish writing all chunks and register the pending
     // request before delivering the response line.
-    await vi.waitFor(() => expect((transport as unknown as { pending: Map<number, unknown> }).pending.size).toBe(1));
+    await vi.waitFor(() => expect((transport as unknown as { rpc: { pending: Map<number, unknown> } }).rpc.pending.size).toBe(1));
     emitLine('{"jsonrpc":"2.0","id":1,"result":{"pong":true}}\n');
 
     await expect(rpcPromise).resolves.toEqual({ pong: true });
