@@ -6,6 +6,7 @@
  *   - bramble.ping          (response format)
  *   - bramble.getVersion    (response format)
  *   - bramble.getConfig     (node_name fallback, identity, radio, channels)
+ *   - bramble.setRadio      (echoed radio fields)
  *   - bramble.setAuthToken  (param validation + success paths)
  *
  * T3 audit finding: add unit coverage for rpc_methods.c pure-logic methods.
@@ -31,6 +32,8 @@ extern uint16_t g_mesh_channel_epoch[8];
 extern mesh_dm_session_info_t g_stub_dm_sessions[8];
 extern size_t g_stub_dm_session_count;
 extern size_t g_stub_dm_session_capacity;
+void stub_set_radio_config(float frequency_mhz, uint8_t sf, uint32_t bw_hz, uint8_t coding_rate,
+                           int8_t tx_power);
 
 /* ── Extra stubs: symbols not covered by rpc_methods_test_stubs.c ──── */
 
@@ -78,6 +81,8 @@ void setUp(void) {
     memset(g_stub_dm_sessions, 0, sizeof(g_stub_dm_sessions));
     g_stub_dm_session_count = 0;
     g_stub_dm_session_capacity = 32;
+
+    stub_set_radio_config(0.0f, 0, 0, 0, 0);
 }
 
 void tearDown(void) {}
@@ -266,6 +271,32 @@ void test_get_config_default_channel_is_marked(void) {
     TEST_ASSERT_NOT_NULL(ch);
     TEST_ASSERT_EQUAL_STRING("Broadcast", cJSON_GetObjectItem(ch, "name")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(ch, "is_default")));
+    cJSON_Delete(resp);
+}
+
+/* ── bramble.setRadio ──────────────────────────────────────────────────
+ * Echoes the radio config through the same field emitter getConfig uses.
+ * ──────────────────────────────────────────────────────────────────── */
+
+void test_set_radio_echo_reports_the_config_the_driver_runs(void) {
+    /* Every field differs from the request below, so the assertions pin both
+     * the struct-member to JSON-key mapping (notably tx_power under
+     * "tx_power_dbm") and the handler's re-read of the driver config after
+     * applying: the stub driver keeps its own config, as a real one does when
+     * it clamps. */
+    stub_set_radio_config(915.0f, 9, 125000, 5, 17);
+
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"bramble.setRadio\","
+                           "\"params\":{\"frequency_mhz\":903.0,\"sf\":11,\"bw_hz\":250000,"
+                           "\"tx_power_dbm\":12,\"coding_rate\":7}}");
+    cJSON* r = assert_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
+    TEST_ASSERT_EQUAL_FLOAT(915.0f, (float)cJSON_GetObjectItem(r, "frequency_mhz")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(9, cJSON_GetObjectItem(r, "sf")->valueint);
+    TEST_ASSERT_EQUAL_INT(125000, cJSON_GetObjectItem(r, "bw_hz")->valueint);
+    TEST_ASSERT_EQUAL_INT(17, cJSON_GetObjectItem(r, "tx_power_dbm")->valueint);
+    TEST_ASSERT_EQUAL_INT(5, cJSON_GetObjectItem(r, "coding_rate")->valueint);
     cJSON_Delete(resp);
 }
 
@@ -720,6 +751,9 @@ int main(void) {
     RUN_TEST(test_get_config_radio_object_has_required_fields);
     RUN_TEST(test_get_config_channels_array_has_one_entry);
     RUN_TEST(test_get_config_default_channel_is_marked);
+
+    /* setRadio */
+    RUN_TEST(test_set_radio_echo_reports_the_config_the_driver_runs);
 
     /* setMailbox */
     RUN_TEST(test_set_mailbox_enabled_true_calls_mesh_and_returns_ok);

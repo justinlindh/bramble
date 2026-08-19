@@ -1157,6 +1157,18 @@ static int rpc_report_persist_failure(cJSON* result, const char* what, esp_err_t
     return rpc_rc;
 }
 
+/* Emit the five wire-facing radio-config numbers (note the runtime tx_power is
+ * reported under the key "tx_power_dbm") into obj. Shared by handle_set_radio's
+ * echo and handle_get_config so the two RPCs cannot drift on the field set or
+ * the tx_power naming. */
+static void rpc_add_radio_config_fields(cJSON* obj, const radio_config_t* cfg) {
+    cJSON_AddNumberToObject(obj, "frequency_mhz", cfg->frequency_mhz);
+    cJSON_AddNumberToObject(obj, "sf", cfg->sf);
+    cJSON_AddNumberToObject(obj, "bw_hz", cfg->bw_hz);
+    cJSON_AddNumberToObject(obj, "tx_power_dbm", cfg->tx_power);
+    cJSON_AddNumberToObject(obj, "coding_rate", cfg->coding_rate);
+}
+
 /* bramble.setRadio: a params object is required, every field in it is
  * optional (omitted fields keep their current value):
  * {"frequency_mhz":915.0, "sf":9, "bw_hz":125000, "tx_power_dbm":17,
@@ -1252,11 +1264,7 @@ static int handle_set_radio(const cJSON* params, cJSON* result) {
              cfg.sf, cfg.bw_hz, cfg.tx_power);
 
     cJSON_AddBoolToObject(result, "ok", true);
-    cJSON_AddNumberToObject(result, "frequency_mhz", cfg.frequency_mhz);
-    cJSON_AddNumberToObject(result, "sf", cfg.sf);
-    cJSON_AddNumberToObject(result, "bw_hz", cfg.bw_hz);
-    cJSON_AddNumberToObject(result, "tx_power_dbm", cfg.tx_power);
-    cJSON_AddNumberToObject(result, "coding_rate", cfg.coding_rate);
+    rpc_add_radio_config_fields(result, &cfg);
     return 0;
 }
 
@@ -2672,11 +2680,7 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
     radio_config_t rcfg;
     radio_get_config(&rcfg);
     cJSON* radio = cJSON_CreateObject();
-    cJSON_AddNumberToObject(radio, "frequency_mhz", rcfg.frequency_mhz);
-    cJSON_AddNumberToObject(radio, "sf", rcfg.sf);
-    cJSON_AddNumberToObject(radio, "bw_hz", rcfg.bw_hz);
-    cJSON_AddNumberToObject(radio, "tx_power_dbm", rcfg.tx_power);
-    cJSON_AddNumberToObject(radio, "coding_rate", rcfg.coding_rate);
+    rpc_add_radio_config_fields(radio, &rcfg);
     cJSON_AddStringToObject(radio, "profile", "custom");
     cJSON_AddItemToObject(result, "radio", radio);
 
