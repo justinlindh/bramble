@@ -1,15 +1,15 @@
 /**
- * JSON-RPC request/response correlation shared by the byte-stream transports.
+ * JSON-RPC request/response correlation shared by the transports.
  *
  * A transport writes a request tagged with a monotonic numeric id and later
  * reads responses back in any order. This owns the id counter and the map of
  * outstanding requests: it hands out ids, matches each response to its waiter,
  * and fails every waiter at once when the link drops.
  *
- * WebSocketTransport and BLETransport share this exactly. SerialTransport keeps
- * its own copy on purpose: its pending entries carry per-call tracing and are
- * coupled to its write-queue release, so it cannot adopt this without dragging
- * that machinery in.
+ * WebSocketTransport, BLETransport and MockTransport share this exactly.
+ * SerialTransport keeps its own copy on purpose: its pending entries carry
+ * per-call tracing and are coupled to its write-queue release, so it cannot
+ * adopt this without dragging that machinery in.
  */
 
 interface PendingRpc {

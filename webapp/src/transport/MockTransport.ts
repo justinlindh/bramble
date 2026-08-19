@@ -1,12 +1,7 @@
 import type { Transport } from '../types/bramble';
 import { handleConnection } from '../../mock/handler.mjs';
 import type { MockSocketLike, MockRequestLike } from '../../mock/handler.mjs';
-
-interface Pending {
-  resolve: (v: unknown) => void;
-  reject: (e: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
+import { RpcCorrelation } from './rpcCorrelation';
 
 /**
  * In-page mock transport for embedded shells (Android WebView, Electron
@@ -24,8 +19,7 @@ interface Pending {
  */
 export class MockTransport implements Transport {
   private _connected = false;
-  private rpcId = 0;
-  private pending = new Map<number, Pending>();
+  private readonly rpc = new RpcCorrelation();
   private notifyCb: ((method: string, params: unknown) => void) | null = null;
   private fakeWs: MockSocketLike | null = null;
   private messageListener: ((data: string) => void) | null = null;
@@ -76,28 +70,19 @@ export class MockTransport implements Transport {
       throw new Error('Not connected');
     }
 
-    const id = ++this.rpcId;
+    const id = this.rpc.nextId();
     const request = { jsonrpc: '2.0', id, method, params };
 
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`RPC timeout: ${method}`));
-      }, timeoutMs);
-      this.pending.set(id, {
-        resolve: resolve as (v: unknown) => void,
-        reject,
-        timer,
-      });
-
-      try {
-        this.messageListener!(JSON.stringify(request));
-      } catch (e) {
-        clearTimeout(timer);
-        this.pending.delete(id);
-        reject(new Error(`Mock RPC dispatch failed: ${(e as Error).message}`));
-      }
-    });
+    // Register before dispatching: handler.mjs answers synchronously through
+    // fakeWs.send, so the response can arrive before this call returns.
+    const response = this.rpc.request<T>(id, method, timeoutMs);
+    try {
+      this.messageListener(JSON.stringify(request));
+    } catch (e) {
+      // A no-op if the handler already answered before throwing.
+      this.rpc.settle({ id, error: { message: `Mock RPC dispatch failed: ${(e as Error).message}` } });
+    }
+    return response;
   }
 
   onNotification(cb: (method: string, params: unknown) => void): void {
@@ -107,7 +92,7 @@ export class MockTransport implements Transport {
   async disconnect(): Promise<void> {
     if (!this._connected) return;
     this._connected = false;
-    this.rejectAll(new Error('Disconnected'));
+    this.rpc.rejectAll(new Error('Disconnected'));
     try { this.fakeWs?.close(1000, 'client disconnect'); } catch { /* ignore */ }
     this.fakeWs = null;
     this.messageListener = null;
@@ -123,29 +108,11 @@ export class MockTransport implements Transport {
     }
 
     // RPC response
-    if ('id' in msg && typeof msg.id === 'number' && this.pending.has(msg.id)) {
-      const { resolve, reject, timer } = this.pending.get(msg.id)!;
-      clearTimeout(timer);
-      this.pending.delete(msg.id);
-      if (msg.error) {
-        reject(new Error((msg.error as { message: string }).message));
-      } else {
-        resolve(msg.result);
-      }
-      return;
-    }
+    if (this.rpc.settle(msg)) return;
 
     // Notification (no id)
     if (msg.method && !('id' in msg)) {
       this.notifyCb?.(msg.method as string, msg.params);
     }
-  }
-
-  private rejectAll(err: Error): void {
-    for (const [, { reject, timer }] of this.pending) {
-      clearTimeout(timer);
-      reject(err);
-    }
-    this.pending.clear();
   }
 }
