@@ -12,7 +12,7 @@
  * that machinery in.
  */
 
-export interface PendingRpc {
+interface PendingRpc {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -39,19 +39,6 @@ export class RpcCorrelation {
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
     });
-  }
-
-  /**
-   * Register a self-managing entry (the keepalive ping, whose handlers only
-   * clear their own timer). The caller owns the timer and its removal.
-   */
-  track(id: number, entry: PendingRpc): void {
-    this.pending.set(id, entry);
-  }
-
-  /** Drop a tracked entry without settling it (a self-managed timeout fired). */
-  forget(id: number): void {
-    this.pending.delete(id);
   }
 
   /**

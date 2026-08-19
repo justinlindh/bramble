@@ -239,14 +239,9 @@ export class WebSocketTransport implements Transport {
       try {
         const pingId = this.rpc.nextId();
         this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: pingId, method: 'bramble.ping' }));
-        // Self-managing entry: its handlers only clear this timeout, and the
-        // timeout forgets the entry if no response ever arrives.
-        const timer = setTimeout(() => { this.rpc.forget(pingId); }, 10000);
-        this.rpc.track(pingId, {
-          resolve: () => { clearTimeout(timer); },
-          reject: () => { clearTimeout(timer); },
-          timer,
-        });
+        // Nothing awaits the pong; any inbound message refreshes lastPong. The
+        // entry clears itself on response, on disconnect, or after 10s.
+        this.rpc.request(pingId, 'bramble.ping', 10_000).catch(() => { /* pong is optional */ });
       } catch {
         // send failed: close event will fire
       }

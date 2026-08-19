@@ -59,17 +59,4 @@ describe('RpcCorrelation', () => {
     await aRej;
     await bRej;
   });
-
-  it('tracks a self-managing entry and forgets it without settling', () => {
-    const rpc = new RpcCorrelation();
-    const id = rpc.nextId();
-    const resolve = vi.fn();
-    const reject = vi.fn();
-    rpc.track(id, { resolve, reject, timer: setTimeout(() => {}, 0) });
-    rpc.forget(id);
-    // Forgotten: a later response matches nothing and the handlers never run.
-    expect(rpc.settle({ id, result: {} })).toBe(false);
-    expect(resolve).not.toHaveBeenCalled();
-    expect(reject).not.toHaveBeenCalled();
-  });
 });
