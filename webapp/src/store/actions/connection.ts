@@ -8,6 +8,7 @@ import { createTransport, BrambleClient } from '../../transport';
 import { fetchConnectionCapabilities } from '../../lib/connectionMode';
 import { formatAddrHex } from '../../utils/address';
 import { isAndroidShell } from '../../utils/platform';
+import { safeGetItem, safeSetItem } from '../../utils/safeLocalStorage';
 import { friendlyErrorFrom, isAuthError, isUnknownMethodError } from '../../lib/errors';
 import type { TransportType } from '../../types/bramble';
 import {
@@ -33,12 +34,8 @@ import { loadConfig } from './config';
 import { saveConnectedDevice } from './deviceBook';
 
 function readLastKnownNodeAddrHex(): string | undefined {
-  try {
-    const raw = localStorage.getItem(LAST_NODE_ADDR_KEY);
-    return raw ? raw.toUpperCase() : undefined;
-  } catch {
-    return undefined;
-  }
+  const raw = safeGetItem(LAST_NODE_ADDR_KEY);
+  return raw ? raw.toUpperCase() : undefined;
 }
 
 export async function loadConnectionCapabilities(): Promise<void> {
@@ -304,7 +301,7 @@ export async function connect(
     const configAddrHex = nodeAddr ? formatAddrHex(nodeAddr) : undefined;
     // Persist last-known address so we can recover if config fails on next connect
     if (configAddrHex) {
-      try { localStorage.setItem(LAST_NODE_ADDR_KEY, configAddrHex); } catch {}
+      safeSetItem(LAST_NODE_ADDR_KEY, configAddrHex);
     }
     const addrHex = configAddrHex ?? readLastKnownNodeAddrHex();
 

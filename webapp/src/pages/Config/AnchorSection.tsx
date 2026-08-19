@@ -19,6 +19,7 @@ import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
 import { useCopyFlash } from '../../hooks/useCopyFlash';
 import { friendlyErrorFrom } from '../../lib/errors';
+import { safeGetItem, safeSetItem, safeRemoveItem } from '../../utils/safeLocalStorage';
 import styles from './AnchorSection.module.css';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
@@ -42,29 +43,18 @@ function clientAnchorFromSeed(seedHex: string): ClientAnchor {
 }
 
 function loadStoredSeed(): string | null {
-  try {
-    const raw = localStorage.getItem(ANCHOR_SEED_KEY);
-    return raw && HEX64.test(raw.trim()) ? raw.trim().toLowerCase() : null;
-  } catch {
-    return null;
-  }
+  const raw = safeGetItem(ANCHOR_SEED_KEY);
+  return raw && HEX64.test(raw.trim()) ? raw.trim().toLowerCase() : null;
 }
 
 function storeSeed(seedHex: string): void {
-  try {
-    localStorage.setItem(ANCHOR_SEED_KEY, seedHex);
-  } catch {
-    // localStorage unavailable (private browsing); the operator still has the
-    // backup string they were forced to save, so the anchor is not lost.
-  }
+  // If storage is unavailable (private browsing), the operator still has the
+  // backup string they were forced to save, so the anchor is not lost.
+  safeSetItem(ANCHOR_SEED_KEY, seedHex);
 }
 
 function clearStoredSeed(): void {
-  try {
-    localStorage.removeItem(ANCHOR_SEED_KEY);
-  } catch {
-    // noop
-  }
+  safeRemoveItem(ANCHOR_SEED_KEY);
 }
 
 // The trust anchor is the fleet's Sybil-scarcity root. The operator's client

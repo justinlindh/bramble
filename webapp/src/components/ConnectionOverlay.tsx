@@ -3,6 +3,7 @@ import { connect, refreshDevices } from '../store/actions';
 import { BLETransport } from '../transport/BLETransport';
 import { useStore } from '../store/index';
 import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
+import { safeGetItem, safeSetItem } from '../utils/safeLocalStorage';
 import { isEmbeddedShell, describePlatform } from '../utils/platform';
 import {
   describeTransports,
@@ -96,11 +97,11 @@ export function connectingLabelFor(transportType: TransportType, pairingPending 
 // saved device. The "last IP" below is only a convenience prefill for the form
 // (a single global value, distinct from the per-address device book).
 function loadSavedIp(): string {
-  try { return localStorage.getItem(WIFI_IP_KEY) || ''; } catch { return ''; }
+  return safeGetItem(WIFI_IP_KEY) || '';
 }
 
 function saveLastIp(ip: string): void {
-  try { localStorage.setItem(WIFI_IP_KEY, ip); } catch { /* noop */ }
+  safeSetItem(WIFI_IP_KEY, ip);
 }
 
 const TRANSPORT_CHOICES: Array<{

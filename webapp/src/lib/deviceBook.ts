@@ -1,3 +1,5 @@
+import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/safeLocalStorage';
+
 const BOOK_KEY = 'bramble.devices';
 const TOKEN_PREFIX = 'bramble.deviceToken.';
 
@@ -13,18 +15,8 @@ export type SavedDevice = {
   bleDeviceName?: string;
 };
 
-function safeGet(store: Storage, key: string): string | null {
-  try { return store.getItem(key); } catch { return null; }
-}
-function safeSet(store: Storage, key: string, value: string): void {
-  try { store.setItem(key, value); } catch { /* private mode / quota: degrade */ }
-}
-function safeRemove(store: Storage, key: string): void {
-  try { store.removeItem(key); } catch { /* noop */ }
-}
-
 function readBook(): SavedDevice[] {
-  const raw = safeGet(localStorage, BOOK_KEY);
+  const raw = safeGetItem(BOOK_KEY);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -32,7 +24,7 @@ function readBook(): SavedDevice[] {
   } catch { return []; }
 }
 function writeBook(devices: SavedDevice[]): void {
-  safeSet(localStorage, BOOK_KEY, JSON.stringify(devices));
+  safeSetItem(BOOK_KEY, JSON.stringify(devices));
 }
 
 export function listDevices(): SavedDevice[] {
@@ -81,8 +73,8 @@ export function forgetDevice(address: string): void {
 }
 
 export function getDeviceToken(address: string): string {
-  return safeGet(localStorage, TOKEN_PREFIX + address)
-    ?? safeGet(sessionStorage, TOKEN_PREFIX + address)
+  return safeGetItem(TOKEN_PREFIX + address)
+    ?? safeGetItem(TOKEN_PREFIX + address, 'session')
     ?? '';
 }
 
@@ -91,17 +83,17 @@ export function getDeviceToken(address: string): string {
 // session's localStorage copy behind, quietly breaking the "leave off on
 // shared devices" promise the Remember checkbox makes.
 export function clearDeviceToken(address: string): void {
-  safeRemove(localStorage, TOKEN_PREFIX + address);
-  safeRemove(sessionStorage, TOKEN_PREFIX + address);
+  safeRemoveItem(TOKEN_PREFIX + address);
+  safeRemoveItem(TOKEN_PREFIX + address, 'session');
 }
 
 export function setDeviceToken(address: string, token: string, remember: boolean): void {
   const key = TOKEN_PREFIX + address;
   if (remember) {
-    safeSet(localStorage, key, token);
-    safeRemove(sessionStorage, key);
+    safeSetItem(key, token);
+    safeRemoveItem(key, 'session');
   } else {
-    safeSet(sessionStorage, key, token);
-    safeRemove(localStorage, key);
+    safeSetItem(key, token, 'session');
+    safeRemoveItem(key);
   }
 }
