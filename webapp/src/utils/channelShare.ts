@@ -11,6 +11,8 @@
  *   - `pk`  base64url-encoded public key
  */
 
+import { tryParseAddr } from '../lib/addr';
+
 export interface ChannelShareData {
   name: string;
   psk?: string; // hex-encoded raw PSK bytes (optional)
@@ -99,8 +101,11 @@ export function parseNodeShare(input: string): ParseResult<NodeShareData> {
   if (!addrHex) {
     return { ok: false, error: 'Missing node address.' };
   }
-  const address = parseInt(addrHex, 16);
-  if (isNaN(address)) {
+  // tryParseAddr rejects trailing garbage and anything past the 32-bit range,
+  // where parseInt(addrHex, 16) would silently truncate a corrupted scanned or
+  // pasted address ("abcz" -> 0xabc) into a wrong-but-plausible node.
+  const address = tryParseAddr(addrHex);
+  if (address === null) {
     return { ok: false, error: 'Invalid node address.' };
   }
   // Convert base64url → standard base64
