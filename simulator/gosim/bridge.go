@@ -137,14 +137,6 @@ func radioConfigInit(config *C.radio_config_t) {
 	C.radio_config_init(config)
 }
 
-func radioAddInterference(config *C.radio_config_t, cx, cy, radius float32) int {
-	return int(C.radio_add_interference_zone(config, C.float(cx), C.float(cy), C.float(radius)))
-}
-
-func radioClearInterference(config *C.radio_config_t, index int) {
-	C.radio_clear_interference_zone(config, C.int(index))
-}
-
 // Reception outcomes under the collision model (mirror radio_rx_outcome_t).
 const (
 	rxOutcomeOK         = int(C.RADIO_RX_OK)

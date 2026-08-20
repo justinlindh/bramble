@@ -712,12 +712,12 @@ func (s *Sim) handleNodeMove(evt *C.sim_event_t) {
 
 func (s *Sim) handleInterferenceStart(evt *C.sim_event_t) {
 	idata := C.bridge_get_interference_event(evt)
-	radioAddInterference(&s.radio, float32(idata.center_x), float32(idata.center_y), float32(idata.radius))
+	C.radio_add_interference_zone(&s.radio, idata.center_x, idata.center_y, idata.radius)
 }
 
 func (s *Sim) handleInterferenceEnd(evt *C.sim_event_t) {
 	idata := C.bridge_get_interference_event(evt)
-	radioClearInterference(&s.radio, int(idata.zone_index))
+	C.radio_clear_interference_zone(&s.radio, idata.zone_index)
 }
 
 // putSharedMetrics fills the counter and rate fields the periodic "metrics"
