@@ -38,6 +38,17 @@ function readLastKnownNodeAddrHex(): string | undefined {
   return raw ? raw.toUpperCase() : undefined;
 }
 
+// Best-effort teardown of the active client inside the connect flow: drop
+// subscriptions and disconnect the transport, swallowing errors from either so
+// cleanup never throws mid-connect, then clear the ref so the next connect
+// starts fresh. The user-initiated disconnect() action keeps its own sequence:
+// it lets errors surface and updates connection state afterward.
+async function teardownActiveClient(): Promise<void> {
+  try { session.client?.clearSubscriptions(); } catch { /* noop */ }
+  try { await session.client?.disconnect(); } catch { /* noop */ }
+  session.client = null;
+}
+
 export async function loadConnectionCapabilities(): Promise<void> {
   const capabilities = await fetchConnectionCapabilities();
   useStore.getState().setConnectionCapabilities(capabilities);
@@ -158,9 +169,7 @@ export async function connect(
 
   // Guard against duplicate/re-entrant connects creating multiple active WS clients.
   if (session.client) {
-    try { session.client.clearSubscriptions(); } catch { /* noop */ }
-    try { await session.client.disconnect(); } catch { /* noop */ }
-    session.client = null;
+    await teardownActiveClient();
   }
 
   store.setConnectionState('connecting');
@@ -317,9 +326,7 @@ export async function connect(
       // saved IP. If the IP now answers as a different node, drop the connection
       // instead of adopting the wrong node or rebinding its lastIp/token.
       if (options?.expectAddressHex && options.expectAddressHex.toUpperCase() !== bookAddrHex) {
-        try { session.client?.clearSubscriptions(); } catch { /* noop */ }
-        try { await session.client?.disconnect(); } catch { /* noop */ }
-        session.client = null;
+        await teardownActiveClient();
         // 'disconnected', not 'error': App treats 'error' as auto-reconnect
         // (overlay hidden, pill saying Reconnecting…, Disconnect the only
         // exit) which dead-ends a guard that has already dropped the link.
@@ -394,9 +401,7 @@ export async function connect(
     // that fails after the link is established (the auth probe rejecting, say)
     // would otherwise leave the node connected-but-unusable and invisible to
     // the system picker on the next attempt.
-    try { session.client?.clearSubscriptions(); } catch { /* noop */ }
-    try { await session.client?.disconnect(); } catch { /* noop */ }
-    session.client = null;
+    await teardownActiveClient();
     // Show the overlay so the user can retry: 'disconnected' shows connect UI.
     // Auth-ness is classified here from the RAW error, then carried as a
     // structured flag beside the friendly text: the overlay highlights the
