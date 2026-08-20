@@ -58,12 +58,6 @@
   cursor: default;
 }
 
-.rateLimit {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  margin-top: 0.4rem;
-}
-
 /* ── Progress bar ─────────────────────────────────────────────────────── */
 
 .progressWrap {
