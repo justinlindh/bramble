@@ -6,12 +6,12 @@ relevant to a change actually execute.
 
 ## The workflows
 
-Three workflows gate pull requests, plus one reusable helper they all call:
+Three workflows gate pull requests, plus one reusable helper two of them call:
 
 | Workflow | Role |
 | --- | --- |
-| `_detect-changes.yml` | Reusable (`workflow_call`) change-detection. Emits boolean area outputs. Never gates anything; called once per gating workflow. |
-| `firmware-quality.yml` | The single-pod `Static checks` bundle (every cheap lint/static check) plus the change detector. |
+| `_detect-changes.yml` | Reusable (`workflow_call`) change-detection. Emits boolean area outputs. Never gates anything; called once by each workflow that reads them. |
+| `firmware-quality.yml` | The single-pod `Static checks` bundle (every cheap lint/static check). Gates on nothing, so it calls no detector. |
 | `quality.yml` | The heavy firmware/emulator compute jobs: host tests, gosim, the board build smoke, and the emulator suite. |
 | `webapp-quality.yml` | The consolidated webapp job (one `npm ci`, all webapp checks) plus the web-flasher tests. |
 
@@ -122,14 +122,24 @@ Concretely:
    creates the job and its check run and skips straight to a `skipped`
    conclusion. Job-level `if:` never changes the context string, so the
    required context still reports.
+4. That `if:` is a function of the diff, never of the event. The diff is fixed
+   for a head SHA, so every run on that SHA makes the same skip decision and
+   the context never contradicts itself. An event-based predicate breaks that:
+   the newest check run of a given name on a SHA is the verdict branch
+   protection reads, and `skipped` counts as success, so one event's skip
+   silently replaces another event's real failure. Anything a job validates
+   that is not in the diff, a PR title for instance, has to be validated on
+   every run.
 
-The single exception is the `Static checks` bundle, which has no `if:` at all
-and therefore runs on every trigger (see below).
+A job carries no `if:` at all where it has nothing to gate on. The
+`Static checks` bundle calls no detector and runs on every trigger (see below).
+So do the PR-metadata jobs `Commitlint` and `Template sections`: their subjects
+are the PR title and the PR body, neither of which is in the diff.
 
 ## The reusable detector
 
-`_detect-changes.yml` is a `workflow_call` reusable workflow. Each gating
-workflow calls it once as its `detect` job:
+`_detect-changes.yml` is a `workflow_call` reusable workflow. A gating workflow
+that reads its outputs calls it once as its `detect` job:
 
 ```yaml
 jobs:
@@ -235,7 +245,7 @@ re-run the build that enforces them.
 
 `ci_core` is OR'd into every heavy job's `if:`. It matches ONLY the workflows
 that DEFINE the build/test jobs: `quality.yml`, `firmware-quality.yml`,
-`webapp-quality.yml`, and the reusable `_detect-changes.yml` they all call.
+`webapp-quality.yml`, and the reusable `_detect-changes.yml` two of them call.
 Editing one of those can change a job's steps or the gating logic itself, and
 that change must be exercised: if a job-defining edit only ran jobs whose code
 area also happened to change, a broken job definition could land unverified. So
@@ -607,8 +617,9 @@ the PR is never stuck waiting on a check that was never going to run.
 1. Add `needs: detect`.
 2. Add an `if:` referencing the relevant `needs.detect.outputs.*` area(s), OR'd
    with `ci_core` at minimum (so editing a job-defining workflow re-exercises the
-   job). (The `Static checks` bundle is the sole deliberate exception: no `if:`,
-   so it always runs and reports.)
+   job). (Jobs with nothing to gate on carry no `if:` and so always run and
+   report: the `Static checks` bundle, plus `Commitlint` and
+   `Template sections`, whose subjects are not in the diff.)
 3. If the job needs an area the detector does not yet compute, add a new output
    and pattern to `_detect-changes.yml` and document it in the table above.
 4. Do not add a workflow-level `paths:` filter. It reintroduces the exact
