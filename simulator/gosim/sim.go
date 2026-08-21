@@ -1564,10 +1564,15 @@ func receiptReturnRate(expected, registered uint64) float64 {
 // consistent.
 //
 // The wait is a join, not a timeout: those two closes drop the only write ends
-// of the pipe (fd 1 was a dup of pipeW), so the reader is guaranteed its EOF
-// and readPipe returns. Waiting a fixed duration instead would leave both a
+// of the pipe (fd 1 was a dup of pipeW, and spawned node processes get their
+// own StdoutPipe rather than inheriting it), so the reader is guaranteed its
+// EOF and readPipe returns. Waiting a fixed duration instead would leave both a
 // line still buffered at the deadline unaccounted for and origStdout closed
 // under a goroutine still writing to it.
+//
+// pipeDone is nil only on a Sim whose reader was never started. Receiving from
+// a nil channel blocks forever, so that case needs the check to skip the join
+// rather than hang on it.
 func (s *Sim) restoreStdout() {
 	s.pipeW.Close()
 	syscall.Dup2(s.origStdout, 1)
