@@ -26,35 +26,15 @@ static volatile int count_left = 0;
 static volatile int count_right = 0;
 static volatile int count_center = 0;
 
-/* ── ISR Handlers ───────────────────────────────────────────────────── */
+/* ── ISR Handler ────────────────────────────────────────────────────── */
 
-static void IRAM_ATTR trackball_up_isr(void* arg) {
+/* One handler for all five directions: `gpio_isr_handler_add` passes the
+ * per-pin `arg` registered below, which points at that direction's counter.
+ * Serialized with the same spinlock trackball_poll uses so an increment is
+ * never lost against a concurrent decrement. */
+static void IRAM_ATTR trackball_isr(void* arg) {
     portENTER_CRITICAL_ISR(&s_tb_lock);
-    count_up++;
-    portEXIT_CRITICAL_ISR(&s_tb_lock);
-}
-
-static void IRAM_ATTR trackball_down_isr(void* arg) {
-    portENTER_CRITICAL_ISR(&s_tb_lock);
-    count_down++;
-    portEXIT_CRITICAL_ISR(&s_tb_lock);
-}
-
-static void IRAM_ATTR trackball_left_isr(void* arg) {
-    portENTER_CRITICAL_ISR(&s_tb_lock);
-    count_left++;
-    portEXIT_CRITICAL_ISR(&s_tb_lock);
-}
-
-static void IRAM_ATTR trackball_right_isr(void* arg) {
-    portENTER_CRITICAL_ISR(&s_tb_lock);
-    count_right++;
-    portEXIT_CRITICAL_ISR(&s_tb_lock);
-}
-
-static void IRAM_ATTR trackball_center_isr(void* arg) {
-    portENTER_CRITICAL_ISR(&s_tb_lock);
-    count_center++;
+    (*(volatile int*)arg)++;
     portEXIT_CRITICAL_ISR(&s_tb_lock);
 }
 
@@ -92,12 +72,13 @@ int trackball_init(void) {
     /* Install ISR service if not already installed */
     gpio_install_isr_service(0);
 
-    /* Add ISR handlers */
-    gpio_isr_handler_add(s_board->trackball.up, trackball_up_isr, NULL);
-    gpio_isr_handler_add(s_board->trackball.down, trackball_down_isr, NULL);
-    gpio_isr_handler_add(s_board->trackball.left, trackball_left_isr, NULL);
-    gpio_isr_handler_add(s_board->trackball.right, trackball_right_isr, NULL);
-    gpio_isr_handler_add(s_board->trackball.center, trackball_center_isr, NULL);
+    /* Add ISR handlers: each pin carries a pointer to its own counter as the
+     * ISR arg, so one shared handler services all five. */
+    gpio_isr_handler_add(s_board->trackball.up, trackball_isr, (void*)&count_up);
+    gpio_isr_handler_add(s_board->trackball.down, trackball_isr, (void*)&count_down);
+    gpio_isr_handler_add(s_board->trackball.left, trackball_isr, (void*)&count_left);
+    gpio_isr_handler_add(s_board->trackball.right, trackball_isr, (void*)&count_right);
+    gpio_isr_handler_add(s_board->trackball.center, trackball_isr, (void*)&count_center);
 
     initialized = true;
     ESP_LOGI(TAG, "Trackball initialized");
