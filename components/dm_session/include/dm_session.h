@@ -175,9 +175,9 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
  * both the forward-derive bound and the skip-cache size: it is a loss-tolerance
  * vs RAM tuning constant, NOT a security boundary (an index beyond
  * next+DM_MAX_SKIP is refused and degrades to the desync-heal re-handshake).
- * prev_recv/prev_skip retain the previous epoch's receive chain across a
- * DH-ratchet grace window (Task 4); unused until then but sized in now so the
- * struct layout is stable across Tasks 2-4.
+ * prev_recv/prev_skip retain the previous epoch's receive chain and skip cache
+ * across the bounded DH-ratchet grace window, so in-flight old-epoch frames
+ * still decrypt until the previous epoch is wiped.
  */
 #define DM_MAX_SKIP 16
 
