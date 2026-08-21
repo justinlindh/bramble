@@ -131,10 +131,10 @@ Concretely:
    that is not in the diff, a PR title for instance, has to be validated on
    every run.
 
-Two jobs carry no `if:` at all and therefore run on every trigger: the
-`Static checks` bundle, which calls no detector and gates nothing (see below),
-and `Commitlint`, whose subject is the PR title and so cannot be predicated on
-the diff at all.
+A job carries no `if:` at all where it has nothing to gate on. The
+`Static checks` bundle calls no detector and runs on every trigger (see below).
+So do the PR-metadata jobs `Commitlint` and `Template sections`: their subjects
+are the PR title and the PR body, neither of which is in the diff.
 
 ## The reusable detector
 
@@ -617,9 +617,9 @@ the PR is never stuck waiting on a check that was never going to run.
 1. Add `needs: detect`.
 2. Add an `if:` referencing the relevant `needs.detect.outputs.*` area(s), OR'd
    with `ci_core` at minimum (so editing a job-defining workflow re-exercises the
-   job). (Two jobs deliberately carry no `if:` and so always run and report:
-   the `Static checks` bundle, and `Commitlint`, whose subject is the PR title
-   and therefore cannot be predicated on the diff.)
+   job). (Jobs with nothing to gate on carry no `if:` and so always run and
+   report: the `Static checks` bundle, plus `Commitlint` and
+   `Template sections`, whose subjects are not in the diff.)
 3. If the job needs an area the detector does not yet compute, add a new output
    and pattern to `_detect-changes.yml` and document it in the table above.
 4. Do not add a workflow-level `paths:` filter. It reintroduces the exact
