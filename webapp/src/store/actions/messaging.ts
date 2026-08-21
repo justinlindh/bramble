@@ -2,7 +2,7 @@
 // delivery-event replay and correlation, broadcast telemetry, probe flows,
 // incoming-message handling, and native notifications.
 import { session, requireClient, LAST_NODE_ADDR_KEY } from './client';
-import { useStore, conversationIdForMessage, parseConversationId } from '../index';
+import { useStore, conversationIdForMessage, formatConversationLabel } from '../index';
 import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
@@ -709,7 +709,10 @@ function maybeNotifyIncoming(msg: Message): void {
   if (appVisible && store.activeConversationId === conversationId) return;
 
   const senderName = store.peerNames.get(msg.from) ?? formatAddr0x(msg.from);
-  const conversationTitle = conversationTitleFor(conversationId, senderName, store);
+  // Title the notification with the store's canonical conversation label so it
+  // matches the chat header and sidebar; for an incoming DM this resolves to the
+  // same peer name as senderName.
+  const conversationTitle = formatConversationLabel(conversationId, store.peerNames, store.config);
 
   const payload: NativeMessageNotification = {
     conversationId,
@@ -722,17 +725,6 @@ function maybeNotifyIncoming(msg: Message): void {
   try {
     notify.onMessage(JSON.stringify(payload));
   } catch { /* notification is best-effort */ }
-}
-
-function conversationTitleFor(conversationId: string, senderName: string, store: ReturnType<typeof useStore.getState>): string {
-  const parsed = parseConversationId(conversationId);
-  if (parsed.kind === 'broadcast') return 'Broadcast';
-  if (parsed.kind === 'channel') {
-    const ch = store.config?.channels?.find(c => c.index === parsed.index);
-    return ch?.name?.trim() ? ch.name : `Channel ${parsed.index}`;
-  }
-  // dm (and any unmatched id) titles as the peer, which is the sender for an incoming DM.
-  return senderName;
 }
 
 export function openDM(addr: number): void {
