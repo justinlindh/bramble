@@ -122,19 +122,20 @@ Concretely:
    creates the job and its check run and skips straight to a `skipped`
    conclusion. Job-level `if:` never changes the context string, so the
    required context still reports.
-4. That `if:` is a function of the diff, never of the event. The diff is fixed
-   for a head SHA, so every run on that SHA makes the same skip decision and
-   the context never contradicts itself. An event-based predicate breaks that:
-   the newest check run of a given name on a SHA is the verdict branch
-   protection reads, and `skipped` counts as success, so one event's skip
-   silently replaces another event's real failure. Anything a job validates
-   that is not in the diff, a PR title for instance, has to be validated on
-   every run.
+4. A job-level skip is sound only where its predicate is a pure function of the
+   head SHA. Change-detection areas qualify, being derived from the diff: every
+   run on a SHA decides the same way, so the context cannot contradict itself.
+   A predicate that reads the triggering event does not qualify. The newest
+   check run of a given name on a SHA is the verdict branch protection reads,
+   and `skipped` counts as success, so an event that skips overwrites a
+   computed failure with an uncomputed pass. Whatever a job validates that the
+   head SHA does not determine, a PR title for instance, it validates on every
+   run.
 
 A job carries no `if:` at all where it has nothing to gate on. The
 `Static checks` bundle calls no detector and runs on every trigger (see below).
 So do the PR-metadata jobs `Commitlint` and `Template sections`: their subjects
-are the PR title and the PR body, neither of which is in the diff.
+are the PR title and the PR body, neither of which the head SHA determines.
 
 ## The reusable detector
 
