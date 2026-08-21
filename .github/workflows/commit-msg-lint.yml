@@ -28,13 +28,13 @@ defaults:
 jobs:
   commitlint:
     name: Commitlint
-    # Deliberately unconditional. Every triggered run publishes a `Commitlint`
-    # check run, and the newest one on a head SHA is the verdict branch
-    # protection reads; a job skipped by an `if:` publishes `skipped`, which
-    # counts as success. Gating this job on the event would therefore let a
-    # body-only edit replace a real failure with a pass. The always-report
-    # contract in docs/ci.md covers skips predicated on the diff, which is
-    # fixed for a head SHA; the PR title this job lints is not in the diff.
+    # Deliberately unconditional. A job-level skip is sound only where its
+    # predicate is a pure function of the head SHA (see docs/ci.md), and the PR
+    # title this job lints is not one: the same SHA carries different titles
+    # over time. Skipping on the event instead would publish `skipped`, which
+    # branch protection reads as success and which supersedes the previous
+    # run's verdict for this context, so a body-only edit would overwrite a
+    # computed failure with an uncomputed pass.
 
     # Fork-head PRs run GitHub-hosted so fork code never reaches the
     # self-hosted pool; same-repo PRs and dispatches follow RUNNER_LABEL.
