@@ -77,6 +77,13 @@ describe('incoming message native notification', () => {
     expect(payload).toMatchObject({ conversationId: 'ch:0', conversationTitle: 'Mesh Net', sender: 'Node A' });
   });
 
+  it('titles an unnamed channel with the same ch- fallback the chat header uses', async () => {
+    useStore.setState({ config: { identity: { address: 0xaa11 } } as any } as any);
+    await deliver({ from: 'DEADBEEF', text: 'net check', channel: 2, msgId: 'm9' });
+    const payload = JSON.parse(onMessage.mock.calls[0][0]);
+    expect(payload).toMatchObject({ conversationId: 'ch:2', conversationTitle: 'ch-2', sender: 'Node A' });
+  });
+
   it('learns the sender name from fromName so an unknown peer never titles as hex', async () => {
     useStore.setState({ peerNames: new Map() } as any);
     await deliver({ from: 'AABBCC04', to: 'AA11', text: 'hi', msgId: 'm7', fromName: 'Northside' });
