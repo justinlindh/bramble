@@ -1,16 +1,12 @@
 name: commit-msg-lint
 
-# Re-runs on `edited` as well as the default opened/synchronize/reopened,
-# because the "Lint PR title" step below validates the PR title and the title
-# is editable after the last push. With the default trigger set, editing a
-# title after CI went green never re-ran this workflow: the passing
-# `Commitlint` context stayed attached to the head SHA and the PR merged with
-# a squash subject nothing had ever validated. That subject is not cosmetic,
-# it is the squash-merge commit message, so commitlint's type/scope/length
-# rules go unenforced and semantic-release derives component versions from it
-# (a bad or missing scope silently cuts the wrong release, or none).
-# .github/workflows/pr-template.yml already spells the same event class out
-# for the same reason; these two must not diverge.
+# Includes `edited` alongside the default opened/synchronize/reopened because
+# the "Lint PR title" step below validates the PR title, and the title is
+# editable after the last push. That title is the squash-merge commit subject,
+# so commitlint's type/scope/length rules gate it and semantic-release derives
+# component versions from it: a title edited after a green run has to be
+# re-validated. .github/workflows/pr-template.yml spells the same event class
+# out for the same reason; these two must not diverge.
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
@@ -19,7 +15,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A run that will skip must never cancel a run that validates: branch
+  # protection reads the skipped `Commitlint` context as success, so the
+  # cancelled run's verdict is lost and an unchecked type or scope reaches the
+  # squash subject. The key therefore puts the runs that skip (body-only edits,
+  # see the job's `if:`) in their own group, where they can only cancel each
+  # other. Everything that validates stays in one group and keeps superseding
+  # itself, which is what cancel-in-progress is for. Non-`edited` events key to
+  # `lint` on the first conjunct alone; `github.event.changes` is absent for
+  # them and dereferencing it yields null rather than an error.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.event.action == 'edited' && github.event.changes.title == null) && 'noop' || 'lint' }}
   cancel-in-progress: true
 
 defaults:
