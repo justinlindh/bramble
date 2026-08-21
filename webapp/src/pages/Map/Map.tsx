@@ -5,6 +5,7 @@ import { useStore } from '../../store/index';
 import type { PeerLocation, Route } from '../../types/bramble';
 import { IconRoutes } from '../../components/Icons';
 import { formatAddr0x } from '../../utils/address';
+import { countEnabledShareTargets } from '../../lib/locationSharing';
 import styles from './Map.module.css';
 
 // Fix Leaflet default icon paths broken by bundlers
@@ -131,9 +132,10 @@ export function Map() {
   const gpsEnabled = config?.location?.enabled ?? false;
   // Sharing publishes only to configured targets, so the affirmative wording
   // is earned by having one, not by the policy switch being on.
-  const shareTargetCount =
-    (config?.location?.contact_rules ?? []).filter(r => r.enabled !== false).length +
-    (config?.location?.channel_targets ?? []).filter(c => c.enabled !== false).length;
+  const shareTargetCount = countEnabledShareTargets(
+    config?.location?.contact_rules ?? [],
+    config?.location?.channel_targets ?? [],
+  );
   const locationPolicyPreview = !config?.location
     ? 'Location policy unavailable'
     : !config.location.enabled
