@@ -1005,7 +1005,7 @@ func (s *Sim) runRealtimeHeadless() error {
 		select {
 		case <-s.stopCh:
 			s.shutdownEmulator()
-			s.restoreStdout(0)
+			s.restoreStdout()
 			return nil
 		case <-ticker.C:
 		}
@@ -1023,7 +1023,7 @@ func (s *Sim) runRealtimeHeadless() error {
 	s.shutdownEmulator()
 
 	// Flush the C-stdout pipe, mirroring RunHeadless's teardown.
-	s.restoreStdout(100 * time.Millisecond)
+	s.restoreStdout()
 	return nil
 }
 

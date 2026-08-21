@@ -4,10 +4,6 @@ package main
 #include "bridge.h"
 */
 import "C"
-import (
-	"strings"
-	"sync"
-)
 
 // emuHarness drives the emu-link broker against a live Sim for the extnode
 // tests. Like radio_harness.go, it exists so _test.go files (which cannot
@@ -18,8 +14,7 @@ import (
 type emuHarness struct {
 	sim *Sim
 
-	mu    sync.Mutex
-	lines []string
+	lineCapture
 }
 
 // newEmuHarness builds a Sim with the default (SF10/125 kHz) radio config and a
@@ -27,17 +22,13 @@ type emuHarness struct {
 // stdout when done.
 func newEmuHarness() *emuHarness {
 	h := &emuHarness{}
-	sim, err := NewSim("", func(b []byte) {
-		h.mu.Lock()
-		h.lines = append(h.lines, strings.TrimRight(string(b), "\n"))
-		h.mu.Unlock()
-	}, true)
+	sim, err := NewSim("", h.add, true)
 	if err != nil {
 		panic(err)
 	}
 	radioConfigInit(&sim.radio)
 	pcg32Seed(&sim.rng, 42)
-	go sim.readPipe()
+	sim.startPipeReader()
 	h.sim = sim
 	return h
 }
@@ -93,5 +84,5 @@ func (h *emuHarness) close() {
 	if h.sim.broker != nil {
 		h.sim.broker.Stop()
 	}
-	h.sim.restoreStdout(0)
+	h.sim.restoreStdout()
 }
