@@ -47,13 +47,10 @@ const TIER_DESCRIPTIONS: Record<LocationTier, string> = {
 
 const DEFAULT_INTERVAL = 300;
 
-// Validate a contact address the user types into the form and normalize it to
-// the canonical 8-char uppercase hex string stored on a rule. tryParseAddr is
-// the strict validator lib/addr.ts owns for exactly this: reject-on-malformed
-// form input (1 to 8 hex digits, optional 0x, trailing garbage rejected),
-// rather than a second hand-rolled copy of that regex here. formatAddrHex is
-// its formatting counterpart, so a round-trip through both yields the same
-// padded, uppercased shape this form has always stored.
+// Canonical 8-char uppercase hex form of a contact address the user typed, or
+// null when it is not 1 to 8 hex digits (optional 0x, trailing garbage
+// rejected). tryParseAddr is lib/addr's strict validator for typed addresses;
+// formatAddrHex is its formatting counterpart.
 export function normalizeAddress(raw: string): string | null {
   const addr = tryParseAddr(raw);
   return addr === null ? null : formatAddrHex(addr);
@@ -129,7 +126,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
   const addContactRule = () => {
     setError('');
     const normalized = normalizeAddress(newContactAddress);
-    if (!normalized) {
+    if (normalized === null) {
       setError('Contact address must be 1-8 hex characters.');
       return;
     }
