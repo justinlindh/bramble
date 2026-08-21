@@ -141,9 +141,7 @@ func TestSupervisorSpawnConsoleAndRestart(t *testing.T) {
 
 	// Console capture: the supervisor forwarded the node's stdout as console
 	// events, and the node attached over emu-link (node_joined + its log line).
-	h.mu.Lock()
-	lines := append([]string(nil), h.lines...)
-	h.mu.Unlock()
+	lines := h.snapshot()
 	var sawConsole, sawJoin, sawLog bool
 	for _, l := range lines {
 		if strings.Contains(l, `"type":"console"`) && strings.Contains(l, "boot=") {
@@ -230,9 +228,7 @@ func TestSupervisorConsoleTaggedByBoundIDMultiGroup(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	var pagerTag, gatewayTag string
 	for time.Now().Before(deadline) {
-		h.mu.Lock()
-		lines := append([]string(nil), h.lines...)
-		h.mu.Unlock()
+		lines := h.snapshot()
 		pagerTag = consoleNodeFor(lines, "attached id="+pagerID)
 		gatewayTag = consoleNodeFor(lines, "attached id="+gatewayID)
 		if pagerTag != "" && gatewayTag != "" {
@@ -249,9 +245,7 @@ func TestSupervisorConsoleTaggedByBoundIDMultiGroup(t *testing.T) {
 	}
 	// No console line may be tagged with a raw process label ("pager-0" /
 	// "gateway-0"): that would mean the old label-based routing leaked back in.
-	h.mu.Lock()
-	lines := append([]string(nil), h.lines...)
-	h.mu.Unlock()
+	lines := h.snapshot()
 	for _, l := range lines {
 		var ev struct {
 			Type string `json:"type"`

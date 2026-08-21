@@ -122,14 +122,11 @@ func (fs *fakeSerial) enableForces() []bool {
 func waitForLine(h *emuHarness, substr string, d time.Duration) bool {
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
-		h.mu.Lock()
-		for _, l := range h.lines {
+		for _, l := range h.snapshot() {
 			if strings.Contains(l, substr) {
-				h.mu.Unlock()
 				return true
 			}
 		}
-		h.mu.Unlock()
 		time.Sleep(2 * time.Millisecond)
 	}
 	return false

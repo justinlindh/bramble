@@ -224,6 +224,16 @@ func (lc *lineCapture) add(b []byte) {
 	lc.mu.Unlock()
 }
 
+// snapshot copies the lines captured so far. Readers take a copy rather than
+// the live slice because add can still be appending: restoreStdout closes the
+// pipe and waits out a fixed drain instead of joining the reader goroutine, so
+// a late line can land after the reader believes the run is over.
+func (lc *lineCapture) snapshot() []string {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	return append([]string(nil), lc.lines...)
+}
+
 // runScenario loads scenarioPath and drains its event queue to completion (or
 // until the scenario's duration_ms elapses) via the same drainInstant core
 // RunHeadless uses, so a duration-truncated scenario reports identical
@@ -257,7 +267,7 @@ func runScenario(scenarioPath string) (*scenarioRunResult, error) {
 
 	sim.restoreStdout(50 * time.Millisecond)
 
-	return &scenarioRunResult{lines: lc.lines, sim: sim}, nil
+	return &scenarioRunResult{lines: lc.snapshot(), sim: sim}, nil
 }
 
 // Lines returns every JSON event line emitted during the run, in order.
