@@ -35,6 +35,7 @@ jobs:
     # body-only edit replace a real failure with a pass. The always-report
     # contract in docs/ci.md covers skips predicated on the diff, which is
     # fixed for a head SHA; the PR title this job lints is not in the diff.
+
     # Fork-head PRs run GitHub-hosted so fork code never reaches the
     # self-hosted pool; same-repo PRs and dispatches follow RUNNER_LABEL.
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
