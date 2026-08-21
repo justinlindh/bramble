@@ -122,6 +122,14 @@ Concretely:
    creates the job and its check run and skips straight to a `skipped`
    conclusion. Job-level `if:` never changes the context string, so the
    required context still reports.
+4. That `if:` is a function of the diff, never of the event. The diff is fixed
+   for a head SHA, so every run on that SHA makes the same skip decision and
+   the context never contradicts itself. An event-based predicate breaks that:
+   the newest check run of a given name on a SHA is the verdict branch
+   protection reads, and `skipped` counts as success, so one event's skip
+   silently replaces another event's real failure. Anything a job validates
+   that is not in the diff, a PR title for instance, has to be validated on
+   every run.
 
 The single exception is the `Static checks` bundle, which has no `if:` at all
 and therefore runs on every trigger (see below).

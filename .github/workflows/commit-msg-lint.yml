@@ -15,16 +15,10 @@ permissions:
   contents: read
 
 concurrency:
-  # A run that will skip must never cancel a run that validates: branch
-  # protection reads the skipped `Commitlint` context as success, so the
-  # cancelled run's verdict is lost and an unchecked type or scope reaches the
-  # squash subject. The key therefore puts the runs that skip (body-only edits,
-  # see the job's `if:`) in their own group, where they can only cancel each
-  # other. Everything that validates stays in one group and keeps superseding
-  # itself, which is what cancel-in-progress is for. Non-`edited` events key to
-  # `lint` on the first conjunct alone; `github.event.changes` is absent for
-  # them and dereferencing it yields null rather than an error.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.event.action == 'edited' && github.event.changes.title == null) && 'noop' || 'lint' }}
+  # Every run validates, so superseding one with a newer one loses nothing: the
+  # replacement re-derives the verdict for the same head SHA. A cancelled run
+  # leaves a `cancelled` context, which blocks rather than passes.
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -34,15 +28,13 @@ defaults:
 jobs:
   commitlint:
     name: Commitlint
-    # `edited` fires on body edits too, and a body edit changes nothing this
-    # job inspects, so re-linting on one would be exactly the redundant work
-    # docs/quality-policy.md forbids. The edited payload carries a `changes`
-    # object naming only the fields that actually changed, so a body-only edit
-    # leaves `changes.title` null and skips straight to a passing context
-    # (job-level `if:` never alters the context string, per the always-report
-    # contract in docs/ci.md). The title was already validated by whichever
-    # run last saw it change.
-    if: github.event.action != 'edited' || github.event.changes.title != null
+    # Deliberately unconditional. Every triggered run publishes a `Commitlint`
+    # check run, and the newest one on a head SHA is the verdict branch
+    # protection reads; a job skipped by an `if:` publishes `skipped`, which
+    # counts as success. Gating this job on the event would therefore let a
+    # body-only edit replace a real failure with a pass. The always-report
+    # contract in docs/ci.md covers skips predicated on the diff, which is
+    # fixed for a head SHA; the PR title this job lints is not in the diff.
     # Fork-head PRs run GitHub-hosted so fork code never reaches the
     # self-hosted pool; same-repo PRs and dispatches follow RUNNER_LABEL.
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
