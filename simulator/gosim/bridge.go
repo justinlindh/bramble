@@ -10,7 +10,6 @@ import "C"
 import (
 	"strings"
 	"sync"
-	"time"
 	"unsafe"
 )
 
@@ -225,9 +224,9 @@ func (lc *lineCapture) add(b []byte) {
 }
 
 // snapshot copies the lines captured so far. Readers take a copy rather than
-// the live slice because add can still be appending: restoreStdout closes the
-// pipe and waits out a fixed drain instead of joining the reader goroutine, so
-// a late line can land after the reader believes the run is over.
+// the live slice because add can still be appending: the emu-link tests poll
+// while the broker and the pipe reader are running, and even the headless
+// callers only stop the reader at restoreStdout.
 func (lc *lineCapture) snapshot() []string {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
@@ -265,7 +264,7 @@ func runScenario(scenarioPath string) (*scenarioRunResult, error) {
 	sim.drainInstant()
 	sim.mu.Unlock()
 
-	sim.restoreStdout(50 * time.Millisecond)
+	sim.restoreStdout()
 
 	return &scenarioRunResult{lines: lc.snapshot(), sim: sim}, nil
 }

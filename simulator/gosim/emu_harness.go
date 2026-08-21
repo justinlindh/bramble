@@ -28,7 +28,7 @@ func newEmuHarness() *emuHarness {
 	}
 	radioConfigInit(&sim.radio)
 	pcg32Seed(&sim.rng, 42)
-	go sim.readPipe()
+	sim.startPipeReader()
 	h.sim = sim
 	return h
 }
@@ -84,5 +84,5 @@ func (h *emuHarness) close() {
 	if h.sim.broker != nil {
 		h.sim.broker.Stop()
 	}
-	h.sim.restoreStdout(0)
+	h.sim.restoreStdout()
 }

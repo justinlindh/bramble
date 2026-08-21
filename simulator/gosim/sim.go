@@ -102,7 +102,8 @@ type Sim struct {
 	// Pipe for capturing C stdout output
 	pipeR      *os.File
 	pipeW      *os.File
-	origStdout int // saved original stdout fd
+	origStdout int           // saved original stdout fd
+	pipeDone   chan struct{} // closed when readPipe returns; nil until started
 
 	nextAddr uint32
 
@@ -228,7 +229,7 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 
 // Start launches the simulation goroutines.
 func (s *Sim) Start() {
-	go s.readPipe()
+	s.startPipeReader()
 	go s.run()
 }
 
@@ -248,7 +249,7 @@ func (s *Sim) State() SimState {
 func (s *Sim) Stop() {
 	close(s.stopCh)
 	// Restore stdout; pipeR then gets EOF and readPipe exits.
-	s.restoreStdout(0)
+	s.restoreStdout()
 }
 
 // run is the main simulation goroutine.
@@ -1556,16 +1557,22 @@ func receiptReturnRate(expected, registered uint64) float64 {
 }
 
 // restoreStdout tears down the C-stdout capture: it closes the pipe's write
-// end, points fd 1 back at the saved original stdout, waits `drain` for the
-// readPipe goroutine to flush the last buffered lines (which, when headless,
-// still go out via origStdout), and only then releases the saved fd. Every
-// teardown path funnels through here so the fd handling and close-after-drain
-// ordering stay consistent.
-func (s *Sim) restoreStdout(drain time.Duration) {
+// end, points fd 1 back at the saved original stdout, waits for the readPipe
+// goroutine to flush the last buffered lines (which, when headless, still go
+// out via origStdout), and only then releases the saved fd. Every teardown path
+// funnels through here so the fd handling and close-after-flush ordering stay
+// consistent.
+//
+// The wait is a join, not a timeout: those two closes drop the only write ends
+// of the pipe (fd 1 was a dup of pipeW), so the reader is guaranteed its EOF
+// and readPipe returns. Waiting a fixed duration instead would leave both a
+// line still buffered at the deadline unaccounted for and origStdout closed
+// under a goroutine still writing to it.
+func (s *Sim) restoreStdout() {
 	s.pipeW.Close()
 	syscall.Dup2(s.origStdout, 1)
-	if drain > 0 {
-		time.Sleep(drain)
+	if s.pipeDone != nil {
+		<-s.pipeDone
 	}
 	syscall.Close(s.origStdout)
 }
@@ -1688,6 +1695,17 @@ func (s *Sim) emitJSON(v any) {
 	s.emitRaw(data)
 }
 
+// startPipeReader launches readPipe and records the channel restoreStdout
+// joins on. Every path that captures C stdout starts the reader through here so
+// none of them can leave pipeDone nil and silently fall back to not waiting.
+func (s *Sim) startPipeReader() {
+	s.pipeDone = make(chan struct{})
+	go func() {
+		defer close(s.pipeDone)
+		s.readPipe()
+	}()
+}
+
 // readPipe reads JSON lines from the pipe (C stdout output) and broadcasts them.
 func (s *Sim) readPipe() {
 	scanner := bufio.NewScanner(s.pipeR)
@@ -1738,14 +1756,14 @@ func shouldFilterLine(line []byte) bool {
 // lock/restoreStdout-on-failure ordering. The caller creates the sim first
 // (each supplies its own broadcast callback) and drives the drain afterward.
 func (sim *Sim) loadHeadless(scenarioPath string) error {
-	go sim.readPipe()
+	sim.startPipeReader()
 
 	sim.mu.Lock()
 	sim.cmdLoad(Command{Scenario: scenarioPath})
 	sim.mu.Unlock()
 
 	if sim.State() != StateLoaded {
-		sim.restoreStdout(0)
+		sim.restoreStdout()
 		return fmt.Errorf("failed to load scenario %s", scenarioPath)
 	}
 	return nil
@@ -1775,7 +1793,7 @@ func RunHeadless(scenarioPath string) error {
 	sim.mu.Unlock()
 
 	// Flush pipe
-	sim.restoreStdout(100 * time.Millisecond)
+	sim.restoreStdout()
 
 	return nil
 }
