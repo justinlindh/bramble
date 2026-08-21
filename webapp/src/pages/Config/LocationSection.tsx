@@ -13,6 +13,7 @@ import { useStore } from '../../store';
 import { IconLocation, IconLocationOff } from '../../components/Icons';
 import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddrShort } from '../../utils/address';
+import { tryParseAddr } from '../../lib/addr';
 import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './LocationSection.module.css';
 
@@ -46,10 +47,13 @@ const TIER_DESCRIPTIONS: Record<LocationTier, string> = {
 
 const DEFAULT_INTERVAL = 300;
 
-function normalizeAddress(raw: string): string | null {
-  const cleaned = raw.trim().replace(/^0x/i, '').toUpperCase();
-  if (!/^[0-9A-F]{1,8}$/.test(cleaned)) return null;
-  return cleaned.padStart(8, '0');
+// Canonical 8-char uppercase hex form of a contact address the user typed, or
+// null when it is not 1 to 8 hex digits (optional 0x, trailing garbage
+// rejected). tryParseAddr is lib/addr's strict validator for typed addresses;
+// formatAddrHex is its formatting counterpart.
+export function normalizeAddress(raw: string): string | null {
+  const addr = tryParseAddr(raw);
+  return addr === null ? null : formatAddrHex(addr);
 }
 
 export function LocationSection({ location, neighbors, channels, gpsAvailable = false, gpsEnabled }: LocationSectionProps) {
@@ -122,7 +126,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
   const addContactRule = () => {
     setError('');
     const normalized = normalizeAddress(newContactAddress);
-    if (!normalized) {
+    if (normalized === null) {
       setError('Contact address must be 1-8 hex characters.');
       return;
     }
