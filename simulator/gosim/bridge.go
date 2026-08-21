@@ -209,6 +209,21 @@ type scenarioRunResult struct {
 	sim   *Sim
 }
 
+// lineCapture accumulates the newline-trimmed JSON event lines a Sim
+// broadcasts. Its add method is the broadcast callback and may run on the
+// C-stdout pipe-reader goroutine, so the mutex guards the append against both
+// that goroutine and the test-side reader of lines.
+type lineCapture struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (lc *lineCapture) add(b []byte) {
+	lc.mu.Lock()
+	lc.lines = append(lc.lines, strings.TrimRight(string(b), "\n"))
+	lc.mu.Unlock()
+}
+
 // runScenario loads scenarioPath and drains its event queue to completion (or
 // until the scenario's duration_ms elapses) via the same drainInstant core
 // RunHeadless uses, so a duration-truncated scenario reports identical
@@ -222,13 +237,8 @@ type scenarioRunResult struct {
 // stdout), and every caller reads Lines rather than stdout, so echoing would
 // only bury a test failure or the twin's report under the event stream.
 func runScenario(scenarioPath string) (*scenarioRunResult, error) {
-	var mu sync.Mutex
-	var lines []string
-	sim, err := NewSim("", func(b []byte) {
-		mu.Lock()
-		lines = append(lines, strings.TrimRight(string(b), "\n"))
-		mu.Unlock()
-	}, false)
+	var lc lineCapture
+	sim, err := NewSim("", lc.add, false)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +257,7 @@ func runScenario(scenarioPath string) (*scenarioRunResult, error) {
 
 	sim.restoreStdout(50 * time.Millisecond)
 
-	return &scenarioRunResult{lines: lines, sim: sim}, nil
+	return &scenarioRunResult{lines: lc.lines, sim: sim}, nil
 }
 
 // Lines returns every JSON event line emitted during the run, in order.
