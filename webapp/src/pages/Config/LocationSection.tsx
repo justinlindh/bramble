@@ -14,6 +14,7 @@ import { IconLocation, IconLocationOff } from '../../components/Icons';
 import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddrShort } from '../../utils/address';
 import { friendlyErrorFrom } from '../../lib/errors';
+import { countEnabledShareTargets } from '../../lib/locationSharing';
 import styles from './LocationSection.module.css';
 
 interface LocationSectionProps {
@@ -103,7 +104,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
   // nothing about whether anything is being sent. Every affirmative bit of copy
   // below is derived from this, not from `enabled`.
   const targetCount = useMemo(
-    () => contactRules.filter(r => r.enabled !== false).length + channelTargets.filter(c => c.enabled !== false).length,
+    () => countEnabledShareTargets(contactRules, channelTargets),
     [contactRules, channelTargets],
   );
   const sharingActive = enabled && targetCount > 0;
