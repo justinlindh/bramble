@@ -99,6 +99,7 @@ module.exports = {
         'timesync',
         'tooling',
         'touch',
+        'trackball',
         'traffic_debug',
         'ui',
         'ui_gfx',
