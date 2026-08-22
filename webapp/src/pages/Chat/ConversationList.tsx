@@ -4,7 +4,7 @@ import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock } from '../../com
 import { usePeerInfo, usePeerVerification } from '../../hooks/usePeer';
 import { PeerStatusDot, PeerVerificationBadge } from './peerBadges';
 import { addChannel } from '../../store/actions';
-import { useStore, parseConversationId } from '../../store/index';
+import { useStore, parseConversationId, formatConversationLabel } from '../../store/index';
 import { friendlyErrorFrom } from '../../lib/errors';
 import { tryParseAddr } from '../../lib/addr';
 import { clampToUtf8Bytes, utf8Length, CHANNEL_NAME_BUDGET_BYTES } from '../../utils/byteLimit';
@@ -33,11 +33,13 @@ export function buildChannelItems(config: Pick<BrambleConfig, 'channels'> | null
     .map((ch: Channel): ChannelItem => {
       const id = `ch:${ch.index}`;
       const existing = conversations.get(id);
-      const rawName = typeof ch.name === 'string' ? ch.name : '';
-      const trimmedName = rawName.trim();
       return {
         id,
-        label: trimmedName.length > 0 ? trimmedName : `ch-${ch.index}`,
+        // One labeler for every conversation surface: the sidebar, the chat
+        // header, and notification titles all resolve the channel name through
+        // formatConversationLabel so they cannot drift on the name-vs-`ch-N`
+        // fallback or on whitespace trimming.
+        label: formatConversationLabel(id, undefined, config),
         unreadCount: existing?.unreadCount ?? 0,
         hasPsk: Boolean(ch.hasPsk),
       };

@@ -38,6 +38,10 @@ describe('formatConversationLabel', () => {
     expect(formatConversationLabel('ch:2', undefined, config(channel(2, 'ops')))).toBe('ops');
   });
 
+  it('trims surrounding whitespace so the label matches the sidebar', () => {
+    expect(formatConversationLabel('ch:2', undefined, config(channel(2, '  alpha-team  ')))).toBe('alpha-team');
+  });
+
   it('falls back to ch-{index} when the channel name is missing or blank', () => {
     expect(formatConversationLabel('ch:2', undefined, config(channel(2, '  ')))).toBe('ch-2');
     expect(formatConversationLabel('ch:3', undefined, config())).toBe('ch-3');
