@@ -252,6 +252,19 @@ func (s *Sim) Stop() {
 	s.restoreStdout()
 }
 
+// tickAdvance steps the sim one tick under the sim lock, advancing only while
+// it is running, and reports whether the sim has reached the completed state.
+// Both real-time drivers (run and runRealtimeHeadless) step through this so
+// their lock-and-advance discipline stays identical.
+func (s *Sim) tickAdvance() (completed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state == StateRunning {
+		s.advanceSim()
+	}
+	return s.state == StateCompleted
+}
+
 // run is the main simulation goroutine.
 func (s *Sim) run() {
 	ticker := time.NewTicker(time.Millisecond)
@@ -264,11 +277,7 @@ func (s *Sim) run() {
 		case cmd := <-s.cmdCh:
 			s.handleCommand(cmd)
 		case <-ticker.C:
-			s.mu.Lock()
-			if s.state == StateRunning {
-				s.advanceSim()
-			}
-			s.mu.Unlock()
+			s.tickAdvance()
 		}
 	}
 }
