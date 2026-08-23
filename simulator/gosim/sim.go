@@ -444,7 +444,7 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 		if s.routingMode == "flood" {
 			s.handleFloodRelayDue(evt)
 		} else {
-			s.handleFloodRelay(evt)
+			s.handleChannelFloodRelay(evt)
 		}
 	case C.EVT_NODE_JOIN:
 		s.handleNodeJoin(evt)
@@ -594,10 +594,12 @@ func (s *Sim) handleReceiptTx(evt *C.sim_event_t) {
 	C.bridge_handle_receipt_tx(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
-// handleFloodRelay fires a jittered channel-flood relay (Task 5): see
+// handleChannelFloodRelay fires a jittered channel-flood relay (Task 5): see
 // bridge.c's _handle_data broadcast branch, which schedules these via
-// EVT_SEND_PACKET (repurposed; previously declared but unused).
-func (s *Sim) handleFloodRelay(evt *C.sim_event_t) {
+// EVT_SEND_PACKET (repurposed; previously declared but unused). Distinct from
+// handleFloodRelayDue, which rebroadcasts through the Go-only floodSim model
+// rather than the real firmware channel flood.
+func (s *Sim) handleChannelFloodRelay(evt *C.sim_event_t) {
 	C.bridge_handle_flood_relay(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
