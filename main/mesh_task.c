@@ -2403,6 +2403,15 @@ static uint32_t mesh_send_channel_uid(int channel_idx, uint32_t dest_addr, const
         return mesh_send_dm(channel_idx, dest_addr, data, len, uid);
     }
 
+    /* Both store paths below (fragmented and short) record the broadcast with
+     * the same direction and status: a public-channel (index 0) broadcast is
+     * an untracked outgoing broadcast, any other channel a tracked outgoing
+     * message. Compute once so the two call sites cannot drift. */
+    const msg_direction_t dir =
+        (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT : MSG_DIR_OUTGOING;
+    const msg_status_t status =
+        (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE : MSG_STATUS_SENT;
+
     /* Check if fragmentation is needed */
     if (len > FRAG_MAX_PLAINTEXT) {
         /* Long message: split into fragments */
@@ -2453,13 +2462,8 @@ static uint32_t mesh_send_channel_uid(int channel_idx, uint32_t dest_addr, const
 
         /* Store the full message in message store */
         if (first_pkt_id != 0) {
-            msg_store_add_channel(
-                dest_addr,
-                (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT
-                                                              : MSG_DIR_OUTGOING,
-                (const char*)data, len, 0, 0, first_pkt_id,
-                (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE : MSG_STATUS_SENT,
-                (uint8_t)channel_idx);
+            msg_store_add_channel(dest_addr, dir, (const char*)data, len, 0, 0, first_pkt_id,
+                                  status, (uint8_t)channel_idx);
         }
         return first_pkt_id;
     }
@@ -2471,12 +2475,7 @@ static uint32_t mesh_send_channel_uid(int channel_idx, uint32_t dest_addr, const
             s_last_broadcast_id = pkt_id;
             recent_broadcast_record(pkt_id);
         }
-        msg_store_add_channel(dest_addr,
-                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT
-                                                                            : MSG_DIR_OUTGOING,
-                              (const char*)data, len, 0, 0, pkt_id,
-                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE
-                                                                            : MSG_STATUS_SENT,
+        msg_store_add_channel(dest_addr, dir, (const char*)data, len, 0, 0, pkt_id, status,
                               (uint8_t)channel_idx);
     }
     return pkt_id;
