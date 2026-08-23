@@ -6,7 +6,7 @@ import (
 )
 
 // floodTransportLineScenario is a 4-node line (A-B-C-D, 100-unit spacing).
-// At the sim's default SF10/125kHz derived range (~149.9 units, see the
+// At the sim's default SF9/125kHz derived range (~149.9 units, see the
 // SF-range coupling fix, commit 30603bdc), each node hears only its
 // immediate neighbor: D is exactly 3 hops from A (A->B->C->D), out of direct
 // radio range (300 units against a ~150-unit range). A sends ONE unicast

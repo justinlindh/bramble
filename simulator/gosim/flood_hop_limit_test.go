@@ -9,7 +9,7 @@ import (
 // floodHopLimitLineScenario builds an N-node line (N0-N1-...-, 100-unit
 // spacing) and floods ONE unicast DATA from N0 to the node at index dest under
 // the REAL firmware flood transport (flood_transport:true, driven through
-// bridge.c). At the sim's default SF10/125kHz range (~149.9 units) each node
+// bridge.c). At the sim's default SF9/125kHz range (~149.9 units) each node
 // hears only its immediate neighbors, so the destination is exactly `dest`
 // radio hops from N0. "collisions":false keeps it deterministic (the point is
 // the hop-budget reach, not the MAC model), mirroring flood_transport_test.go.

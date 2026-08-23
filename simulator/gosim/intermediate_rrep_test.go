@@ -7,7 +7,7 @@ import (
 
 // intermediateRREPStarScenario is a star topology (I at the hub, D/E/F each
 // a spoke in range of I only, not of each other): I=(0,0), D=(140,0),
-// E=(-140,0), F=(0,140). At the sim's default SF10/125kHz derived range
+// E=(-140,0), F=(0,140). At the sim's default SF9/125kHz derived range
 // (~149.9 units, see the SF-range coupling fix, commit 30603bdc), I hears
 // all three spokes but no spoke hears another (E-D is 280 units, F-D is
 // ~198, E-F is ~313, all out of range). "collisions":false keeps this
