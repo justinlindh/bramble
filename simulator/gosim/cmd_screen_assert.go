@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -81,7 +83,7 @@ func runScreenAssert(args []string) int {
 			}
 		}
 		if len(hits) >= *minNodes {
-			fmt.Printf("PASS: %q rendered on %d node(s): %s\n", *text, len(hits), strings.Join(keys(hits), " "))
+			fmt.Printf("PASS: %q rendered on %d node(s): %s\n", *text, len(hits), strings.Join(slices.Sorted(maps.Keys(hits)), " "))
 			return 0
 		}
 		fmt.Fprintf(os.Stderr, "FAIL: %q rendered on %d node(s), want >= %d\n", *text, len(hits), *minNodes)
@@ -149,12 +151,4 @@ func loadDeviceFrames(path string) (frames map[string][][]byte, joins map[string
 
 func posKey(x, y float64) string {
 	return strconv.FormatFloat(x, 'g', -1, 64) + "," + strconv.FormatFloat(y, 'g', -1, 64)
-}
-
-func keys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }

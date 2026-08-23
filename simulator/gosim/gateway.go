@@ -58,7 +58,7 @@ type Gateway struct {
 	baud       int
 	force      bool // enable with force:true even if the node holds an identity
 
-	idc uint64 // JSON-RPC id counter
+	idc atomic.Uint64 // JSON-RPC id counter
 
 	nodeMu sync.Mutex
 	nodeW  io.Writer // serial writer, guarded (phy.tx + keepalive both write)
@@ -78,7 +78,7 @@ func NewGateway(brokerPath, device string) *Gateway {
 	}
 }
 
-func (g *Gateway) nextID() uint64 { return atomic.AddUint64(&g.idc, 1) }
+func (g *Gateway) nextID() uint64 { return g.idc.Add(1) }
 
 // --- JSON-RPC (serial) wire types ---
 

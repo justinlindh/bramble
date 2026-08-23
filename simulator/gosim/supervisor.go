@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -220,9 +221,9 @@ func buildNodeEnv(brokerAddr, nodeDir, nodeLabel string, extra map[string]string
 // through a group's env map.
 func envLookup(env []string, key, def string) string {
 	prefix := key + "="
-	for i := len(env) - 1; i >= 0; i-- { // last wins, like the real environ
-		if strings.HasPrefix(env[i], prefix) {
-			return env[i][len(prefix):]
+	for _, e := range slices.Backward(env) { // last wins, like the real environ
+		if strings.HasPrefix(e, prefix) {
+			return e[len(prefix):]
 		}
 	}
 	return def

@@ -14,6 +14,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1327,7 +1328,7 @@ func (s *Sim) complete() {
 	broadcastReceiptsExpected := uint64(extMetrics.broadcast_receipts_expected)
 	broadcastReceiptsRegistered := uint64(extMetrics.broadcast_receipts_registered)
 
-	sort.Slice(perNodeMs, func(i, j int) bool { return perNodeMs[i] < perNodeMs[j] })
+	slices.Sort(perNodeMs)
 	pct := func(p float64) uint64 {
 		if len(perNodeMs) == 0 {
 			return 0
