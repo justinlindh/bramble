@@ -74,13 +74,15 @@ type AirtimeWire = WirePartial<RpcSchemas['AirtimeResponse']> & {
   tiers?: unknown[];
 };
 
+const REFILL_INTERVAL_MS = 3600000;
+
 export function normalizeAirtime(raw: AirtimeWire): AirtimeStatus {
   // Firmware returns flat fields; webapp expects { tiers: [...] }
   if (raw.tiers) return raw as AirtimeStatus;
 
   // next_refill_ms is a duration (ms until next refill). 0 means "just refilled",
-  // treat it as a full interval from now. Default to 1 hour if missing.
-  const nextRefillMs = raw.next_refill_ms ?? 3600000;
+  // treat it as a full interval from now. Default to one interval if missing.
+  const nextRefillMs = raw.next_refill_ms ?? REFILL_INTERVAL_MS;
   const refillAtMs = Date.now() + (nextRefillMs > 0 ? nextRefillMs : REFILL_INTERVAL_MS);
 
   const tiers: AirtimeTier[] = [
@@ -97,8 +99,6 @@ export function normalizeAirtime(raw: AirtimeWire): AirtimeStatus {
     tiers: tiers.map(t => ({ ...t, usedPct: t.maxMs > 0 ? Math.round(100 * (t.maxMs - t.remainingMs) / t.maxMs) : 0 })),
   };
 }
-
-const REFILL_INTERVAL_MS = 3600000;
 
 export async function loadAirtime(): Promise<void> {
   if (!session.client) return;
