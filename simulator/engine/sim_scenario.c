@@ -224,9 +224,7 @@ static bool load_beacon_policy(cJSON* beacon_json, sim_beacon_policy_t* beacon) 
  * hard load failure. Do not reintroduce a warn-and-skip list to silence a
  * typo; an unloadable scenario is strictly better than an inert one. */
 
-static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* nodes,
-                        radio_config_t* radio) {
-    (void)radio; /* Reserved for future use */
+static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* nodes) {
     if (!events_json)
         return true; /* No scripted events */
 
@@ -843,7 +841,7 @@ bool scenario_load_file(const char* path, scenario_t* scenario) {
         }
         if (ok) {
             cJSON* events_json = cJSON_GetObjectItem(root, "events");
-            ok = load_events(events_json, scenario->events, scenario->nodes, scenario->radio);
+            ok = load_events(events_json, scenario->events, scenario->nodes);
         }
     }
 
