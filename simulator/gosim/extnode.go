@@ -588,7 +588,7 @@ func (ec *extConn) handleTx(msg *emuInbound) {
 // adoptReportedPHY points the ether's time-on-air model at the LoRa PHY the
 // attached firmware node actually configured, which it reports on every tx.
 //
-// A firmware node does not transmit at RADIO_PROFILE_LONG_RANGE's SF:
+// A firmware node does not transmit at RADIO_PROFILE_LONG_RANGE's SF10:
 // mesh_init_radio_config overwrites the profile's sf/bw_hz with the frequency
 // plan's defaults, and every shipped plan (US915/EU868/AU915) defaults to
 // SF9/125 kHz. The C radio model reads the same plan (radio_config_init), so
