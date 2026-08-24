@@ -15,6 +15,7 @@
 #include "packet.h" /* BRAMBLE_PROTOCOL_VERSION */
 #include "topology_export.h"
 #include "cJSON.h"
+#include "relay_path_json.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
@@ -570,15 +571,10 @@ static int handle_get_delivery_events(const cJSON* params, cJSON* result) {
             cJSON_AddStringToObject(obj, "packet_id", msg_buf);
             cJSON_AddStringToObject(payload, "status", "delivered");
 
-            cJSON* path = cJSON_AddArrayToObject(payload, "relayPath");
-            for (uint8_t h = 0; h < e->route_len && h < DELIVERY_EVENT_ROUTE_MAX_HOPS; h++) {
-                cJSON* hop = cJSON_CreateObject();
-                char hop_buf[9];
-                cJSON_AddStringToObject(hop, "addr",
-                                        addr_hex(e->route_hops[h], hop_buf, sizeof(hop_buf)));
-                cJSON_AddNumberToObject(hop, "rssi", 0);
-                cJSON_AddItemToArray(path, hop);
-            }
+            uint8_t hops = (e->route_len < DELIVERY_EVENT_ROUTE_MAX_HOPS)
+                               ? e->route_len
+                               : DELIVERY_EVENT_ROUTE_MAX_HOPS;
+            relay_path_json_add(payload, e->route_hops, hops, true, 0);
         }
 
         cJSON_AddItemToObject(obj, "payload", payload);

@@ -11,6 +11,7 @@
 
 #include "esp_random.h"
 #include "cJSON.h"
+#include "relay_path_json.h"
 #include "rpc_dispatcher.h"
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
@@ -655,15 +656,7 @@ void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         cJSON_AddStringToObject(params, "status", "delivered");
         cJSON_AddNumberToObject(params, "rssi_at_dest", ack.rssi_at_dest);
 
-        cJSON* path = cJSON_AddArrayToObject(params, "relayPath");
-        char hop_buf[9];
-        for (uint8_t i = 0; i < route_hop_count; i++) {
-            cJSON* hop = cJSON_CreateObject();
-            cJSON_AddStringToObject(hop, "addr", addr_hex(route_hops[i], hop_buf, sizeof(hop_buf)));
-            cJSON_AddNumberToObject(hop, "rssi",
-                                    (i == (route_hop_count - 1)) ? ack.rssi_at_dest : 0);
-            cJSON_AddItemToArray(path, hop);
-        }
+        relay_path_json_add(params, route_hops, route_hop_count, true, ack.rssi_at_dest);
 
         rpc_notify("bramble.onAck", params);
         cJSON_Delete(params);
@@ -885,7 +878,7 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr, uint32_t broad
         return;
     }
 
-    char src_buf[9], id_buf[9], hop_buf[9];
+    char src_buf[9], id_buf[9];
     cJSON* params = cJSON_CreateObject();
     snprintf(id_buf, sizeof(id_buf), "%08" PRIX32, broadcast_id);
     cJSON_AddStringToObject(params, "recipient", addr_hex(src_addr, src_buf, sizeof(src_buf)));
@@ -897,12 +890,7 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr, uint32_t broad
         relay_path) {
         uint8_t bounded_hops =
             (hop_count > DELIVERY_RECEIPT_MAX_HOPS) ? DELIVERY_RECEIPT_MAX_HOPS : hop_count;
-        cJSON* path = cJSON_AddArrayToObject(params, "relayPath");
-        for (uint8_t i = 0; i < bounded_hops; i++) {
-            cJSON* hop = cJSON_CreateObject();
-            cJSON_AddStringToObject(hop, "addr", addr_hex(relay_path[i], hop_buf, sizeof(hop_buf)));
-            cJSON_AddItemToArray(path, hop);
-        }
+        relay_path_json_add(params, relay_path, bounded_hops, false, 0);
     }
 
     record_broadcast_delivery_event(src_addr, broadcast_id, hop_count, relay_path);
