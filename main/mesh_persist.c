@@ -102,10 +102,11 @@ void mesh_pin_store_load(void) {
 /*
  * Replay-window persistence.
  *
- * The receive-side windows must be as durable as the SENDER-side nonce
- * counter (nonce_counter's reserve-ahead ceiling). Held in RAM only, the
- * high-water marks come back all zero after a reboot, so a batch captured
- * off the air beforehand replays cleanly in ascending counter order.
+ * The receive-side windows are persisted here so they are as durable as the
+ * SENDER-side nonce counter (nonce_counter's reserve-ahead ceiling). Were
+ * they held in RAM alone, the high-water marks would come back all zero
+ * after a reboot and a batch captured off the air beforehand would replay
+ * cleanly in ascending counter order.
  * Replayed RERR tears down routes; replayed LOCATION and CHAT are integrity
  * and privacy problems. OTA reboots the node on demand, which hands an
  * attacker the trigger.
@@ -132,9 +133,10 @@ static uint32_t s_last_replay_flush_ms;
 
 /* Static rather than a stack buffer: the flush runs from
  * mesh_periodic_maintenance, which already sits at the bottom of a deep call
- * chain on the 10 KB mesh task stack, where a blob-sized frame risks an
- * overflow that only shows on real hardware. Both the save and load paths run
- * on the mesh task and never overlap, so one buffer serves both. */
+ * chain on the 10 KB mesh task stack, where a blob-sized frame overflows it.
+ * Host and gosim builds have no real task stack, so an overflow here shows up
+ * only on device. Both the save and load paths run on the mesh task and never
+ * overlap, so one buffer serves both. */
 static uint8_t s_replay_blob[REPLAY_TABLE_BLOB_MAX];
 
 static void mesh_replay_store_save_one(nvs_handle_t h, const char* key, replay_table_t* t) {
@@ -238,9 +240,9 @@ void mesh_replay_store_load(void) {
  * s_state_mutex and complete a cycle with mesh_add_channel's
  * s_state_mutex-then-NVS ordering.
  *
- * The collect buffer is static rather than stack: it is ~700 bytes, which the
- * mesh task's stack cannot spare on a deep call chain, and this runs once so
- * nothing overlaps.
+ * The collect buffer is static rather than stack: at ~700 bytes it overflows
+ * the mesh task's stack on a deep call chain, and this runs once so nothing
+ * overlaps.
  */
 static peer_location_restore_entry_t s_restore_buf[LOCATION_MAX_CONTACTS];
 

@@ -387,7 +387,7 @@ void mesh_process_receipt_tx_event(void) {
      * number. First attempts are slot-spread across a window sized to the
      * peer count, so a short fixed backoff would fold retries back into OTHER
      * nodes' first-attempt slots: during a receipt storm each transmission
-     * then collides with the nodes it needs to reach, and a receipt can lose
+     * then collides with the nodes it needs to reach, and a receipt loses
      * every copy at the origin. Salting the slot hash with the attempt number
      * scatters each retry into a fresh pseudo-random slot of the next window,
      * decorrelated from every other sender's attempts, at the same TX volume.

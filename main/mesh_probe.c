@@ -180,8 +180,8 @@ void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
      * rate limit below has any say. PROBE is unauthenticated and remotely
      * inducible, so an attacker in radio range could otherwise buy one UART
      * line per injected frame and starve the serial RPC channel a maintainer
-     * would reach for while diagnosing the flood. Every remotely inducible,
-     * pre-rate-limit log line in the firmware sits at debug for this reason. */
+     * would reach for while diagnosing the flood. Every PROBE ingress line
+     * below the rate limit sits at debug for this reason. */
     ESP_LOGD(TAG, "PROBE RX pid=%08" PRIX32 " round=%u src=%s me=%s hop=%u rssi=%d snr=%d",
              header.packet_id, (unsigned)probe_round, addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)), (unsigned)header.hop_limit,

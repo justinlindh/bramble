@@ -46,9 +46,10 @@ void timesync_init(timesync_state_t* ts);
 /*
  * Ingest a time observation from a beacon.
  *
- * source_established: whether source_addr is an established neighbor
- * (neighbor_is_established) at the time this beacon arrived. Only
- * established sources count toward the pre-commit
+ * source_established (NEW-SEC-4 mitigation, see docs/SECURITY-MODEL.md):
+ * whether source_addr is an established neighbor (neighbor_is_established)
+ * at the time this beacon arrived. Only established sources count toward
+ * the pre-commit
  * corroboration quorum (CORROBORATION_REQUIRED distinct established
  * sources), so an insider fabricating fresh source addresses cannot
  * bootstrap the clock instantly: their addresses must first accumulate
@@ -75,7 +76,7 @@ uint8_t timesync_get_stratum(const timesync_state_t* ts);
 
 /*
  * Whether network time is trustworthy enough to gate a security decision on
- * (e.g. deferred replay acceptance in handle_data). This is the real
+ * (e.g. deferred replay acceptance in handle_data, NEW-SEC-4). This is the real
  * signal, not a placeholder. `synchronized` can only ever become true via
  * timesync_handle_sync's commit path, which requires CORROBORATION_REQUIRED
  * distinct sources to have already agreed (within MAX_TIME_SHIFT_MS of each

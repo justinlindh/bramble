@@ -137,7 +137,8 @@ replay_table_t s_control_replay; /* control-plane (RREP/RERR/ACK/receipt/beacon)
                                   separate from the data-plane s_replay above */
 /* This node's verified TOFU pin table (address -> Ed25519/X25519 pubs), fed
  * by handle_identity_attestation below. Persisted to NVS: new pins and
- * verified bits survive reboot via mesh_pin_store_save/_load. */
+ * verified bits (DM forward-secrecy + SAS) survive reboot via
+ * mesh_pin_store_save/_load. */
 identity_store_t s_identity_pins;
 /* Pin-store NVS persistence (defined near the other NVS helpers). save() is
  * called whenever a NEW pin is added or a verified bit changes; load() runs
@@ -2893,7 +2894,7 @@ void mesh_task_start(bramble_identity_t* identity) {
             identity_store_set_anchor(&s_identity_pins, anchor_pub);
         }
     }
-    /* Restore the persisted verified TOFU pin table
+    /* Restore the persisted verified TOFU pin table (DM forward-secrecy + SAS)
      * AFTER the anchor is provisioned above: identity_store_deserialize rebuilds
      * the pin bindings + verified bits while preserving the anchor, so a
      * "verified once, stays verified" model survives reboot. Must follow

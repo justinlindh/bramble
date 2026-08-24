@@ -88,7 +88,8 @@ int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t r
             return -2;
         }
     } else if (ts->pending_count > 0) {
-        /* Bootstrap outlier clamp (STAGED, see network_key.h): before the
+        /* Bootstrap outlier clamp (NEW-SEC-4, STAGED, see network_key.h and
+         * docs/SECURITY-MODEL.md): before the
          * first sync commits, ts->offset_ms is not yet meaningful (it is
          * still its zero-init value), so a lone huge proposal cannot be
          * judged against it the way the synchronized branch above does.
