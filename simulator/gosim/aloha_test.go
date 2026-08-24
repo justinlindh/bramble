@@ -27,13 +27,13 @@ import (
 //
 // As N grows with offered load G = N*T/W held fixed, this converges to the
 // textbook pure-ALOHA throughput factor e^(-2G): with the parameters below
-// (N = 40, T = 485.376 ms at SF10/125 kHz for a 32-byte frame, W = 60 s),
-// p = 0.016114 and P(success) = (1 - p)^39 = 0.5306, versus
-// e^(-2G * (N-1)/N) = 0.5318.
+// (N = 40, T = 263.168 ms, the default SF9/125 kHz cost of a 32-byte frame,
+// W = 60 s), p = 0.008753 and P(success) = (1 - p)^39 = 0.7097, versus
+// e^(-2G * (N-1)/N) = 0.7103.
 //
 // The test measures the delivered fraction over many seeded trials and
 // requires it to match the exact finite-N expectation within 0.05
-// (3.5 standard errors at 1200 samples).
+// (3.8 standard errors at 1200 samples).
 func TestAlohaCollisionRateMatchesAnalytic(t *testing.T) {
 	const (
 		nTx     = 40
