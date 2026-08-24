@@ -6,10 +6,10 @@ import (
 )
 
 // floodTransportLineScenario is a 4-node line (A-B-C-D, 100-unit spacing).
-// At the sim's default SF10/125kHz derived range (~149.9 units, see the
-// SF-range coupling fix, commit 30603bdc), each node hears only its
+// At the sim's default SF9/125kHz derived range (150 units, see
+// radio_derive_range in sim_radio.c), each node hears only its
 // immediate neighbor: D is exactly 3 hops from A (A->B->C->D), out of direct
-// radio range (300 units against a ~150-unit range). A sends ONE unicast
+// radio range (300 units against a 150-unit range). A sends ONE unicast
 // DATA to D. "collisions":false keeps this deterministic: the point of this
 // test is the RELAY transport decision (flood vs reactive route-lookup
 // forward) B and C make on receipt, not the MAC/collision model, mirroring

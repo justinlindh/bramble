@@ -2,15 +2,15 @@ package main
 
 import "testing"
 
-// Reception range now derives from the LoRa link budget (radio_sensitivity_dbm
-// + radio_derive_range in sim_radio.c) instead of being a fixed disk
-// independent of SF/BW. These tests calibrate and sanity-check that model: the
-// firmware's default PHY (the frequency plan's default_sf/default_bw_hz, which
-// mesh_init_radio_config programs over the radio profile's values) must
-// reproduce the simulator's long-standing ~150-unit baseline range, and other
-// SF/BW combinations must move relative to that baseline the way a real link
-// budget would (higher SF = more sensitive = longer range; wider bandwidth =
-// higher noise floor = shorter range).
+// Reception range derives from the LoRa link budget (radio_sensitivity_dbm +
+// radio_derive_range in sim_radio.c), so it tracks SF and BW rather than
+// standing as a fixed disk. These tests calibrate and sanity-check that model:
+// the firmware's default PHY (the frequency plan's default_sf/default_bw_hz,
+// which mesh_init_radio_config programs over the radio profile's values) must
+// reproduce the simulator's 150-unit baseline range, and other SF/BW
+// combinations must move relative to that baseline the way a real link budget
+// would (higher SF = more sensitive = longer range; wider bandwidth = higher
+// noise floor = shorter range).
 
 func approxEqual(t *testing.T, got, want, tolerance float32, what string) {
 	t.Helper()
@@ -23,15 +23,15 @@ func approxEqual(t *testing.T, got, want, tolerance float32, what string) {
 	}
 }
 
-// TestDefaultPHYIsFrequencyPlanDefault pins the property this model got wrong
-// for as long as it had a default PHY: the medium must be modeled at the PHY
-// the firmware transmits at, which is the frequency plan's, not the radio
-// profile table's. mesh_task.c's mesh_init_radio_config loads
-// RADIO_PROFILE_LONG_RANGE (SF10) and then overwrites sf/bw_hz with
-// freq_plan_get_default()'s (SF9/125 kHz on every shipped plan), so a real
-// node's boot log reads "SF9 BW125000". Comparing radio_config_init's output
-// against the plan table directly is what keeps the two coupled: change a
-// plan's default_sf and either the model follows or this test fails.
+// TestDefaultPHYIsFrequencyPlanDefault pins the property the rest of the model
+// rests on: the medium is modeled at the PHY the firmware transmits at, which
+// is the frequency plan's, not the radio profile table's. mesh_task.c's
+// mesh_init_radio_config loads RADIO_PROFILE_LONG_RANGE (SF10) and then
+// overwrites sf/bw_hz with freq_plan_get_default()'s (SF9/125 kHz on every
+// shipped plan), so a real node's boot log reads "SF9 BW125000". Comparing
+// radio_config_init's output against the plan table directly is what keeps the
+// two coupled: change a plan's default_sf and either the model follows or this
+// test fails.
 func TestDefaultPHYIsFrequencyPlanDefault(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()
@@ -53,9 +53,9 @@ func TestDefaultPHYIsFrequencyPlanDefault(t *testing.T) {
 
 // TestDefaultPHYFrameAirtime prices a frame at the default PHY and checks it
 // against the firmware's own ToA function at the plan's SF, the number the
-// whole channel model (offered load, collisions, LBT) is built on. At SF10 a
-// 60-byte frame was charged 731 ms; at the firmware's real SF9 it is 386 ms, and
-// every published offered-load figure moved with it.
+// whole channel model (offered load, collisions, LBT) is built on. A 60-byte
+// frame is 386 ms at the plan's SF9 against 731 ms at SF10, so every published
+// offered-load figure turns on the model pricing it at the right one.
 func TestDefaultPHYFrameAirtime(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()
@@ -69,13 +69,13 @@ func TestDefaultPHYFrameAirtime(t *testing.T) {
 	//   payload symbols = 8 + ceil((8*60 - 4*9 + 28 + 16) / (4*9)) * 5
 	//                   = 8 + ceil(488/36) * 5 = 8 + 14*5 = 78
 	//   payload = 78 * 4.096 ms = 319.488 ms, total 386.048 ms.
-	// The same frame at SF10 is 731.136 ms, so the corrected PHY charges 53% of
-	// what this model used to charge every frame.
+	// The same frame at SF10 is 731.136 ms, so the default PHY charges 53% of
+	// the SF10 price.
 	approxEqual(t, float32(got), 386048.0, 1.0, "60-byte ToA at the default PHY (us)")
 
-	// The correction's direction and magnitude, asserted rather than assumed:
-	// the default PHY must be materially cheaper than the SF10 the model used
-	// to assume, and not by a rounding error.
+	// That gap's direction and magnitude, asserted rather than assumed: the
+	// default PHY must be materially cheaper than SF10, and not by a rounding
+	// error.
 	h10 := newRadioHarness()
 	defer h10.free()
 	h10.setPHY(10, 125000, 1)
@@ -94,7 +94,7 @@ func TestDefaultPHYBaselineRangeCalibration(t *testing.T) {
 	// place, so radio.range is already the derived value. The noise-margin
 	// anchor (radio_noise_margin_db) is computed from that same PHY, so this
 	// 150-unit baseline holds whatever the frequency plan's default SF is:
-	// correcting the modeled SF changes airtime without moving the topology of
+	// changing the modeled SF changes airtime without moving the topology of
 	// any scenario that lets range derive.
 	got := h.rangeField()
 	approxEqual(t, got, 150.0, 2.0, "default-PHY derived range")
@@ -177,14 +177,14 @@ func TestSensitivityModelDatasheetValues(t *testing.T) {
 	approxEqual(t, sf10_500-sf10, 6.0206, 0.01, "sensitivity(SF10,500k) - sensitivity(SF10,125k)")
 }
 
-// TestLegacyGridDisconnectsAtSF7_250k demonstrates the inversion this fix
-// corrects: at the legacy 120-unit grid spacing (airtime-adaptive-*
-// scenarios), the OLD fixed 150-unit disk let SF7/250k "reach" neighbors it
-// physically could not at that SF/BW. With range now derived from the link
-// budget, SF7/250k's ~73-unit range is well under 120 units, so adjacent
-// grid neighbors are out of range: radio_can_receive must reject them. The
-// default PHY at the same spacing must still connect (anchored range ~150 >
-// 120), which is what keeps every legacy scenario's topology intact.
+// TestLegacyGridDisconnectsAtSF7_250k pins what deriving range from the link
+// budget buys over a fixed disk: at the legacy 120-unit grid spacing
+// (airtime-adaptive-* scenarios), a fixed 150-unit disk lets SF7/250k "reach"
+// neighbors it physically cannot at that SF/BW. The derived SF7/250k range is
+// ~73 units, well under 120, so adjacent grid neighbors are out of range and
+// radio_can_receive must reject them. The default PHY at the same spacing must
+// still connect (anchored range 150 > 120), which is what keeps every legacy
+// scenario's topology intact.
 func TestLegacyGridDisconnectsAtSF7_250k(t *testing.T) {
 	const gridSpacing = 120.0
 

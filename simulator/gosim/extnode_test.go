@@ -181,11 +181,11 @@ func TestExtNodeTxPricedAndDeliveredWithRSSI(t *testing.T) {
 }
 
 // The ether prices airtime at the PHY the attached firmware reports, whatever
-// the C radio model's own default is. The model's default is now the same
-// frequency-plan PHY a stock node boots on (SF9/125 kHz), so this test starts
-// the ether at SF10 to make adoption observable: that is also the concrete case
-// adoption still has to cover, a node whose PHY differs from the ether's
-// (an NVS-overridden sf/bw, or a build for another region's plan).
+// the C radio model's own default is. That default is the same frequency-plan
+// PHY a stock node boots on (SF9/125 kHz), so this test starts the ether at
+// SF10 to make adoption observable: that is also the concrete case adoption
+// has to cover, a node whose PHY differs from the ether's (an NVS-overridden
+// sf/bw, or a build for another region's plan).
 func TestExtNodeAdoptsReportedPHY(t *testing.T) {
 	h := newEmuHarness()
 	defer h.close()
@@ -212,8 +212,9 @@ func TestExtNodeAdoptsReportedPHY(t *testing.T) {
 	if toa := uint32(td["toa_ms"].(float64)); toa != sf9Toa {
 		t.Fatalf("txdone toa_ms = %d, want %d (priced at the reported SF9)", toa, sf9Toa)
 	}
-	// The whole point: SF9 is materially cheaper than SF10, so a short beacon
-	// cadence no longer oversubscribes the emulated channel.
+	// The whole point: SF9 is materially cheaper than SF10, so pricing at the
+	// reported PHY keeps a short beacon cadence from oversubscribing the
+	// emulated channel.
 	if sf9Toa >= sf10Toa {
 		t.Fatalf("SF9 ToA %d ms is not below the SF10 ToA %d ms", sf9Toa, sf10Toa)
 	}

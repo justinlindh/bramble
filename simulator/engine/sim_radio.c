@@ -165,10 +165,10 @@ static float bw_noise_adj_db(uint32_t bw_hz) {
  *          = 22 - 52 - (-129) - 29 * log10(150)
  *          = 99 - 63.107
  *          = 35.89 dB.
- * It was 38.9 dB while the model's default PHY was mistakenly SF10; the 3 dB
- * difference is exactly the SF9-to-SF10 datasheet sensitivity step, so ranges
- * at a non-default SF/BW move by that one step and the default PHY's 150-unit
- * baseline is unchanged.
+ * A plan defaulting to SF10 would put it at 38.9 dB instead: the 3 dB gap is
+ * exactly the SF9-to-SF10 datasheet sensitivity step, so moving the default
+ * shifts every non-default SF/BW range by that one step while the default PHY
+ * keeps the 150-unit baseline.
  */
 static float radio_noise_margin_db(void) {
     float base = kSfSensitivity125kDbm[radio_default_sf() - 7];

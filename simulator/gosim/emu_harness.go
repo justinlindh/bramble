@@ -17,7 +17,7 @@ type emuHarness struct {
 	lineCapture
 }
 
-// newEmuHarness builds a Sim with the default (SF10/125 kHz) radio config and a
+// newEmuHarness builds a Sim with the default (SF9/125 kHz) radio config and a
 // running pipe reader, ready for a broker to attach. Call close() to restore
 // stdout when done.
 func newEmuHarness() *emuHarness {
