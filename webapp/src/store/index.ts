@@ -129,10 +129,9 @@ export function formatConversationLabel(id: string, peerNames?: Map<number, stri
       return 'Broadcast';
     case 'channel': {
       const ch = config?.channels?.find(c => c.index === parsed.index);
-      // Trim to match the sidebar's long-standing display: a stored channel name
-      // can carry surrounding whitespace (config normalization decides blankness
-      // on the trimmed value but keeps the raw name), and a label with leading or
-      // trailing spaces reads as a rendering glitch.
+      // A stored name can carry surrounding whitespace: config normalization
+      // decides blankness on the trimmed value but keeps the raw name, which
+      // protocol-facing callers (channel share strings) need.
       const name = ch?.name?.trim();
       return name ? name : `ch-${parsed.index}`;
     }

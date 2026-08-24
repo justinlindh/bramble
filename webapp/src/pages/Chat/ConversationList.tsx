@@ -35,10 +35,8 @@ export function buildChannelItems(config: Pick<BrambleConfig, 'channels'> | null
       const existing = conversations.get(id);
       return {
         id,
-        // One labeler for every conversation surface: the sidebar, the chat
-        // header, and notification titles all resolve the channel name through
-        // formatConversationLabel so they cannot drift on the name-vs-`ch-N`
-        // fallback or on whitespace trimming.
+        // Shared with every other conversation surface so the name-or-`ch-N`
+        // fallback cannot drift between them.
         label: formatConversationLabel(id, undefined, config),
         unreadCount: existing?.unreadCount ?? 0,
         hasPsk: Boolean(ch.hasPsk),
