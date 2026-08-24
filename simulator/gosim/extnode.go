@@ -1008,13 +1008,7 @@ func (s *Sim) runRealtimeHeadless() error {
 			return nil
 		case <-ticker.C:
 		}
-		s.mu.Lock()
-		if s.state == StateRunning {
-			s.advanceSim()
-		}
-		done := s.state == StateCompleted
-		s.mu.Unlock()
-		if done {
+		if s.tickAdvance() {
 			break
 		}
 	}
