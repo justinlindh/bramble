@@ -32,7 +32,7 @@ uint8_t flood_hop_limit_clamp(uint32_t hops) {
 
 uint8_t flood_origination_hop_limit(bool flood_transport, uint32_t flood_hop_limit) {
     /* Flood transport: originate at the clamped operator-settable budget.
-     * Reactive (default): originate at ROUTE_HOP_LIMIT_MAX, unchanged. */
+     * Reactive (default): originate at ROUTE_HOP_LIMIT_MAX. */
     return flood_transport ? flood_hop_limit_clamp(flood_hop_limit) : ROUTE_HOP_LIMIT_MAX;
 }
 

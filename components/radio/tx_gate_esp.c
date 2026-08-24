@@ -1,8 +1,8 @@
 /*
  * Firmware binding for the TX gate: wires the host-testable gate core to
  * the real radio, timer, and RTOS primitives, and serializes all
- * transmissions behind one mutex (the radio is a single shared resource;
- * previously concurrent senders raced both the radio and the budget).
+ * transmissions behind one mutex: the radio is a single shared resource, and
+ * concurrent senders would race both it and the budget.
  */
 #include "tx_gate.h"
 #include "radio.h"
@@ -21,8 +21,7 @@ static tx_gate_t s_gate;
 static SemaphoreHandle_t s_gate_mutex;
 
 /*
- * WDT-safe lock (review MAJOR on PR #82). Worst-case mutex hold by a
- * sender inside the gate:
+ * WDT-safe lock. Worst-case mutex hold by a sender inside the gate:
  *   LBT: 3 backoffs of (50+<50) + (100+<100) + (300+<300) ms  < ~900 ms
  *   radio_transmit_raw: standby/setup + TX-done wait bounded by the 4 s
  *   FreeRTOS notify timeout (3 s SX1262 hardware timeout inside it)      ~4 s

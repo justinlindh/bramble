@@ -114,7 +114,7 @@ int route_install(routing_table_t* table, uint32_t dest, uint32_t next_hop, uint
         if (table->entries[i].dest_addr == dest) {
             route_entry_t* e = &table->entries[i];
             bool replace;
-            /* Task 4-fix F2: trust class dominates. A DISCOVERED
+            /* Trust class dominates. A DISCOVERED
              * (control-plane, HMAC-gated) install always reclaims a
              * BREADCRUMB entry, and a BREADCRUMB install can never displace
              * a DISCOVERED one -- otherwise a forged/maxed breadcrumb
@@ -146,15 +146,14 @@ int route_install(routing_table_t* table, uint32_t dest, uint32_t next_hop, uint
     if (table->count < MAX_ROUTES) {
         idx = table->count++;
     } else {
-        /* Evict: same broken -> stale -> LRU ordering as before, but biased
-         * to prefer a ROUTE_SRC_BREADCRUMB victim over a ROUTE_SRC_DISCOVERED
-         * one (finding 2, final whole-branch review). A breadcrumb carries
-         * only an unauthenticated link hint (see route_source_t doc comment
-         * above); a full table should give up a breadcrumb before it gives
-         * up a control-plane-verified DISCOVERED route, even when the
-         * install needing the slot is itself DISCOVERED. Search breadcrumbs
-         * first, in the usual broken -> stale -> LRU order among just that
-         * class. */
+        /* Evict in broken -> stale -> LRU order, biased to prefer a
+         * ROUTE_SRC_BREADCRUMB victim over a ROUTE_SRC_DISCOVERED one. A
+         * breadcrumb carries only an unauthenticated link hint (see
+         * route_source_t doc comment above); a full table should give up a
+         * breadcrumb before it gives up a control-plane-verified DISCOVERED
+         * route, even when the install needing the slot is itself
+         * DISCOVERED. Search breadcrumbs first, in the usual broken ->
+         * stale -> LRU order among just that class. */
         idx = -1;
         for (int i = 0; i < table->count; i++) {
             if (table->entries[i].source == ROUTE_SRC_BREADCRUMB &&
@@ -184,11 +183,11 @@ int route_install(routing_table_t* table, uint32_t dest, uint32_t next_hop, uint
             /* No breadcrumb victim exists anywhere in the table. A
              * BREADCRUMB install must not evict a DISCOVERED route to make
              * room for itself either -- that is the exact same trust-class
-             * inversion the same-dest F2 rule above forbids, just reached
+             * inversion the same-dest trust-class rule above forbids, reached
              * via capacity pressure instead of a same-dest collision -- so
              * refuse the install rather than reclaim a higher-trust entry.
              * A DISCOVERED install has no such restriction and falls
-             * through to the original broken -> stale -> LRU search across
+             * through to the broken -> stale -> LRU search across
              * every entry regardless of source. */
             if (source == ROUTE_SRC_BREADCRUMB) {
                 return -1;

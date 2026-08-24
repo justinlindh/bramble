@@ -1,8 +1,8 @@
 /*
- * battery_wrappers: the legacy battery_read_mv/battery_read_pct API,
- * reimplemented as thin wrappers over battery_get_status() so every target
- * implements the read path exactly once (in battery_get_status) and every
- * existing call site keeps working unchanged. Also battery_display_pct(),
+ * battery_wrappers: battery_read_mv/battery_read_pct as thin wrappers over
+ * battery_get_status(), so every target implements the read path exactly
+ * once (in battery_get_status) and a call site that needs only one of the
+ * two numbers stays a one-liner. Also battery_display_pct(),
  * the convenience one-argument form of battery_helpers.c's
  * battery_display_pct_ema(): it needs a real clock (esp_timer_get_time()),
  * which is why it lives here rather than in battery_helpers.c, which stays

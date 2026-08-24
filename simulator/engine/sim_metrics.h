@@ -24,15 +24,15 @@ typedef struct {
     uint64_t total_packets;
     uint64_t messages_sent;
     uint64_t delivered_packets;
-    /* Phase 2 "save reactive routing" Part A: distinct scripted messages
-     * whose delivery receipt made it all the way back to the true
-     * ORIGINATOR (bridge.c's _handle_delivery_receipt, at the point
-     * receipt.header.dest_addr == rx->addr), not just reached the
-     * destination. This is Bramble's actual differentiator (confirmed
-     * delivery); delivered_packets/message_delivery_rate is destination
-     * REACH only (see bridge.c's "don't wait for receipt to arrive at
-     * source" comment). confirmed_packets <= delivered_packets always,
-     * since a receipt can only return after the destination decoded the
+    /* Distinct scripted messages whose delivery receipt made it all the
+     * way back to the true ORIGINATOR (bridge.c's
+     * _handle_delivery_receipt, at the point receipt.header.dest_addr
+     * == rx->addr), not just reached the destination. This is Bramble's
+     * actual differentiator (confirmed delivery);
+     * delivered_packets/message_delivery_rate is destination REACH only
+     * (see bridge.c's "don't wait for receipt to arrive at source"
+     * comment). confirmed_packets <= delivered_packets always, since a
+     * receipt can only return after the destination decoded the
      * message. */
     uint64_t confirmed_packets;
     uint64_t dropped_packets;
@@ -86,15 +86,12 @@ void metrics_update_active_nodes(metrics_state_t* metrics, int count);
 void metrics_record_tx_airtime(metrics_state_t* metrics, uint8_t pkt_type, uint32_t airtime_us);
 double metrics_avg_latency_ms(const metrics_state_t* metrics);
 /* ToA-weighted control-plane share: ToA(beacon+RREQ+RREP+RERR) / ToA(all).
- * This is the HONEST replacement for the packet-count ratio this function
- * used to compute; see metrics_control_packet_pct for that old semantic,
- * kept under its own honest name. */
+ * Weighting by real time-on-air rather than packet count keeps the share
+ * comparable across packet sizes and spreading factors. */
 double metrics_control_airtime_pct(const metrics_state_t* metrics);
-/* Packet-COUNT control-plane share (beacon+RREQ+RREP sent / total packets
- * sent): the exact formula metrics_control_airtime_pct used to compute
- * before it was fixed to be ToA-weighted. Kept for continuity under an
- * honest name; note it does not include RERR, unlike the ToA-weighted
- * version, since it is a frozen copy of the old (mislabeled) formula. */
+/* Packet-COUNT control-plane share: (beacon+RREQ+RREP sent) / total packets
+ * sent. Reported alongside the ToA-weighted share; it counts packets, not
+ * airtime, and omits RERR, so the two numbers legitimately disagree. */
 double metrics_control_packet_pct(const metrics_state_t* metrics);
 
 #endif /* SIM_METRICS_H */

@@ -78,8 +78,8 @@ static int location_contacts_find(uint32_t addr) {
 /*
  * One-time carry-over of the legacy "ct_data" blob.
  *
- * That blob was private to this screen: nothing else read it, so peers
- * toggled on here were never transmitted to and never appeared in the app.
+ * The blob is private to this screen: nothing else reads it, so peers toggled
+ * on through it are never transmitted to and never appear in the app.
  * Rewriting each record as a canonical rule key makes those selections real,
  * and the blob is erased so this runs once.
  */

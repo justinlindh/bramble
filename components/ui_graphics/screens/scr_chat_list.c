@@ -238,8 +238,7 @@ void scr_chat_list_create(bramble_layout_t* layout) {
 
     /* No ui_zone_reset_to_content() here: this builder only ever runs through
      * layout_rebuild_content (tab dispatch, and the chat view's Back button),
-     * which owns the reset. That the reset used to live here, and that this was
-     * the ONE builder that forgot it, was bug F2. */
+     * which owns the reset. */
 }
 
 void scr_chat_list_refresh(bramble_layout_t* layout) { layout_set_tab(layout, TAB_CHAT); }

@@ -48,8 +48,8 @@ neighbor_entry_t* neighbor_lookup(neighbor_table_t* table, uint32_t addr);
 void neighbor_purge(neighbor_table_t* table, uint32_t now_ms);
 int neighbor_count(const neighbor_table_t* table);
 
-/* Tenure thresholds for treating a neighbor as established (ws 1.3c
- * anti-Sybil lever): sustained presence, not just a single beacon. */
+/* Tenure thresholds for treating a neighbor as established (an anti-Sybil
+ * lever): sustained presence, not just a single beacon. */
 #define ESTABLISHED_MIN_BEACONS 3
 #define ESTABLISHED_MIN_AGE_MS 300000
 
@@ -108,7 +108,7 @@ typedef enum {
     ROUTE_BROKEN,
 } route_state_t;
 
-/* Trust class of a route install (Task 4-fix F2). A DATA breadcrumb
+/* Trust class of a route install. A DATA breadcrumb
  * (dest=src_addr, next_hop=prev_hop, learned off a forwarded DATA frame)
  * carries only immediate-link quality and, critically, an UNAUTHENTICATED
  * next-hop hint (prev_hop is relay-mutable, MAC-excluded). Without a trust
@@ -131,7 +131,7 @@ typedef enum {
     ROUTE_SRC_DISCOVERED = 0, /* RREP/beacon: control-plane, HMAC-authenticated */
     ROUTE_SRC_BREADCRUMB,     /* unauthenticated hint: DATA reverse-route
                                * learning (wire v4) or an RREQ source route
-                               * (RREQs carry no HMAC; see issue #74) */
+                               * (RREQs carry no HMAC) */
 } route_source_t;
 
 typedef struct {

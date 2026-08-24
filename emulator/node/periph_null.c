@@ -1,15 +1,14 @@
 /*
  * No-op peripheral drivers for the IDF linux target: WiFi manager and the
  * device-only half of the OTA component. Each implements an existing firmware
- * header function-for-function; the spike proved these symbols are required to
- * link app_main -> mesh_task on the simulator (their real drivers need
- * esp_wifi / app_update, neither of which exists on the linux target). These
- * remain no-ops (Task 9+ territory).
+ * header function-for-function, supplying the symbols app_main -> mesh_task
+ * needs to link on the simulator (their real drivers need esp_wifi /
+ * app_update, neither of which exists on the linux target).
  *
- * The button and battery halves that used to live here are gone: the real
- * virtual drivers button_virt.c / battery_virt.c now own those symbols on the
- * linux target (and gps_virt.c owns gps). Defining them here too would clash at
- * link time.
+ * Button, battery and GPS are deliberately NOT here: components/button's
+ * button_virt.c, components/battery's battery_virt.c and components/gps's
+ * gps_virt.c own those symbols on the linux target, and defining them here
+ * too would clash at link time.
  */
 #include <string.h>
 

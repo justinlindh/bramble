@@ -36,9 +36,8 @@ int identity_mint_ws_auth_token(char* token_out, size_t token_out_len) {
     return 0;
 }
 
-/* Blob store keys. "priv"/"pub" (X25519) predate Phase 1; a store holding
- * only those two is an old identity and gets the Ed25519 migration in
- * identity_load(). */
+/* Blob store keys. A store holding only "priv"/"pub" (the X25519 pair) has
+ * no Ed25519 keypair and gets the migration in identity_load(). */
 #define ID_KEY_X25519_PRIV "priv"
 #define ID_KEY_X25519_PUB "pub"
 #define ID_KEY_ED25519_PUB "ed_pub"
@@ -234,10 +233,9 @@ int identity_load(bramble_identity_t* id) {
             0 ||
         id_store_read(ID_KEY_ED25519_PRIV, id->ed25519_private_key, BRAMBLE_ED25519_SECKEY_SIZE) !=
             0) {
-        /* MIGRATION (Phase 1): an old store holds only the X25519 identity.
-         * Keep it (the address stays X25519-derived and thus stable) and
-         * generate + persist a fresh Ed25519 keypair for it. Fail closed:
-         * no keygen or persist success, no identity. */
+        /* MIGRATION: a store holding only the X25519 identity keeps that pair
+         * and gets a fresh Ed25519 keypair generated and persisted for it.
+         * Fail closed: no keygen or persist success, no identity. */
         if (crypto_ed25519_keypair(id->ed25519_public_key, id->ed25519_private_key) != 0)
             return -1;
         if (id_store_write(ID_KEY_ED25519_PUB, id->ed25519_public_key,
@@ -248,11 +246,10 @@ int identity_load(bramble_identity_t* id) {
         }
     }
 
-    /* Phase 4 rebind: address/pubkey_hash derive from the Ed25519 identity
-     * key. For a migrated (previously X25519-only) store this is the flag
-     * day: the node comes up with a NEW address derived from its freshly
-     * generated Ed key. Deliberate and owner-approved (pre-alpha): peers'
-     * pins are RAM-only and re-establish via attestation TOFU. */
+    /* Address/pubkey_hash derive from the Ed25519 identity key, so a store
+     * that had to generate its Ed25519 keypair in the migration above comes
+     * up under a NEW address. Deliberate: the new address is simply unknown
+     * to peers, and they pin it via attestation TOFU. */
     id->address = crypto_derive_address(id->ed25519_public_key);
     id->pubkey_hash = crypto_derive_pubkey_hash(id->ed25519_public_key);
     return 0;
@@ -264,7 +261,7 @@ int identity_generate_and_save(bramble_identity_t* id) {
     return identity_save(id);
 }
 
-/* --- Trust-anchor endorsement primitive (trust-anchor campaign, P0) --------
+/* --- Trust-anchor endorsement primitive -----------------------------------
  * Pure helpers: build/verify the canonical endorsement message. No NVS, no
  * state, no device-side signing. Layout is LOCKED (see identity.h). */
 
@@ -300,7 +297,7 @@ bool identity_endorsement_verify(const uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY
     return crypto_ed25519_verify(anchor_pub, msg, sizeof(msg), sig);
 }
 
-/* --- Anchor public-key provisioning (trust-anchor campaign, P0) ------------
+/* --- Anchor public-key provisioning ---------------------------------------
  * In-memory state mirrored to the per-platform blob store (id_store_read/
  * write), fail-closed and exact-length like the identity keypair above.
  * Absent = not anchored = the default; load never creates one. */
@@ -350,7 +347,7 @@ void identity_anchor_clear(void) {
     s_anchor_set = false;
 }
 
-/* --- Own endorsement certificate (trust-anchor campaign, P1) ----------------
+/* --- Own endorsement certificate -------------------------------------------
  * The node's own cert (the anchor's signature over this node's identity key)
  * mirrored to the per-platform blob store: not_after as an 8-byte big-endian
  * blob, sig as a 64-byte blob. Same in-memory-authoritative, fail-closed,

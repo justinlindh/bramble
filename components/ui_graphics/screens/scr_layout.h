@@ -31,9 +31,9 @@ void layout_set_tab(bramble_layout_t* layout, bramble_tab_t tab);
 /* THE way to swap the content area to a new screen: clean the content area, run
  * the builder to repopulate it, then reset the focus zone to content. Every
  * full-screen transition (tab dispatch, back buttons, chat/SAS/compose/channel
- * entries) goes through here so no screen builder can forget the zone reset -
- * forgetting it in scr_chat_list_create was bug F2 (a content row lit green
- * while input stayed in chrome, so SELECT fired a nav tab and jumped screens).
+ * entries) goes through here so no screen builder can forget the zone reset: a
+ * builder that forgets it leaves a content row lit green while input stays in
+ * chrome, so SELECT fires a nav tab and jumps screens.
  *
  * The builder receives the layout and an opaque ctx; builders that take other
  * argument shapes get a tiny adapter. Deferred (ui_defer'd) transitions must

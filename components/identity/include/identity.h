@@ -34,7 +34,7 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len);
  * IDENTITY_TOKEN_ERR_ENTROPY with token_out emptied when the gate is shut. */
 int identity_mint_ws_auth_token(char* token_out, size_t token_out_len);
 
-/* --- Trust-anchor endorsement primitive (trust-anchor campaign, P0) --------
+/* --- Trust-anchor endorsement primitive -----------------------------------
  * A fleet has one Ed25519 ANCHOR keypair. The anchor holder (an offline
  * operator client) signs an endorsement over each node's Ed25519 identity
  * public key, binding "this key is a member of my fleet" to a validity
@@ -50,7 +50,7 @@ int identity_mint_ws_auth_token(char* token_out, size_t token_out_len);
 #define IDENTITY_ENDORSEMENT_MSG_CONTEXT_LEN 18
 #define IDENTITY_ENDORSEMENT_MSG_SIZE (IDENTITY_ENDORSEMENT_MSG_CONTEXT_LEN + 32 + 8) /* 58 */
 
-/* Endorsement certificate as stored/transmitted (wired in later phases):
+/* Endorsement certificate as stored and transmitted:
  * not_after(8, big-endian) || endorsement_sig(64) = 72 bytes. */
 #define IDENTITY_ENDORSEMENT_CERT_SIZE (8 + 64) /* 72 */
 
@@ -69,7 +69,7 @@ bool identity_endorsement_verify(const uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY
                                  const uint8_t ed25519_pub[BRAMBLE_ED25519_PUBKEY_SIZE],
                                  uint64_t not_after, const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]);
 
-/* --- Anchor public-key provisioning (trust-anchor campaign, P0) ------------
+/* --- Anchor public-key provisioning ---------------------------------------
  * The fleet anchor PUBLIC key, persisted per node (device NVS, host in-memory)
  * and mirrored in module memory. Absent = not anchored = the default; nothing
  * loads or creates one implicitly. Mirrors the network_key provider. */
@@ -98,7 +98,7 @@ int identity_anchor_load(void);
  * network_key_clear. */
 void identity_anchor_clear(void);
 
-/* --- Own endorsement certificate (trust-anchor campaign, P1) ----------------
+/* --- Own endorsement certificate -------------------------------------------
  * The node's OWN cert: the anchor's signature over this node's Ed25519
  * identity key, plus its not_after validity bound. Provisioned via the
  * setEndorsement RPC (after verifying the cert against the node's key and the

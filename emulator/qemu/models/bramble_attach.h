@@ -1,6 +1,6 @@
 /*
- * Bramble device-model fan-out (Phase 2 emulator).
- * See hw/xtensa/bramble/bramble_attach.c.
+ * Bramble device-model fan-out. See hw/xtensa/bramble/bramble_attach.c.
+ *
  */
 
 #ifndef HW_XTENSA_BRAMBLE_ATTACH_H
@@ -10,7 +10,7 @@
 #include "exec/memory.h"
 
 /*
- * Single fan-out entry point for the Bramble Phase 2 emulator device models.
+ * Single fan-out entry point for the Bramble emulator device models.
  * Called once from esp32s3_machine_init(), where the SoC state is in scope, so
  * every model is wired from one stable call site instead of a per-model patch
  * to the machine init (Esp32s3SocState is private to esp32s3.c, so the handles

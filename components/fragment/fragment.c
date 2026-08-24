@@ -75,14 +75,14 @@ int reassembly_add(reassembly_ctx_t* ctx, const frag_header_t* hdr, const uint8_
     if (!slot)
         return -1;
 
-    /* frag_total is unauthenticated attacker-controlled input, and it was
-     * previously recorded once and never rechecked. A sender could open a
-     * slot with total=2 and then feed the same message_id a fragment
-     * declaring total=4 with frag_index=3: the index passed the
-     * index < total check against the ATTACKER's total, set bit 3 in a slot
-     * whose full_mask is 0b0011, and permanently poisoned the mask so the
-     * real message could never complete and the slot stayed pinned for the
-     * full 30s timeout.
+    /* frag_total is unauthenticated attacker-controlled input, so it is
+     * rechecked on EVERY fragment, not just recorded when the slot opens.
+     * Without the recheck a sender opens a slot with total=2 and then feeds
+     * the same message_id a fragment declaring total=4 with frag_index=3: the
+     * index passes the index < total check against the ATTACKER's total, sets
+     * bit 3 in a slot whose full_mask is 0b0011, and permanently poisons the
+     * mask so the real message can never complete and the slot stays pinned
+     * for the full 30s timeout.
      *
      * The offending fragment is dropped and the first-seen total is kept.
      * The alternative of tearing down the slot on mismatch is worse: it

@@ -1,5 +1,5 @@
 /*
- * Bramble SSD1680 e-paper SSI slave (QEMU esp32s3, Phase 2 emulator, P2.5).
+ * Bramble SSD1680 e-paper SSI slave (QEMU esp32s3).
  *
  * Register-accurate model of the Solomon SSD1680 controller driving the pager's
  * GDEY0213B74 2.13" e-paper (components/display/ssd1680_io.c on top of the

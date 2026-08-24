@@ -1,6 +1,5 @@
 /*
- * Bramble SAR ADC oneshot stub (P2.3b).
- * See hw/xtensa/bramble_adc.c.
+ * Bramble SAR ADC oneshot stub. See hw/xtensa/bramble_adc.c.
  */
 
 #ifndef HW_XTENSA_BRAMBLE_ADC_H

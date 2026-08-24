@@ -67,12 +67,12 @@ bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_ba
                             uint32_t my_addr);
 
 /*
- * SEC-H1 (Task 3.2, STAGED, NOT closed: see network_key.h). Authenticates
- * exactly the 4 origin-stable fields a destination computes once
- * (query_id, src_addr, hop_count, route_metric), deliberately excluding
- * next_hop and header.dest_addr, the only two fields rrep_forward mutates
- * on each relay hop. rrep_sign fills r->auth_hmac; call it once, at the
- * end of rrep_build_destination. rrep_verify recomputes the same MAC and
+ * SEC-H1 (STAGED, NOT closed: see network_key.h). Authenticates exactly the
+ * 4 origin-stable fields a destination computes once (query_id, src_addr,
+ * hop_count, route_metric), deliberately excluding next_hop and
+ * header.dest_addr, the only two fields rrep_forward mutates on each relay
+ * hop. rrep_sign fills r->auth_hmac; call it once, at the end of
+ * rrep_build_destination. rrep_verify recomputes the same MAC and
  * constant-time-compares; returns nonzero (true) iff it matches. When
  * unprovisioned there is no key: network_key_get fails, network_key_mac
  * returns the all-zero sentinel, and rrep_verify rejects before the compare
@@ -80,18 +80,17 @@ bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_ba
  * under a provisioned key this closes the keyless-outsider case for SEC-H1;
  * the keyed-insider residual remains.
  */
-/* Fail-closed (mandatory-provisioning Task 2): rrep_sign returns 0 on success
- * and nonzero when UNPROVISIONED (emits the all-zero sentinel, do not send);
- * rrep_verify checks that return and REJECTS before the compare, so an
- * unprovisioned verifier never accepts a frame (never matches the sentinel). */
+/* Fail-closed: rrep_sign returns 0 on success and nonzero when UNPROVISIONED
+ * (emits the all-zero sentinel, do not send); rrep_verify checks that return
+ * and REJECTS before the compare, so an unprovisioned verifier never accepts a
+ * frame (never matches the sentinel). */
 int rrep_sign(bramble_rrep_t* r);
 int rrep_verify(const bramble_rrep_t* r);
 
 /*
- * Phase 2 "save reactive routing": intermediate-node RREP (classic AODV
- * shortcut, RFC 3561 6.6.2). Every RREQ flooding the whole mesh to find its
- * destination is reactive routing's dominant airtime cost at scale
- * (see the 2026-07-04 phase-2 scale-framework design notes). If a relay
+ * Intermediate-node RREP (classic AODV shortcut, RFC 3561 6.6.2). Every RREQ
+ * flooding the whole mesh to find its destination is reactive routing's
+ * dominant airtime cost at scale. If a relay
  * that receives an RREQ already holds a route to the destination, it can
  * answer on the destination's behalf instead of only forwarding the flood
  * further, short-circuiting discovery for the whole subtree beyond it.

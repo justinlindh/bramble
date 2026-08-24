@@ -37,10 +37,10 @@ static volatile bool s_needs_reinit = false;
 bool sx1262_needs_reinit(void) { return s_needs_reinit; }
 void sx1262_clear_reinit(void) { s_needs_reinit = false; }
 
-/* Raise the reinit flag without a hard reset. Used by the CAD-timeout policy
- * (issue #118): after enough consecutive CAD timeouts the radio is treated as
- * wedged, and the next radio_check_and_clear_reinit() reconfigures it. If the
- * chip is genuinely stuck, that reconfigure's own BUSY-timeout path escalates
+/* Raise the reinit flag without a hard reset. Used by the CAD-timeout policy:
+ * after enough consecutive CAD timeouts the radio is treated as wedged, and
+ * the next radio_check_and_clear_reinit() reconfigures it. If the chip is
+ * genuinely stuck, that reconfigure's own BUSY-timeout path escalates
  * to a hard reset via BUSY_STUCK_THRESHOLD, so this stays a soft request. */
 void sx1262_request_reinit(void) { s_needs_reinit = true; }
 
@@ -415,8 +415,8 @@ int sx1262_set_tx_params(int8_t power_dbm, uint8_t ramp_time) {
 int sx1262_set_modulation_params(uint8_t sf, uint32_t bw_hz, uint8_t cr, uint8_t ldro) {
     /* Map bw_hz to the register code in one place (125kHz=0x04, 250kHz=0x05,
      * 500kHz=0x06). Taking Hz here rather than a kHz number through a uint8_t
-     * avoids the 500 -> 244 truncation that silently ran the radio at 125 kHz
-     * (issue #149). */
+     * avoids the 500 -> 244 truncation that silently runs the radio at
+     * 125 kHz. */
     uint8_t bw_param = sx1262_bw_reg_from_hz(bw_hz);
 
     /* Auto-calculate LDRO if caller passed 0xFF */
@@ -548,9 +548,9 @@ int sx1262_get_packet_status(int16_t* rssi, int8_t* snr) {
 
 int sx1262_set_sleep(uint8_t config) {
     /* No BUSY wait before sleep command, but still serialize the transfer:
-     * this hand-rolled CS path previously bypassed g_spi_mutex entirely, so on
-     * shared-SPI boards a display flush could splice into it and on any board a
-     * concurrent radio command could (issue #82). */
+     * this hand-rolled CS path takes g_spi_mutex like every other transfer, so
+     * on shared-SPI boards a display flush cannot splice into it, and on any
+     * board neither can a concurrent radio command. */
     spi_mutex_take();
     uint8_t tx[2] = {SX1262_CMD_SET_SLEEP, config};
     nss_low();
@@ -606,8 +606,8 @@ static int sx1262_calibrate(uint8_t cal_mask) {
      * again for the calibration to complete. */
     /* Hold g_spi_mutex across the whole calibrate sequence (pre-BUSY wait,
      * transfer, and the long completion BUSY wait). This hand-rolled CS path
-     * previously bypassed the mutex and discarded the transfer return (issue
-     * #82). */
+     * serializes on the mutex like every other transfer, and its transfer
+     * return is checked rather than discarded. */
     spi_mutex_take();
 
     int busy_rc = sx1262_wait_busy(2000);

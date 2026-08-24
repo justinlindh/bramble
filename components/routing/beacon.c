@@ -33,16 +33,17 @@ void beacon_compute_hmac(bramble_beacon_t* beacon, const uint8_t* shared_key, si
     memset(beacon->auth_hmac, 0, sizeof(beacon->auth_hmac));
     bramble_beacon_serialize(beacon, buf, sizeof(buf));
 
-    /* Fix 4 (red-team panel): cover the optional name field too, not just
-     * the fixed prefix before auth_hmac (32 bytes originally, 38 as of ws
-     * 1.3b's seq field; always BEACON_SIZE - sizeof(auth_hmac) below,
-     * never hardcoded). bramble_beacon_serialize lays the wire out as
+    /* Cover the optional name field too, not just the fixed prefix before
+     * auth_hmac. That prefix length is always BEACON_SIZE -
+     * sizeof(auth_hmac), derived below and never hardcoded, so growing the
+     * fixed fields cannot silently drop bytes out of coverage.
+     * bramble_beacon_serialize lays the wire out as
      * [fixed prefix | auth_hmac (16) | name_len + name (0 or 1+nlen)], so
      * the HMAC input is the fixed prefix concatenated with the name
      * region, skipping over auth_hmac's own 16 bytes in the middle (which
      * must stay excluded from their own coverage). Without this, an
-     * attacker rewrites any captured beacon's name and it still verifies:
-     * the display name was spoofable even under a provisioned key. */
+     * attacker rewrites any captured beacon's name and it still verifies,
+     * leaving the display name spoofable even under a provisioned key. */
     size_t prefix_len = BEACON_SIZE - sizeof(beacon->auth_hmac);
     size_t name_wire_len = bramble_beacon_wire_size(beacon) - BEACON_SIZE; /* 0, or 1+nlen */
     uint8_t hmac_input[(BEACON_SIZE - 16) + 1 + BEACON_NAME_MAX];
@@ -60,9 +61,8 @@ bool beacon_verify_hmac(const bramble_beacon_t* beacon, const uint8_t* shared_ke
     uint8_t saved[sizeof(copy.auth_hmac)];
     memcpy(saved, copy.auth_hmac, sizeof(saved));
     beacon_compute_hmac(&copy, shared_key, key_len);
-    /* SEC-H2 (Task 3.4): constant-time compare with no early exit, unlike
-     * memcmp. The non-constant-time compare was named as part of SEC-H2's
-     * root cause. Uses the shared crypto_ct_memeq so every tag/MAC check in
-     * the tree goes through one implementation. */
+    /* SEC-H2: constant-time compare with no early exit, unlike memcmp. Uses
+     * the shared crypto_ct_memeq so every tag/MAC check in the tree goes
+     * through one implementation. */
     return crypto_ct_memeq(saved, copy.auth_hmac, sizeof(saved));
 }

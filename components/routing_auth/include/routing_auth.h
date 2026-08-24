@@ -3,22 +3,20 @@
 #include "packet.h"
 
 /*
- * Task 3.3 (SEC-H1, STAGED, NOT closed: see network_key.h). Host-compilable
- * home for the routing/reliability control-plane sign+verify helpers
- * (RERR here; ACK/delivery-receipt land in Task 3.5). mesh_task.c is
+ * SEC-H1 (STAGED, NOT closed: see network_key.h). Host-compilable home for
+ * the routing/reliability control-plane sign+verify helpers. mesh_task.c is
  * 3800+ ESP-IDF-only lines and is never #include'd by a host test, so any
  * verify function defined there could never be host-tested; this component
- * exists purely so these can be. mesh_task.c includes this header and
- * calls these functions; it defines none of them.
+ * exists purely so these can be. mesh_task.c includes this header and calls
+ * these functions; it defines none of them.
  *
- * Fail-closed contract (mandatory-provisioning campaign, Task 2): the network
- * key is now mandatory, with NO public-PSK fallback. Every *_sign returns 0 on
- * success and nonzero when the node is UNPROVISIONED (it emits the all-zero
- * sentinel MAC, never a fallback HMAC); the caller must treat nonzero as
- * "do not transmit". Every *_verify checks that same return and REJECTS
- * (returns 0) before the constant-time compare, so an unprovisioned verifier
- * can never accept a frame -- in particular it never matches a received
- * all-zero MAC against the sentinel.
+ * Fail-closed contract: the network key is mandatory, with NO public-PSK
+ * fallback. Every *_sign returns 0 on success and nonzero when the node is
+ * UNPROVISIONED (it emits the all-zero sentinel MAC, never a fallback HMAC);
+ * the caller must treat nonzero as "do not transmit". Every *_verify checks
+ * that same return and REJECTS (returns 0) before the constant-time compare,
+ * so an unprovisioned verifier can never accept a frame -- in particular it
+ * never matches a received all-zero MAC against the sentinel.
  */
 
 /*
@@ -28,11 +26,10 @@
  * reporter_addr and a freshly-drawn seq, passing broken_dest/
  * broken_next_hop through unchanged, and re-signs the WHOLE struct
  * (including its own reporter_addr and seq) on every call. reporter_addr
- * moved INTO the MAC in ws 1.3b (it used to be excluded alongside
- * packet_id): this is safe specifically because each hop signs its own
- * reporter_addr rather than carrying someone else's forward, and it is
+ * sits INSIDE the MAC: this is safe specifically because each hop signs its
+ * own reporter_addr rather than carrying someone else's forward, and it is
  * what makes replay-keying RERR on (reporter_addr, seq) sound, since both
- * halves of that key are now authenticated and reporter_addr identifies
+ * halves of that key are authenticated and reporter_addr identifies
  * exactly one node drawing one monotonic seq counter (no cross-signer
  * interleaving to break the sliding window). rerr_sign fills r->auth_hmac;
  * call it once, right before serializing (both on first detection and on
@@ -44,12 +41,12 @@ int rerr_sign(bramble_rerr_t* r);
 int rerr_verify(const bramble_rerr_t* r);
 
 /*
- * Task 3.5 (NEW-SEC-8, STAGED, NOT closed: see network_key.h), extended by
- * ws 1.3b. Authenticates src_addr||ack_packet_id||seq with label
+ * NEW-SEC-8 (STAGED, NOT closed: see network_key.h).
+ * Authenticates src_addr||ack_packet_id||seq with label
  * "bramble-ack-v2", excluding relay_path/hop_count/header.hop_limit:
  * mesh_reliability.c's forward_ack grows relay_path, increments hop_count, and
  * decrements hop_limit on every relay hop, so those three are the only
- * per-hop-mutated fields. seq (ws 1.3b) is origin-stable, drawn once by
+ * per-hop-mutated fields. seq is origin-stable, drawn once by
  * send_ack and carried through forward_ack unchanged, so it sits in the
  * same coverage set as src_addr/ack_packet_id. Both auth_hmac and seq
  * live at a fixed, hop_count-independent wire offset (packet.h), so a
@@ -66,12 +63,12 @@ int ack_sign(bramble_ack_t* a);
 int ack_verify(const bramble_ack_t* a);
 
 /*
- * Task 3.5 (NEW-SEC-8, STAGED, NOT closed), extended by ws 1.3b.
+ * NEW-SEC-8 (STAGED, NOT closed).
  * Authenticates src_addr||orig_packet_id||seq with label
  * "bramble-receipt-v2", excluding relay_path/hop_count/header.hop_limit
  * for the same reason as ack_sign/verify above (forward_delivery_receipt
  * grows relay_path, increments hop_count, decrements hop_limit per hop).
- * seq (ws 1.3b) is origin-stable, drawn once by the receipt builder
+ * seq is origin-stable, drawn once by the receipt builder
  * (mesh_build_broadcast_delivery_receipt_packet) and carried through
  * forward_delivery_receipt unchanged, at the same fixed,
  * hop_count-independent offset as auth_hmac. Same fixed-offset,
@@ -81,10 +78,10 @@ int receipt_sign(bramble_delivery_receipt_t* r);
 int receipt_verify(const bramble_delivery_receipt_t* r);
 
 /*
- * Task 4-fix F1 (wire v4 DATA reverse-route poisoning). Authenticates a DATA
- * frame's ORIGIN-STABLE fields under the network key with label
- * "bramble-data-v1", so a relay -- which never decrypts DATA and therefore
- * never checks the AEAD tag -- can still confirm the frame came from a
+ * Wire v4 DATA origin authentication, against reverse-route poisoning.
+ * Authenticates a DATA frame's ORIGIN-STABLE fields under the network key
+ * with label "bramble-data-v1", so a relay -- which never decrypts DATA and
+ * therefore never checks the AEAD tag -- can still confirm the frame came from a
  * network-key holder before learning a reverse route off it (dest=src_addr,
  * next_hop=prev_hop). The covered bytes are exactly bramble_build_aead_aad's
  * output: the masked header (hop_limit zeroed) followed by little-endian
@@ -107,7 +104,7 @@ int data_auth_sign(const bramble_header_t* h, uint32_t src_addr, uint8_t out[8])
 int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t hmac[8]);
 
 /*
- * Per-node identity Phase 3 (relay gate). Authenticates an identity
+ * Per-node identity relay gate. Authenticates an identity
  * attestation's origin-stable fields
  *   src_addr(4, BE) || x25519_pub(32) || ed25519_pub(32) || sig(64)
  *                   || seq(6)

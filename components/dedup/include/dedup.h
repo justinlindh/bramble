@@ -20,7 +20,7 @@ int dedup_count(const dedup_buffer_t* buf);
  * Read-only membership query: is `packet_id` present and unexpired? Unlike
  * dedup_check_and_add, this never inserts and never mutates `buf` (a pure
  * peek), so callers can consult a dedup table as a "have I already seen
- * this key" record without side effects on a miss. Used by Task 6's
+ * this key" record without side effects on a miss. Used by the
  * duplicate-DATA re-ACK decision: a small "recently delivered" dedup table
  * answers "did I already deliver this (src_addr, packet_id) locally" so a
  * duplicate can be recognized as "already delivered, re-send the ACK"

@@ -14,14 +14,13 @@
 #define BR_COLOR_TEXT lv_color_hex(0xE6EDF3)     /* --text */
 #define BR_COLOR_TEXT_SEC lv_color_hex(0x8B949E) /* --text-muted */
 /* Outgoing bubbles fill with BR_COLOR_SENT, so any mark drawn ON one must
- * contrast with that fill or it renders invisible. SENT is its own role now: a
- * dark blue, deliberately NOT the brand/success green. Green used to do five
- * jobs at once (brand, action, success, outgoing fill, focus) and the delivered
- * double-check drew green-on-green, invisible for the product's whole life.
- * Splitting SENT off lets the delivered badge be success-green and read clearly
- * on the blue bubble. BR_COLOR_ON_SENT is the light text for muted marks (the
- * age) on an outgoing bubble. The static-asserts below refuse any future
- * palette edit that would reunify these roles. */
+ * contrast with that fill or it renders invisible. SENT is its own role: a
+ * dark blue, deliberately NOT the brand/success green, which already carries
+ * brand, action, success and focus. Keeping the roles apart lets the delivered
+ * double-check be success-green and still read clearly on the blue bubble.
+ * BR_COLOR_ON_SENT is the light text for muted marks (the age) on an outgoing
+ * bubble. The static-asserts below refuse any palette edit that would reunify
+ * these roles. */
 #define BR_HEX_SENT 0x1A4B91
 #define BR_HEX_ON_SENT 0xE6EDF3
 #define BR_COLOR_SENT lv_color_hex(BR_HEX_SENT) /* outgoing bubble fill (blue) */

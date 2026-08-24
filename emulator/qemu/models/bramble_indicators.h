@@ -1,6 +1,6 @@
 /*
- * Bramble indicator bridge + LEDC buzzer model (Phase 2 emulator).
- * See hw/xtensa/bramble/bramble_indicators.c.
+ * Bramble indicator bridge + LEDC buzzer model. See
+ * hw/xtensa/bramble/bramble_indicators.c.
  */
 
 #ifndef HW_XTENSA_BRAMBLE_INDICATORS_H

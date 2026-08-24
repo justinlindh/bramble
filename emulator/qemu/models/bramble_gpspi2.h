@@ -1,6 +1,6 @@
 /*
- * Bramble GPSPI2 (SPI2_HOST) controller model (P2.3).
- * See hw/xtensa/bramble/bramble_gpspi2.c.
+ * Bramble GPSPI2 (SPI2_HOST) controller model. See
+ * hw/xtensa/bramble/bramble_gpspi2.c.
  */
 
 #ifndef HW_XTENSA_BRAMBLE_GPSPI2_H
@@ -14,7 +14,7 @@
  * (the SX1262 radio and the SSD1680 display) to the running esp32s3 machine.
  * Called from bramble_attach(), where the SoC state pointer is in scope
  * (Esp32s3SocState is private to hw/xtensa/esp32s3.c, so we wire in at the
- * machine-init site rather than exporting SoC internals; see P2.3 in
+ * machine-init site rather than exporting SoC internals; see
  * docs/archive/plans/emulator-phase2-qemu-spec.md).
  *
  *   sys_mem  the system address space the GPSPI2 register window lives in.

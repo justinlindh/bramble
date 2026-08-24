@@ -11,7 +11,7 @@
 /* Inner app types (carried, authenticated, inside the GCM plaintext). */
 #define APP_TYPE_CHAT 0x01
 #define APP_TYPE_KE 0x02
-#define APP_TYPE_LOCATION 0x03 /* channel-shared location share (SEC-C1, PART 2) */
+#define APP_TYPE_LOCATION 0x03 /* channel-shared location share (SEC-C1) */
 /* Attested roll-call (components/rollcall). ROLLCALL is the broadcast
  * announce, ROLLCALL_REPLY the unicast, identity-signed answer. Both ride
  * the ordinary DATA envelope, so they inherit its channel-key AEAD, its

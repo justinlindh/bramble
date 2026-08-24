@@ -86,7 +86,7 @@ void anomaly_record_fwd(blackhole_tracker_t* t, uint64_t now_us);
 bool anomaly_check_blackhole(blackhole_tracker_t* t, uint64_t now_us, FILE* emit_out,
                              const char* node_id);
 
-/* Route loop (issue #144): call when a node FORWARDS a unicast packet,
+/* Route loop: call when a node FORWARDS a unicast packet,
  * passing the hop_limit the packet ARRIVED with. Flags the same packet_id
  * forwarded again at a different hop_limit: a looped packet comes back
  * around with hop_limit lower by the loop length, while a legitimate

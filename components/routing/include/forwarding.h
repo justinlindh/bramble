@@ -30,23 +30,23 @@ bool rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr);
  * EXACTLY (dest_addr == self_addr or the broadcast address 0xFFFFFFFF
  * delivers locally; any other dest_addr forwards).
  *
- * Wire v4 (Task 4 of the Phase 1 delivery-core plan): DATA now carries a
- * relay-mutated prev_hop field (packet.h, BRAMBLE_DATA_PREV_HOP_OFFSET), so
- * this function also decides whether to learn a route back to the DATA's
- * ORIGINATOR: dest = src_addr (AAD-bound, trustworthy), next_hop = prev_hop
- * (the verified last radio hop, unauthenticated/relay-mutable by design).
- * This is what leaves every relay on the forward path a fresh breadcrumb
- * route home, so a destination's ACK/receipt has somewhere to go instead of
- * dying at route_lookup(src_addr) == NULL.
+ * Wire v4 DATA carries a relay-mutated prev_hop field (packet.h,
+ * BRAMBLE_DATA_PREV_HOP_OFFSET), so this function also decides whether to
+ * learn a route back to the DATA's ORIGINATOR: dest = src_addr (AAD-bound,
+ * trustworthy), next_hop = prev_hop (the verified last radio hop,
+ * unauthenticated/relay-mutable by design). This is what leaves every relay
+ * on the forward path a fresh breadcrumb route home, so a destination's
+ * ACK/receipt has somewhere to go instead of dying at route_lookup(src_addr)
+ * == NULL.
  *
  * install_reverse_route fires for received AND forwarded UNICAST DATA -- it
  * does not depend on `action`. It does NOT fire when src_addr == self_addr
  * (an echo of our own packet) or prev_hop == self_addr (the last hop was
- * somehow ourselves); either would install a self-referential route. Task
- * 4-fix F3: it also does NOT fire for broadcast DATA (dest_addr ==
- * 0xFFFFFFFF). A broadcast implies no unicast return path worth learning,
- * and learning off it would let one forged broadcast poison every neighbor's
- * route toward a spoofed victim in a single frame (plus a table-flush DoS).
+ * somehow ourselves); either would install a self-referential route. It also
+ * does NOT fire for broadcast DATA (dest_addr == 0xFFFFFFFF). A broadcast
+ * implies no unicast return path worth learning, and learning off it would
+ * let one forged broadcast poison every neighbor's route toward a spoofed
+ * victim in a single frame (plus a table-flush DoS).
  *
  * reverse_hop_count is derived from received_hop_limit: the originator
  * always sends at ROUTE_HOP_LIMIT_MAX, and every forwarder decrements

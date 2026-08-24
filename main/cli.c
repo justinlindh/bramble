@@ -333,20 +333,20 @@ static void cli_task(void* param) {
     /* Disable task watchdog for CLI task (linenoise blocks on input) */
     esp_task_wdt_delete(NULL);
 
-    /* JSON-RPC response buffer. The old 2 KB lived on this task's stack and
-     * silently swallowed anything bigger: a full 20-message bramble.getMessages
-     * dump, or a screenshot chunk over ~1.5 KB, produced NO output at all, so
-     * the caller could only see a serial timeout. 16 KB from PSRAM (falling back
-     * to internal RAM on boards without it) covers a full message store, and an
-     * overflow past even that now comes back as an explicit "response too large"
-     * error from rpc_dispatch rather than silence. */
+    /* JSON-RPC response buffer: 16 KB from PSRAM, falling back to internal RAM
+     * on boards without it. Heap, not this task's stack, and sized to cover a
+     * full message store: a 20-message bramble.getMessages dump or a screenshot
+     * chunk runs well past the couple of KB a stack buffer can hold. An
+     * overflow past even 16 KB comes back as an explicit "response too large"
+     * error from rpc_dispatch, so an oversized reply is never silence the
+     * caller can only read as a serial timeout. */
     size_t resp_cap = 16 * 1024;
     char* response = heap_caps_malloc(resp_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     /* No PSRAM (or PSRAM exhausted): step the internal-RAM fallback DOWN
      * instead of dying. On the PSRAM-less heltec-v3 the largest free internal
-     * block at boot is under 16 KB, and the old single-shot fallback failed,
-     * which killed this task and with it the ONLY local control channel
-     * (serial RPC never answered again). A smaller cap degrades loudly
+     * block at boot is under 16 KB, so a single-shot fallback at the full size
+     * fails, killing this task and with it the ONLY local control channel
+     * (serial RPC would never answer again). A smaller cap degrades loudly
      * per-call instead: rpc_dispatch reports "response too large" explicitly
      * for anything that does not fit. */
     while (!response && resp_cap >= 2 * 1024) {

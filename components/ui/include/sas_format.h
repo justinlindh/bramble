@@ -4,7 +4,7 @@
 #include <stddef.h>
 
 /*
- * Pure formatting helper for the pager SAS verification screen (Task 8):
+ * Pure formatting helper for the pager SAS verification screen:
  * groups a 7-digit identity SAS ("1234567") into the read-aloud form
  * ("123 4567"). Host-testable on its own, unlike the LVGL screen that uses
  * it. out must be at least 9 bytes (8 chars + NUL). A NULL/short/malformed

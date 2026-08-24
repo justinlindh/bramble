@@ -286,24 +286,25 @@ void mesh_set_mailbox(bool enabled);
 bool mesh_get_mailbox(void);
 
 /**
- * Enable/disable the flood transport (Flooding F1, Task 1): when on, a
- * received unicast DATA not addressed to us is relayed through the same
- * multi-hop flood engine broadcast DATA already uses (channel_flood_decide +
- * s_flood_dedup), instead of the reactive route-lookup forward
- * (forward_data_packet). Default false (reactive unchanged); NVS-persisted
- * so the setting survives reboot, same pattern as mesh_set_mailbox above.
+ * Enable/disable the flood transport: when on, a received unicast DATA not
+ * addressed to us is relayed through the same multi-hop flood engine
+ * broadcast DATA already uses (channel_flood_decide + s_flood_dedup),
+ * instead of the reactive route-lookup forward (forward_data_packet).
+ * Default false, so the reactive path is what a node runs unless an operator
+ * turns this on; NVS-persisted so the setting survives reboot, same pattern
+ * as mesh_set_mailbox above.
  */
 void mesh_set_flood_transport(bool enabled);
 bool mesh_get_flood_transport(void);
 
 /**
- * Set/get the flood-transport origination hop budget (Flooding F1 finalize).
- * mesh_set_flood_hop_limit clamps to [FLOOD_HOP_LIMIT_MIN, FLOOD_HOP_LIMIT_CEIL]
- * and stores the clamped value (read it back with mesh_get_flood_hop_limit).
- * Under s_flood_transport this is the hop_limit a freshly-originated flood DATA
- * and its flooded-ACK are stamped with; the reactive path (ROUTE_HOP_LIMIT_MAX)
- * is unaffected. Default FLOOD_HOP_LIMIT_DEFAULT (8); NVS-persisted by the RPC
- * setter, same pattern as mesh_set_flood_transport above.
+ * Set/get the flood-transport origination hop budget. mesh_set_flood_hop_limit
+ * clamps to [FLOOD_HOP_LIMIT_MIN, FLOOD_HOP_LIMIT_CEIL] and stores the clamped
+ * value (read it back with mesh_get_flood_hop_limit). Under s_flood_transport
+ * this is the hop_limit a freshly-originated flood DATA and its flooded-ACK are
+ * stamped with; the reactive path (ROUTE_HOP_LIMIT_MAX) is unaffected. Default
+ * FLOOD_HOP_LIMIT_DEFAULT (8); NVS-persisted by the RPC setter, same pattern as
+ * mesh_set_flood_transport above.
  */
 void mesh_set_flood_hop_limit(uint32_t hops);
 uint8_t mesh_get_flood_hop_limit(void);
@@ -320,26 +321,26 @@ const char* mesh_get_node_name(void);
 int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]);
 
 /**
- * Per-node identity Phase 4 diagnostics: current verified-pin count and
- * the impersonation-signal counters (TOFU conflicts, delivered
- * attestations with invalid Ed25519 sigs, delivered attestations whose
- * src_addr did not match their key's derived address). The trust-anchor
- * campaign (P2) adds two more: unendorsed (delivered attestations refused
- * on an anchored node for a missing/invalid endorsement cert) and expired
- * (refused for a cert past the synced wall clock). Any out-pointer may be
- * NULL. Lock-free word reads; values are diagnostics-grade.
+ * Per-node identity diagnostics: current verified-pin count and the
+ * impersonation-signal counters (TOFU conflicts, delivered attestations
+ * with invalid Ed25519 sigs, delivered attestations whose src_addr did not
+ * match their key's derived address). Two more cover the trust anchor:
+ * unendorsed (delivered attestations refused on an anchored node for a
+ * missing/invalid endorsement cert) and expired (refused for a cert past
+ * the synced wall clock). Any out-pointer may be NULL. Lock-free word
+ * reads; values are diagnostics-grade.
  */
 void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* sig_failures,
                                  uint32_t* addr_mismatches, uint32_t* unendorsed,
                                  uint32_t* expired);
 
 /**
- * Per-peer SAS + verification state (DM forward-secrecy + SAS, Task 7.5): the
- * single accessor the pager UI (Task 8) and webapp RPC (Task 9) both consume.
- * Fills sas_out with the identity SAS between this node and addr, plus the
- * peer's persisted verified bit and RAM-only key_changed warning flag.
- * Returns false (leaving the outputs untouched) if there is no pin for addr
- * or the SAS derivation fails. sas_out is a 7-digit string plus NUL.
+ * Per-peer SAS + verification state: the single accessor the pager UI and
+ * the webapp RPC both consume. Fills sas_out with the identity SAS between
+ * this node and addr, plus the peer's persisted verified bit and RAM-only
+ * key_changed warning flag. Returns false (leaving the outputs untouched)
+ * if there is no pin for addr or the SAS derivation fails. sas_out is a
+ * 7-digit string plus NUL.
  */
 bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified, bool* key_changed);
 
@@ -351,20 +352,19 @@ bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified, 
 bool mesh_get_peer_verify_flags(uint32_t addr, bool* verified, bool* key_changed);
 
 /**
- * Sets or clears a peer's SAS-verified state and persists it (DM
- * forward-secrecy + SAS, Task 8): the mesh accessor the pager confirm action
- * and Task 9's RPC both go through, never identity_store directly. When
- * verifying, records the current identity SAS with the pin, which also
- * dismisses a pending key-change warning. When un-verifying, only clears the
- * verified bit; a deliberate un-verify is not a key change and must not raise
- * one. Returns false if there is no pin for addr (cannot verify an unpinned
- * peer).
+ * Sets or clears a peer's SAS-verified state and persists it: the mesh
+ * accessor the pager confirm action and the RPC both go through, never
+ * identity_store directly. When verifying, records the current identity SAS
+ * with the pin, which also dismisses a pending key-change warning. When
+ * un-verifying, only clears the verified bit; a deliberate un-verify is not a
+ * key change and must not raise one. Returns false if there is no pin for
+ * addr (cannot verify an unpinned peer).
  */
 bool mesh_set_peer_verified(uint32_t addr, bool verified);
 
 /*
- * Trust-anchor campaign (P2): push a newly provisioned fleet anchor into the
- * live pin store so a runtime bramble.setAnchor takes effect on the pin gate
+ * Push a newly provisioned fleet anchor into the live pin store so a
+ * runtime bramble.setAnchor takes effect on the pin gate
  * without a reboot. anchor_pub is the fleet anchor's Ed25519 public key.
  */
 void mesh_set_pin_anchor(const uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE]);
@@ -465,19 +465,19 @@ void mesh_rederive_beacon_key(void);
 
 /* Trigger a fresh identity attestation now (budget-gated). Called after a
  * runtime setEndorsement so the node re-announces with its new cert without
- * waiting for the next periodic attestation (trust-anchor campaign, P1);
- * mirrors the attest-on-address/key-change hook. */
+ * waiting for the next periodic attestation; mirrors the
+ * attest-on-address/key-change hook. */
 void mesh_trigger_attestation(void);
 
 /* Airtime backpressure counters, surfaced through bramble.getDiagnostics.
  *
  * flood relay drops: rebroadcasts discarded because the jittered flood relay
- * queue was full (issue #87). Non-zero means this node hit local congestion
+ * queue was full. Non-zero means this node hit local congestion
  * and yielded the channel. A silently dropped relay is impossible to tell
  * apart from a radio fault in the field, which is why it is counted.
  *
  * probe ingress: how much inbound PROBE traffic the ingress token buckets
- * refused (issue #75). Split by bucket so a flood is attributable: reply
+ * refused. Split by bucket so a flood is attributable: reply
  * means the node's probe ceiling was hit and probes went unanswered, forward
  * means probes were answered but not propagated onward. Neither counter is
  * per-sender, because the buckets deliberately are not: see security.h. */

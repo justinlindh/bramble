@@ -102,7 +102,7 @@ esp_err_t bramble_ack_serialize(const bramble_ack_t* p, uint8_t* buf, size_t len
     buf[B + 9] = (uint8_t)p->rssi_at_dest;
     buf[B + 10] = hops;
     /* NEW-SEC-8: auth_hmac at a fixed, hop_count-independent offset,
-     * before relay_path. ws 1.3b: seq sits right after auth_hmac, same
+     * before relay_path. seq sits right after auth_hmac, same
      * fixed-offset-before-relay_path invariant. */
     memcpy(buf + B + 11, p->auth_hmac, 8);
     memcpy(buf + B + 19, p->seq, 6);
@@ -130,22 +130,21 @@ esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t l
     p->hop_count = buf[B + 10];
     /* NEW-SEC-8: auth_hmac at a fixed offset, read BEFORE relay_path and
      * independent of hop_count, so a verifier never has to trust the
-     * unauthenticated hop_count to locate the tag. ws 1.3b: seq reads at
+     * unauthenticated hop_count to locate the tag. seq reads at
      * the same kind of fixed offset, right after auth_hmac. */
     memcpy(p->auth_hmac, buf + B + 11, 8);
     memcpy(p->seq, buf + B + 19, 6);
     if (p->hop_count > ACK_MAX_HOPS)
         p->hop_count = ACK_MAX_HOPS;
-    /* Fix 5 (red-team panel): clamp hop_count down to the number of
-     * relay_path entries the buffer ACTUALLY carries, not just the
-     * ACK_MAX_HOPS array bound. A tampered/truncated hop_count claiming
-     * more entries than len supplies previously left relay_path[] beyond
-     * what was read holding whatever was already in *p (handle_ack in
-     * main/mesh_task.c reads relay_path[0..hop_count) straight into the
-     * onAck UI notification, so uninitialized bytes there was a real,
-     * bounded, own-UI leak). Zero the whole array first so even a future
-     * bug that iterates past the now-correct hop_count reads zero, not
-     * garbage. */
+    /* Clamp hop_count down to the number of relay_path entries the buffer
+     * ACTUALLY carries, not just the ACK_MAX_HOPS array bound. A tampered or
+     * truncated hop_count claiming more entries than len supplies would
+     * otherwise leave relay_path[] beyond what was read holding whatever was
+     * already in *p (handle_ack in main/mesh_task.c reads
+     * relay_path[0..hop_count) straight into the onAck UI notification, so
+     * those bytes are a real, bounded, own-UI leak). Zero the whole array
+     * first so even a bug that iterates past the clamped hop_count reads
+     * zero, not garbage. */
     memset(p->relay_path, 0, sizeof(p->relay_path));
     size_t avail_hops = (len > (size_t)(B + 25)) ? (len - (B + 25)) / 4 : 0;
     if ((size_t)p->hop_count > avail_hops)
@@ -186,7 +185,7 @@ esp_err_t bramble_rreq_deserialize(bramble_rreq_t* p, const uint8_t* buf, size_t
     return ESP_OK;
 }
 
-/* RREP (40 bytes: was 34, +6 for seq, ws 1.3b) */
+/* RREP (RREP_SIZE bytes) */
 esp_err_t bramble_rrep_serialize(const bramble_rrep_t* p, uint8_t* buf, size_t len) {
     if (len < RREP_SIZE)
         return ESP_ERR_INVALID_SIZE;
@@ -218,7 +217,7 @@ esp_err_t bramble_rrep_deserialize(bramble_rrep_t* p, const uint8_t* buf, size_t
     return ESP_OK;
 }
 
-/* RERR (38 bytes: was 32, +6 for seq, ws 1.3b) */
+/* RERR (RERR_SIZE bytes) */
 esp_err_t bramble_rerr_serialize(const bramble_rerr_t* p, uint8_t* buf, size_t len) {
     if (len < RERR_SIZE)
         return ESP_ERR_INVALID_SIZE;
@@ -302,9 +301,9 @@ esp_err_t bramble_beacon_serialize(const bramble_beacon_t* p, uint8_t* buf, size
     buf[B + 13] = p->flags;
     put_be32(buf + B + 14, p->network_time);
     put_be16(buf + B + 18, p->time_confidence);
-    /* ws 1.3b: seq sits inside the fixed prefix, before auth_hmac, so
-     * beacon_compute_hmac's prefix hash covers it without any change
-     * there (see packet.h). */
+    /* seq sits inside the fixed prefix, before auth_hmac, so
+     * beacon_compute_hmac's prefix hash covers it automatically
+     * (see packet.h). */
     memcpy(buf + B + 20, p->seq, 6);
     memcpy(buf + B + 26, p->auth_hmac, 16);
     if (nlen > 0) {
@@ -334,17 +333,18 @@ esp_err_t bramble_beacon_deserialize(bramble_beacon_t* p, const uint8_t* buf, si
     p->flags = buf[B + 13];
     p->network_time = get_be32(buf + B + 14);
     p->time_confidence = get_be16(buf + B + 18);
-    /* ws 1.3b: seq reads at the same fixed offset it was written at,
+    /* seq reads at the same fixed offset it is written at,
      * inside the HMAC-covered prefix, before auth_hmac. */
     memcpy(p->seq, buf + B + 20, 6);
     memcpy(p->auth_hmac, buf + B + 26, 16);
     /* Optional name after fixed fields. name_len is attacker-controlled and
      * unauthenticated at this layer, so nothing derived from it may survive a
-     * failed bounds check. The pre-fix code skipped the memcpy when the
-     * declared length overran the frame but LEFT p->name_len at the declared
-     * value with name[] unwritten, so callers that read name_len bytes (the
-     * beacon name is copied into the neighbor table) read uninitialized stack.
-     * Same class as the relay_path clamp in bramble_ack_deserialize above.
+     * failed bounds check: name[] is zeroed and p->name_len reset to 0 BEFORE
+     * the declared length is examined. Skipping the memcpy on an overrun while
+     * leaving p->name_len at the declared value hands callers that read
+     * name_len bytes (the beacon name is copied into the neighbor table)
+     * uninitialized stack. Same class as the relay_path clamp in
+     * bramble_ack_deserialize above.
      *
      * Unlike relay_path, an overrunning name is dropped entirely rather than
      * truncated to what the frame carries: relay_path is a sequence of
@@ -423,7 +423,7 @@ esp_err_t bramble_delivery_receipt_serialize(const bramble_delivery_receipt_t* p
     buf[B + 8] = p->hop_count;
     buf[B + 9] = p->total_latency;
     /* NEW-SEC-8: auth_hmac at a fixed, hop_count-independent offset,
-     * before relay_path. ws 1.3b: seq sits right after auth_hmac, same
+     * before relay_path. seq sits right after auth_hmac, same
      * fixed-offset-before-relay_path invariant. */
     memcpy(buf + B + 10, p->auth_hmac, 8);
     memcpy(buf + B + 18, p->seq, 6);
@@ -445,15 +445,15 @@ esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, co
     p->total_latency = buf[B + 9];
     /* NEW-SEC-8: read at a fixed offset, before validating/using
      * hop_count, so a verifier never has to trust the unauthenticated
-     * hop_count to locate the tag. ws 1.3b: seq reads at the same kind of
+     * hop_count to locate the tag. seq reads at the same kind of
      * fixed offset, right after auth_hmac. */
     memcpy(p->auth_hmac, buf + B + 10, 8);
     memcpy(p->seq, buf + B + 18, 6);
     /* Zero the trail before any of it is trusted, and reset hop_count on
      * every rejecting path: this function returns an error rather than
-     * clamping, but leaving an attacker-declared hop_count paired with a
-     * stale relay_path[] behind in *p is the same state-consistency shape
-     * that bit the beacon name, one ignored return value away from a leak. */
+     * clamping, and leaving an attacker-declared hop_count paired with a
+     * stale relay_path[] behind in *p is the same state-consistency hazard as
+     * the beacon name above, one ignored return value away from a leak. */
     memset(p->relay_path, 0, sizeof(p->relay_path));
     if (p->hop_count > DELIVERY_RECEIPT_MAX_HOPS) {
         p->hop_count = 0;

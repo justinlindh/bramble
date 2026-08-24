@@ -120,16 +120,17 @@ int board_init(void) {
         }
         ESP_LOGI(TAG, "Shared SPI bus initialized");
     }
-    /* Non-shared SPI boards: radio driver inits its own bus (existing behavior) */
+    /* Non-shared SPI boards: radio driver inits its own bus */
 
     /* Serialize multi-command SPI sequences on every board, not only shared-SPI
      * ones. spi_device_acquire_bus keeps a single transfer atomic, but a radio
      * command sequence (BUSY wait, CS low, transfer, CS high) or a full
-     * radio_reconfigure spans several commands, and on a non-shared board this
-     * mutex was left NULL, making spi_mutex_take() a no-op so two radio callers
-     * could still interleave. On shared-SPI boards it additionally coordinates
-     * radio traffic with the display. Either way it must exist before either
-     * subsystem starts, and both start after board_init returns (issue #82). */
+     * radio_reconfigure spans several commands; a NULL mutex makes
+     * spi_mutex_take() a no-op and lets two radio callers interleave mid-
+     * sequence. On shared-SPI boards it additionally coordinates radio traffic
+     * with the display. Either way it must exist before either subsystem
+     * starts, and both start after board_init returns, so it is created
+     * unconditionally here rather than inside a board-specific branch. */
     g_spi_mutex = xSemaphoreCreateMutex();
     if (!g_spi_mutex) {
         ESP_LOGE(TAG, "Failed to create SPI mutex");

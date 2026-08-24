@@ -295,8 +295,8 @@ static esp_err_t ws_handler(httpd_req_t* req) {
          *     cross-site attacker page cannot read it, so a token-bearing
          *     cross-origin page is the user's own client, not CSWSH.
          *     Requiring origin enrollment before a token-holding webapp
-         *     could ever connect would resurrect the onboarding friction
-         *     that led to the old open-by-default regression.
+         *     could ever connect would add onboarding friction whose only
+         *     escape hatch is opening the server to every origin.
          *   - no credentials (including devices with auth explicitly
          *     disabled): browser Origin allowlist applies (same-origin or
          *     configured extras; see main/ws_origin.h). On the opt-out

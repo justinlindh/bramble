@@ -36,7 +36,7 @@
  *
  * Phase 2 exists for the DM-desync scenario: phase 1 establishes a DM session,
  * the receiver drops its half (EMU_DROP_DM_SESSION_AT_MS), and phase 2's repeats
- * drive the post-#138 heal (the first lands on a receiver with no session and
+ * drive the heal (the first lands on a receiver with no session and
  * fires the re-handshake; a later one decrypts and renders).
  *
  * EMU_AUTO_PARK=1 with the same phase-1/phase-2 shape drives a DIFFERENT
@@ -291,11 +291,11 @@ static void wait_and_park_phase2(const char* text, uint32_t dest) {
  *
  * This gates the peer-never-left scenario on a precondition the firmware
  * really has, instead of letting the scenario win or lose a coin flip. When
- * the receiver drops its session half and then fails to decrypt, its #138
+ * the receiver drops its session half and then fails to decrypt, its
  * self-heal INIT is a FIRST-CONTACT init carrying a zero auth tag (it no
  * longer holds a peer_id to tag with). The sender still holds its stale
  * session, so process_ke_init takes dm_verify_init's strict tag path and
- * rejects that zero tag by design (the Item 2 downgrade defense). The one
+ * rejects that zero tag by design (the downgrade defense). The one
  * escape is main/mesh_dm.c's pinned-peer branch, which needs an
  * attestation-verified X25519 pin for the peer. With no pin the session never
  * heals, every redelivery is encrypted under the dead session, and the
@@ -662,7 +662,7 @@ int emu_node_start_autosend(void) {
         }
     } else if (getenv("EMU_AUTO_SEND") && *getenv("EMU_AUTO_SEND")) {
         /* 8 KB stack: the send path runs crypto (channel/DM encrypt + MAC) like
-         * the DM handshake worker, bumped to the same for its stack (PR #133). */
+         * the DM handshake worker, so it gets the same stack that worker needs. */
         if (xTaskCreate(autosend_task, "emu_autosend", 8192, NULL, 5, NULL) == pdPASS) {
             ESP_LOGI(TAG, "auto-send armed");
             started = 0;

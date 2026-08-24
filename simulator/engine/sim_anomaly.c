@@ -101,15 +101,15 @@ bool anomaly_check_forward_loop(loop_tracker_t* t, uint32_t packet_id, uint8_t h
         }
     }
 
-    /* Issue #144: the old detector flagged any packet_id a node SAW twice,
-     * which is normal life on a mesh (flood rebroadcast, a sender's ACK
-     * retransmission, a relay re-forwarding that retransmission). Checked
-     * at FORWARD time instead, with the received hop_limit as the
-     * discriminator: a retransmitted frame retraces the same path and
-     * arrives at each relay with the SAME hop_limit as before, while a
-     * packet trapped in a routing loop comes back around with hop_limit
-     * lower by the loop length. Same id, different hop_limit at the same
-     * relay = the packet transited this node twice in one journey. */
+    /* Checked at FORWARD time, with the received hop_limit as the
+     * discriminator, because a packet_id a node merely SAW twice is normal
+     * life on a mesh (flood rebroadcast, a sender's ACK retransmission, a
+     * relay re-forwarding that retransmission). A retransmitted frame
+     * retraces the same path and arrives at each relay with the SAME
+     * hop_limit as before, while a packet trapped in a routing loop comes
+     * back around with hop_limit lower by the loop length. Same id,
+     * different hop_limit at the same relay = the packet transited this
+     * node twice in one journey. */
     for (int i = 0; i < t->count; i++) {
         if (t->seen[i].packet_id == packet_id) {
             if (t->seen[i].hop_limit != hop_limit) {

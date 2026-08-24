@@ -1,5 +1,5 @@
 /*
- * Bramble SX1262 LoRa radio SSI slave (QEMU esp32s3, Phase 2 emulator, P2.4).
+ * Bramble SX1262 LoRa radio SSI slave (QEMU esp32s3).
  *
  * Register-accurate model of the Semtech SX1262 the pager's radio driver
  * (components/radio/sx1262.c) talks to over SPI2. It answers radio_init's
@@ -21,7 +21,7 @@
  *   GetRxBufStatus 0x13 / GetPacketStatus 0x14      -> status then zeros
  *   Set* / config commands                          -> accepted, mode latched
  *
- * BUSY (GPIO13) is served low by the P2.2 overlay; DIO1 (RX/TX-done IRQ) is
+ * BUSY (GPIO13) is served low by the GPIO overlay; DIO1 (RX/TX-done IRQ) is
  * driven here via the GPIO overlay's input accessor on emu-link TxDone/RxDone.
  */
 
@@ -62,7 +62,7 @@
 
 /* DIO1 = GPIO14 (main/boards/bramble_pager.h): the radio driver installs a
  * posedge ISR here; the SX1262 model raises it on TxDone/RxDone via the GPIO
- * overlay's input accessor (P2.4b). */
+ * overlay's input accessor. */
 #define SX1262_DIO1_GPIO            14
 
 /* Status byte (datasheet 13.5.1): [6:4]=chip mode, [3:1]=command status. */
@@ -76,7 +76,7 @@
 #define SX1262_BUFFER_SIZE          0x100  /* 256-byte TX/RX data buffer */
 
 /* Bounded FIFO for frames the broker delivers faster than the slow guest
- * drains them (P2.4c). The radio driver's radio_task drains exactly ONE frame
+ * drains them. The radio driver's radio_task drains exactly ONE frame
  * per DIO1 rising edge - GetIrqStatus -> ClrIrqStatus -> GetRxBufferStatus ->
  * ReadBuffer -> GetPacketStatus, then back to ulTaskNotifyTake - so overlapping
  * arrivals must NOT overwrite the live RX buffer or collapse onto one edge:
@@ -103,7 +103,7 @@ struct BrambleSx1262State {
     uint16_t irq_status;   /* pending IRQ flags (driven by emu-link txdone/rx) */
 
     /* PHY params latched from the driver's config commands, emitted with each
-     * `tx` so the broker/UI see the transmit parameters (P2.4b). */
+     * `tx` so the broker/UI see the transmit parameters. */
     int tx_freq_mhz;       /* SetRfFrequency (0x86), decoded to MHz */
     int tx_sf;             /* SetModulationParams (0x8B) spreading factor */
     int tx_bw_hz;          /* SetModulationParams bandwidth, Hz */
@@ -120,7 +120,7 @@ struct BrambleSx1262State {
     uint8_t rssi_raw;      /* GetPacketStatus byte 0: rssi = -raw/2 */
     int8_t snr_raw;        /* GetPacketStatus byte 1: snr = raw/4 */
 
-    /* RX frame handling (P2.4c). The presented frame is held in rx_cur, SEPARATE
+    /* RX frame handling. The presented frame is held in rx_cur, SEPARATE
      * from the FIFO of not-yet-presented frames, so a TX that clobbers the SPI
      * buffer mid-flight can reload it and the FIFO never loses it. rx_active ==
      * a frame is latched awaiting the driver's drain; dio1_level mirrors the
@@ -241,10 +241,10 @@ static void bramble_sx1262_rx_drain_done(BrambleSx1262State *s)
 /* SetRx (0x82): the driver (re-)enters continuous RX. This is the universal
  * re-arm point - boot (radio_init -> radio_start_rx, AFTER the DIO1 ISR is
  * installed) and after every TX (radio_transmit_raw -> radio_start_rx). Frames
- * the broker delivered while the guest was still booting were presented before
- * the driver could catch the edge, then radio_start_rx's ClrIrqStatus dropped
- * DIO1 without a drain; without this the latch would stick forever and the FIFO
- * back up (observed in P2.4b). On re-arm: if a frame is still pending but DIO1
+ * the broker delivers while the guest is still booting get presented before
+ * the driver can catch the edge, and radio_start_rx's ClrIrqStatus then drops
+ * DIO1 without a drain; without this re-arm the latch sticks forever and the
+ * FIFO backs up. On re-arm: if a frame is still pending but DIO1
  * is low, reload it (a TX may have clobbered the buffer) and raise a fresh edge;
  * otherwise present the head of the FIFO if one is waiting. */
 static void bramble_sx1262_rx_rearm(BrambleSx1262State *s)

@@ -1,6 +1,6 @@
 /**
  * @file ota_rollback_policy.h
- * @brief Pure anti-rollback decision logic, split out of ota_rollback.c.
+ * @brief Pure anti-rollback decision logic behind ota_rollback.c's gate.
  *
  * ota_rollback_gate() is device-only: it reads and writes the NVS-stored
  * version floor. The policy question it answers (given a candidate image
@@ -9,9 +9,9 @@
  * exposes exactly that question so the security boundary can be covered by
  * the host suite instead of a stub.
  *
- * The policy is unchanged from the in-gate logic it replaces: fail closed on
- * an unparseable candidate, accept at or above the floor, reject below it,
- * and lower the floor only on an explicit authenticated downgrade.
+ * The policy: fail closed on an unparseable candidate, accept at or above the
+ * floor, reject below it, and lower the floor only on an explicit
+ * authenticated downgrade.
  */
 
 #pragma once

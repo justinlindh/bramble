@@ -1,5 +1,5 @@
 /*
- * Bramble emu-link bridge (QEMU esp32s3, Phase 2 emulator).
+ * Bramble emu-link bridge (QEMU esp32s3).
  *
  * The QEMU pager's single emu-link connection to the gosim ether, shared by the
  * device models (the SX1262 radio and the indicator bridge). The QEMU node is an

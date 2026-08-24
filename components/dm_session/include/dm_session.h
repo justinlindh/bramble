@@ -52,7 +52,7 @@ int dm_ratchet_dh(const uint8_t rk_e[32], const uint8_t dh[32], uint32_t addr_a,
 /*
  * Computes the 128-byte quad-DH handshake IKM (the same schedule dm_build_resp/
  * dm_verify_resp use internally). Exposed non-static so the mesh DH-ratchet
- * epoch path (Task 4) and the ratchet host tests can seed a session's ratchet
+ * epoch path and the ratchet host tests can seed a session's ratchet
  * state directly from a handshake IKM. Returns 0 on success.
  */
 int dm_compute_ikm(const uint8_t my_id_priv[32], const uint8_t my_eph_priv[32],
@@ -60,7 +60,7 @@ int dm_compute_ikm(const uint8_t my_id_priv[32], const uint8_t my_eph_priv[32],
                    uint8_t ikm_out[128]);
 
 /*
- * DM handshake (Task 1.3): INIT/RESP message build and authenticated verify.
+ * DM handshake: INIT/RESP message build and authenticated verify.
  * RFC section 1's message flow, PART 1's B1 construction.
  */
 #define KE_TYPE_INIT 1
@@ -82,7 +82,7 @@ int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
                   const uint8_t my_eph_priv[32], uint32_t peer_addr, uint16_t ke_epoch,
                   const uint8_t* peer_id_pub_or_null, bramble_key_exchange_t* out);
 
-/* Distinct failure code for the Phase 4 pin-continuity check below, so the
+/* Distinct failure code for the pin-continuity check below, so the
  * caller can log a key-change red flag differently from a generic verify
  * failure. */
 #define DM_VERIFY_ERR_PIN_MISMATCH (-2)
@@ -90,10 +90,10 @@ int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
 /*
  * Verifies message 1 from the responder's side.
  *
- * Address<->key binding (Phase 4 rebind): the node address derives from
- * the Ed25519 identity key, NOT from long_term_pubkey (X25519), so the
- * pre-rebind check crypto_derive_address(long_term_pubkey) == src_addr is
- * gone; an X25519 key no longer proves an address by hashing. In its place
+ * Address<->key binding: the node address derives from the Ed25519
+ * identity key, NOT from long_term_pubkey (X25519), so there is no
+ * crypto_derive_address(long_term_pubkey) == src_addr check here: an
+ * X25519 key cannot prove an address by hashing. In its place
  * pinned_peer_x25519_or_null carries the identity store's pinned X25519
  * key for msg->src_addr when one exists (mesh_task snapshots it from the
  * attestation-verified pin store): non-NULL means REQUIRE
@@ -128,38 +128,35 @@ int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
 /*
  * Verifies message 2 from the initiator's side: recomputes the session key
  * and verifies the K_confirm tag (constant-time). src_addr integrity comes
- * from transcript_2 (the tag binds both addresses), and the Phase 4
- * pin-continuity check applies exactly as in dm_verify_init:
- * pinned_peer_x25519_or_null non-NULL requires resp->long_term_pubkey to
- * match the pinned key (DM_VERIFY_ERR_PIN_MISMATCH otherwise), NULL is the
- * no-pin TOFU-grade residual. Returns 0 and fills session_key_out on
- * success.
+ * from transcript_2 (the tag binds both addresses), and the pin-continuity
+ * check applies exactly as in dm_verify_init: pinned_peer_x25519_or_null
+ * non-NULL requires resp->long_term_pubkey to match the pinned key
+ * (DM_VERIFY_ERR_PIN_MISMATCH otherwise), NULL is the no-pin TOFU-grade
+ * residual. Returns 0 and fills session_key_out on success.
  */
 int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t* my_id,
                    const uint8_t my_eph_priv[32], const uint8_t my_eph_pub[32], uint16_t ke_epoch,
                    const uint8_t* pinned_peer_x25519_or_null, uint8_t session_key_out[32]);
 
 /*
- * DM session table (Task 1.2). State-priority LRU with a bounded
- * DM_STATE_HANDSHAKING count: this is the DoS defense for the session
- * layer (M4 in the crypto design RFC). A spoofed-INIT flood can occupy at
- * most DM_MAX_HANDSHAKING slots regardless of table size.
+ * DM session table. State-priority LRU with a bounded DM_STATE_HANDSHAKING
+ * count: this is the DoS defense for the session layer (M4 in the crypto design
+ * RFC). A spoofed-INIT flood can occupy at most DM_MAX_HANDSHAKING slots
+ * regardless of table size.
  *
- * Fix 1 (red-team panel, post-Task-3.6): only a VERIFIED ACTIVE session
- * (state==ACTIVE && verified==1) is fully protected from eviction. An
- * UNVERIFIED ACTIVE session (state==ACTIVE && verified==0) IS evictable
- * under allocation pressure, LRU-ordered by last_active_ms, same pool as
- * HANDSHAKING slots. This closes a session-table exhaustion DoS: a
- * first-contact INIT (main/mesh_task.c's process_ke_init) needs no secret
- * and goes straight to ACTIVE/verified=0 without ever touching
+ * Only a VERIFIED ACTIVE session (state==ACTIVE && verified==1) is fully
+ * protected from eviction. An UNVERIFIED ACTIVE session (state==ACTIVE &&
+ * verified==0) IS evictable under allocation pressure, LRU-ordered by
+ * last_active_ms, same pool as HANDSHAKING slots. This closes a session-table
+ * exhaustion DoS: a first-contact INIT (main/mesh_task.c's process_ke_init)
+ * needs no secret and goes straight to ACTIVE/verified=0 without ever touching
  * DM_STATE_HANDSHAKING or its cap, so DM_MAX_SESSIONS forged first-contact
- * INITs from freshly-generated identities used to fill the table with
- * permanently-unevictable slots (every ACTIVE session was protected
- * regardless of verified), killing all future DM establishment until
- * reboot. Bumping last_active_ms on every real send/receive (the caller's
- * job, under s_dm_mutex) means a genuinely-active UNVERIFIED session still
- * outlives an idle attacker flood: eviction pressure reclaims stale forged
- * slots first.
+ * INITs from freshly-generated identities would otherwise fill the table with
+ * permanently-unevictable slots and kill all future DM establishment until
+ * reboot. Bumping last_active_ms on every real send/receive (the caller's job,
+ * under s_dm_mutex) means a genuinely-active UNVERIFIED session still outlives
+ * an idle attacker flood: eviction pressure reclaims stale forged slots first.
+ *
  */
 #define DM_MAX_SESSIONS 32
 #define DM_MAX_HANDSHAKING (DM_MAX_SESSIONS / 4)
@@ -199,7 +196,7 @@ typedef struct {
     dm_chain_t send;
     dm_chain_t recv;
     dm_skip_entry_t skip[DM_MAX_SKIP];
-    /* Previous-epoch receive retention during the DH-ratchet grace (Task 4). */
+    /* Previous-epoch receive retention during the DH-ratchet grace. */
     dm_chain_t prev_recv;
     dm_skip_entry_t prev_skip[DM_MAX_SKIP];
     uint16_t new_epoch_msgs; /* messages seen on the new epoch; grace expiry */
@@ -210,7 +207,7 @@ typedef struct {
     uint8_t session_key[32];
     uint8_t peer_id_pub[32]; /* cached for rekey-path msg1 auth + SAS */
     uint32_t established_ms; /* when this slot was (re)established, informational only */
-    /* Fix 1 (red-team panel): set at allocation, and bumped by the caller
+    /* Set at allocation, and bumped by the caller
      * (main/mesh_task.c, under s_dm_mutex) on every successful send or
      * receive through this session. Drives dm_alloc's eviction ordering,
      * separately from established_ms, so a genuinely-active session is
@@ -233,13 +230,13 @@ void dm_table_init(dm_table_t* t);
 dm_session_t* dm_lookup(dm_table_t* t, uint32_t peer_addr);
 
 /*
- * M2 TOFU-session teardown (P3b): drop the slot for peer_addr (same match
- * dm_lookup uses), zeroing it back to DM_STATE_NONE. Returns true if a slot
- * was found and torn down, false if none existed. Operates on the passed
- * table only (no globals), so it is host-testable; the mesh_task caller
- * holds s_dm_mutex across the lookup+decision+teardown. This is fail-safe
- * defense-in-depth: it only ever DROPS a session (recovered by re-handshake),
- * never establishes or mutates one in place.
+ * M2 TOFU-session teardown: drop the slot for peer_addr (same match dm_lookup
+ * uses), zeroing it back to DM_STATE_NONE. Returns true if a slot was found
+ * and torn down, false if none existed. Operates on the passed table only (no
+ * globals), so it is host-testable; the mesh_task caller holds s_dm_mutex
+ * across the lookup+decision+teardown. This is fail-safe defense-in-depth: it
+ * only ever DROPS a session (recovered by re-handshake), never establishes or
+ * mutates one in place.
  */
 bool dm_session_teardown(dm_table_t* t, uint32_t peer_addr);
 
@@ -256,7 +253,7 @@ bool dm_session_teardown(dm_table_t* t, uint32_t peer_addr);
 bool dm_pin_disagrees(const dm_session_t* s, const uint8_t pinned_x25519[32]);
 
 /*
- * Task 7 decision: whether a genuine pin key change must clear the
+ * Whether a genuine pin key change must clear the
  * session's verified bit, true iff s->verified AND dm_pin_disagrees. A
  * session that is not verified has nothing to clear; a verified session
  * whose pin still matches keeps its verified bit (ratchet steps, epoch
@@ -272,7 +269,7 @@ bool dm_verified_should_clear(const dm_session_t* s, const uint8_t pinned_x25519
  * (DM_STATE_NONE) slot, else the slot with the smallest last_active_ms that
  * is NOT VERIFIED ACTIVE (state==ACTIVE && verified==1) is LRU-evicted:
  * HANDSHAKING and UNVERIFIED ACTIVE (state==ACTIVE && verified==0) slots
- * are both eligible victims (Fix 1, see the table's doc comment above).
+ * are both eligible victims (see the table's doc comment above).
  * Returns NULL if a brand-new slot (free or evicted) would push the
  * table's DM_STATE_HANDSHAKING count past DM_MAX_HANDSHAKING, or if the
  * table is full with no evictable slot (every slot VERIFIED ACTIVE). The
@@ -284,7 +281,7 @@ bool dm_verified_should_clear(const dm_session_t* s, const uint8_t pinned_x25519
 dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms);
 
 /*
- * Task 1.4: thin AES-256-GCM wrappers over an established session key,
+ * Thin AES-256-GCM wrappers over an established session key,
  * AAD built via bramble_build_aead_aad (the same SEC-M2 src_addr-bound AAD
  * DATA envelopes use under the channel key). src_addr is the WIRE src_addr
  * field carried alongside the DATA envelope, not a session_t member (a
@@ -372,7 +369,7 @@ int dm_session_ratchet_decrypt(dm_session_t* s, const bramble_header_t* h, uint3
                                size_t* pt_len_out);
 
 /*
- * DH-ratchet epoch bump (Task 4, post-compromise recovery at epoch
+ * DH-ratchet epoch bump (post-compromise recovery at epoch
  * granularity). Rolls the root forward by folding a fresh X25519 output new_dh
  * into the CURRENT root (dm_ratchet_dh), retains the current receive chain +
  * skip cache as prev_recv/prev_skip so in-flight OLD-epoch frames still decrypt

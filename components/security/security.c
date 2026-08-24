@@ -76,7 +76,7 @@ bool rreq_fwd_allow(rreq_fwd_limiter_t* rl, uint32_t now_ms) {
 }
 
 /*
- * PROBE ingress buckets (issue #75). Same integer-only refill discipline as
+ * PROBE ingress buckets. Same integer-only refill discipline as
  * rreq_fwd_allow above: whole elapsed windows only, last_refill_ms advanced
  * by exactly that many windows so the sub-window remainder is carried rather
  * than discarded. A caller polling every millisecond must not accrue tokens

@@ -8,22 +8,22 @@
 #define REPLAY_REJECT_DUP 1
 #define REPLAY_BELOW_WINDOW 2
 /* No slot could be allocated for this sender because every slot is held by a
- * sender that has been active too recently to evict (issue #88). Callers MUST
- * treat this as a drop, never as an accept. */
+ * sender that has been active too recently to evict. Callers MUST treat this
+ * as a drop, never as an accept. */
 #define REPLAY_REJECT_NO_SLOT 3
 
 /*
- * Issue #88: the table is bounded and senders are not, so eviction is
- * unavoidable. What is NOT acceptable is eviction that silently reopens a
- * replay window: src_addr is spoofable, so an attacker who can force the
- * eviction of a target's slot resets that target's high_water to 0 and can
- * then replay anything ever captured from them.
+ * The table is bounded and senders are not, so eviction is unavoidable. What
+ * is NOT acceptable is eviction that silently reopens a replay window:
+ * src_addr is spoofable, so an attacker who can force the eviction of a
+ * target's slot resets that target's high_water to 0 and can then replay
+ * anything ever captured from them.
  *
- * The fix is to make a slot un-evictable while its sender is still plausibly
- * active. A slot is only an eviction candidate once it has been idle for at
+ * So a slot is un-evictable while its sender is still plausibly active. A
+ * slot is only an eviction candidate once it has been idle for at
  * least REPLAY_EVICT_MIN_IDLE_MS; if no slot qualifies, the table refuses to
  * allocate and the NEW sender's packet is dropped (REPLAY_REJECT_NO_SLOT).
- * That is the fail-closed direction: flooding spoofed source addresses now
+ * That is the fail-closed direction: flooding spoofed source addresses
  * costs the attacker their own delivery instead of the victim's protection.
  *
  * The trade-off is honest and deliberate: on a mesh with more than
@@ -33,7 +33,7 @@
  */
 #define REPLAY_EVICT_MIN_IDLE_MS (15u * 60u * 1000u)
 
-/* Persistence blob (issue #72). Layout, all little-endian:
+/* Persistence blob. Layout, all little-endian:
  *   [0]      format version
  *   [1]      entry count N (<= REPLAY_MAX_SENDERS)
  *   [2..3]   reserved, must be zero
@@ -58,7 +58,7 @@ typedef struct {
 
 typedef struct {
     replay_slot_t slots[REPLAY_MAX_SENDERS];
-    /* Observability for issue #88: eviction is no longer silent. `evictions`
+    /* Eviction observability, so recycling is never silent. `evictions`
      * counts slots actually recycled, `evict_denied` counts allocations
      * refused because every slot was too recently active. A climbing
      * evict_denied is the signature of a spoofed-source flood. Both are
@@ -80,7 +80,7 @@ void replay_table_mark_clean(replay_table_t* t);
 
 /*
  * Pure (NVS-free, host-testable) serialize/deserialize of the per-sender
- * high-water marks, so the replay window survives a reboot (issue #72).
+ * high-water marks, so the replay window survives a reboot.
  *
  * serialize returns the number of bytes written, or -1 if buf_len is too
  * small. Only slots that have actually seen a packet are written.

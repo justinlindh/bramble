@@ -73,8 +73,8 @@ extern uint32_t bramble_calculate_airtime_us(uint16_t payload_bytes, uint8_t sf,
 #define SIM_DEFAULT_PATH_LOSS_D0_DB 52.0f
 #define SIM_DEFAULT_PATH_LOSS_EXP 2.9f
 
-/* The simulator's long-standing reception-range baseline, in grid units
- * (1 unit = 10 m, so 1.5 km). Every legacy scenario was laid out around this
+/* The simulator's reception-range baseline, in grid units
+ * (1 unit = 10 m, so 1.5 km). The scenario corpus is laid out around this
  * disk (120-unit grid spacing so orthogonal neighbors, and only they, are
  * audible), so it is a fixed point of the model: the derived range at the
  * firmware's default PHY must reproduce it. radio_noise_margin_db is the
@@ -149,10 +149,10 @@ static float bw_noise_adj_db(uint32_t bw_hz) {
  * 52 dB, path_loss_exp = 2.9) is far lossier at short grid distances than a
  * real link budget with datasheet sensitivity would imply (the raw budget
  * would put the default PHY's range past 2000 grid units); the simulator's own
- * ~150-unit range was tuned for gameplay/test scale, not physical realism.
+ * ~150-unit range is set for test scale, not physical realism.
  * This margin folds that difference into a single "noise figure +
  * implementation margin" offset so the derived range at the FIRMWARE'S DEFAULT
- * PHY reproduces SIM_BASELINE_RANGE_UNITS exactly (every legacy scenario was
+ * PHY reproduces SIM_BASELINE_RANGE_UNITS exactly (the scenario corpus is
  * laid out around that disk, and the ones that omit "range" derive it), while
  * SF/BW deltas relative to that anchor follow the real datasheet deltas.
  *
@@ -521,7 +521,7 @@ sim_tx_outcome_t sim_radio_broadcast_lbt(sim_node_t* tx_node, const outbound_pac
     tx_node->tx_busy_until_us = air_end;
     tx_node->airtime_tx_us += toa_us;
     metrics->airtime_total_us += toa_us;
-    /* Per-type ToA (Task 4): same toa_us the channel/collision model above
+    /* Per-type ToA: same toa_us the channel/collision model above
      * just used, charged once per actual (post-budget-gate) transmission,
      * since sim_radio_broadcast is the single chokepoint every TX site
      * (beacon, RREQ/RREP/RERR, DATA, receipts) converges through. */

@@ -1,6 +1,6 @@
 /*
- * Bramble SX1262 LoRa radio SSI slave (Phase 2 emulator).
- * See hw/xtensa/bramble/bramble_sx1262.c.
+ * Bramble SX1262 LoRa radio SSI slave. See
+ * hw/xtensa/bramble/bramble_sx1262.c.
  */
 
 #ifndef HW_XTENSA_BRAMBLE_SX1262_H

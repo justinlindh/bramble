@@ -13,33 +13,26 @@ typedef struct {
 } channel_flood_decision_t;
 
 /*
- * The multi-hop channel/broadcast flood relay decision (Phase 1 delivery-
- * core Task 5). Broadcast/channel DATA (dest_addr == 0xFFFFFFFF) is
- * delivered locally today but never rebroadcast, so a group message only
- * ever reaches direct radio neighbors. This is the pure decision that
- * fixes that: whether THIS node, having just received/delivered a
+ * The multi-hop channel/broadcast flood relay decision. Broadcast/channel
+ * DATA (dest_addr == 0xFFFFFFFF) is delivered locally AND relayed onward, so
+ * a group message reaches past this node's direct radio neighbors. This is
+ * the pure decision of whether THIS node, having just received/delivered a
  * broadcast DATA frame, should also relay it onward.
  *
- * This is a fresh design, not a revival of the caller-less channel_flood.c
- * deleted in 703d78a1: that version hardcoded its own flat 50-300ms jitter
- * constants and took a dedup_buffer_t pointer + packet_id directly (doing
- * its own packet_id-only dedup lookup inside the "pure" function, which
- * both made it untestable without a real dedup buffer and reused a
- * packet_id-only key -- the delivery-path audit's flagged cross-source
- * collision risk: two different originators' broadcasts could collide on
- * a 32-bit packet_id and one would be silently dropped as the other's
- * duplicate). This version:
+ * Design points:
  *   - takes the dup-check RESULT as a plain bool, so the caller decides how
- *     to key its dedup lookup (mesh_task.c uses a src_addr-qualified key
- *     for exactly this reason) and this function stays trivially testable;
+ *     to key its dedup lookup and this function stays trivially testable.
+ *     mesh_task.c uses a src_addr-qualified key: a packet_id-only key lets
+ *     two different originators' broadcasts collide on a 32-bit packet_id,
+ *     and one is then silently dropped as the other's duplicate;
  *   - reuses the RREQ forward path's jitter range (RREQ_FWD_JITTER_MIN_MS/
  *     RREQ_FWD_JITTER_MAX_MS, discovery.h) via discovery_forward_jitter_ms
- *     instead of a second hardcoded constant set, so same-hop relays
- *     already avoid keying up simultaneously for RREQ and now for channel
- *     floods too, with one tuning knob instead of two;
+ *     instead of a second hardcoded constant set, so same-hop relays avoid
+ *     keying up simultaneously for RREQ and for channel floods alike, with
+ *     one tuning knob instead of two;
  *   - takes the airtime budget's real permit/deny as an explicit input
  *     (budget_permits), so a saturated node stops relaying instead of
- *     amplifying a storm -- the airtime-aware lever the plan calls for.
+ *     amplifying a storm.
  *
  * Inputs:
  *   hop_limit      - the RECEIVED header hop_limit (before any decrement).
@@ -70,19 +63,18 @@ channel_flood_decision_t channel_flood_decide(uint8_t hop_limit, bool is_duplica
                                               bool budget_permits, uint32_t random_value);
 
 /*
- * Flood-transport origination hop budget (Flooding F1 finalize).
+ * Flood-transport origination hop budget.
  *
  * The flood transport originates a DATA frame (and the flooded-ACK that
  * confirms it) at an OPERATOR-SETTABLE hop limit so its best-effort reach can
- * be matched to the expected network diameter. 8 (the default, unchanged from
- * the shipped ROUTE_HOP_LIMIT_MAX the flood used to originate at) covers a
+ * be matched to the expected network diameter. The default of 8 covers a
  * small/moderate-diameter mesh; a larger value covers a larger-diameter mesh
  * at a documented airtime cost (roughly 3x airtime / many more collisions to
  * cover ~2.5x more hops -- see docs/bramble-protocol-spec.md's flood
  * operating-envelope section). This is a SEPARATE value from
- * ROUTE_HOP_LIMIT_MAX: the reactive routing path still originates and forwards
- * at ROUTE_HOP_LIMIT_MAX unchanged, so raising the flood hop limit never
- * touches reactive reach.
+ * ROUTE_HOP_LIMIT_MAX: the reactive routing path originates and forwards at
+ * ROUTE_HOP_LIMIT_MAX, so raising the flood hop limit never touches reactive
+ * reach.
  */
 #define FLOOD_HOP_LIMIT_DEFAULT 8
 #define FLOOD_HOP_LIMIT_MIN 1
@@ -98,15 +90,15 @@ uint8_t flood_hop_limit_clamp(uint32_t hops);
 /*
  * The hop_limit an ORIGINATOR stamps on a freshly-originated frame. Under the
  * flood transport it is the clamped operator-settable flood hop limit;
- * otherwise it is ROUTE_HOP_LIMIT_MAX, the reactive path's unchanged
- * full-depth budget. Shared by send_data_packet / send_dm_packet / send_ack
+ * otherwise it is ROUTE_HOP_LIMIT_MAX, the reactive path's full-depth
+ * budget. Shared by send_data_packet / send_dm_packet / send_ack
  * so every originator agrees, and directly unit-testable (it is what proves
  * flood origination uses the configured value, not a constant).
  */
 uint8_t flood_origination_hop_limit(bool flood_transport, uint32_t flood_hop_limit);
 
 /*
- * Rebroadcast suppression (Flooding F1). A node that has a flood rebroadcast
+ * Rebroadcast suppression. A node that has a flood rebroadcast
  * still waiting out its jitter CANCELS it once it has overheard enough OTHER
  * copies of the same frame from neighbors: those copies already covered the
  * airspace this node's relay would have, so keying up would only add a
@@ -142,7 +134,7 @@ uint8_t flood_origination_hop_limit(bool flood_transport, uint32_t flood_hop_lim
  *   tx_kind   = the tx_gate kind (a tx_kind_t stored as a plain uint8_t to
  *               avoid a routing->radio header dependency) the relay is sent
  *               with, so a flooded DATA debits the BROADCAST lane and a
- *               flooded ACK (Flooding F1 Task 2) debits the CRITICAL/ACK lane
+ *               flooded ACK debits the CRITICAL/ACK lane
  *               -- one shared queue + suppression engine, correct per-lane
  *               airtime accounting.
  */
@@ -182,19 +174,18 @@ bool channel_flood_note_overheard(pending_flood_relay_t* queue, int capacity, ui
 
 /*
  * channel_flood_relay_admit: place one jittered flood rebroadcast into the
- * pending-relay queue, or DROP it when the queue is full (issue #87).
+ * pending-relay queue, or DROP it when the queue is full.
  *
- * The dropping is the point. This function used to be inline in
- * mesh_task.c's schedule_flood_relay, and its full-queue branch transmitted
- * the frame IMMEDIATELY instead of dropping it. That inverts backpressure at
- * exactly the moment the mesh can least afford it: the relay queue is only
- * full when this node already has FLOOD_RELAY_QUEUE_CAPACITY rebroadcasts
- * pending, which is the definition of local congestion, and the response
- * was to key up without jitter, immediately, on the congested channel. The
- * fuller the queue, the more eagerly the node transmitted. A flood that
- * outran the queue therefore turned every relay into an un-jittered
- * broadcast storm, with same-hop neighbors all transmitting at once because
- * the jitter that exists to decorrelate them had been skipped.
+ * The dropping is the point. Transmitting the frame IMMEDIATELY on the
+ * full-queue branch instead would invert backpressure at exactly the moment
+ * the mesh can least afford it: the relay queue is only full when this node
+ * already has FLOOD_RELAY_QUEUE_CAPACITY rebroadcasts pending, which is the
+ * definition of local congestion, and the response would be to key up
+ * without jitter, immediately, on the congested channel. The fuller the
+ * queue, the more eagerly the node would transmit. A flood that outruns the
+ * queue would turn every relay into an un-jittered broadcast storm, with
+ * same-hop neighbors all transmitting at once because the jitter that exists
+ * to decorrelate them had been skipped.
  *
  * Dropping is correct because a flood relay is best-effort by construction:
  * the frame reached this node, other neighbors are relaying the same frame
@@ -211,7 +202,7 @@ bool channel_flood_note_overheard(pending_flood_relay_t* queue, int capacity, ui
  * buf/len are the ALREADY relay-mutated wire bytes; this function owns
  * placement and timing, not frame content. due_at_ms is the absolute fire
  * time (the caller adds its own jitter). flood_key/tx_kind are stored for
- * the suppression engine and the airtime lane exactly as before.
+ * the suppression engine and the airtime lane.
  *
  * Returns true if the relay was queued, false if it was dropped. Pure over
  * its inputs (no globals, no clock) for the same testability reason

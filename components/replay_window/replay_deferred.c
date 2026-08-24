@@ -4,14 +4,14 @@
 void replay_deferred_init(replay_deferred_t* d) { memset(d, 0, sizeof(*d)); }
 
 /*
- * Issue #88: pick a slot for a new (src, counter) record.
+ * Pick a slot for a new (src, counter) record.
  *
  * A record only stops being needed once it is older than
  * DEFERRED_TTL_S, because past that age replay_deferred_accept rejects the
  * corresponding message on its sent_at check anyway. So an entry younger
- * than the TTL must never be evicted: doing so is exactly the attack in
- * issue #88, where flooding cheap spoofed records pushes a target's record
- * out and reopens the deferred acceptance window for it.
+ * than the TTL must never be evicted: doing so is the whole attack, where
+ * flooding cheap spoofed records pushes a target's record out and reopens
+ * the deferred acceptance window for it.
  *
  * Unlike replay_window's time-based idle threshold, this needs no tuning
  * constant: the TTL that already governs acceptance is the same TTL that
@@ -55,7 +55,7 @@ int replay_deferred_accept(replay_deferred_t* d, uint32_t src, uint64_t counter,
 
     replay_dslot_t* s = dslot_alloc(d, now_s);
     if (!s)
-        return REPLAY_BELOW_WINDOW; /* fail closed, issue #88 */
+        return REPLAY_BELOW_WINDOW; /* fail closed: a full table refuses to accept */
     s->used = 1;
     s->src = src;
     s->counter = counter;

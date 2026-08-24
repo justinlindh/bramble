@@ -11,12 +11,11 @@
  * on the nRF52840 target. */
 #include "esp_err.h"
 
-/* Protocol version.
- * was 4; DM forward-secrecy flag day: DM/LOCATION session payloads now carry a
- * 3-byte cleartext ratchet header (epoch || msg_index, authenticated via the
- * AEAD AAD) and are keyed by a per-message ratchet (see DM_RATCHET_HEADER_SIZE
- * below). Old v4 session frames drop at the RX version gate
- * (bramble_header_is_supported_version, exact ==) and re-handshake once. */
+/* Protocol version. DM/LOCATION session payloads carry a 3-byte cleartext
+ * ratchet header (epoch || msg_index, authenticated via the AEAD AAD) and are
+ * keyed by a per-message ratchet (see DM_RATCHET_HEADER_SIZE below). The RX
+ * version gate (bramble_header_is_supported_version) compares exactly, so a
+ * session frame from any other version drops and the peers re-handshake. */
 #define BRAMBLE_VERSION 5
 
 /* The protocol release this build speaks, as reported to clients by
@@ -49,7 +48,7 @@
 #define PKT_TYPE_PROBE 0x12     /* Network reachability probe */
 #define PKT_TYPE_PROBE_ACK 0x13 /* Probe acknowledgement */
 #define PKT_TYPE_LOCATION 0x14  /* Location share */
-/* Self-signed identity attestation (per-node identity Phase 2): a node's
+/* Self-signed identity attestation (per-node identity): a node's
  * broadcast claim binding {address, X25519 pub, Ed25519 pub} under its own
  * Ed25519 key. Additive on wire v4: un-upgraded peers drop it at the RX
  * dispatch switch's default case. */
@@ -60,10 +59,10 @@
 /* Buffer sizes */
 #define BRAMBLE_MAX_PACKET_SIZE 256
 
-/* Flag bits (wire v2). Tier moved into the LOCATION ciphertext, freeing bits 6-7.
- * DES-9: FLAG_EMERGENCY no longer collides with FLAG_ENCRYPT (historical 0x04
- * collision is gone; there is no emergency feature, bit 6 is reserved-named). */
-#define FLAG_RESERVED_HIGH 0x80 /* reserved (was FLAG_DEFERRED in RFC r1; not used) */
+/* Flag bits (wire v2). Tier lives inside the LOCATION ciphertext, not in
+ * these bits, so bits 6-7 carry nothing. There is no emergency feature; bit 6
+ * holds the reserved FLAG_EMERGENCY name only. */
+#define FLAG_RESERVED_HIGH 0x80 /* reserved; not used */
 #define FLAG_EMERGENCY 0x40     /* origin-set, immutable, AAD-bound; reserved for future use */
 #define FLAG_ACK_REQ (1 << 5)
 #define FLAG_RECEIPT (1 << 4)
@@ -75,28 +74,27 @@
 #define HEADER_SIZE 12
 #define ACK_BASE_SIZE                                                                              \
     37 /* header(12) + src(4) + ack_pkt_id(4) + flags(1) + rssi(1) + hop_count(1) + auth_hmac(8) + \
-        * seq(6); was 31, +6 for seq (ws 1.3b control-plane freshness) */
+        * seq(6) */
 #define ACK_MAX_HOPS 8
 #define ACK_MAX_SIZE (ACK_BASE_SIZE + ACK_MAX_HOPS * 4) /* 37 + 32 = 69 */
 #define ACK_SIZE ACK_BASE_SIZE                          /* backward compat for min size checks */
 #define RREQ_SIZE 30
-#define RREP_SIZE 40   /* was 34; +6 for seq (ws 1.3b control-plane freshness) */
-#define RERR_SIZE 38   /* was 32; +6 for seq (ws 1.3b control-plane freshness) */
-#define BEACON_SIZE 54 /* was 48; +6 for seq (ws 1.3b control-plane freshness) */
+#define RREP_SIZE 40   /* includes auth_hmac(8) + seq(6) */
+#define RERR_SIZE 38   /* includes auth_hmac(8) + seq(6) */
+#define BEACON_SIZE 54 /* fixed prefix: includes seq(6) + auth_hmac(16); name follows */
 #define KEY_EXCHANGE_SIZE 101
-#define DELIVERY_RECEIPT_MIN_SIZE 36 /* was 30; +6 for seq (ws 1.3b control-plane freshness) */
-#define DELIVERY_RECEIPT_MAX_SIZE 68 /* was 62; +6 for seq (ws 1.3b control-plane freshness) */
+#define DELIVERY_RECEIPT_MIN_SIZE 36 /* includes auth_hmac(8) + seq(6), zero relay_path hops */
+#define DELIVERY_RECEIPT_MAX_SIZE 68 /* MIN + DELIVERY_RECEIPT_MAX_HOPS * 4 bytes of relay_path */
 
 #define DELIVERY_RECEIPT_MAX_HOPS 8
 
 /* Identity attestation wire size: header(12) + src_addr(4) + x25519_pub(32)
  * + ed25519_pub(32) + sig(64) + not_after(8) + endorsement_sig(64)
  * + auth_hmac(8) + seq(6). Fixed-size frame; the deserializer rejects
- * anything that is not EXACTLY this long. Phase 3 grew the frame by the
- * relay-gate MAC + seq (144 -> 158); the trust-anchor campaign (P1) grew it
- * again by the inline endorsement cert (not_after + endorsement_sig,
- * 158 -> 230) as a deliberate pre-alpha wire flag day (old 158-byte frames
- * are rejected). The canonical SIGNED message below is unchanged. */
+ * anything that is not EXACTLY this long, so a peer speaking a different
+ * attestation layout is dropped rather than misparsed. The canonical SIGNED
+ * message below covers only a subset of these fields and is sized
+ * independently (IDENTITY_ATTESTATION_MSG_SIZE). */
 #define IDENTITY_ATTESTATION_SIZE (HEADER_SIZE + 4 + 32 + 32 + 64 + 8 + 64 + 8 + 6) /* 230 */
 
 /* Canonical signed message for the attestation (see
@@ -123,14 +121,14 @@ typedef struct {
     uint8_t ack_flags;
     int8_t rssi_at_dest;
     uint8_t hop_count; /* number of addresses in relay_path */
-    /* NEW-SEC-8 (Task 3.5, STAGED, not closed: see network_key.h), extended
-     * by ws 1.3b. Covers src_addr||ack_packet_id||seq; excludes
+    /* NEW-SEC-8 (STAGED, not closed: see network_key.h).
+     * Covers src_addr||ack_packet_id||seq; excludes
      * relay_path/hop_count/hop_limit, which forward_ack mutates on every
      * relay hop. Placed BEFORE relay_path (a fixed, hop_count-independent
      * wire offset) so a verifier never has to trust the unauthenticated
      * hop_count to locate the tag. */
     uint8_t auth_hmac[8];
-    /* ws 1.3b: 48-bit origin sequence, drawn once by the originating
+    /* 48-bit origin sequence, drawn once by the originating
      * destination (control_seq_next in mesh_reliability.c's send_ack) and
      * carried through forward_ack unchanged, exactly like auth_hmac. Sits
      * at the same fixed, hop_count-independent offset immediately after
@@ -159,7 +157,7 @@ typedef struct {
     uint8_t hop_count;
     uint8_t route_metric;
     uint8_t auth_hmac[8];
-    /* ws 1.3b: 48-bit origin sequence, drawn once by the originator
+    /* 48-bit origin sequence, drawn once by the originator
      * (control_seq_next in mesh_beacon.c) and carried through rrep_forward
      * unchanged, exactly like auth_hmac. MAC-covered (rrep_build_auth_buf).
      */
@@ -171,14 +169,14 @@ typedef struct {
     uint32_t reporter_addr;
     uint32_t broken_dest;
     uint32_t broken_next_hop;
-    /* SEC-H1 (Task 3.3, STAGED, not closed: see network_key.h), extended by
-     * ws 1.3b. Covers reporter_addr||broken_dest||broken_next_hop||seq;
+    /* SEC-H1 (STAGED, not closed: see network_key.h).
+     * Covers reporter_addr||broken_dest||broken_next_hop||seq;
      * excludes only header.packet_id, which every forwarder legitimately
      * rewrites on re-origination (send_rerr, mesh_routing.c). reporter_addr
      * is MAC-covered because every forwarder re-signs with its OWN
      * reporter_addr on every re-origination (see routing_auth.h). */
     uint8_t auth_hmac[8];
-    /* ws 1.3b: 48-bit origin sequence, freshly drawn by EACH hop on every
+    /* 48-bit origin sequence, freshly drawn by EACH hop on every
      * re-origination (control_seq_next in mesh_routing.c's send_rerr), not
      * origin-stable like RREP's. MAC-covered; replay-keyed on
      * (reporter_addr, seq), both authenticated. */
@@ -212,15 +210,15 @@ typedef struct {
     uint8_t flags;
     uint32_t network_time;
     uint16_t time_confidence;
-    /* ws 1.3b: 48-bit origin sequence. MUST stay inside the fixed prefix
+    /* 48-bit origin sequence. MUST stay inside the fixed prefix
      * beacon_compute_hmac hashes (i.e. BEFORE auth_hmac): the prefix
      * length there is BEACON_SIZE - sizeof(auth_hmac), so anything placed
      * before auth_hmac is covered automatically, and anything placed
-     * after it (like name) needs its own explicit coverage, per Fix 4's
-     * lesson (see beacon.c). Drawn once per periodic beacon
-     * (control_seq_next in mesh_beacon.c's send_beacon); beacons are
-     * single-hop and never forwarded, so there is no carry-through case
-     * to preserve here (unlike RREP/ACK/receipt). */
+     * after it (like name) needs its own explicit coverage (see
+     * beacon.c). Drawn once per periodic beacon (control_seq_next in
+     * mesh_beacon.c's send_beacon); beacons are single-hop and never
+     * forwarded, so there is no carry-through case to preserve here
+     * (unlike RREP/ACK/receipt). */
     uint8_t seq[6];
     uint8_t auth_hmac[16];
     /* Optional: node name (appended after fixed fields) */
@@ -250,14 +248,14 @@ typedef struct {
     uint32_t orig_packet_id;
     uint8_t hop_count;
     uint8_t total_latency;
-    /* NEW-SEC-8 (Task 3.5, STAGED, not closed: see network_key.h), extended
-     * by ws 1.3b. Covers src_addr||orig_packet_id||seq; excludes
+    /* NEW-SEC-8 (STAGED, not closed: see network_key.h).
+     * Covers src_addr||orig_packet_id||seq; excludes
      * relay_path/hop_count/hop_limit, which forward_delivery_receipt
      * mutates on every relay hop. Placed BEFORE relay_path (a fixed,
      * hop_count-independent wire offset), same rationale as
      * bramble_ack_t's auth_hmac above. */
     uint8_t auth_hmac[8];
-    /* ws 1.3b: 48-bit origin sequence, drawn once by the originating
+    /* 48-bit origin sequence, drawn once by the originating
      * builder (control_seq_next in mesh_reliability.c, via
      * mesh_build_broadcast_delivery_receipt_packet) and carried through
      * forward_delivery_receipt unchanged, exactly like auth_hmac. Same
@@ -269,7 +267,7 @@ typedef struct {
 } bramble_delivery_receipt_t;
 
 /*
- * Identity attestation (per-node identity Phase 2, relay-gated in Phase 3):
+ * Identity attestation (per-node identity, relay-gated):
  * a self-signed, flooded (low-cadence) binding of {src_addr, X25519 pub,
  * Ed25519 pub}.
  *
@@ -278,12 +276,12 @@ typedef struct {
  *   "bramble-ident-v1" || src_addr(4, big-endian) || x25519_pub(32)
  *                      || ed25519_pub(32)
  *
- * (bramble_identity_attestation_signed_msg builds it; the Phase 3 pinning
- * verifier checks these same bytes). The header is deliberately NOT
+ * (bramble_identity_attestation_signed_msg builds it; the pinning verifier
+ * checks these same bytes). The header is deliberately NOT
  * covered: hop_limit is relay-mutable and packet_id is per-send, while the
  * identity claim itself is stable across re-sends and relays.
  *
- * TWO authenticators, two jobs (Phase 3):
+ * TWO authenticators, two jobs:
  *   - sig (Ed25519) carries the identity claim's TRUTH: it is
  *     self-authenticating, checkable by ANY member against the embedded
  *     ed25519_pub with no shared secret needed. A network-key MAC adds
@@ -310,23 +308,23 @@ typedef struct {
     uint8_t x25519_pub[32];
     uint8_t ed25519_pub[32];
     uint8_t sig[64];
-    /* Endorsement certificate (trust-anchor campaign, P1): the anchor's
-     * signature vouching for ed25519_pub, carried inline so a receiver can
-     * later (P2) verify fleet membership from the frame alone. not_after is
+    /* Endorsement certificate: the anchor's signature vouching for
+     * ed25519_pub, carried inline so a receiver can verify fleet membership
+     * from the frame alone (identity_store.c's pin check). not_after is
      * big-endian ms epoch; UINT64_MAX = permanent, 0 = "no cert present"
      * (endorsement_sig then all-zero). The node NEVER signs this; it is the
      * anchor's signature, provisioned via setEndorsement. Not part of the
      * self-signed canonical message (bramble_identity_attestation_signed_msg
-     * is unchanged); it IS covered by the relay-gate MAC (ident_relay_sign)
-     * so an outsider cannot flip cert bits in flight. */
+     * does not cover it); it IS covered by the relay-gate MAC
+     * (ident_relay_sign) so an outsider cannot flip cert bits in flight. */
     uint64_t not_after;
     uint8_t endorsement_sig[64];
-    uint8_t auth_hmac[8]; /* network-key relay gate (Phase 3) */
-    uint8_t seq[6];       /* 48-bit origin seq, big-endian (Phase 3) */
+    uint8_t auth_hmac[8]; /* network-key relay gate */
+    uint8_t seq[6];       /* 48-bit origin seq, big-endian */
 } bramble_identity_attestation_t;
 
 /*
- * 48-bit control-plane sequence (ws 1.3b) pack/unpack. The seq field on the
+ * 48-bit control-plane sequence pack/unpack. The seq field on the
  * ACK/RREP/RERR/BEACON/delivery-receipt/attestation frames above is a
  * big-endian 6-byte array; these two helpers are the single definition of that
  * byte order, so no build or parse site can transcribe the shifts differently
@@ -391,24 +389,23 @@ esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, u
  * handle_data (main/mesh_task.c) and handle_location (main/mesh_location.c)
  * parse it; gosim's bridge.c
  * uses its own out-of-band src_addr/prev_hop tracking instead of these wire
- * bytes, since its DATA framing already diverges from firmware's -- see
- * task-4-report.md).
+ * bytes, since its DATA framing already diverges from firmware's).
  *
  * prev_hop is RELAY-MUTABLE and MAC-EXCLUDED, mirroring RREP's relay-mutable
- * next_hop (#119): every node that transmits this frame -- the originator on
+ * next_hop: every node that transmits this frame -- the originator on
  * first TX, then each relay before it retransmits -- overwrites prev_hop
  * with its OWN address, so any receiver always knows the address of the
  * radio it just heard this specific frame from, regardless of how many hops
  * it has already travelled. Because every hop rewrites it, prev_hop cannot
  * live under the AEAD tag. It also is NOT fed into bramble_build_aead_aad:
- * that helper's AAD buffer is unchanged by this field's addition (still
- * HEADER_SIZE + 4 bytes: the masked header plus src_addr only), so prev_hop
+ * that helper's AAD buffer covers no part of it (HEADER_SIZE + 4 bytes: the
+ * masked header plus src_addr only), so prev_hop
  * simply sits at a wire offset the AAD build never reads, exactly the way
  * nonce/ciphertext/tag already sit outside it. There is nothing to "zero":
  * exclusion here is structural (prev_hop's offset is never copied into the
  * AAD buffer at all), not a masked-in-place byte like hop_limit.
  *
- * auth_hmac (Task 4-fix F1, wire v4) is an 8-byte NETWORK-KEY MAC the
+ * auth_hmac (wire v4) is an 8-byte NETWORK-KEY MAC the
  * ORIGINATOR writes and never mutates in flight (relays and the mailbox
  * flusher copy it through verbatim, exactly like the AEAD tag). It covers
  * the ORIGIN-STABLE authenticated fields -- the masked header (hop_limit

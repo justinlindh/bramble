@@ -157,7 +157,7 @@ void tx_gate_snapshot(airtime_budget_t* out);
  * multi-command SPI sequence that must not interleave with a transmit) against
  * the transmit path, which holds the same lock for its whole sequence. The
  * caller holds it across the entire operation. These are WDT-safe: the take
- * feeds the task watchdog while it spins, matching tx_gate_send (issue #82). */
+ * feeds the task watchdog while it spins, matching tx_gate_send. */
 void tx_gate_radio_lock(void);
 void tx_gate_radio_unlock(void);
 

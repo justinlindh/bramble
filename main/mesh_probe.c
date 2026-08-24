@@ -1,7 +1,8 @@
 /**
  * mesh_probe.c: Neighbor probe sweep and the jittered probe-reply queue.
  *
- * Split out of mesh_task.c (issue #86); pure code motion, no behavior change.
+ * Owns the multi-round probe sweep, PROBE and PROBE_ACK handling with its
+ * ingress accounting, and the timer that spreads queued replies over time.
  * Shared state and cross-module entry points come from mesh_internal.h.
  */
 #include "mesh_internal.h"
@@ -40,7 +41,7 @@ static void mesh_schedule_next_probe_reply_timer(void) {
 }
 
 static void queue_probe_reply(const uint8_t* buf, uint8_t wire_len, uint32_t address) {
-    uint32_t jitter_ms = esp_random() % 120u; /* +0..119, as before */
+    uint32_t jitter_ms = esp_random() % 120u; /* +0..119 */
     uint32_t initial_delay_ms = probe_reply_initial_delay_ms(address, jitter_ms);
     uint32_t first_due_ms = probe_reply_attempt_due_ms(now_ms(), initial_delay_ms, 0);
 
@@ -179,9 +180,8 @@ void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
      * rate limit below has any say. PROBE is unauthenticated and remotely
      * inducible, so an attacker in radio range could otherwise buy one UART
      * line per injected frame and starve the serial RPC channel a maintainer
-     * would reach for while diagnosing the flood. Same reasoning as commit
-     * 843db077, which demoted the raw NMEA log for exactly this failure mode
-     * (issue #174). */
+     * would reach for while diagnosing the flood. Every PROBE ingress line
+     * below the rate limit sits at debug for this reason. */
     ESP_LOGD(TAG, "PROBE RX pid=%08" PRIX32 " round=%u src=%s me=%s hop=%u rssi=%d snr=%d",
              header.packet_id, (unsigned)probe_round, addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)), (unsigned)header.hop_limit,
@@ -195,14 +195,14 @@ void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         return;
     }
 
-    /* Ingress backpressure (issue #75). PROBE is unauthenticated on purpose:
+    /* Ingress backpressure. PROBE is unauthenticated on purpose:
      * an unprovisioned node asking "who can hear me" is the feature, so
      * there is deliberately no MAC check and no provisioning gate here. What
      * is bounded is the AMPLIFICATION. Accepting a probe costs this node a
      * three-send reply burst plus a rebroadcast, and dedup keys on a
-     * packet_id an attacker varies freely, so before this the cost ratio of
+     * packet_id an attacker varies freely, so without a cap the cost ratio of
      * one injected 16-byte frame to four transmissions per node in earshot
-     * was unbounded. The cap is node-global, NOT keyed on the src_addr above:
+     * is unbounded. The cap is node-global, NOT keyed on the src_addr above:
      * that field is unauthenticated, so per-sender keying would be evadable
      * by rotating it and would hand an attacker a targeted DoS against any
      * victim whose address it forged. Same call, same reasons, as SEC-M4's
@@ -240,8 +240,8 @@ void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     buf[HEADER_SIZE + 5] = probe_round;
 
     /* Defer the reply burst (slot delay + jitter + 3 sends 140ms apart) onto
-     * the probe-reply timer/queue so the mesh task is never blocked (DES-15).
-     * Same slotting/jitter/spacing as before; only the blocking is removed. */
+     * the probe-reply timer/queue so the mesh task is never blocked for the
+     * length of the burst. */
     queue_probe_reply(buf, HEADER_SIZE + 6, s_identity->address);
 
     ESP_LOGI(TAG, "PROBE ACK QUEUED pid=%08" PRIX32 " round=%u to=%s from=%s hops=1",

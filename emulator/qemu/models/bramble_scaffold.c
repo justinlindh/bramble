@@ -1,11 +1,12 @@
 /*
- * Bramble device-model injection scaffold (P2.2-infra).
+ * Bramble device-model injection scaffold.
  *
- * Placeholder for the P2.2-P2.5 Bramble device models (GPIO, GPSPI2,
- * SX1262, SSD1680; see docs/archive/plans/emulator-phase2-qemu-spec.md in the
- * bramble repo). This file
- * exists only to prove the clone -> inject -> patch -> build -> observable
- * round trip those models will build on. It implements no device behavior.
+ * Shared plumbing for the Bramble device models (GPIO, GPSPI2, SX1262,
+ * SSD1680; see docs/archive/plans/emulator-phase2-qemu-spec.md in the bramble
+ * repo): a machine-init banner that makes the injected models observable, and
+ * bramble_overlay_attach, the helper each overlay model uses to map its
+ * register window over the machine's catch-all IO region. It models no device
+ * of its own.
  */
 
 #include "qemu/osdep.h"

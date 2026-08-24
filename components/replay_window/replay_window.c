@@ -24,12 +24,12 @@ static uint32_t replay_crc32(const uint8_t* data, size_t len) {
  * LRU-reused path must reset it, or a reused slot's leftover seen = 1 from
  * its PREVIOUS occupant would skip the fresh-slot branch for the new
  * sender's first packet and misclassify it via the general accept/dup path
- * (the same failure mode BUG A fixes at init, just reachable through
- * eviction instead).
+ * (the same failure mode the fresh-slot check in replay_check_and_add
+ * guards at init, just reachable through eviction instead).
  *
- * Issue #88: returns NULL rather than evicting a slot whose sender has been
- * active within REPLAY_EVICT_MIN_IDLE_MS. See the header for why refusing
- * the new sender is the correct direction to fail. */
+ * Returns NULL rather than evicting a slot whose sender has been active
+ * within REPLAY_EVICT_MIN_IDLE_MS. See the header for why refusing the new
+ * sender is the correct direction to fail. */
 static replay_slot_t* slot_for(replay_table_t* t, uint32_t src_addr, uint32_t now_ms) {
     replay_slot_t* lru = &t->slots[0];
     for (int i = 0; i < REPLAY_MAX_SENDERS; i++) {
@@ -71,11 +71,11 @@ static replay_slot_t* slot_for(replay_table_t* t, uint32_t src_addr, uint32_t no
 int replay_check_and_add(replay_table_t* t, uint32_t src_addr, uint64_t counter, uint32_t now_ms) {
     replay_slot_t* s = slot_for(t, src_addr, now_ms);
     if (!s)
-        return REPLAY_REJECT_NO_SLOT; /* fail closed, issue #88 */
+        return REPLAY_REJECT_NO_SLOT; /* fail closed: never accept unprotected */
     s->last_seen_ms = now_ms;
 
-    /* BUG A fix: a fresh slot is "no packet seen yet", not "high_water
-     * happens to be 0". The nonce counter (Task 0.4) issues 0 as the very
+    /* A fresh slot is "no packet seen yet", not "high_water
+     * happens to be 0". The nonce counter issues 0 as the very
      * first value on a node's first-ever boot, so high_water == 0 is a
      * legitimate, already-seen counter value, not just an unset sentinel.
      * Conflating the two lets a replay of that real counter-0 packet re-hit
@@ -89,17 +89,17 @@ int replay_check_and_add(replay_table_t* t, uint32_t src_addr, uint64_t counter,
 
     if (counter > s->high_water) {
         uint64_t shift = counter - s->high_water;
-        /* BUG B fix: at shift == 64 the old high_water sits at window bit 63
-         * (the last bit the 64-bit window can represent) and must survive
-         * the shift, not be wiped to 0. A naive `shift >= 64 -> window = 0`
-         * loses that bit, so replaying the old high_water after an exact
-         * 64-counter jump would wrongly be accepted. `window << 64` is also
-         * undefined behavior in C, so shift must never reach the shift
+        /* At shift == 64 the previous high_water sits at window bit 63 (the
+         * last bit the 64-bit window can represent) and must survive the
+         * shift, not be wiped to 0. A naive `shift >= 64 -> window = 0`
+         * loses that bit, so replaying that previous high_water after an
+         * exact 64-counter jump would wrongly be accepted. `window << 64` is
+         * also undefined behavior in C, so shift must never reach the shift
          * operator at 64 or above. */
         if (shift > 64) {
             s->window = 0;
         } else if (shift == 64) {
-            s->window = (1ull << 63); /* only the old high_water still tracked */
+            s->window = (1ull << 63); /* only the previous high_water still tracked */
         } else {
             s->window = (s->window << shift) | (1ull << (shift - 1));
         }

@@ -98,21 +98,21 @@ typedef struct {
     int index;
     float x;
     float y;
-    /* Original scenario position, captured at creation (issue #144): a
-     * coordinate-less node_join restores the node here instead of leaving
-     * it wherever the kill (or a bug) put it. */
+    /* Original scenario position, captured at creation: a coordinate-less
+     * node_join restores the node here instead of leaving it wherever the
+     * kill put it. */
     float home_x;
     float home_y;
     bool active;
 
-    /* Per-node identity Phase 4: the node's PERSISTENT Ed25519 identity
-     * keypair, the sim analog of firmware's NVS-stored identity. Created
-     * ONCE in node_array_add and surviving leave/rejoin (node_activate
-     * models a reboot and must not touch it), deterministic from the node
-     * id so scenario runs are reproducible. addr above is DERIVED from
-     * ident_ed_pub exactly as firmware derives it post-rebind
-     * (crypto_derive_address = SHA256[0:4]), which is what lets the REAL
-     * identity_store addr<->key check accept sim attestations. */
+    /* The node's PERSISTENT Ed25519 identity keypair, the sim analog of
+     * firmware's NVS-stored identity. Created ONCE in node_array_add and
+     * surviving leave/rejoin (node_activate models a reboot and must not
+     * touch it), deterministic from the node id so scenario runs are
+     * reproducible. addr above is DERIVED from ident_ed_pub exactly as
+     * firmware derives it (crypto_derive_address = SHA256[0:4]), which
+     * is what lets the REAL identity_store addr<->key check accept sim
+     * attestations. */
     uint8_t ident_ed_pub[32];
     uint8_t ident_ed_priv[64];
 
@@ -128,13 +128,13 @@ typedef struct {
 
     /* Dedup state */
     dedup_buffer_t dedup;
-    /* Task 5 (channel flood): separate, src_addr-qualified dedup for the
+    /* Channel flood: separate, src_addr-qualified dedup for the
      * broadcast/channel DATA flood path -- mirrors main/mesh_task.c's
      * s_flood_dedup. Kept apart from `dedup` above (which the RREQ path
      * uses keyed on raw packet_id) for the same collision-safety reason. */
     dedup_buffer_t flood_dedup;
 
-    /* Flooding F1 rebroadcast suppression: per-node pending flood relays,
+    /* Rebroadcast suppression: per-node pending flood relays,
      * mirroring flood.go's floodSim.pending (keyed by flood_key) and
      * firmware's s_flood_relay_queue heard/cancel fields. A scheduled relay is
      * an EVT_SEND_PACKET already in the event queue with no cancel handle, so

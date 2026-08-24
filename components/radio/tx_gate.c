@@ -157,7 +157,7 @@ int tx_gate_transmit(tx_gate_t* g, const uint8_t* buf, uint8_t len, tx_kind_t ki
      * `quiet` records whether a CAD actually found the channel free, which
      * is what separates "the channel went quiet" from "the attempts ran
      * out while it was still busy". Tracking it costs nothing: the quiet
-     * path still spends exactly one CAD, as it always did. */
+     * path spends exactly one CAD either way. */
     bool quiet = false;
     for (uint8_t attempt = 0; attempt < TX_GATE_LBT_MAX_ATTEMPTS; attempt++) {
         if (g->ops.wdt_feed)

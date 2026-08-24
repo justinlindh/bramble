@@ -104,8 +104,8 @@ static void bytes_to_hex(const uint8_t* in, size_t n, char* out) {
  * rpc_dispatch() has no serialization of its own and is entered concurrently
  * from three tasks: the WebSocket httpd task, the BLE RPC task and the CLI
  * task. Any handler scratch that outlives the call frame is therefore shared
- * mutable state, and two overlapping getNeighbors calls used to stomp the same
- * ~1.5 KB buffer mid-iteration, so one client got a torn neighbor table.
+ * mutable state: two overlapping getNeighbors calls would stomp the same
+ * ~1.5 KB buffer mid-iteration and hand one client a torn neighbor table.
  *
  * These snapshots (mesh_shared_state_t ~1.5 KB, routing_table_t ~1.8 KB) are
  * per-call heap instead: the buffer is private to the call by construction,
@@ -208,7 +208,7 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync",
                           mesh_supports_delivery_event_sync());
 
-    /* Per-node identity Phase 4 diagnostics: verified-pin count plus the
+    /* Per-node identity diagnostics: verified-pin count plus the
      * impersonation-signal counters. Additive response fields (no new
      * method); mirrored in api/openapi.yaml's StatusResponse. */
     uint32_t id_pins = 0, id_conflicts = 0, id_sig_failures = 0, id_addr_mismatches = 0;
@@ -219,8 +219,8 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(result, "identity_conflicts", id_conflicts);
     cJSON_AddNumberToObject(result, "identity_sig_failures", id_sig_failures);
     cJSON_AddNumberToObject(result, "identity_addr_mismatches", id_addr_mismatches);
-    /* Trust-anchor campaign (P2): endorsement-gate rejection counters. Both
-     * stay 0 on an unanchored node (the gate never runs). */
+    /* Endorsement-gate rejection counters. Both stay 0 on an unanchored node
+     * (the gate never runs). */
     cJSON_AddNumberToObject(result, "identity_unendorsed", id_unendorsed);
     cJSON_AddNumberToObject(result, "identity_expired", id_expired);
     return 0;
@@ -273,8 +273,7 @@ static int handle_get_diagnostics(const cJSON* params, cJSON* result) {
 
     /* Airtime backpressure counters. Congestion that is absorbed silently is
      * congestion nobody can diagnose from the field, so both the flood relay
-     * drops (issue #87) and the PROBE ingress refusals (issue #75) are
-     * readable here. */
+     * drops and the PROBE ingress refusals are readable here. */
     cJSON* backpressure = cJSON_AddObjectToObject(result, "backpressure");
     cJSON_AddNumberToObject(backpressure, "flood_relay_drops",
                             (double)mesh_get_flood_relay_drops());
@@ -1512,11 +1511,11 @@ static int hex_nibble(char c) {
 }
 
 /* bramble.setNetworkKey: params {"key": "<64 lowercase/uppercase hex chars>"}.
- * Provisions the control-plane network key (PART 3, STAGED: see
- * network_key.h. This does NOT by itself close SEC-H1, SEC-H2, NEW-SEC-4,
- * or NEW-SEC-8; those stay open until real per-fleet key distribution
- * lands). Authenticated callers only: this method is not in rpc_auth's
- * unauth allowlist, so an unauthenticated caller cannot reach it, exactly
+ * Provisions the control-plane network key (STAGED, see network_key.h): this
+ * does NOT by itself close SEC-H1, SEC-H2, NEW-SEC-4, or NEW-SEC-8; those
+ * stay open until real per-fleet key distribution lands. Authenticated
+ * callers only: this method is not in rpc_auth's unauth allowlist, so an
+ * unauthenticated caller cannot reach it, exactly
  * mirroring setAuthToken above. Persists to NVS (NVS_NS_NETKEY) so the
  * provisioned key survives reboot, mirroring the identity/nonce NVS
  * pattern. Distribution UX, how an operator actually gets a key onto a
@@ -1541,10 +1540,10 @@ static int rpc_set_network_key(const cJSON* params, cJSON* result) {
         key[i] = (uint8_t)((hi << 4) | lo);
     }
 
-    /* Mandatory-provisioning (Task 2): single source of truth. The network_key
-     * component persists to NVS (NVS_NS_NETKEY) on set, so this no longer
-     * hand-rolls its own NVS write; that removes the double-write and the risk
-     * of the RPC and the component disagreeing on the stored key. */
+    /* Single source of truth: the network_key component persists to NVS
+     * (NVS_NS_NETKEY) on set, so this handler does not write NVS itself. One
+     * writer means the RPC and the component cannot disagree on the stored
+     * key. */
     network_key_set_provisioned(key);
     mesh_rederive_beacon_key(); /* beacons pick up the new key live, no reboot */
     cJSON_AddBoolToObject(result, "ok", true);
@@ -1572,10 +1571,10 @@ static int handle_get_network_key_status(const cJSON* params, cJSON* result) {
 /* bramble.generateNetworkKey: params none. Result:
  *   {"key": "<64 lowercase hex>", "fingerprint": "<8 lowercase hex>"}
  * Mints a fresh entropy-gated 32-byte network key via
- * network_key_generate_provision (mandatory-provisioning Task 1), which
- * provisions THIS node (in memory + NVS) atomically and copies the key out.
- * This makes the local node the fleet "founder": the operator then copies the
- * displayed key to the other nodes (via setNetworkKey / the QR share).
+ * network_key_generate_provision, which provisions THIS node (in memory +
+ * NVS) atomically and copies the key out. This makes the local node the fleet
+ * "founder": the operator then copies the displayed key to the other nodes
+ * (via setNetworkKey / the QR share).
  *
  * Returning the RAW key here is deliberate and acceptable: this is the
  * operator's own LOCAL control channel (WiFi/BLE/serial to their own node),
@@ -1610,13 +1609,13 @@ static int handle_generate_network_key(const cJSON* params, cJSON* result) {
 }
 
 /* bramble.setAnchor: params {"anchor_pubkey": "<64 hex chars>"}.
- * Provisions the fleet trust-anchor PUBLIC key (trust-anchor campaign, P0).
- * The anchor holder is an offline operator client; the device only ever holds
- * the anchor PUBLIC key, never the private key, and never signs endorsements.
- * Persisted via identity_anchor_set (NVS on device). P0 is inert: nothing
- * reads the anchor for a trust decision yet (later phases pin endorsed-only).
- * Authenticated callers only (registered normally, so not in rpc_auth's
- * unauth allowlist), mirroring setNetworkKey. */
+ * Provisions the fleet trust-anchor PUBLIC key. The anchor holder is an
+ * offline operator client; the device only ever holds the anchor PUBLIC key,
+ * never the private key, and never signs endorsements. Persisted via
+ * identity_anchor_set (NVS on device). An anchored node pins ONLY identities
+ * carrying an endorsement that verifies against this anchor. Authenticated
+ * callers only (registered normally, so not in rpc_auth's unauth allowlist),
+ * mirroring setNetworkKey. */
 static int rpc_set_anchor(const cJSON* params, cJSON* result) {
     const cJSON* key_j = cJSON_GetObjectItem(params, "anchor_pubkey");
     if (!key_j || !cJSON_IsString(key_j)) {
@@ -1636,10 +1635,10 @@ static int rpc_set_anchor(const cJSON* params, cJSON* result) {
         pub[i] = (uint8_t)((hi << 4) | lo);
     }
     identity_anchor_set(pub);
-    /* Trust-anchor campaign (P2): push the anchor into the live pin store so it
-     * pins only endorsed identities immediately, without waiting for a reboot.
-     * The boot path also loads it, so a reboot is never required for
-     * correctness; this just makes runtime provisioning take effect at once. */
+    /* Push the anchor into the live pin store so it pins only endorsed
+     * identities immediately, without waiting for a reboot. The boot path also
+     * loads it, so a reboot is never required for correctness; this just makes
+     * runtime provisioning take effect at once. */
     mesh_set_pin_anchor(pub);
     cJSON_AddBoolToObject(result, "ok", true);
     return 0;
@@ -1651,8 +1650,8 @@ static int rpc_set_anchor(const cJSON* params, cJSON* result) {
  * one-way fingerprint (SHA256(anchor_pub)[0:4]) so an operator can confirm a
  * fleet shares one anchor without the key being echoed. The fingerprint field
  * is present only when anchored. The "endorsed" flag reports whether THIS node
- * holds its own endorsement cert (trust-anchor campaign, P1) so an operator
- * can see enrollment state. Mirrors getNetworkKeyStatus. */
+ * holds its own endorsement cert so an operator can see enrollment state.
+ * Mirrors getNetworkKeyStatus. */
 static int handle_get_anchor_status(const cJSON* params, cJSON* result) {
     (void)params;
     bool anchored = identity_anchor_is_set();
@@ -1667,10 +1666,10 @@ static int handle_get_anchor_status(const cJSON* params, cJSON* result) {
     /* endorsed = we hold a cert that ACTUALLY verifies against the CURRENT
      * anchor + this node's own identity key, not mere presence. After an
      * anchor rotation (setAnchor A2 while a cert signed by A1 is still stored)
-     * the old cert is dead, so this must report false. P3's gates and P4's
-     * webapp read this as live enrollment state. The stored cert is NOT
-     * cleared here: idempotent re-provisioning of the same anchor must keep
-     * working; only what we REPORT changes. */
+     * the old cert is dead, so this must report false. The webapp reads this
+     * as live enrollment state. The stored cert is NOT cleared here:
+     * idempotent re-provisioning of the same anchor must keep working; only
+     * what we REPORT changes. */
     bool endorsed = false;
     if (anchored && identity_endorsement_is_set()) {
         uint64_t not_after;
@@ -1689,11 +1688,11 @@ static int handle_get_anchor_status(const cJSON* params, cJSON* result) {
 /* bramble.setEndorsement: params
  *   {"not_after": "<16 hex chars, big-endian uint64>",
  *    "endorsement_sig": "<128 hex chars>"}.
- * Provisions THIS node's own endorsement cert (trust-anchor campaign, P1):
- * the anchor's signature vouching for this node's Ed25519 identity key.
- * not_after is a HEX STRING, not a JSON number, because UINT64_MAX (the
- * permanent sentinel, "ffffffffffffffff") does not survive JSON double
- * precision. The device never SIGNS an endorsement; it only accepts one the
+ * Provisions THIS node's own endorsement cert: the anchor's signature
+ * vouching for this node's Ed25519 identity key. not_after is a HEX STRING,
+ * not a JSON number, because UINT64_MAX (the permanent sentinel,
+ * "ffffffffffffffff") does not survive JSON double precision. The device
+ * never SIGNS an endorsement; it only accepts one the
  * anchor already signed, and verifies it against this node's own identity key
  * and the provisioned anchor before persisting. Rejected when no anchor is
  * provisioned, when not_after == 0 (the "no cert" sentinel), when either field
@@ -1885,7 +1884,7 @@ static int handle_add_channel(const cJSON* params, cJSON* result) {
         return 0;
     }
 
-    /* Persistence is now handled in mesh_add_channel (Phase 1) */
+    /* Persistence happens in mesh_add_channel */
 
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddNumberToObject(result, "index", idx);
@@ -1914,7 +1913,7 @@ static int handle_remove_channel(const cJSON* params, cJSON* result) {
         return 0;
     }
 
-    /* Persistence is now handled in mesh_remove_channel (Phase 1) */
+    /* Persistence happens in mesh_remove_channel */
 
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddNumberToObject(result, "channels", mesh_get_channel_count());
@@ -1981,14 +1980,14 @@ static int handle_set_mailbox(const cJSON* params, cJSON* result) {
                                     "mailbox persist failed", result);
 }
 
-/* Flooding F1 Task 1: bramble.setFloodTransport. */
+/* bramble.setFloodTransport. */
 static int handle_set_flood_transport(const cJSON* params, cJSON* result) {
     return rpc_persist_bool_setting(params, NVS_NS_FLOOD, mesh_set_flood_transport,
                                     "Flood transport", "flood transport persist failed", result);
 }
 
-/* Flooding F1 finalize: bramble.setFloodHopLimit {hops}. Sets the operator-
- * settable flood-transport origination hop budget. mesh_set_flood_hop_limit
+/* bramble.setFloodHopLimit {hops}. Sets the operator-settable flood-transport
+ * origination hop budget. mesh_set_flood_hop_limit
  * clamps to [FLOOD_HOP_LIMIT_MIN, FLOOD_HOP_LIMIT_CEIL]; the CLAMPED value is
  * what we persist and echo back, so a client always sees exactly what took
  * effect. Only the flood transport uses this; ROUTE_HOP_LIMIT_MAX (reactive)
@@ -2488,8 +2487,8 @@ static int handle_get_peer_locations(const cJSON* params, cJSON* result) {
 
             /* Prefer the live GPS fix over manually configured coordinates,
              * mirroring mesh_location_policy_tick: a GPS-only node has
-             * lat_e6 == lon_e6 == 0 in NVS and was previously omitted
-             * entirely, leaving the map empty. */
+             * lat_e6 == lon_e6 == 0 in NVS, so keying off NVS alone would
+             * omit it entirely and leave the map empty. */
             bramble_position_t gps_pos;
             bool has_gps = gps_get_position(&gps_pos) && gps_pos.valid;
             /* Not gated on policy.enabled: the sharing policy governs what is
@@ -2837,10 +2836,10 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
     /* Mailbox enabled state */
     cJSON_AddBoolToObject(result, "mailboxEnabled", mesh_get_mailbox());
 
-    /* Flooding F1 Task 1: flood transport toggle state */
+    /* Flood transport toggle state */
     cJSON_AddBoolToObject(result, "floodTransportEnabled", mesh_get_flood_transport());
 
-    /* Flooding F1 finalize: operator-settable flood origination hop budget. */
+    /* Operator-settable flood origination hop budget. */
     cJSON_AddNumberToObject(result, "floodHopLimit", mesh_get_flood_hop_limit());
 
     return 0;
