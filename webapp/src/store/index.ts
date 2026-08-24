@@ -119,16 +119,21 @@ export function parseConversationId(id: string): ParsedConversationId {
   return { kind: 'unknown' };
 }
 
-// Display label for a conversation bucket. Exported so UI headers can render
-// the same name policy the store uses when it labels conversations.
-export function formatConversationLabel(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
+// Display label for a conversation bucket. Exported so UI headers and the
+// conversation sidebar render the same name policy the store uses when it labels
+// conversations. Only `channels` is read, so the parameter asks for no more.
+export function formatConversationLabel(id: string, peerNames?: Map<number, string>, config?: Pick<BrambleConfig, 'channels'> | null): string {
   const parsed = parseConversationId(id);
   switch (parsed.kind) {
     case 'broadcast':
       return 'Broadcast';
     case 'channel': {
       const ch = config?.channels?.find(c => c.index === parsed.index);
-      return ch?.name?.trim() ? ch.name : `ch-${parsed.index}`;
+      // A stored name can carry surrounding whitespace: config normalization
+      // decides blankness on the trimmed value but keeps the raw name, which
+      // protocol-facing callers (channel share strings) need.
+      const name = ch?.name?.trim();
+      return name ? name : `ch-${parsed.index}`;
     }
     case 'dm': {
       const name = peerNames?.get(parsed.addr);
