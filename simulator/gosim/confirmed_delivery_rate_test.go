@@ -76,12 +76,15 @@ func TestConfirmedDeliveryRateMatchesReceiptsHome(t *testing.T) {
 // msgs/min traffic: a real, reproducible run where several messages reach
 // their destination but not every one of those receipts makes it back
 // through the loaded reverse path. At 3 msgs/min the ACK retransmit ladder
-// recovers every lost receipt and the reach/confirm gap closes at that load,
-// which would make this test vacuous; 5 msgs/min keeps the reverse path
-// lossy enough to exercise it. The range is pinned rather than derived
-// because this scenario is tuned to a specific reverse-path loss pattern: 58
-// units is what SF7/250 kHz derives to (radio_derive_range in sim_radio.c),
-// and any value in [45, 63.6) gives the same orthogonal-only graph, so
+// recovers every lost receipt, because a destination re-ACKs duplicate DATA
+// with a fresh header.packet_id (send_ack draws next_packet_id every call,
+// main/mesh_reliability.c) so the re-ACK is not deduped and floods anew, and
+// the reach/confirm gap closes at that load, which would make this test
+// vacuous; 5 msgs/min keeps the reverse path lossy enough to exercise it.
+// The range is pinned rather than derived because this scenario is tuned to
+// a specific reverse-path loss pattern: 58 units is what SF7/250 kHz
+// derives to (radio_derive_range in sim_radio.c), and any value in
+// [45, 63.6) gives the same orthogonal-only graph, so
 // pinning it keeps the tuning independent of the derived-range calibration
 // anchor (which tracks the frequency plan's default PHY, see
 // radio_noise_margin_db).

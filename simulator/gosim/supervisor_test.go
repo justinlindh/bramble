@@ -190,9 +190,12 @@ func consoleNodeFor(lines []string, marker string) string {
 // firmware groups ("pager" and "gateway") each spawn one instance, so both
 // processes carry a "<label>-0" label that ends in "-0": routing by that
 // suffix alone would map both to firmwareOrder[0] and cross-wire their
-// consoles. With server-side tagging each console line instead carries the
-// node's bound emu-link hello id, so the two nodes' consoles stay distinct
-// regardless of label collisions.
+// consoles. That suffix rule is the fallback resolveDeviceId
+// (simulator/ui/src/hooks/useSimulation.ts) applies to a console line that
+// arrives without a hello id, so server-side tagging is what keeps the
+// frontend off it: each console line carries the node's bound emu-link hello
+// id, and the two nodes' consoles stay distinct regardless of label
+// collisions.
 func TestSupervisorConsoleTaggedByBoundIDMultiGroup(t *testing.T) {
 	self, err := os.Executable()
 	if err != nil {
