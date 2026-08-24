@@ -2,22 +2,21 @@ package main
 
 import "testing"
 
-// Issue #74 route-poisoning demonstration (simulation).
+// Route-poisoning demonstration (simulation).
 //
 // An unauthenticated RREQ carries an attacker-controlled prev_hop, hop_count
 // and metric. Firmware's handle_rreq, after answering an RREQ addressed to it,
 // installs a route back toward that source: dest = next_hop = prev_hop, with
-// the RREQ's hop_count/metric. The bug was that it classed this route as
-// ROUTE_SRC_DISCOVERED, the most-trusted class, whose route_install invariants
-// refuse to let anything displace or evict it. A keyless attacker could
-// therefore flood an RREQ (prev_hop = a node it wants to impersonate,
-// hop_count forged to 0, metric forged to the maximal 255) and install an
-// unbeatable, permanent poisoned route.
+// the RREQ's hop_count/metric. If that route were classed ROUTE_SRC_DISCOVERED,
+// the most-trusted class, its route_install invariants refuse to let anything
+// displace or evict it, so a keyless attacker could flood an RREQ (prev_hop =
+// a node it wants to impersonate, hop_count forged to 0, metric forged to the
+// maximal 255) and install an unbeatable, permanent poisoned route.
 //
 // These two tests drive the SAME real firmware routing code through the gosim
 // cgo bridge (bridge.c's _handle_rreq -> routing.c's route_install), toggling
 // only the trust class the source-route install uses, to show the attack
-// succeeding under the old ROUTE_SRC_DISCOVERED classing and being neutralized
+// succeeding under a ROUTE_SRC_DISCOVERED classing and being neutralized
 // under the shipped ROUTE_SRC_BREADCRUMB classing. This is a simulation; it is
 // not hardware verification.
 
@@ -71,10 +70,11 @@ func seedAndFlood(t *testing.T, trustClass int) (nextHop uint32, source int, fou
 	return h.routeEntry(victim, poisonTargetAddr)
 }
 
-// TestRREQForgedRoutePoisonsUnderDiscoveredClassing reproduces the issue #74
-// vulnerability: with the source route classed ROUTE_SRC_DISCOVERED, the forged
-// RREQ overwrites the victim's honest route to the target and the next hop is
-// hijacked to the attacker-impersonated address.
+// TestRREQForgedRoutePoisonsUnderDiscoveredClassing demonstrates the
+// vulnerability described above: with the source route classed
+// ROUTE_SRC_DISCOVERED, the forged RREQ overwrites the victim's honest route
+// to the target and the next hop is hijacked to the attacker-impersonated
+// address.
 func TestRREQForgedRoutePoisonsUnderDiscoveredClassing(t *testing.T) {
 	nextHop, source, found := seedAndFlood(t, routeSourceDiscovered)
 
@@ -90,10 +90,10 @@ func TestRREQForgedRoutePoisonsUnderDiscoveredClassing(t *testing.T) {
 	}
 }
 
-// TestRREQForgedRouteCannotPoisonUnderBreadcrumbClassing proves the fix: with
-// the source route classed ROUTE_SRC_BREADCRUMB, the same forged RREQ flood
-// cannot touch the victim's honest DISCOVERED route to the target, which
-// survives intact via its real next hop.
+// TestRREQForgedRouteCannotPoisonUnderBreadcrumbClassing pins the guarantee:
+// with the source route classed ROUTE_SRC_BREADCRUMB, the same forged RREQ
+// flood cannot touch the victim's honest DISCOVERED route to the target,
+// which survives intact via its real next hop.
 func TestRREQForgedRouteCannotPoisonUnderBreadcrumbClassing(t *testing.T) {
 	nextHop, source, found := seedAndFlood(t, routeSourceBreadcrumb)
 

@@ -4,12 +4,12 @@ import (
 	"testing"
 )
 
-// TestDutyCycleCapForcesBeaconThrottling proves Task 5's wiring: applying a
-// tight regulatory duty-cycle cap (1%, EU868-style) via the REAL
-// airtime_budget_set_duty_cap forces node_tick's beacon budget gate (Task 1)
-// to start denying beacons, something the default (unlimited) profile would
-// not do at the same cadence. No sim-side duty math is involved: the cap is
-// applied once, and the existing budget gate does the rest.
+// TestDutyCycleCapForcesBeaconThrottling pins that applying a tight
+// regulatory duty-cycle cap (1%, EU868-style) via the REAL
+// airtime_budget_set_duty_cap forces node_tick's beacon budget gate to start
+// denying beacons, something the default (unlimited) profile would not do at
+// the same cadence. No sim-side duty math is involved: the cap is applied
+// once, and the existing budget gate does the rest.
 func TestDutyCycleCapForcesBeaconThrottling(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()
@@ -77,14 +77,15 @@ func TestDutyCycleCapAbsentAllowsNormalBeaconing(t *testing.T) {
 	}
 }
 
-// TestDutyCycleCapScenarioSchemaAppliesThroughBridge exercises the actual
-// new plumbing end to end: a scenario JSON's "radio.duty_cycle_pct" field
-// parses into the shared radio_config_t (sim_scenario.c), and
-// bridge_apply_duty_cycle_cap (the exact function sim.go calls after every
-// node_activate) applies it to a node's real airtime budget, which then
-// throttles beacons via Task 1's existing gate. This is the path
-// TestDutyCycleCapForcesBeaconThrottling does NOT cover (that test calls
-// airtime_budget_set_duty_cap directly, skipping the schema and bridge glue).
+// TestDutyCycleCapScenarioSchemaAppliesThroughBridge exercises the
+// scenario-to-budget plumbing end to end: a scenario JSON's
+// "radio.duty_cycle_pct" field parses into the shared radio_config_t
+// (sim_scenario.c), and bridge_apply_duty_cycle_cap (the exact function
+// sim.go calls after every node_activate) applies it to a node's real
+// airtime budget, which then throttles beacons via the same budget gate
+// TestDutyCycleCapForcesBeaconThrottling exercises directly. This is the
+// path that test does NOT cover (that test calls airtime_budget_set_duty_cap
+// directly, skipping the schema and bridge glue).
 func TestDutyCycleCapScenarioSchemaAppliesThroughBridge(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()
@@ -108,10 +109,10 @@ func TestDutyCycleCapScenarioSchemaAppliesThroughBridge(t *testing.T) {
 		t.Fatalf("radio.duty_cycle_pct = %d, want 1", got)
 	}
 
-	// Since the Phase 4 rebind, scenario-loaded nodes get addresses derived
-	// from their Ed25519 identity keys (deterministic per node id, not a
-	// fixed constant); this scenario has exactly one node, so take it by
-	// index and activate it the way cmdLoad does.
+	// Scenario-loaded nodes get addresses derived from their Ed25519 identity
+	// keys (deterministic per node id, not a fixed constant); this scenario
+	// has exactly one node, so take it by index and activate it the way
+	// cmdLoad does.
 	n := h.nodeAtIndex(0)
 	nodeActivate(n)
 	h.applyBridgeDutyCycleCap(n) // exactly what cmdLoad does after nodeActivate

@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-// TestBeaconPolicyFixedIgnoresNeighborCount proves Task 3's default: the
+// TestBeaconPolicyFixedIgnoresNeighborCount pins the default: the
 // sim's beacon cadence, unless a scenario opts into "beacon.adaptive": true,
 // comes from the REAL firmware function beacon_interval_decide()
 // (main/beacon_policy_calc.c) running in fixed mode, which returns the

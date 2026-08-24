@@ -76,28 +76,26 @@ func nodeMove(node *C.sim_node_t, x, y float32) {
 	C.node_move(node, C.float(x), C.float(y))
 }
 
-// nodeMarkUnprovisioned clears bridge_node_ext_t.provisioned (mandatory-
-// provisioning Task 2), making the node inert: it originates nothing
-// authenticated and drops all inbound frames. join defaults nodes to
-// provisioned, so the override only ever moves in this direction; the rest of
-// the fleet is unaffected.
+// nodeMarkUnprovisioned clears bridge_node_ext_t.provisioned, making the node
+// inert: it originates nothing authenticated and drops all inbound frames.
+// join defaults nodes to provisioned, so the override only ever moves in this
+// direction; the rest of the fleet is unaffected.
 func nodeMarkUnprovisioned(idx int) {
 	C.bridge_node_set_provisioned(C.int(idx), C.bool(false))
 }
 
-// nodeMarkUnendorsed clears bridge_node_ext_t.endorsed (trust-anchor campaign
-// P2), making the node attest with no fleet-anchor cert, so every anchored
-// receiver refuses to pin it (identity_unendorsed) while still relaying its
-// MAC-valid frame. join defaults nodes to endorsed; the rest of the fleet is
-// unaffected.
+// nodeMarkUnendorsed clears bridge_node_ext_t.endorsed, making the node
+// attest with no fleet-anchor cert, so every anchored receiver refuses to pin
+// it (identity_unendorsed) while still relaying its MAC-valid frame. join
+// defaults nodes to endorsed; the rest of the fleet is unaffected.
 func nodeMarkUnendorsed(idx int) {
 	C.bridge_node_set_endorsed(C.int(idx), C.bool(false))
 }
 
-// nodeMarkUnanchored clears bridge_node_ext_t.ident_pins.has_anchor (trust-
-// anchor campaign P2 red-team), booting the node un-anchored (TOFU pinning)
-// until a provision_anchor event hardens it. join anchors nodes to the fleet
-// anchor; the rest of the fleet is unaffected.
+// nodeMarkUnanchored clears bridge_node_ext_t.ident_pins.has_anchor, booting
+// the node un-anchored (TOFU pinning) until a provision_anchor event hardens
+// it. join anchors nodes to the fleet anchor; the rest of the fleet is
+// unaffected.
 func nodeMarkUnanchored(idx int) {
 	C.bridge_node_set_anchored(C.int(idx), C.bool(false))
 }
@@ -151,9 +149,9 @@ func anomalyInit(t *C.node_anomaly_tracker_t) {
 }
 
 // anomalyCheckPartition runs the reachability sweep at virtual time nowUs.
-// Issue #144: this used to hardcode 0, so mesh_partition was the only
-// anomaly type whose emitted timestamp_us was not the detection time.
-// The whole radio config, not just its range, because adjacency comes from
+// Passing the real clock is what makes mesh_partition's emitted timestamp_us
+// the detection time, the same as every other anomaly type. The whole radio
+// config, not just its range, because adjacency comes from
 // radio_nodes_connected: the range disk normally, the imported link graph for
 // a digital-twin scenario.
 func anomalyCheckPartition(nodes *C.node_array_t, radio *C.radio_config_t, nowUs uint64) {
@@ -180,7 +178,7 @@ func pcg32Seed(rng *C.pcg32_state_t, seed uint64) {
 	C.pcg32_seed(rng, C.uint64_t(seed))
 }
 
-// --- Scenario-level test harness (Phase 1 Task 1) ---
+// --- Scenario-level test harness ---
 //
 // _test.go files in this package avoid "C" directly (see radio_harness.go),
 // so a full protocol-level scenario run (discovery + multi-hop forwarding +

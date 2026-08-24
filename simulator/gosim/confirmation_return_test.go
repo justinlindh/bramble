@@ -8,56 +8,49 @@ import (
 )
 
 // TestPhase1ConfirmationReachesOriginatorAcrossMultiHopLine is the
-// system-level proof for Phase 1 delivery-core plan Task 4
-// the internal design plan.
+// system-level proof that a delivery confirmation makes it back to the
+// originator across a multi-hop line topology.
 //
-// gosim used to install a route to every beacon sender (the old
-// _handle_beacon in bridge.c), which firmware's own handle_beacon
-// (main/mesh_task.c) never does. That accidentally supplied the reverse-hop
-// route real relays never get, which masked the confirmation-return bug:
-// relays only ever installed routes TOWARD an RREQ/RREP discovery target
-// (rrep_rx_decide), never back toward a message's originator. Task 1
-// removed that masking and captured the bug as a TDD baseline (this test
-// used to assert sourceConfirmed == false, with an explicit BUG marker).
+// Relays only ever install routes TOWARD an RREQ/RREP discovery target
+// (rrep_rx_decide), never back toward a message's originator, so nothing on
+// the forward path knows a route home from discovery alone. What supplies
+// that route home is wire v4's relay-mutated prev_hop: every node that
+// receives or forwards a DATA frame learns a route back to its src_addr via
+// prev_hop (data_rx_decide's install_reverse_route, honored by both
+// main/mesh_task.c's mesh_process_rx_packet and gosim's own _handle_data).
+// gosim's _handle_beacon must NOT install a route to every beacon sender:
+// firmware's own handle_beacon (main/mesh_task.c) never does, and installing
+// one here would hand relays a reverse-hop route they never get in the
+// field, hiding exactly the failure this test exists to catch.
 //
-// Task 4 fixes the root cause: DATA now carries a relay-mutated prev_hop
-// (wire v4), and every node that receives or forwards a DATA frame learns a
-// route back to its src_addr via prev_hop (data_rx_decide's
-// install_reverse_route, wired into both main/mesh_task.c's
-// mesh_process_rx_packet and gosim's own _handle_data). On this same line
-// topology forcing 3 hops (A-B-C-D), A's unicast DATA to D is still
-// delivered (D decodes it), and D's delivery receipt now has a breadcrumb
-// route at every relay to travel home on, so A observes the confirmation.
+// On this line topology forcing 3 hops (A-B-C-D), A's unicast DATA to D is
+// delivered (D decodes it), and D's delivery receipt has a breadcrumb route
+// at every relay to travel home on, so A observes the confirmation.
 //
-// This test also covers the Task 4 brief's ACK-loss fallback ("drop the
-// first ACK, assert retry eventually yields DELIVERED; if Task 6 [re-ACK on
-// duplicate DATA] not yet done, assert at least that the reverse route
-// exists and a re-sent ACK would route"). Task 6 has since landed on the
-// firmware side (main/mesh_task.c: a duplicate unicast DATA whose
-// (src_addr, packet_id) was already delivered locally now re-sends the ACK
-// instead of being silently dropped -- see components/dedup's
-// dedup_contains and test_dedup.c's
-// test_delivered_dedup_enables_reack_without_redelivery), but the sim
-// harness still has no scenario primitive to selectively drop a single
-// in-flight packet (only a global radio.loss_pct; gosim also does not
-// dedup unicast DATA at the destination at all -- see bridge.c's dedup
-// comment -- so it never had this gap to begin with, and there is nothing
-// for gosim to reproduce here), so a literal "drop the first ACK, observe a
-// second one arrive" run is still not constructible here. Per the brief's
-// explicit fallback, the assertions below instead prove the weaker,
-// still meaningful claim directly off this same run: every relay on the
-// forward path (B, C) installs a reverse route to A as a side effect of
-// A's DATA transiting it, BEFORE any delivery receipt is ever sent. That
-// route does not depend on a receipt having arrived, which is exactly why
-// it would still be there for a retried/re-sent confirmation even if the
-// first attempt were lost.
+// This test also covers the ACK-loss fallback: drop the first ACK and
+// assert retry eventually yields DELIVERED, or, where that drop cannot be
+// forced, assert at least that the reverse route exists and a re-sent ACK
+// would route. On the firmware side, main/mesh_task.c re-sends the ACK for
+// a duplicate unicast DATA whose (src_addr, packet_id) was already
+// delivered locally, instead of dropping it silently (see components/
+// dedup's dedup_contains and test_dedup.c's
+// test_delivered_dedup_enables_reack_without_redelivery). The sim harness
+// has no scenario primitive to selectively drop a single in-flight packet
+// (only a global radio.loss_pct), and gosim does not dedup unicast DATA at
+// the destination at all (see bridge.c's dedup comment), so a literal "drop
+// the first ACK, observe a second one arrive" run is not constructible
+// here. The assertions below instead prove the weaker, still meaningful
+// claim directly off this same run: every relay on the forward path (B, C)
+// installs a reverse route to A as a side effect of A's DATA transiting it,
+// BEFORE any delivery receipt is ever sent. That route does not depend on a
+// receipt having arrived, which is exactly why it would still be there for
+// a retried/re-sent confirmation even if the first attempt were lost.
 //
 // (These fallback assertions are folded into this same test, reusing one
 // runScenario call, rather than a second scenario-level test: the
 // pipe-based stdout capture runScenario uses is only built to be
-// exercised once per test process, and a second back-to-back invocation
-// in the same package process was observed to lose C-side fprintf lines,
-// a pre-existing harness fragility this task does not attempt to fix.)
+// exercised once per test process; a second back-to-back invocation in
+// the same package process loses C-side fprintf lines.)
 func TestPhase1ConfirmationReachesOriginatorAcrossMultiHopLine(t *testing.T) {
 	const scenarioJSON = `{
 		"name": "phase1-line-4hop",
@@ -123,9 +116,9 @@ func TestPhase1ConfirmationReachesOriginatorAcrossMultiHopLine(t *testing.T) {
 			"RREQ/RREP discovery; multi-hop DATA forwarding is broken", packetIDHex)
 	}
 
-	/* FIXED (Task 4): wire v4's relay-mutated prev_hop plus data_rx_decide's
-	 * reverse-route learning give every relay on the forward path a
-	 * breadcrumb route home, so D's delivery receipt now reaches A. */
+	/* wire v4's relay-mutated prev_hop plus data_rx_decide's reverse-route
+	 * learning give every relay on the forward path a breadcrumb route
+	 * home, so D's delivery receipt reaches A. */
 	if !sourceConfirmed {
 		t.Fatalf("source A never observed a delivery confirmation for %s even though D "+
 			"decoded it. Task 4 (wire v4 prev_hop reverse-route learning) should make every "+

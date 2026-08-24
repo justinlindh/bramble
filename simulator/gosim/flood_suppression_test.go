@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// TestFloodSuppressionCancelsRedundantRelay is Flooding F1's system-level
-// proof, driven through gosim's bridge.c (the REAL firmware flood path:
+// TestFloodSuppressionCancelsRedundantRelay is the system-level proof,
+// driven through gosim's bridge.c (the REAL firmware flood path:
 // _handle_data -> bridge_flood_relay -> bridge_handle_flood_relay, the same
 // components the flooding transport is validated against, NOT the Go-only
 // floodSim MODEL): a node that has overheard FLOOD_SUPPRESS_AFTER (2) OTHER
@@ -85,10 +85,11 @@ func TestFloodSuppressionCancelsRedundantRelay(t *testing.T) {
 	}
 
 	// The core proof: with 4 nodes all overhearing one another, at least one
-	// scheduled relay must be cancelled by overheard copies. Before this
-	// change the firmware-through-bridge flood had NO suppression at all, so
-	// this count was always 0 and the bridge diverged from the Go model
-	// (which already suppresses, flood.go's floodSuppressAfterHeard).
+	// scheduled relay must be cancelled by overheard copies. This exercises
+	// the firmware-through-bridge flood path (bridge_handle_flood_relay); a
+	// suppressed count of 0 here would mean the bridge diverges from the Go
+	// model, which independently suppresses via flood.go's
+	// floodSuppressAfterHeard.
 	if suppressed < 1 {
 		t.Fatalf("no flood relay was suppressed in a dense cluster; the firmware-through-bridge "+
 			"flood is not cancelling redundant rebroadcasts (want >=1 flood_relay_suppressed, "+

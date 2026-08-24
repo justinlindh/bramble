@@ -37,13 +37,13 @@ func NewHub(sim *Sim) *Hub {
 // Sized for a burst, not a steady state: a firmware scenario boots several
 // real node processes at once and each streams its whole boot console, which
 // is several hundred one-shot events arriving faster than a browser drains
-// them. The old 256 was inside that burst, so events were dropped from a
-// perfectly healthy client, and a dropped console line is invisible: it is
-// the only copy, so the UI's console pane silently loses a line and anything
-// reading those lines (the playground tour's step milestones) can miss a
-// marker that is printed exactly once. Dropping is still the policy for a
-// client that has genuinely stopped reading; this only moves the threshold
-// past the normal case.
+// them. A buffer sized inside that burst drops events from a perfectly
+// healthy client, and a dropped console line is invisible: it is the only
+// copy, so the UI's console pane silently loses a line and anything reading
+// those lines (the playground tour's step milestones) can miss a marker
+// that is printed exactly once. Dropping is still the policy for a client
+// that has genuinely stopped reading; this only moves the threshold past
+// the normal case.
 const clientSendBuffer = 4096
 
 // Broadcast sends msg to all connected clients, dropping if slow.

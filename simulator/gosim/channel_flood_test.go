@@ -5,20 +5,18 @@ import (
 	"testing"
 )
 
-// TestPhase1ChannelFloodReachesFarNode is the system-level proof for Phase 1
-// delivery-core plan Task 5 (the internal design plan 2026-07-04-phase1-delivery-
-// core-plan.md): a broadcast/channel DATA message must mesh past direct
-// radio neighbors, reaching a node >=3 hops from the sender.
+// TestPhase1ChannelFloodReachesFarNode is the system-level proof that a
+// broadcast/channel DATA message meshes past direct radio neighbors,
+// reaching a node >=3 hops from the sender.
 //
-// Before this task, broadcast DATA (dest_addr == 0xFFFFFFFF) was delivered
-// locally and never rebroadcast (main/mesh_task.c's handle_data), so a
-// group/channel message only ever reached direct neighbors -- a core "it's
-// a mesh" feature that regressed when the caller-less channel_flood module
-// was deleted (703d78a1) without ever having shipped. channel_flood_decide
-// (components/routing/channel_flood.c) plus its wiring into handle_data's
-// broadcast branch (firmware) and this file's bridge.c broadcast branch
-// (gosim, same decide function, same real airtime budget -- no parallel
-// logic) restore multi-hop flooding.
+// channel_flood_decide (components/routing/channel_flood.c) is wired into
+// both main/mesh_task.c's handle_data broadcast branch (firmware) and this
+// file's bridge.c broadcast branch (gosim, same decide function, same real
+// airtime budget, no parallel logic), so a broadcast/channel message gets
+// relayed onward instead of only being delivered locally at dest_addr ==
+// 0xFFFFFFFF. Without that wiring, a group/channel message would only ever
+// reach direct neighbors, breaking the core "it's a mesh" property this
+// test pins.
 //
 // Topology: a 5-node line (A-B-C-D-E), spacing 100 units, radio range 150,
 // so each node hears only its immediate neighbors (a 200-unit 2-hop gap
@@ -76,32 +74,31 @@ func TestPhase1ChannelFloodReachesFarNode(t *testing.T) {
 		t.Fatalf("A never sent a broadcast DATA message (no message_sent/broadcast event seen)")
 	}
 
-	// Self-echo guard (final whole-branch review finding 1): once B relays
-	// A's broadcast back out, A itself is in range of B and hears its own
-	// message echoed back. That is not a delivery anywhere new -- A already
-	// locally delivered this message the instant it originated it -- so
-	// bridge.c's _handle_data broadcast branch must not emit a
-	// message_delivered for A on that echo (mirrors main/mesh_task.c's
-	// handle_data src_addr == s_identity->address self-guard). Before that
-	// guard, A's own echo would be indistinguishable from a genuine
-	// far-node delivery in this exact event stream.
+	// Self-echo guard: once B relays A's broadcast back out, A itself is in
+	// range of B and hears its own message echoed back. That is not a
+	// delivery anywhere new -- A already locally delivered this message the
+	// instant it originated it -- so bridge.c's _handle_data broadcast
+	// branch must not emit a message_delivered for A on that echo (mirrors
+	// main/mesh_task.c's handle_data src_addr == s_identity->address
+	// self-guard). Without that guard, A's own echo would be indistinguishable
+	// from a genuine far-node delivery in this exact event stream.
 	if delivered["A"] {
 		t.Fatalf("originator A received a spurious message_delivered for its own broadcast %s "+
 			"(self-echo from the channel flood was not suppressed)", packetIDHex)
 	}
 
-	// Direct neighbor: proves the base case still works (this passed even
-	// before Task 5, since B is one hop from A).
+	// Direct neighbor: proves the base case works, since B is one hop from
+	// A and needs no relay to receive the broadcast.
 	if !delivered["B"] {
 		t.Fatalf("direct neighbor B never received broadcast %s; even single-hop broadcast is "+
 			"broken", packetIDHex)
 	}
 
-	// This is the actual Task 5 proof: D (3 hops) and E (4 hops) are both
-	// out of direct radio range of A (200+ units against a 150-unit range)
-	// and can only receive this message if B, then C, then D each relay it
-	// onward. Before Task 5, broadcast DATA was consumed locally and never
-	// rebroadcast, so neither would ever see it.
+	// D (3 hops) and E (4 hops) are both out of direct radio range of A
+	// (200+ units against a 150-unit range) and can only receive this
+	// message if B, then C, then D each relay it onward. Without
+	// channel_flood_decide rebroadcasting broadcast DATA, it would be
+	// consumed locally only, so neither would ever see it.
 	if !delivered["D"] {
 		t.Fatalf("broadcast %s never reached D (3 hops from A) -- multi-hop channel flood is "+
 			"not relaying past direct neighbors", packetIDHex)

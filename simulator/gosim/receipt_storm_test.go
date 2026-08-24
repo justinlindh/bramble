@@ -17,29 +17,27 @@ import (
 const receiptStormNodes = 10
 
 // receiptStormSeeds is the number of seeds each arm runs. Ten is enough to
-// separate the arms here (the per-seed table in the header comment shows the
-// spread) without turning one test into a minute of wall clock. Both arms
-// over all ten seeds run in just over a second (`go test -run
-// TestReceiptStormLBTDeferBeatsBlindFire -v`, 2026-07-28), so this stays at
-// ten rather than dropping to a smaller count for CI speed: the means are
-// stable at this count (see the calibration table below) and a smaller
-// sample would buy no runtime that matters while making the >= 0.95 gate
-// more sensitive to which seeds happen to be included.
+// separate the arms: TestReceiptStormLBTDeferBeatsBlindFire logs a per-seed
+// and mean rate/ToA line for both arms, and that spread stays stable at this
+// count, so a smaller sample would buy no meaningful runtime reduction while
+// making the >= 0.95 gate more sensitive to which seeds happen to be
+// included. Both arms over all ten seeds run quickly enough that this is
+// not a wall-clock concern for CI.
 const receiptStormSeeds = 10
 
 // receiptToaTolerancePct bounds how much the defer arm's receipt-tier ToA may
 // exceed the blind-fire arm's before the airtime-cost regression check below
 // fails. Calibration measured the two arms' receipt-tier ToA as bit-identical
-// (7658ms) on every one of the ten seeds: the fix changes WHEN a receipt
-// transmits (deferred off a busy channel, replayed later), never HOW MANY
-// transmit or at what frame size, so the packet count and per-packet size
-// behind this figure do not depend on RNG state or which seed runs. A tight
-// zero-tolerance check would therefore be defensible today, but this test
-// runs in CI forever and a future change to receipt framing, SF, or the
+// (7658ms) on every one of the ten seeds: the defer arm only changes WHEN a
+// receipt transmits (deferred off a busy channel, replayed later), never HOW
+// MANY transmit or at what frame size, so the packet count and per-packet
+// size behind this figure do not depend on RNG state or which seed runs. A
+// tight zero-tolerance check would therefore be defensible today, but this
+// test runs in CI forever and a future change to receipt framing, SF, or the
 // storm topology could introduce a few milliseconds of legitimate rounding
 // noise between arms without that being a regression. 2% is loose enough to
-// absorb that and tight enough that it would still catch the fix regressing
-// to spending materially more air than it did at calibration.
+// absorb that and tight enough that it would still catch the defer arm
+// regressing to spending materially more air than it did at calibration.
 const receiptToaTolerancePct = 0.02
 
 // receiptStormScenarioJSON builds one storm run: receiptStormNodes nodes
@@ -96,9 +94,10 @@ func receiptStormScenarioJSON(seed int, txKind string) string {
 // figures come from the sim's per-type time-on-air accounting, charged once
 // per real transmission inside sim_radio_broadcast_lbt: receiptToaMs is the
 // RECEIPT lane's share, totalToaMs the whole mesh's. They belong beside the
-// return rate because the fix has to buy its reliability without spending
-// more air: a deferred attempt is never transmitted and so never charged, and
-// every collision it avoids is airtime that would have been wasted.
+// return rate because the defer arm has to buy its reliability without
+// spending more air: a deferred attempt is never transmitted and so never
+// charged, and every collision it avoids is airtime that would have been
+// wasted.
 type receiptStormResult struct {
 	rate         float64
 	receiptToaMs float64
@@ -164,43 +163,37 @@ func receiptStormMeans(rs []receiptStormResult) receiptStormResult {
 	}
 }
 
-// TestReceiptStormLBTDeferBeatsBlindFire is the receipt reliability campaign's
-// Task 2 calibration: a ten-node all-in-range cluster where one broadcast
-// makes nine nodes answer the same origin at once, run twice over the same ten
-// seeds with one parameter changed.
+// TestReceiptStormLBTDeferBeatsBlindFire runs a ten-node all-in-range
+// cluster where one broadcast makes nine nodes answer the same origin at
+// once, twice over the same ten seeds with one parameter changed.
 //
-// The two arms are both real firmware kinds, so the arm switch is a parameter
-// and not a second implementation. An originated broadcast delivery receipt
-// goes out as TX_KIND_RECEIPT, which components/radio/tx_gate.c's lbt_defers()
-// answers true for: three busy CAD checks and the send is handed back to the
-// app layer (TX_GATE_ERR_CHANNEL_BUSY) to retry later. TX_KIND_RECEIPT_FORWARD
-// is not in that set, so it keeps the behavior every kind had before the fix:
-// after three busy CAD checks, transmit anyway. Same code, same seeds, one
-// parameter, and that parameter is exactly the defect.
+// The two arms are both real firmware kinds, so the arm switch is a
+// parameter and not a second implementation. An originated broadcast
+// delivery receipt goes out as TX_KIND_RECEIPT, which
+// components/radio/tx_gate.c's lbt_defers() answers true for: three busy
+// CAD checks and the send is handed back to the app layer
+// (TX_GATE_ERR_CHANNEL_BUSY) to retry later. TX_KIND_RECEIPT_FORWARD is not
+// in that set: after three busy CAD checks it transmits anyway, blind into
+// the channel. Same code, same seeds, one parameter, and that parameter
+// alone decides whether a hearer's receipt defers around a busy channel or
+// fires blindly into it.
 //
 // Both arms carry the full app-layer receipt policy from
-// main/broadcast_delivery_receipt.c and main/mesh_reliability.c (deterministic
-// slot delay, jitter, three attempts, scaled inter-attempt backoff), because
-// that policy exists in the pre-fix world too. Only the busy-channel decision
-// differs.
+// main/broadcast_delivery_receipt.c and main/mesh_reliability.c
+// (deterministic slot delay, jitter, three attempts, scaled inter-attempt
+// backoff); only the busy-channel decision differs. With the current
+// 1000ms slot pitch and retries that re-draw a full attempt-salted slot
+// each time (see mesh_reliability.c's retry-spacing comment), the dominant
+// loss mechanism in a receipt storm is contention-window occupancy rather
+// than blind-fire collisions alone, so both arms saturate near 1.0 in this
+// scenario: the assertions below check that the defer arm still clears the
+// reliability floor and never trails blind-fire, not that it wins by a wide
+// margin.
 //
-// Calibration history lives in the git log of this file: the original
-// tight-pitch calibration measured blind-fire mean 0.8444 vs defer 0.9889
-// with identical ToA; those numbers are RETIRED, see HISTORY below.
-//
-// HISTORY: the original calibration (tight 500ms slot pitch, short fixed
-// retry backoffs) reproduced the bench defect at blind-fire mean 0.8444 vs
-// defer 0.9889. Bench telemetry then showed the dominant loss was storm
-// WINDOW OCCUPANCY, not blind-fire: with the slot pitch widened to 1000ms
-// and retries re-drawing full attempt-salted slots, BOTH arms saturate near
-// 1.0 in this scenario, exactly as the occupancy analysis predicts. The
-// blind-fire-reproduces-the-defect assertion is therefore retired; the
-// scenario now gates the shipping configuration.
-//
-// This test asserts the metric plumbing on every run plus the campaign's
-// exit gate: the shipping (defer) arm clears mean rate >= 0.95, is never
-// worse than the blind-fire reference beyond seed noise, and does not buy
-// its reliability with extra receipt-tier airtime (within
+// This test asserts the metric plumbing on every run plus the receipt
+// pipeline's reliability floor: the shipping (defer) arm clears mean rate
+// >= 0.95, is never worse than the blind-fire reference beyond seed noise,
+// and does not buy its reliability with extra receipt-tier airtime (within
 // receiptToaTolerancePct of the blind-fire arm's ToA).
 func TestReceiptStormLBTDeferBeatsBlindFire(t *testing.T) {
 	blindFire := runReceiptStorm(t, "receipt_forward")

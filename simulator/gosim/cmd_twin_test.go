@@ -89,13 +89,12 @@ func TestTwinJSONToAFileKeepsTheReportOnStdout(t *testing.T) {
 	}
 }
 
-// TestTwinJSONReportsOneWayLinkCount pins the one bound the assumptions block
-// used to drop on the floor: a measured one-way link shows up in the text
-// report but was hardcoded to zero in the JSON, so a consumer reading only the
-// machine-readable output was told the reconstruction was symmetric when it was
-// not. The graph here is the same shape as the merge test: 0A1B2C3D hears
-// 3D4E5F60, and 3D4E5F60 exports an empty neighbour table, so the asymmetry is
-// measured (one-way), not assumed reciprocal.
+// TestTwinJSONReportsOneWayLinkCount pins that the JSON assumptions block's
+// one_way_links count matches what the text report shows: a measured one-way
+// link must not be silently reported as symmetric to a consumer reading only
+// the machine-readable output. The graph here is the same shape as the merge
+// test: 0A1B2C3D hears 3D4E5F60, and 3D4E5F60 exports an empty neighbour
+// table, so the asymmetry is measured (one-way), not assumed reciprocal.
 func TestTwinJSONReportsOneWayLinkCount(t *testing.T) {
 	dir := t.TempDir()
 	heard := filepath.Join(dir, "0A1B2C3D.json")

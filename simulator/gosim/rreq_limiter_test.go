@@ -2,14 +2,14 @@ package main
 
 import "testing"
 
-// TestRREQForwardRateLimiterBucketExhausts proves Task 2's wiring: the
-// middle node of a 3-node line (A -> B -> C) now runs every forwarded RREQ
-// through the real rreq_fwd_allow global token bucket (components/security),
-// the same component and same decision point (after dedup, before the
-// jittered rebroadcast) firmware's handle_rreq uses. The bucket is BURST=16
-// tokens refilling one token per 2s (RREQ_FWD_BURST / RREQ_FWD_REFILL_MS),
-// so flooding more than 16 distinct RREQs at B within a couple hundred ms
-// must stop forwarding at 16 and record the rest as denied.
+// TestRREQForwardRateLimiterBucketExhausts pins the middle node of a 3-node
+// line (A -> B -> C): every forwarded RREQ runs through the real
+// rreq_fwd_allow global token bucket (components/security), the same
+// component and same decision point (after dedup, before the jittered
+// rebroadcast) firmware's handle_rreq uses. The bucket is BURST=16 tokens
+// refilling one token per 2s (RREQ_FWD_BURST / RREQ_FWD_REFILL_MS), so
+// flooding more than 16 distinct RREQs at B within a couple hundred ms must
+// stop forwarding at 16 and record the rest as denied.
 func TestRREQForwardRateLimiterBucketExhausts(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()
@@ -96,12 +96,12 @@ func TestRREQForwardRateLimiterAllowsUnderBurst(t *testing.T) {
 	}
 }
 
-// TestRREQOriginationRateLimiterDeniesWithinWindow proves the second half of
-// Task 2's wiring: bridge_handle_generate_message's fresh-discovery
-// origination (the "!pd" branch, the sim's equivalent of firmware's
-// initiate_discovery, main/mesh_task.c:4320) now consults the real
-// rreq_rate_allow per-(self,dest) limiter (30s window) before starting a
-// discovery, instead of originating unconditionally.
+// TestRREQOriginationRateLimiterDeniesWithinWindow pins
+// bridge_handle_generate_message's fresh-discovery origination (the "!pd"
+// branch, the sim's equivalent of firmware's initiate_discovery,
+// main/mesh_task.c:4320): it consults the real rreq_rate_allow
+// per-(self,dest) limiter (30s window) before starting a discovery, instead
+// of originating unconditionally.
 //
 // Discovery retries (the "else if discovery_should_retry" branch, and
 // node_tick's separate discovery retry loop) are deliberately NOT gated

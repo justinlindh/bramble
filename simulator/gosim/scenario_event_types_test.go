@@ -1,20 +1,19 @@
 package main
 
-// Scenario event-type gate (issue #166, same family as #144).
+// Scenario event-type gate.
 //
-// simulator/engine/sim_scenario.c used to skip any event whose "type" it did
-// not recognize, printing a warning nobody read. Three checked-in scenarios
-// spelled their movement event "node_move" while the engine parsed only
-// "move_node", so their movement phases never ran and every run still looked
-// healthy. That is the same failure mode as #144: a scenario that quietly
+// simulator/engine/sim_scenario.c (load_events) refuses to load a scenario
+// containing an event type it cannot execute, rather than skipping the
+// event and continuing. A scenario whose movement event is spelled
+// "node_move" where the engine parses "move_node" would otherwise run no
+// movement at all and still report a healthy run: a scenario that quietly
 // tests less than its name claims.
 //
-// The engine now refuses to load a scenario containing an event type it cannot
-// execute. These tests keep that guarantee honest from the Go side: the first
-// proves every checked-in scenario still parses (so the hard failure cannot be
-// introduced by a stale spelling without CI noticing), and the second proves
-// the movement phase of reliability-path-trace actually reaches the simulation
-// rather than being parsed and dropped.
+// These tests keep that guarantee honest from the Go side: the first proves
+// every checked-in scenario still parses (so a stale spelling cannot creep
+// in without CI noticing), and the second proves the movement phase of
+// reliability-path-trace actually reaches the simulation rather than being
+// parsed and dropped.
 
 import (
 	"encoding/json"
@@ -68,20 +67,18 @@ var engineEventTypes = map[string]bool{
 	"send_location":    true,
 }
 
-// engineKnownUnimplementedEventTypes is EMPTY and must stay that way: with
-// send_location implemented (issue #172), every recognized spelling is
-// executable and the engine hard-fails on anything else. The map survives
-// only so this test names the policy; do not add entries to silence a typo
-// or park an unbuilt feature, an unloadable scenario is strictly better
-// than an inert one.
+// engineKnownUnimplementedEventTypes is EMPTY and must stay that way: every
+// spelling in engineEventTypes is executable, so the engine hard-fails on
+// anything else. The map survives only so this test names the policy; do
+// not add entries to silence a typo or park an unbuilt feature, an
+// unloadable scenario is strictly better than an inert one.
 var engineKnownUnimplementedEventTypes = map[string]bool{}
 
 // TestScenarioEventTypesAreExecutable asserts that no checked-in scenario
-// declares an event type the engine would reject. Before #166 a typo here cost
-// nothing at load time and silently removed a whole phase of the scenario;
-// now it fails the load, so this test is the early warning that names the file
-// and the offending spelling instead of leaving a maintainer to debug an
-// engine error message.
+// declares an event type the engine would reject. A misspelled event type
+// fails scenario_load_file outright; this test catches it earlier, naming
+// the file and the offending spelling instead of leaving a maintainer to
+// debug an engine error message.
 func TestScenarioEventTypesAreExecutable(t *testing.T) {
 	paths, err := filepath.Glob("../scenarios/*.json")
 	if err != nil {
@@ -109,11 +106,11 @@ func TestScenarioEventTypesAreExecutable(t *testing.T) {
 	}
 }
 
-// TestUnknownEventTypeFailsScenarioLoad is the direct test of the #166 fix:
-// a scenario carrying an event type the engine cannot execute must fail to
-// load rather than load and quietly drop the event. The scenario used here is
-// a valid two-node line whose only defect is the event spelling, so a
-// successful load would mean the engine had gone back to skipping in silence.
+// TestUnknownEventTypeFailsScenarioLoad asserts that a scenario carrying an
+// event type the engine cannot execute fails to load rather than loading
+// and quietly dropping the event. The scenario used here is a valid
+// two-node line whose only defect is the event spelling, so a successful
+// load would mean the engine is skipping unrecognized events in silence.
 func TestUnknownEventTypeFailsScenarioLoad(t *testing.T) {
 	const bad = `{
   "name": "Unknown Event Type",
@@ -133,15 +130,16 @@ func TestUnknownEventTypeFailsScenarioLoad(t *testing.T) {
 	}
 }
 
-// TestScenarioPathTraceMovementRuns pins the behaviour issue #166 restored:
-// reliability-path-trace's two node_move events must reach the simulation.
+// TestScenarioPathTraceMovementRuns asserts that reliability-path-trace's
+// two move_node events reach the simulation and produce node_moved output.
 //
-// The assertions are derived from the scenario file and the radio config, not
-// from a recorded run: the file moves C to (200, 300) at 45s and back to
-// (200, 0) at 70s, and the engine must emit a node_moved for each. With
-// range 120 on a 100-unit line, C at y=300 is 316 units from both B and D, so
-// the move partitions A-B from D-E. That partition is the whole point of the
-// movement phase, and before this fix none of it happened.
+// The assertions are derived from the scenario file and the radio config,
+// not from a recorded run: the file moves C to (200, 300) at 45s and back
+// to (200, 0) at 70s, and the engine must emit a node_moved for each. With
+// range 120 on a 100-unit line, C at y=300 is 316 units from both B and D,
+// so the move partitions A-B from D-E. That partition is the whole point of
+// the movement phase: a scenario that parses these events but drops them
+// would still look healthy while testing none of it.
 func TestScenarioPathTraceMovementRuns(t *testing.T) {
 	result, err := runScenario("../scenarios/reliability-path-trace.json")
 	if err != nil {

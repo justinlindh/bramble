@@ -2,8 +2,8 @@ package main
 
 import "testing"
 
-// TestPerTypeAirtimeMatchesToAAndControlPctIsHonest proves Task 4's core
-// claim: per-packet-type airtime accumulators charge the SAME ToA the radio
+// TestPerTypeAirtimeMatchesToAAndControlPctIsHonest pins the core claim:
+// per-packet-type airtime accumulators charge the SAME ToA the radio
 // medium model computes (bramble_calculate_airtime_us via
 // radio_frame_airtime_us), and control_airtime_pct is genuinely
 // ToA-weighted, not a packet-count ratio wearing an airtime label.
@@ -12,7 +12,8 @@ import "testing"
 // frames (200B each). By packet COUNT, control (beacon+RREQ) is 2 of 5
 // packets = 40%. But the 200B DATA frames carry far more real time-on-air
 // than the tiny 54B/30B control frames, so the ToA-weighted share must be
-// well under 40%: proof the fix is not just a relabeled packet-count ratio.
+// well under 40%: this is what distinguishes a genuine ToA-weighted metric
+// from a relabeled packet-count ratio.
 func TestPerTypeAirtimeMatchesToAAndControlPctIsHonest(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()

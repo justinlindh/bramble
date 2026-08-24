@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// originationEvidence captures, for the ORIGINAL sender "A" on the A-B-C-D line
-// scenario, what Task 3 needs to prove send-side flood origination:
+// originationEvidence captures, for the ORIGINAL sender "A" on the A-B-C-D
+// line scenario, the evidence needed to prove send-side flood origination:
 //   - dataSendDests: the dest of every DATA packet_sent A ORIGINATED (the first
 //     send and any retry re-flood). A flood origination broadcasts (dest
 //     0xFFFFFFFF, no route consulted); a reactive origination sends to a
@@ -47,7 +47,8 @@ func runFloodOriginationScenario(t *testing.T, namePrefix string, floodTransport
 			}
 		case "packet_sent":
 			// A's own DATA sends only (node "A"); relay DATA sends come from B/C
-			// and are covered by Task 1's relay test.
+			// and are covered separately, by the relay-transport test in
+			// flood_transport_test.go.
 			if node != "A" {
 				continue
 			}
@@ -60,14 +61,15 @@ func runFloodOriginationScenario(t *testing.T, namePrefix string, floodTransport
 	return ev
 }
 
-// TestFloodOriginationFloodsWithoutDiscovery is Flooding F1 Task 3's
-// system-level proof, driven through gosim's bridge.c (the REAL firmware
-// origination path with g_flood_transport_enabled). With flood_transport:true
-// and EMPTY route tables (no scenario field pre-seeds a route), A originates
-// its unicast DATA to D by FLOODING it immediately (broadcast, dest
-// 0xFFFFFFFF) with no route lookup, the DATA reaches D 3 hops out, D floods a
-// confirmation receipt back, and A ends confirmed. This is the whole
-// origination-to-confirmation round trip with empty routes.
+// TestFloodOriginationFloodsWithoutDiscovery is the system-level proof for
+// send-side flood origination, driven through gosim's bridge.c (the REAL
+// firmware origination path with g_flood_transport_enabled). With
+// flood_transport:true and EMPTY route tables (no scenario field pre-seeds
+// a route), A originates its unicast DATA to D by FLOODING it immediately
+// (broadcast, dest 0xFFFFFFFF) with no route lookup, the DATA reaches D 3
+// hops out, D floods a confirmation receipt back, and A ends confirmed.
+// This is the whole origination-to-confirmation round trip with empty
+// routes.
 //
 // Compare TestFloodOriginationOffRoutesFirst below: identical topology/traffic
 // with the toggle off makes A originate the DATA to a route-resolved next hop

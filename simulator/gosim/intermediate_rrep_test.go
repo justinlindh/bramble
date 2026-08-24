@@ -73,12 +73,12 @@ func intermediateRREPStarScenario(intermediateRREP bool) string {
 	return string(b)
 }
 
-// TestIntermediateRREPShortCircuitsSecondDiscovery is Phase 2 "save
-// reactive routing" Part B's system-level proof, enabled (the default):
-// once I has a route to D, F's later RREQ for D is answered directly by I
-// instead of flooding all the way to D. Both messages still get delivered
-// AND confirmed (correctness preserved); the RREQ count drops relative to
-// the disabled case (see TestIntermediateRREPDisabledFloodsFully), the
+// TestIntermediateRREPShortCircuitsSecondDiscovery is the system-level proof
+// of intermediate-node RREP short-circuiting, enabled (the default): once I
+// has a route to D, F's later RREQ for D is answered directly by I instead
+// of flooding all the way to D. Both messages still get delivered AND
+// confirmed (correctness preserved); the RREQ count drops relative to the
+// disabled case (see TestIntermediateRREPDisabledFloodsFully), the
 // mechanism's actual airtime-saving proof.
 func TestIntermediateRREPShortCircuitsSecondDiscovery(t *testing.T) {
 	finalMetrics := runAndGetFinalMetrics(t, "intermediate-rrep-star-on",

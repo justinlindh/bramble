@@ -2,10 +2,9 @@ package main
 
 // NMEA synthesis for virtual GPS: while a firmware node's GPS power gate is
 // on (see handleGpsGate), the broker feeds it RMC+GGA+GSV sentences derived
-// from the node's scenario slot position, on the simulation clock. This is the
-// "later task" the gpsgate hook in extnode.go reserved: it is what exercises
-// the firmware's gps_virt path (nmea parse, fix state, fix callback) in the
-// emulator, where previously no scenario ever drove GPS.
+// from the node's scenario slot position, on the simulation clock. This is
+// what exercises the firmware's gps_virt path (nmea parse, fix state, fix
+// callback) in the emulator.
 //
 // The coordinate origin is the canonical NMEA documentation position
 // (48 deg 07.038' N, 011 deg 31.000' E, the fixture every NMEA reference and

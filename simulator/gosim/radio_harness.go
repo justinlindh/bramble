@@ -25,7 +25,7 @@ type radioHarness struct {
 	metrics  *C.metrics_state_t
 	anomaly  *C.node_anomaly_tracker_t // MAX_NODES-sized, indexed like nodes.nodes
 	msgTrack *C.msg_tracker_t          // MAX_MSG_TRACK-sized
-	beacon   *C.sim_beacon_policy_t    // firmware-default beacon policy (Task 3); mutate via setters below
+	beacon   *C.sim_beacon_policy_t    // firmware-default beacon policy; mutate via setters below
 }
 
 // rxResult is one reception attempt evaluated under the collision model.
@@ -84,12 +84,12 @@ func (h *radioHarness) addNode(addr uint32, x, y float32) {
 	if idx < 0 {
 		panic("radioHarness: node array full")
 	}
-	// Unit-test scaffold only: pin the caller's address back. Since the
-	// Phase 4 rebind, node_array_add derives the address from the node's
-	// Ed25519 identity key; every FULL-SIM path (scenario load, node
-	// join, add_node) keeps that derived address, but these radio/budget
-	// harness tests key nodes by their own constants and never exercise
-	// attestation delivery, where the addr<->key binding matters.
+	// Unit-test scaffold only: pin the caller's address back. node_array_add
+	// derives a node's address from its Ed25519 identity key; every FULL-SIM
+	// path (scenario load, node join, add_node) keeps that derived address,
+	// but these radio/budget harness tests key nodes by their own constants
+	// and never exercise attestation delivery, where the addr<->key binding
+	// matters.
 	C.node_array_get(h.nodes, C.int(idx)).addr = C.uint32_t(addr)
 }
 
@@ -110,8 +110,8 @@ func (h *radioHarness) nodeCount() int { return int(h.nodes.count) }
 // nodeAddrAndDerived returns node i's assigned address alongside the
 // address its Ed25519 identity pub derives to, computed INDEPENDENTLY in
 // Go (SHA256[0:4], big-endian) so the test cross-checks the C derivation
-// rather than calling it. The Phase 4 invariant: the two must be equal
-// for every full-sim node.
+// rather than calling it. The invariant: the two must be equal for every
+// full-sim node.
 func (h *radioHarness) nodeAddrAndDerived(i int) (uint32, uint32) {
 	n := h.nodeAtIndex(i)
 	var pub [32]byte
@@ -135,9 +135,10 @@ func (h *radioHarness) activateNode(addr uint32) *C.sim_node_t {
 }
 
 // tick drives node_tick for one node at nowUs through the real budget gate
-// (Task 1: beacon TX in node_tick), broadcasting any packets it produces
-// exactly as sim.go's handleTickNode does. Returns the number of packets
-// the node actually put on the air this tick (0 if the gate denied them).
+// that beacon TX inside node_tick must pass, broadcasting any packets it
+// produces exactly as sim.go's handleTickNode does. Returns the number of
+// packets the node actually put on the air this tick (0 if the gate denied
+// them).
 func (h *radioHarness) tick(node *C.sim_node_t, nowUs uint64) int {
 	var result C.node_tick_result_t
 	C.node_tick(node, C.uint64_t(nowUs), h.radio, h.beacon, &result)
@@ -163,23 +164,23 @@ func (h *radioHarness) budgetDeniedBroadcast(node *C.sim_node_t) uint32 {
 }
 
 // applyDutyCap calls the REAL airtime_budget_set_duty_cap on a node's
-// airtime budget (Task 5), exactly what bridge_apply_duty_cycle_cap does
-// for a live scenario with a "radio.duty_cycle_pct" set. No sim-side duty
-// math: this is a direct passthrough to the real component.
+// airtime budget, exactly what bridge_apply_duty_cycle_cap does for a live
+// scenario with a "radio.duty_cycle_pct" set. No sim-side duty math: this is
+// a direct passthrough to the real component.
 func (h *radioHarness) applyDutyCap(node *C.sim_node_t, maxDutyCyclePct uint8) {
 	C.airtime_budget_set_duty_cap(&node.airtime, C.uint8_t(maxDutyCyclePct), C.bool(true))
 }
 
 // dutyCycleSet/dutyCycleCapPct read the harness's shared radio_config_t
-// duty-cycle fields (Task 5 scenario schema), populated by loadScenario
-// parsing a "radio.duty_cycle_pct" scenario JSON field.
+// duty-cycle fields, populated by loadScenario parsing a
+// "radio.duty_cycle_pct" scenario JSON field.
 func (h *radioHarness) dutyCycleSet() bool     { return bool(h.radio.duty_cycle_set) }
 func (h *radioHarness) dutyCycleCapPct() uint8 { return uint8(h.radio.duty_cycle_pct) }
 
-// applyBridgeDutyCycleCap calls the real bridge_apply_duty_cycle_cap
-// (Task 5), exactly the function sim.go's cmdLoad/handleNodeJoin/cmdAddNode
-// call after every node_activate. No-ops if the harness's shared radio
-// config has no duty cap set, matching sim.go's own guard.
+// applyBridgeDutyCycleCap calls the real bridge_apply_duty_cycle_cap,
+// exactly the function sim.go's cmdLoad/handleNodeJoin/cmdAddNode call
+// after every node_activate. No-ops if the harness's shared radio config
+// has no duty cap set, matching sim.go's own guard.
 func (h *radioHarness) applyBridgeDutyCycleCap(node *C.sim_node_t) {
 	if h.dutyCycleSet() {
 		C.bridge_apply_duty_cycle_cap(node, h.radio.duty_cycle_pct)
@@ -386,8 +387,8 @@ func (h *radioHarness) deliverRREQ(to *C.sim_node_t, fromAddr, rreqDestAddr, que
 		h.anomaly, h.msgTrack, C.MAX_MSG_TRACK)
 }
 
-// packetsForwarded reads a node's forwarded-packet counter (only incremented
-// on an actual successful transmission, per Task 1).
+// packetsForwarded reads a node's forwarded-packet counter, incremented only
+// on an actual successful transmission.
 func (h *radioHarness) packetsForwarded(node *C.sim_node_t) uint64 {
 	return uint64(node.packets_forwarded)
 }
@@ -429,11 +430,14 @@ func (h *radioHarness) provisionAll() {
 	C.bridge_node_ext_init_all()
 }
 
-// setRREQSrcRouteTrust drives bridge.c's issue #74 attack-repro toggle: it
-// makes _handle_rreq install the route it learns back toward an RREQ source
-// with the given trust class (routeSourceDiscovered = pre-fix vulnerable,
-// routeSourceBreadcrumb = the fix). Callers must reset it to off via
-// clearRREQSrcRouteTrust so no test leaks the setting to another.
+// setRREQSrcRouteTrust drives bridge.c's RREQ source-route install knob: it
+// makes _handle_rreq install the route it learns back toward an RREQ
+// source, using the given trust class (routeSourceDiscovered installs it as
+// a fully trusted discovered route, letting an unauthenticated RREQ source
+// poison the reverse route; routeSourceBreadcrumb matches the
+// breadcrumb-trust class firmware actually installs). Callers must reset it
+// to off via clearRREQSrcRouteTrust so no test leaks the setting to
+// another.
 func (h *radioHarness) setRREQSrcRouteTrust(source int) {
 	C.bridge_set_rreq_src_route_trust(C.int(source))
 }
@@ -494,8 +498,7 @@ var (
 )
 
 // airtimeUsByType reads the harness's shared metrics_state_t per-type ToA
-// accumulator (Task 4), in microseconds, indexed by the metric* constants
-// above.
+// accumulator, in microseconds, indexed by the metric* constants above.
 func (h *radioHarness) airtimeUsByType(idx int) uint64 {
 	return uint64(h.metrics.airtime_us_by_type[idx])
 }
@@ -505,8 +508,11 @@ func (h *radioHarness) controlAirtimePct() float64 {
 	return float64(C.metrics_control_airtime_pct(h.metrics))
 }
 
-// controlPacketPct reads the packet-COUNT-weighted control-plane share (the
-// old, now-honestly-named, formula).
+// controlPacketPct reads the packet-count-weighted control-plane share:
+// (beacons_sent + rreqs_sent + rreps_sent) / total_packets * 100. This
+// differs from controlAirtimePct's ToA-weighted share in two ways: it counts
+// frames instead of summing time-on-air, and it excludes RERR from the
+// control tally, so the two percentages are not directly comparable.
 func (h *radioHarness) controlPacketPct() float64 {
 	return float64(C.metrics_control_packet_pct(h.metrics))
 }

@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-// TestUnprovisionedNodeIsInert is the system-level proof for the mandatory-
-// provisioning campaign (Task 2): a node that boots WITHOUT the network key is
-// INERT. It originates no network-key-authenticated frame (broadcast DATA,
-// identity attestation) and it accepts none (its RX is dropped at the door),
-// while every provisioned node in range meshes exactly as before.
+// TestUnprovisionedNodeIsInert is the system-level proof that a node that
+// boots WITHOUT the network key is INERT. It originates no
+// network-key-authenticated frame (broadcast DATA, identity attestation)
+// and it accepts none (its RX is dropped at the door), while every
+// provisioned node in range meshes normally.
 //
 // Topology: three nodes A, B, C mutually in radio range. C is marked
 // "unprovisioned". Scripted events:
