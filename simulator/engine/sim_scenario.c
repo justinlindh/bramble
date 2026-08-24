@@ -104,11 +104,10 @@ static bool load_radio(cJSON* radio_json, radio_config_t* radio) {
     else
         radio->range = radio_derive_range(radio);
 
-    /* Optional regulatory duty-cycle cap (DES-8): absent = unlimited,
-     * matching today's behavior (radio_config_init already left
-     * duty_cycle_set false). When present, applied via the real
-     * airtime_budget_set_duty_cap on every node (bridge_apply_duty_cycle_cap),
-     * never computed here. */
+    /* Optional regulatory duty-cycle cap: absent = unlimited
+     * (radio_config_init leaves duty_cycle_set false). When present, applied
+     * via the real airtime_budget_set_duty_cap on every node
+     * (bridge_apply_duty_cycle_cap), never computed here. */
     cJSON* duty = cJSON_GetObjectItem(radio_json, "duty_cycle_pct");
     if (duty && cJSON_IsNumber(duty)) {
         double pct = duty->valuedouble;
@@ -218,10 +217,8 @@ static bool load_beacon_policy(cJSON* beacon_json, sim_beacon_policy_t* beacon) 
     return true;
 }
 
-/* The known-unimplemented event-type escape hatch is gone (issue #172):
- * send_location, its only entry, is now a real EVT_GENERATE_LOCATION, so
- * every recognized spelling is executable and every unrecognized one is a
- * hard load failure. Do not reintroduce a warn-and-skip list to silence a
+/* Every recognized event-type spelling is executable, and every unrecognized
+ * one is a hard load failure. Do not add a warn-and-skip list to silence a
  * typo; an unloadable scenario is strictly better than an inert one. */
 
 static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* nodes) {
@@ -258,7 +255,7 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
 
             uint32_t dest_addr;
             if (strcmp(dest->valuestring, "*") == 0) {
-                /* Broadcast/channel message (Task 5, channel flood): no
+                /* Broadcast/channel message (channel flood): no
                  * single destination node to resolve. 0xFFFFFFFF mirrors
                  * firmware's mesh_send_broadcast/mesh_send_channel dest
                  * sentinel; bridge_handle_generate_message (gosim) branches
@@ -274,23 +271,22 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
             strncpy(event.data.node.node_id, src->valuestring, NODE_ID_LEN - 1);
             event.data.node.addr = dest_addr;
 
-            /* payload_size stored in x field (Phase 4: fragmentation) */
+            /* payload_size stored in x field (drives fragmentation) */
             cJSON* ps = cJSON_GetObjectItem(evt_json, "payload_size");
             if (cJSON_IsNumber(ps)) {
                 event.data.node.x = (float)ps->valuedouble;
             }
 
         } else if (strcmp(type, "send_attestation") == 0) {
-            /* Per-node identity Phase 3/4: scripted identity-attestation
-             * origination. "src" is the attesting node; optional "claim"
-             * names the node whose ADDRESS is claimed (default: src
-             * itself). claim != src is the impersonation scenario: a keyed
-             * insider attesting someone else's address under its own keys
-             * (post-Phase-4: refused by every receiver's addr<->key
-             * check). Optional "rotate_x25519": true rotates the node's
-             * X25519 pub before attesting (stored in the x field, like
-             * generate_message's payload_size), the TOFU-conflict
-             * scenario. */
+            /* Scripted identity-attestation origination. "src" is the
+             * attesting node; optional "claim" names the node whose ADDRESS
+             * is claimed (default: src itself). claim != src is the
+             * impersonation scenario: a keyed insider attesting someone
+             * else's address under its own keys, refused by every
+             * receiver's addr<->key check. Optional "rotate_x25519": true
+             * rotates the node's X25519 pub before attesting (stored in the
+             * x field, like generate_message's payload_size), the
+             * TOFU-conflict scenario. */
             event.type = EVT_GENERATE_ATTESTATION;
             cJSON* src = cJSON_GetObjectItem(evt_json, "src");
             if (!cJSON_IsString(src))
@@ -313,8 +309,8 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
             }
 
         } else if (strcmp(type, "provision_anchor") == 0) {
-            /* Trust-anchor campaign (P2 red-team): runtime anchor provisioning,
-             * the sim analog of an operator running bramble.setAnchor mid-life.
+            /* Runtime trust-anchor provisioning: the sim analog of an
+             * operator running bramble.setAnchor mid-life.
              * "node" is (re-)anchored to the fleet test anchor; if it was
              * un-anchored ("unanchored": true at boot) its stale TOFU pins are
              * dropped by identity_store_set_anchor. */
@@ -383,11 +379,10 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
             if (!cJSON_IsString(node_id))
                 return false;
             strncpy(event.data.node.node_id, node_id->valuestring, NODE_ID_LEN - 1);
-            /* Issue #144 Bug 1: the event's x/y used to be silently dropped,
-             * so every rejoin landed at (0,0) regardless of what the
-             * scenario said. Parse them when supplied; when absent,
-             * has_coords=false makes the join restore the node's original
-             * scenario position (handleNodeJoin in sim.go). */
+            /* The event's x/y place the rejoining node. Parse them when
+             * supplied; when absent, has_coords=false makes the join restore
+             * the node's original scenario position (handleNodeJoin in
+             * sim.go). */
             cJSON* jx = cJSON_GetObjectItem(evt_json, "x");
             cJSON* jy = cJSON_GetObjectItem(evt_json, "y");
             if (cJSON_IsNumber(jx) && cJSON_IsNumber(jy)) {
@@ -397,8 +392,8 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
             }
 
         } else if (strcmp(type, "send_location") == 0) {
-            /* Location sharing (issue #172): a scripted GPS position
-             * broadcast. "src" is the originating node; "lat"/"lon" are fix
+            /* Location sharing: a scripted GPS position broadcast.
+             * "src" is the originating node; "lat"/"lon" are fix
              * degrees, "alt_m" optional meters. Degrees are converted to e7
              * integers here (bramble_position_t convention) because the
              * event union's float fields cannot hold e7 precision. */
@@ -446,12 +441,11 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
             }
 
         } else {
-            /* Hard failure, deliberately. Issues #144 and #166 were both
-             * scenarios whose phases never ran because an unrecognized event
-             * type was skipped with at most a warning nobody read, so the
-             * scenario looked healthy while testing less than its name
-             * claimed. An unloadable scenario is strictly better than an
-             * inert one that passes. */
+            /* Hard failure, deliberately. Skipping an unrecognized event type
+             * with a warning leaves a scenario whose phases never run: it
+             * looks healthy while testing less than its name claims. An
+             * unloadable scenario is strictly better than an inert one that
+             * passes. */
             fprintf(stderr,
                     "Error: unknown event type '%s' at %llu ms. The engine cannot execute this "
                     "event; fix the scenario's spelling or add support for the type. Known "

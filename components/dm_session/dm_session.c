@@ -105,7 +105,7 @@ static void dm_build_info(uint32_t addr_a, uint32_t addr_b, uint16_t ke_epoch, u
 }
 
 /* Derives the session key from an already-computed 128-byte IKM. Split out
- * of dm_derive_session_key so dm_build_resp/dm_verify_resp (Task 1.3) can
+ * of dm_derive_session_key so dm_build_resp/dm_verify_resp can
  * compute the IKM once via dm_compute_ikm and reuse it both here and for
  * K_confirm, instead of repeating the four X25519 scalar multiplications
  * (each 30-100ms on the S3 per the RFC's compute-placement note). */
@@ -210,13 +210,13 @@ static void dm_ratchet_install_chains(dm_ratchet_t* r, const uint8_t ck_lohi[32]
 /*
  * Fails closed by leaving the ratchet WIPED and both chains invalid: derivation
  * happens into locals and nothing is installed until every step has succeeded,
- * so a failure here can never produce the shape this used to have (a session
- * marked send.valid/recv.valid with zero or garbage chain keys, waved through by
- * the validity guard in dm_session_ratchet_encrypt). The caller must treat -1 as
- * "this session was never established" and refuse to mark it usable; a session
- * that silently looked valid but held garbage would encrypt undecryptable
- * frames forever, which is exactly the one-sided-desync silent message loss this
- * layer is supposed to avoid.
+ * so a failure here can never produce a session marked send.valid/recv.valid
+ * with zero or garbage chain keys that the validity guard in
+ * dm_session_ratchet_encrypt waves through. The caller must treat -1 as "this
+ * session was never established" and refuse to mark it usable; a session that
+ * silently looked valid but held garbage would encrypt undecryptable frames
+ * forever, which is exactly the one-sided-desync silent message loss this layer
+ * is supposed to avoid.
  */
 int dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint32_t addr_self,
                                   uint32_t addr_peer) {
@@ -242,8 +242,8 @@ int dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint3
     memset(&s->ratchet.prev_recv, 0, sizeof(s->ratchet.prev_recv));
     memset(s->ratchet.prev_skip, 0, sizeof(s->ratchet.prev_skip));
     s->ratchet.new_epoch_msgs = 0;
-    /* Retain the legacy static session_key as RK_0 provenance only; the ratchet
-     * chains are authoritative for every message now. */
+    /* Retain the static session_key as RK_0 provenance only; the ratchet
+     * chains are authoritative for every message. */
     memcpy(s->session_key, s->ratchet.rk, 32);
     crypto_secure_wipe(ck_lohi, 32);
     crypto_secure_wipe(ck_hilo, 32);
@@ -260,14 +260,13 @@ int dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint3
  * leaves both sides on the current epoch and strands nothing) but that contract
  * only holds when the rekey never happened at ALL. By the time this is called
  * the peer has already committed to new_epoch: silently staying on the old one
- * is a ONE-SIDED epoch desync, which is the exact shape of the permanent silent
- * DM loss this repo has already been bitten by, and it would look healthy from
- * the outside (send.valid set, encrypt succeeding, every frame undecryptable at
- * the far end forever).
+ * is a ONE-SIDED epoch desync, which is the exact shape of a permanent silent
+ * DM loss, and it would look healthy from the outside (send.valid set, encrypt
+ * succeeding, every frame undecryptable at the far end forever).
  *
- * So on failure the whole ratchet is wiped, which drops both chains to
- * valid == 0. dm_session_ratchet_encrypt then refuses to send (surfaced by the
- * mesh caller as an encrypt failure rather than a message that vanishes) and
+ * So on failure the whole ratchet is wiped, which drops both chains to valid ==
+ * 0. dm_session_ratchet_encrypt then refuses to send (surfaced by the mesh
+ * caller as an encrypt failure rather than a message that vanishes) and
  * dm_session_ratchet_decrypt returns DM_DECRYPT_FAIL, which the mesh caller
  * already maps to its rate-limited re-handshake desync-heal path. Failure is
  * therefore loud and self-healing rather than quiet and permanent. Returns 0 on
@@ -626,7 +625,7 @@ int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
      * DH3 is the initiator's OWN ephemeral bound to the peer's identity;
      * only the initiator's ephemeral exists at this point (the responder
      * hasn't generated one yet), so this is a fixed, role-specific
-     * pairing, not Task 1.1's role-agnostic sorted cross-term (that sort
+     * pairing, not the session key's role-agnostic sorted cross-term (that sort
      * exists only because the FINAL session key mixes both parties'
      * ephemerals symmetrically after both exist; here only one does). */
     int rc = -1;
@@ -677,12 +676,12 @@ int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* 
     if (msg->ke_type != KE_TYPE_INIT)
         return -1;
 
-    /* Phase 4 pin continuity (replaces the pre-rebind
-     * derive_address(long_term_pubkey) == src_addr binding, which cannot
-     * hold now that the address derives from the Ed25519 identity key):
-     * when the caller holds an attestation-verified pin for src_addr, the
-     * handshake's X25519 identity key MUST be the pinned one. A public-key
-     * compare, not a secret: memcmp is fine. */
+    /* Pin continuity. A derive_address(long_term_pubkey) == src_addr binding
+     * cannot hold here: the address derives from the Ed25519 identity key,
+     * not from this X25519 key. Instead, when the caller holds an
+     * attestation-verified pin for src_addr, the handshake's X25519 identity
+     * key MUST be the pinned one. A public-key compare, not a secret: memcmp
+     * is fine. */
     if (pinned_peer_x25519_or_null &&
         memcmp(msg->long_term_pubkey, pinned_peer_x25519_or_null, 32) != 0)
         return DM_VERIFY_ERR_PIN_MISMATCH;
@@ -793,7 +792,7 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
     if (resp->ke_type != KE_TYPE_RESP)
         return -1;
 
-    /* Phase 4 pin continuity, same semantics as dm_verify_init. src_addr
+    /* Pin continuity, same semantics as dm_verify_init. src_addr
      * tampering is caught below by the K_confirm tag (transcript_2 binds
      * both addresses); this check is about a KNOWN peer showing up with a
      * DIFFERENT X25519 key than its attested, pinned one. */

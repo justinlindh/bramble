@@ -1,7 +1,6 @@
 /**
  * mesh_mailbox.c: Store-and-forward mailbox glue over components/mailbox.
  *
- * Split out of mesh_task.c (issue #86); pure code motion, no behavior change.
  * Shared state and cross-module entry points come from mesh_internal.h.
  */
 #include "mesh_internal.h"
@@ -9,8 +8,6 @@
 #include <string.h>
 
 static const char* TAG = "mesh";
-
-/* ── Data forwarding for multi-hop ──────────────────────────────────── */
 
 /* ── Mailbox helpers ─────────────────────────────────────────────────── */
 

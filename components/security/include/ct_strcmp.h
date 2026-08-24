@@ -14,20 +14,19 @@
 /* Constant-time string comparison for secrets (auth tokens).
  * Returns 0 if the strings match, non-zero otherwise.
  *
- * SEC-L3: the previous implementation iterated min(len_a, len_b) times,
- * which let an attacker discover the secret's length by probing with
- * growing inputs and timing the plateau. This version always executes
- * exactly CT_STRCMP_BOUND iterations regardless of either operand, and
- * folds the length difference into the result instead of branching on it.
+ * A compare that iterated min(len_a, len_b) times would let an attacker
+ * discover the secret's length by probing with growing inputs and timing
+ * the plateau. This always executes exactly CT_STRCMP_BOUND iterations
+ * regardless of either operand, and folds the length difference into the
+ * result instead of branching on it.
  *
- * Approach chosen: fixed-bound padded compare (reads are predicated on
- * index < length, out-of-range positions contribute zero). This is the
- * simplest correct fix and keeps this header dependency-free for the BLE
- * auth path; hash-then-compare would also work but drags a crypto
- * dependency into every caller for no additional benefit at these sizes.
- * The per-iteration bounds predicates compile to branchless selects on
- * our targets; any residual microarchitectural signal is orders of
- * magnitude below the byte-granular plateau the old loop leaked. */
+ * Approach: fixed-bound padded compare (reads are predicated on index <
+ * length, out-of-range positions contribute zero). It keeps this header
+ * dependency-free for the BLE auth path; hash-then-compare would also work
+ * but drags a crypto dependency into every caller for no additional benefit
+ * at these sizes. The per-iteration bounds predicates compile to branchless
+ * selects on our targets; any residual microarchitectural signal is orders
+ * of magnitude below the byte-granular plateau a min-length loop leaks. */
 static inline int ct_strcmp(const char* a, const char* b) {
     size_t len_a = strnlen(a, CT_STRCMP_BOUND);
     size_t len_b = strnlen(b, CT_STRCMP_BOUND);

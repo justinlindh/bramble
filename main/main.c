@@ -275,11 +275,10 @@ static void log_heap_diagnostics_periodic(void) {
 }
 
 static void on_gps_fix(const bramble_position_t* pos, void* ctx) {
-    /* No position bookkeeping here: this callback used to copy every fix into a
-     * local location_manager_t that nothing ever read, while the manager the UI
-     * reads (mesh_task's) starved. Consumers now pull self-position straight
-     * from gps_get_position via mesh_resolve_self_position; this callback only
-     * handles event emission. */
+    /* No position bookkeeping here: consumers pull self-position straight from
+     * gps_get_position via mesh_resolve_self_position, so this callback only
+     * handles event emission. A second location_manager_t fed from here would
+     * be a copy nothing reads. */
     (void)ctx;
     if (pos && pos->valid) {
         s_last_gps_fix = true;
@@ -492,10 +491,9 @@ static void render_main_screen(const ui_state_t* ui) {
              * instead of a fabricated percentage. */
             snprintf(batt, sizeof(batt), "CHG");
         } else if (!battery_reading_available(&bstat)) {
-            /* Honest "no reading" affordance. This replaces the old "USB"
-             * guess, which claimed a specific power state that a bare 0 mV
-             * reading cannot actually distinguish from "no battery
-             * hardware" or "read failed". */
+            /* Honest "no reading" affordance: a bare 0 mV reading cannot
+             * distinguish USB power from "no battery hardware" or "read
+             * failed", so name none of them. */
             snprintf(batt, sizeof(batt), "--");
         } else {
             /* charging == NO or UNKNOWN: smoothed pct so the unplug cliff
@@ -536,7 +534,7 @@ static void render_main_screen(const ui_state_t* ui) {
      * In AP mode the IP is the constant 192.168.4.1, which tells the user
      * nothing they cannot guess, so that line carries the per-device AP
      * password instead: on a screen-only board this is how the operator
-     * learns it (issue #78). Line budget is unchanged either way. */
+     * learns it. Either branch costs the same single line. */
     wifi_status_t wst;
     wifi_manager_get_status(&wst);
     const char* ip = wifi_manager_get_ip();
@@ -1411,10 +1409,10 @@ void app_main(void) {
     }
 #endif
 
-    /* Trust-anchor campaign: load the provisioned fleet anchor pubkey (P0) and
-     * this node's own endorsement cert (P1) into module memory. Both are
-     * absent by default and neither is ever synthesized; a fresh node stays
-     * unanchored and un-endorsed until an operator provisions them. */
+    /* Load the provisioned fleet anchor pubkey and this node's own endorsement
+     * cert into module memory. Both are absent by default and neither is ever
+     * synthesized; a fresh node stays unanchored and un-endorsed until an
+     * operator provisions them. */
     if (identity_anchor_load() == 0) {
         ESP_LOGI(TAG, "Fleet trust anchor loaded from NVS");
     }
@@ -1475,12 +1473,12 @@ void app_main(void) {
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     /* Init keyboard and trackball (T-Deck Plus only) */
     ESP_LOGI(TAG, "=== BOOT STAGE: keyboard_init ===");
-    /* Power: keyboard_init() already loads the persisted backlight percent
-     * from NVS (default 80%) and applies it. Do NOT force the LEDs here: a
-     * raw keyboard_set_backlight(255) after init used to override the saved
-     * preference on every boot, burning the keyboard LEDs at full brightness
-     * regardless of the Settings slider (which then disagreed with the
-     * hardware, since the raw setter bypasses the percent bookkeeping). */
+    /* Power: keyboard_init() loads the persisted backlight percent from NVS
+     * (default 80%) and applies it. Do NOT force the LEDs here: a raw
+     * keyboard_set_backlight(255) after init overrides the saved preference
+     * on every boot, burning the keyboard LEDs at full brightness regardless
+     * of the Settings slider, and it bypasses the percent bookkeeping, so the
+     * slider and the hardware disagree. */
     keyboard_init();
     ESP_LOGI(TAG, "=== BOOT STAGE: trackball_init ===");
     trackball_init();
@@ -1630,8 +1628,8 @@ void app_main(void) {
         show_boot_status("WiFi: starting...");
 #endif
         /* Seed the per-device SoftAP password derivation before init: AP
-         * mode refuses to start without it (issue #78). The Ed25519 secret
-         * key never leaves this call, only its HKDF image does. */
+         * mode refuses to start without it. The Ed25519 secret key never
+         * leaves this call, only its HKDF image does. */
         wifi_manager_set_ap_secret(g_identity.ed25519_private_key,
                                    sizeof(g_identity.ed25519_private_key));
         if (wifi_manager_init(my_addr) == 0) {
@@ -2093,9 +2091,9 @@ void app_main(void) {
             /* render_main_screen() draws straight to the display, bypassing
              * render_screen() and the pairing overlay it draws on top; skip
              * this tick while the overlay is up so it is not erased a second
-             * after appearing. render_main_screen() itself no longer
-             * flushes (render_screen() owns the single flush per frame for
-             * its own callers), so this standalone caller flushes here. */
+             * after appearing. render_main_screen() itself does not flush
+             * (render_screen() owns the single flush per frame for its own
+             * callers), so this standalone caller flushes here. */
             render_main_screen(&ui);
             display_flush();
         }

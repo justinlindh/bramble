@@ -3,10 +3,9 @@
 #include <string.h>
 
 /* Pull the wire packet types and airtime tiers from their defining headers so
- * the classifier stays in lockstep with the protocol. Hand-copied mirrors of
- * these constants used to live here and drifted (they never grew
- * PKT_TYPE_IDENTITY_ATTESTATION), silently bucketing new packet types as
- * TRAFFIC_CAT_OTHER. */
+ * the classifier stays in lockstep with the protocol. Never mirror these
+ * constants here: a hand-copied copy drifts as the protocol gains packet
+ * types, silently bucketing the new ones as TRAFFIC_CAT_OTHER. */
 #include "airtime_budget.h"
 #include "packet.h"
 

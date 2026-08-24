@@ -34,13 +34,13 @@ int node_array_add(node_array_t* array, const char* id, uint32_t addr, float x, 
     node->home_y = y;
     node->active = true;
 
-    /* Per-node identity Phase 4: create the node's persistent Ed25519
-     * identity here (node creation = first boot; a rejoin reuses the
-     * existing entry and keeps it, like firmware keeps NVS keys) and
-     * DERIVE the address from it exactly as firmware does post-rebind.
-     * Deterministic seed from the node id keeps runs reproducible. The
-     * caller-supplied addr stays only as a fallback if keygen fails; such
-     * a node has no identity and cannot originate attestations. */
+    /* Create the node's persistent Ed25519 identity here (node creation =
+     * first boot; a rejoin reuses the existing entry and keeps it, like
+     * firmware keeps NVS keys) and DERIVE the address from it exactly as
+     * firmware does. Deterministic seed from the node id keeps runs
+     * reproducible. The caller-supplied addr stays only as a fallback if
+     * keygen fails; such a node has no identity and cannot originate
+     * attestations. */
     {
         char seed_input[NODE_ID_LEN + 32];
         int n = snprintf(seed_input, sizeof(seed_input), "bramble-gosim-ident-v1:%s", node->id);
@@ -179,9 +179,10 @@ void node_tick(sim_node_t* node, uint64_t now_us, const radio_config_t* radio,
                                beacon_policy->churn_threshold, num_neighbors, churn_events);
     if (now_us >= node->next_beacon_due_us) {
         /* Same span-clamped interval+jitter the firmware uses
-         * (beacon_next_interval_ms): the old now + interval - JITTER + draw
-         * form went backwards past zero for sub-jitter intervals early in a
-         * sim and wrapped the uint64, ending that node's beaconing. */
+         * (beacon_next_interval_ms). Do not open-code
+         * now + interval - JITTER + draw: for sub-jitter intervals that goes
+         * backwards past zero, wraps the uint64, and ends the node's
+         * beaconing. */
         uint16_t jitter_draw = (uint16_t)pcg32_range(&node->beacon_rng, 0, 0xFFFFu);
         node->next_beacon_due_us =
             now_us +
@@ -255,7 +256,7 @@ void node_tick(sim_node_t* node, uint64_t now_us, const radio_config_t* radio,
             pending_discovery_t* d = &node->pending_discoveries.entries[i];
             if (discovery_should_retry(d, now_ms)) {
                 /* Fresh query_id per retry with an expanded hop ring,
-                 * mirroring firmware (DES-1/DES-2). */
+                 * mirroring firmware. */
                 uint32_t query_id = pcg32_random(&node->beacon_rng);
                 discovery_record_attempt(d, query_id, now_ms);
                 bramble_rreq_t rreq =
@@ -286,11 +287,11 @@ void node_tick(sim_node_t* node, uint64_t now_us, const radio_config_t* radio,
     /* 5. Pending ACK retransmit/expire is driven exclusively by
      * bridge_handle_retransmit (called right after node_tick in sim.go),
      * which both sends the retransmit and advances attempt/next_retry_ms,
-     * mirroring firmware's mesh_task ACK retry tick. Calling pending_ack_tick
-     * here as well double-drove the state machine: it advanced attempt and
-     * pushed next_retry_ms into the future before bridge_handle_retransmit
-     * could act, so the sender was permanently starved and no retransmit was
-     * ever sent (messages_retried stuck at 0). */
+     * mirroring firmware's mesh_task ACK retry tick. Do not also call
+     * pending_ack_tick here: that double-drives the state machine, advancing
+     * attempt and pushing next_retry_ms into the future before
+     * bridge_handle_retransmit can act, starving the sender so no retransmit
+     * is ever sent (messages_retried stuck at 0). */
 
     /* 6. Dedup purge */
     dedup_purge(&node->dedup, now_ms);

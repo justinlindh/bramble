@@ -4,8 +4,7 @@
 #include <string.h>
 
 /* reporter_addr(4) || broken_dest(4) || broken_next_hop(4) || seq(6),
- * big-endian for the multi-byte fields: was broken_dest||broken_next_hop
- * only (8 bytes); ws 1.3b adds reporter_addr and seq (now 18 bytes).
+ * big-endian for the multi-byte fields, 18 bytes in all.
  * reporter_addr is safe to cover because every forwarder re-signs with
  * its OWN reporter_addr on every re-origination (send_rerr rebuilds the
  * whole struct and calls rerr_sign again each time); only
@@ -51,7 +50,7 @@ int rerr_verify(const bramble_rerr_t* r) {
 /* src_addr(4) || ack_packet_id(4) || seq(6), big-endian for the
  * multi-byte fields: the origin-stable fields, exactly excluding
  * relay_path/hop_count/header.hop_limit (the fields forward_ack mutates
- * on every relay hop). seq (ws 1.3b) is origin-stable like the rest:
+ * on every relay hop). seq is origin-stable like the rest:
  * forward_ack carries it through unchanged, so it belongs in the same
  * coverage set. */
 static void ack_build_auth_buf(const bramble_ack_t* a, uint8_t buf[14]) {
@@ -85,7 +84,7 @@ int ack_verify(const bramble_ack_t* a) {
 /* src_addr(4) || orig_packet_id(4) || seq(6), big-endian for the
  * multi-byte fields: the origin-stable fields, exactly excluding
  * relay_path/hop_count/header.hop_limit (the fields
- * forward_delivery_receipt mutates on every relay hop). seq (ws 1.3b) is
+ * forward_delivery_receipt mutates on every relay hop). seq is
  * origin-stable like the rest: forward_delivery_receipt carries it
  * through unchanged, so it belongs in the same coverage set. */
 static void receipt_build_auth_buf(const bramble_delivery_receipt_t* r, uint8_t buf[14]) {
@@ -116,7 +115,7 @@ int receipt_verify(const bramble_delivery_receipt_t* r) {
     return crypto_ct_memeq(expect, r->auth_hmac, sizeof(expect));
 }
 
-/* DATA origin authentication (Task 4-fix F1). The MAC covers exactly the
+/* DATA origin authentication. The MAC covers exactly the
  * bytes bramble_build_aead_aad emits -- masked header (hop_limit zeroed) ||
  * LE src_addr, HEADER_SIZE + 4 bytes -- which structurally excludes the two
  * relay-mutable fields (prev_hop lives further out in the wire envelope and
@@ -151,12 +150,12 @@ int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t
  * origin-stable field of the attestation, excluding only the header
  * (hop_limit is the one relay-mutated field; packet_id is per-send and
  * already outside every stable authenticator on this frame, matching the
- * Ed25519 sig's own header exclusion in packet.c). The trust-anchor
- * campaign (P1) extended coverage to the inline endorsement cert
- * (not_after + endorsement_sig): the cert is NOT self-signed (it is the
- * anchor's signature, not the node's), so this MAC is the ONLY authenticator
- * binding it in flight. Without it a keyless outsider could flip cert bits on
- * a relayed frame and spray UNENDORSED rejections once P2 acts on the cert. */
+ * Ed25519 sig's own header exclusion in packet.c). Coverage includes the
+ * inline endorsement cert (not_after + endorsement_sig): the cert is NOT
+ * self-signed (it is the anchor's signature, not the node's), so this MAC is
+ * the ONLY authenticator binding it in flight. Without it a keyless outsider
+ * could flip cert bits on a relayed frame and spray UNENDORSED rejections at
+ * any receiver that acts on the cert. */
 static void ident_relay_build_auth_buf(const bramble_identity_attestation_t* a, uint8_t buf[210]) {
     buf[0] = (uint8_t)(a->src_addr >> 24);
     buf[1] = (uint8_t)(a->src_addr >> 16);

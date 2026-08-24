@@ -8,11 +8,12 @@
  * shared SPI bus feeding the radio and a 2.13" SSD1680 e-paper panel.
  *
  * GNSS: ATGM336H-5N31 (CASIC AT6558, speaks PCAS config commands not Quectel
- *   PMTK; default NMEA 9600 8N1 so the firmware autobaud probe works unchanged).
- *   UART TX=35 (ESP to module RXD), RX=36 (module TXD to ESP). Power gate
- *   GNSS_EN=GPIO38 drives a P-FET high-side switch, active LOW (LOW = GNSS on);
- *   handled by the bramble_pager branch in components/gps/gps.c. GPIO35/36 are
- *   no longer reserved for an N8R8 octal-PSRAM option (dropped for GPS).
+ *   PMTK; default NMEA 9600 8N1, which the firmware autobaud probe handles
+ *   without extra configuration). UART TX=35 (ESP to module RXD), RX=36
+ *   (module TXD to ESP). Power gate GNSS_EN=GPIO38 drives a P-FET high-side
+ *   switch, active LOW (LOW = GNSS on); handled by the bramble_pager branch in
+ *   components/gps/gps.c. GPIO35/36 belong to the GNSS UART, which rules out an
+ *   N8R8 octal-PSRAM part: that variant claims the same two pins.
  *
  * E-paper (SSD1680, GDEY0213B74 2.13" 250x122): shares the SPI bus with
  *   the radio (BOARD_CAP_SHARED_SPI: board_init owns the bus + g_spi_mutex).
@@ -23,10 +24,10 @@
  * Reserved for future drivers (not wired into this skeleton yet):
  *   Alert outputs: buzzer=15, vibra=16, LED=48.
  *   HMI buttons: DOWN=21 (RTC-capable, deep-sleep wake), UP=47 (BOOT/SELECT is
- *     button_gpio=0 below). Swapped in the rev B pre-fab pass: GPIO47 has no RTC
- *     alias, so the primary scroll/wake button (DOWN, middle front plunger SW403;
- *     BOOT is leftmost, UP rightmost) sits on
- *     GPIO21 instead. UP cannot wake from deep sleep; accepted trade.
+ *     button_gpio=0 below). GPIO47 has no RTC alias, so the primary scroll/wake
+ *     button (DOWN, middle front plunger SW403; BOOT is leftmost, UP rightmost)
+ *     takes the RTC-capable GPIO21. UP cannot wake from deep sleep; accepted
+ *     trade.
  */
 static const bramble_board_config_t board_bramble_pager = {
     .name = "Bramble Pager v1",

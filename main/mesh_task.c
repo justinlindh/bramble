@@ -89,11 +89,10 @@ static void traffic_event_notify(const traffic_event_t* evt, void* ctx);
 #define NEIGHBOR_PURGE_INTERVAL 60000 /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH 16
 #define MESH_EVENT_QUEUE_DEPTH 8
-/* handle_data runs on this task and now calls dm_session_ratchet_decrypt, whose
+/* handle_data runs on this task and calls dm_session_ratchet_decrypt, whose
  * dm_recv_walk holds a bounded skip buffer (pending[DM_MAX_SKIP], ~0.58 KB at
  * DM_MAX_SKIP=16) on the stack on top of handle_data's own relay_buf[256] +
- * plaintext[256]. Raised from 8192 to 10240 for comfortable headroom (Task 4;
- * Task 3 stack-headroom concern); the DM_MAX_SKIP 32->16 cut leaves extra margin. */
+ * plaintext[256]. Sized for comfortable headroom over that worst case. */
 #define MESH_TASK_STACK 10240
 #define MESH_TASK_PRIORITY 5
 
@@ -106,7 +105,7 @@ uint8_t s_beacon_key[BRAMBLE_KEY_SIZE]; /* shared key for beacon HMAC */
 neighbor_table_t s_neighbors;
 parked_sweep_t s_parked_sweep;
 dedup_buffer_t s_dedup;
-/* Task 5 (channel flood): a SEPARATE dedup buffer from s_dedup, keyed
+/* Channel flood: a SEPARATE dedup buffer from s_dedup, keyed
  * src_addr-qualified (packet_id ^ src_addr), not just packet_id. s_dedup's
  * key (header.packet_id ^ (type << 24), mesh_process_rx_packet) has no
  * src_addr component; two different originators whose broadcasts happen to
@@ -114,12 +113,12 @@ dedup_buffer_t s_dedup;
  * duplicate of the other's at every shared relay -- harmless for the
  * existing unicast-only traffic s_dedup gates today (a collision there just
  * delays a retry), but a real correctness risk once broadcasts flood
- * multiple hops (the delivery-path audit's flagged concern). Kept as its
- * own instance rather than widening s_dedup's key so this stays scoped to
- * the flood path and cannot change dedup behavior for RREQ/PROBE_ACK/other
- * control traffic that already relies on s_dedup's existing key shape. */
+ * multiple hops. Kept as its own instance rather than widening s_dedup's
+ * key so this stays scoped to the flood path and cannot change dedup
+ * behavior for RREQ/PROBE_ACK/other control traffic that already relies on
+ * s_dedup's existing key shape. */
 dedup_buffer_t s_flood_dedup;
-/* Task 6 (GAP A): tracks unicast DATA we have already delivered locally
+/* Tracks unicast DATA we have already delivered locally
  * (ACK already sent), keyed the same src_addr-qualified way s_flood_dedup
  * is (packet_id ^ src_addr, collision-safe for the same reason). Consulted
  * ONLY at mesh_process_rx_packet's s_dedup duplicate-hit branch: without
@@ -133,23 +132,22 @@ dedup_buffer_t s_flood_dedup;
  * path, so local delivery stays exactly-once. */
 static dedup_buffer_t s_delivered_dedup;
 replay_table_t s_replay;         /* SEC-M1: per-sender authenticated nonce-counter replay window */
-replay_table_t s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon)
-                                           replay window, keyed on the authenticated signer address,
-                                           separate from the data-plane s_replay above */
-/* Per-node identity Phase 3 (Part C): this node's verified TOFU pin table
- * (address -> Ed25519/X25519 pubs), fed by handle_identity_attestation
- * below. Persisted to NVS (DM forward-secrecy + SAS): new pins and verified
- * bits survive reboot via mesh_pin_store_save/_load. */
+replay_table_t s_control_replay; /* control-plane (RREP/RERR/ACK/receipt/beacon)
+                                  replay window, keyed on the authenticated signer address,
+                                  separate from the data-plane s_replay above */
+/* This node's verified TOFU pin table (address -> Ed25519/X25519 pubs), fed
+ * by handle_identity_attestation below. Persisted to NVS: new pins and
+ * verified bits survive reboot via mesh_pin_store_save/_load. */
 identity_store_t s_identity_pins;
 /* Pin-store NVS persistence (defined near the other NVS helpers). save() is
  * called whenever a NEW pin is added or a verified bit changes; load() runs
  * once at boot after the anchor is provisioned. */
-static replay_deferred_t s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
+static replay_deferred_t s_deferred; /* tier-2: deferred acceptance for delayed CHAT */
 /* RREQ origination gate. Forwarded RREQs are gated separately, by the global
- * s_rreq_fwd_rl budget below (ws 1.3d, SEC-M4); see SECURITY-MODEL.md for the
+ * s_rreq_fwd_rl budget below (SEC-M4); see SECURITY-MODEL.md for the
  * node-global-not-per-neighbor residual. */
 static rreq_rate_limiter_t s_rreq_rl;
-/* Global forwarded-RREQ token bucket (ws 1.3d, SEC-M4). Bounds this node's
+/* Global forwarded-RREQ token bucket (SEC-M4). Bounds this node's
  * aggregate forwarded-RREQ rate regardless of the unauthenticated, spoofable
  * rreq.prev_hop field; not keyed per-neighbor on purpose (see
  * SECURITY-MODEL.md). */
@@ -163,7 +161,7 @@ SemaphoreHandle_t s_delivery_event_mutex;
  * critical section, because a boundary flush may block on NVS I/O. */
 SemaphoreHandle_t s_nonce_mutex;
 /*
- * DM session table (SEC-C2, Task 1.4). Guards every dm_lookup/dm_alloc,
+ * DM session table (SEC-C2). Guards every dm_lookup/dm_alloc,
  * every session state transition, and every read of the ratchet state for
  * dm_session_ratchet_encrypt/decrypt. Reachable from the mesh RX task
  * (handle_ke_envelope, handle_data's session-decrypt path),
@@ -200,18 +198,17 @@ reverse_route_table_t s_reverse_routes;
 pending_discovery_table_t s_pending_disc;
 
 /* Queued messages waiting for route discovery (QUEUE_REASON_ROUTE) or for a
- * DM session to establish (QUEUE_REASON_SESSION, Task 1.4 / SEC-C2 B5). Both
+ * DM session to establish (QUEUE_REASON_SESSION, SEC-C2). Both
  * reasons share this one array; `reason` disambiguates so the reaper, the
  * route-established flush, and the session-established flush each only
  * touch entries meant for them. */
 #define MAX_QUEUED_MSGS 8
 #define QUEUE_REASON_ROUTE 0
 #define QUEUE_REASON_SESSION 1
-/* B5: covers the full handshake retransmit budget (base 4s, x2 backoff,
+/* Covers the full handshake retransmit budget (base 4s, x2 backoff,
  * cap 64s, 5 attempts, worst case ~124s) plus margin, so a slow-SF path
  * cannot have its awaiting-session message reaped before the handshake can
- * possibly complete. Route-awaiting entries keep the pre-existing flat
- * 60000ms below. */
+ * possibly complete. Route-awaiting entries use the flat 60000ms below. */
 #define DM_QUEUE_TTL_MS 150000
 queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
 
@@ -230,10 +227,9 @@ queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
 dm_hs_dedup_entry_t s_hs_dedup[DM_HS_DEDUP_MAX];
 
 /*
- * Pending-initiator ephemeral keys (Task 1.4). dm_session_t (Task 1.2,
- * already locked in and unit-tested) has no field for "my own in-flight
- * handshake ephemeral": it stores only the FINAL session key. To verify a
- * RESP via dm_verify_resp, the initiator needs the ephemeral keypair it
+ * Pending-initiator ephemeral keys. dm_session_t has no field for "my own
+ * in-flight handshake ephemeral": it stores only the FINAL session key. To
+ * verify a RESP via dm_verify_resp, the initiator needs the keypair it
  * generated when it sent the matching INIT, so mesh_task.c (the
  * integration layer) owns this small side table instead of growing
  * dm_session_t. Sized to DM_MAX_HANDSHAKING since only handshaking peers
@@ -247,35 +243,35 @@ dm_pending_eph_t s_pending_eph[DM_MAX_HANDSHAKING];
  * item here; handshake_worker_task drains it on a low-priority task. */
 #define HANDSHAKE_WORK_QUEUE_LEN 8
 /* The DM handshake is a quad-DH X25519 exchange plus HKDF and an Ed25519
- * identity verify, not a single "periodic X25519": at 4096 bytes the
- * dm_hs_worker task stack-overflowed and rebooted the receiver on the first
- * incoming key exchange (found in 2-node on-device testing 2026-07-06;
- * host/gosim have no real FreeRTOS task stacks so never hit it). */
+ * identity verify, not a single "periodic X25519": 4096 bytes overflows this
+ * task's stack on the first incoming key exchange and reboots the receiver
+ * (measured 2-node on-device 2026-07-06). Only on-device testing catches that,
+ * since host/gosim have no real FreeRTOS task stacks. */
 #define DM_HANDSHAKE_WORKER_STACK 8192
 #define DM_HANDSHAKE_WORKER_PRIORITY (MESH_TASK_PRIORITY - 2)
 QueueHandle_t s_handshake_work_q;
 
-/* Jittered channel-flood relay queue (Task 5). Same shape and drain cadence
+/* Jittered channel-flood relay queue. Same shape and drain cadence
  * as the RREQ forward queue below, holding the exact relay-mutated wire
  * bytes (hop_limit decremented, prev_hop rewritten to us) a broadcast DATA
  * frame is rebroadcast with once its jitter elapses. pending_flood_relay_t,
  * FLOOD_RELAY_QUEUE_CAPACITY and the rebroadcast-suppression helper live in
- * channel_flood.h (Flooding F1) so they are unit-testable in isolation. */
+ * channel_flood.h so they are unit-testable in isolation. */
 pending_flood_relay_t s_flood_relay_queue[FLOOD_RELAY_QUEUE_CAPACITY];
 
-/* Flood relays dropped because the queue above was full (issue #87). A drop
+/* Flood relays dropped because the queue above was full. A drop
  * under congestion that nobody can see is indistinguishable in the field
  * from a radio problem, so it is counted and surfaced through
  * bramble.getDiagnostics. */
 uint32_t s_flood_relay_drops;
 
-/* PROBE ingress backpressure (issue #75). PROBE stays unauthenticated by
+/* PROBE ingress backpressure. PROBE stays unauthenticated by
  * design; these buckets only bound how much transmission an inbound probe
  * can buy. Global, not per-sender, for the same reason SEC-M4's forwarded-
  * RREQ cap is: see security.h. */
 probe_ingress_limiter_t s_probe_ingress;
 
-/* Jittered RREQ forward queue (DES-3). Relays delay RREQ rebroadcasts by a
+/* Jittered RREQ forward queue. Relays delay RREQ rebroadcasts by a
  * random 50-300ms so same-hop relays do not key up at the same instant; the
  * mesh task drains due entries from its main loop (10ms poll cadence). */
 #define RREQ_FWD_QUEUE_CAPACITY 8
@@ -336,22 +332,22 @@ broadcast_telemetry_mode_t s_broadcast_telemetry_mode = BROADCAST_TELEMETRY_RECI
 bool s_mailbox_enabled = false;
 mailbox_t s_mailbox;
 
-/* Flooding F1 Task 1: runtime toggle for the unicast flood transport. OFF
- * (default) preserves today's reactive route-lookup forward for unicast
- * DATA; ON routes unicast DATA not addressed to us through the same
- * multi-hop flood engine broadcast DATA already uses (channel_flood_decide +
- * s_flood_dedup) instead of forward_data_packet. See mesh_process_rx_packet's
- * PKT_TYPE_DATA case. NVS-persisted, same pattern as s_mailbox_enabled. */
+/* Runtime toggle for the unicast flood transport. OFF (default) uses the
+ * reactive route-lookup forward for unicast DATA; ON routes unicast DATA not
+ * addressed to us through the same multi-hop flood engine broadcast DATA
+ * already uses (channel_flood_decide + s_flood_dedup) instead of
+ * forward_data_packet. See mesh_process_rx_packet's PKT_TYPE_DATA case.
+ * NVS-persisted, same pattern as s_mailbox_enabled. */
 bool s_flood_transport = false;
 
-/* Flooding F1 finalize: operator-settable flood-transport origination hop
- * budget. Under s_flood_transport, a freshly-originated flood DATA and its
+/* Operator-settable flood-transport origination hop budget. Under
+ * s_flood_transport, a freshly-originated flood DATA and its
  * flooded-ACK are stamped with this hop_limit (via flood_origination_hop_limit)
- * instead of the hardcoded ROUTE_HOP_LIMIT_MAX, so reach can be matched to the
- * expected network diameter. Default FLOOD_HOP_LIMIT_DEFAULT (8) leaves shipped
- * behavior unchanged; NVS-persisted (NVS_NS_FLOOD "hop_limit"); clamped to
- * [FLOOD_HOP_LIMIT_MIN, FLOOD_HOP_LIMIT_CEIL]. SEPARATE from ROUTE_HOP_LIMIT_MAX
- * (the reactive path is untouched). */
+ * rather than the hardcoded ROUTE_HOP_LIMIT_MAX, so reach can be matched to the
+ * expected network diameter. Default FLOOD_HOP_LIMIT_DEFAULT (8);
+ * NVS-persisted (NVS_NS_FLOOD "hop_limit"); clamped to
+ * [FLOOD_HOP_LIMIT_MIN, FLOOD_HOP_LIMIT_CEIL]. SEPARATE from ROUTE_HOP_LIMIT_MAX,
+ * which the reactive path keeps using. */
 uint8_t s_flood_hop_limit = FLOOD_HOP_LIMIT_DEFAULT;
 
 /* Location policy engine tick state */
@@ -386,13 +382,13 @@ static void mesh_publish_neighbors(void) {
 }
 
 /* s_state_mutex guards EVERY write to s_neighbors, including the mesh task's
- * own, which is why these wrappers exist. The mutex used to be taken only by
- * the cross-task readers and writers (mesh_get_peer_name, and the park that
- * arms a peer), while the mesh task mutated the table beside them without it,
- * so it was not mutual exclusion at all: a reader could copy a name being
- * memcpy'd into, and an arming write could land in a slot a purge was
- * compacting. A lock that holds off only some of its writers is worse than no
- * lock, because everything that touches the table reads the take as safety.
+ * own, which is why these wrappers exist. Taking it only in the cross-task
+ * readers and writers (mesh_get_peer_name, and the park that arms a peer)
+ * while the mesh task mutates the table beside them is not mutual exclusion at
+ * all: a reader can copy a name being memcpy'd into, and an arming write can
+ * land in a slot a purge is compacting. A lock that holds off only some of its
+ * writers is worse than no lock, because everything that touches the table
+ * reads the take as safety.
  *
  * WRITES, precisely. The mesh task still READS the table unlocked all over
  * (neighbor_count, neighbor_is_established, the Sybil RSSI walk), which is
@@ -494,7 +490,7 @@ static void reboot_timer_cb(TimerHandle_t xTimer) {
     esp_restart();
 }
 
-/* Issue #72: ask the mesh task to flush the replay high-water marks before a
+/* Ask the mesh task to flush the replay high-water marks before a
  * deliberate reboot (OTA, RPC reboot, settings screen). Deliberately a FLAG
  * rather than a direct write: the mesh task is the only mutator of the
  * replay tables, so serializing them from the timer/RPC task could snapshot
@@ -558,7 +554,7 @@ static void on_rx(const uint8_t* data, uint8_t len, const radio_rx_info_t* info)
 static void on_tx_done(void) { ESP_LOGD(TAG, "TX complete"); }
 
 /* Confirm a data message that was just handed to the message store: ACK a
- * unicast and record the delivery (Task 6 / GAP A) so the sender's retransmit
+ * unicast and record the delivery so the sender's retransmit
  * after a lost ACK is re-ACKed at mesh_process_rx_packet's dedup gate rather
  * than silently dropped, keyed like s_flood_dedup (packet_id ^ src_addr); or,
  * for a broadcast, queue a delivery receipt when policy calls for one. The
@@ -578,8 +574,8 @@ static void on_tx_done(void) { ESP_LOGD(TAG, "TX complete"); }
  * but NOT structurally equal for a channel message, whose info.src_addr comes
  * out of the decrypted inner plaintext (channel_msg.c) while the AEAD AAD
  * binds only the wire value (SEC-M2). Keying the record on the payload value
- * would leave a mismatched entry the re-ACK gate can never hit, quietly
- * restoring the lost-ACK-is-terminal failure GAP A exists to prevent. */
+ * would leave a mismatched entry the re-ACK gate can never hit, making a
+ * single lost ACK terminal, which is exactly what this record prevents. */
 static void confirm_data_delivery(msg_direction_t dir, uint32_t peer_addr, uint32_t wire_src_addr,
                                   uint32_t dest_addr, uint32_t ack_packet_id,
                                   uint32_t receipt_packet_id, int16_t rssi) {
@@ -605,8 +601,8 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
     uint32_t src_addr;
     memcpy(&src_addr, data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
 
-    /* Self-originated guard (mirrors handle_location): the Task 5 channel
-     * flood means a node now hears its OWN broadcast/channel DATA echoed
+    /* Self-originated guard (mirrors handle_location): the channel flood
+     * means a node hears its OWN broadcast/channel DATA echoed
      * back by a neighbor's rebroadcast. Without this, the frame below would
      * still get trial-decrypted (this node holds the key it encrypted with)
      * and re-delivered as a spurious incoming onMessage/msg_store_add, plus
@@ -637,20 +633,19 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
-    /* Flooding F1 Task 1: dest filter for the ONE flood relay path shared by
-     * broadcast and (when s_flood_transport is on) unicast DATA not
-     * addressed to us. dest_is_broadcast is always flood-eligible (Task 5,
-     * unchanged); dest_is_self never relays (it is delivered below instead,
-     * hop_limit is irrelevant once a message has arrived). A unicast frame
-     * for someone else only enters the relay block when the toggle is on;
-     * when it is off, mesh_process_rx_packet's PKT_TYPE_DATA case never
-     * calls handle_data for that frame at all (it calls forward_data_packet,
-     * the reactive route-lookup path), so this flag is a belt-and-suspenders
-     * check, not the only gate. */
+    /* Dest filter for the ONE flood relay path shared by broadcast and (when
+     * s_flood_transport is on) unicast DATA not addressed to us.
+     * dest_is_broadcast is always flood-eligible; dest_is_self never relays
+     * (it is delivered below instead, hop_limit is irrelevant once a message
+     * has arrived). A unicast frame for someone else only enters the relay
+     * block when the toggle is on; when it is off, mesh_process_rx_packet's
+     * PKT_TYPE_DATA case never calls handle_data for that frame at all (it
+     * calls forward_data_packet, the reactive route-lookup path), so this
+     * flag is a redundant check, not the only gate. */
     bool dest_is_broadcast = (rx_hdr.dest_addr == 0xFFFFFFFF);
     bool dest_is_self = (rx_hdr.dest_addr == s_identity->address);
 
-    /* Task 5: multi-hop channel flood. A broadcast/channel DATA (dest ==
+    /* Multi-hop channel flood. A broadcast/channel DATA (dest ==
      * 0xFFFFFFFF) is "delivered" locally below regardless of whether THIS
      * node can decrypt it (public broadcast vs. a secret channel this node
      * may not belong to) -- that is orthogonal to whether it should be
@@ -664,7 +659,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
      * point of a flood is that relays do not need to understand the
      * payload, exactly like RREQ/RERR relays never decrypt anything.
      *
-     * Task 1 extends this same block to unicast: when s_flood_transport is
+     * This same block covers unicast too: when s_flood_transport is
      * on and this frame is unicast for someone else, it goes through the
      * identical dedup + channel_flood_decide + rebroadcast dance as a
      * broadcast flood, reusing channel_flood_decide rather than a second
@@ -729,15 +724,14 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         }
     }
 
-    /* Task 1: a unicast frame addressed to someone else is a relay-only
+    /* A unicast frame addressed to someone else is a relay-only
      * pass-through under the flood toggle (handled above); it is never
      * decrypted or delivered here (we have no session/channel-key basis for
      * doing so on someone else's behalf, and doing so would risk spurious
      * local-delivery side effects: msg_store, an outgoing ACK, replay-window
      * updates, none of which belong to a frame that is not ours). Broadcast
      * (dest_is_broadcast) and unicast-to-self (dest_is_self) both fall
-     * through to the decrypt/deliver code below exactly as before this
-     * task. */
+     * through to the decrypt/deliver code below. */
     if (!dest_is_broadcast && !dest_is_self) {
         return;
     }
@@ -792,10 +786,10 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             ESP_LOGW(TAG, "Failed session decrypt from %08" PRIX32, src_addr);
             /* Our DM session with this peer has desynced (no session, a stale key
              * it no longer holds, or a ratchet index beyond the skip bound,
-             * DM_DECRYPT_TOO_FAR). Silently returning here is what made DMs fail
-             * permanently after one side rebooted; instead, kick a rate-limited
-             * re-handshake so the session self-heals (the ratchet adds no new
-             * recovery mechanism, it degrades into this existing one). */
+             * DM_DECRYPT_TOO_FAR). Silently returning here would make DMs fail
+             * permanently after one side reboots, so kick a rate-limited
+             * re-handshake instead and let the session self-heal (the ratchet
+             * adds no recovery mechanism of its own, it degrades into this). */
             maybe_trigger_dm_rehandshake(src_addr);
             return;
         }
@@ -815,33 +809,32 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
     }
 
     /* SEC-M1: authenticated replay protection, keyed on the nonce counter
-     * (Task 0.4) rather than the cleartext packet_id, so it cannot be
-     * spoofed by an attacker who doesn't hold the relevant key. Runs only
-     * after a successful decrypt, and only when src_addr is trustworthy
-     * (Fix 2, red-team panel): BRAMBLE_PUBLIC_CHANNEL_PSK is public, so a
-     * public-channel decrypt's src_addr is a free-to-forge claim, not
-     * "bound to this sender's identity". Feeding it into the SHARED
-     * per-sender window would let an attacker claim src_addr=victim and
-     * slam the victim's high-water mark, dropping the victim's own later,
-     * genuine packets as BELOW_WINDOW (a mesh-wide DoS). Public-channel
-     * traffic relies on the pre-existing packet_id/type dedup for loop
-     * suppression instead; a secret channel's or a session's src_addr is
-     * still authenticated (channel membership or a session key) and still
-     * goes through the window as before. */
+     * rather than the cleartext packet_id, so it cannot be spoofed by an
+     * attacker who doesn't hold the relevant key. Runs only after a
+     * successful decrypt, and only when src_addr is trustworthy:
+     * BRAMBLE_PUBLIC_CHANNEL_PSK is public, so a public-channel decrypt's
+     * src_addr is a free-to-forge claim, not "bound to this sender's
+     * identity". Feeding it into the SHARED per-sender window would let
+     * an attacker claim src_addr=victim and slam the victim's high-water
+     * mark, dropping the victim's own later, genuine packets as
+     * BELOW_WINDOW (a mesh-wide DoS). Public-channel traffic relies on
+     * the packet_id/type dedup for loop suppression instead; a secret
+     * channel's or a session's src_addr is authenticated (channel
+     * membership or a session key) and goes through the window. */
     uint64_t rx_counter = nonce_counter_extract(nonce);
     if (channel_source_is_replay_trustworthy(is_channel_message, info.channel_index)) {
         int rp = replay_check_and_add(&s_replay, src_addr, rx_counter, now_ms());
         /* Drop on anything that is not an outright accept or the one code
          * with a legitimate tier-2 continuation below. Written as an
-         * allow-list rather than `== REPLAY_REJECT_DUP` so that a future
-         * reject code (REPLAY_REJECT_NO_SLOT was exactly this case) cannot
+         * allow-list rather than `== REPLAY_REJECT_DUP` so that another
+         * reject code (REPLAY_REJECT_NO_SLOT is exactly such a case) cannot
          * fall through this block and be treated as accepted. */
         if (rp != REPLAY_ACCEPT && rp != REPLAY_BELOW_WINDOW) {
             ESP_LOGD(TAG, "Replay drop from %08" PRIX32 " ctr=%llu (rp=%d)", src_addr,
                      (unsigned long long)rx_counter, rp);
             return;
         }
-        /* Issue #72: apply the authenticated sent_at freshness bound on the
+        /* Apply the authenticated sent_at freshness bound on the
          * ACCEPT path too, not just the below-window path. Persistence
          * bounds the post-reboot exposure to one flush interval; this
          * closes that residual for CHAT, which is the only app type
@@ -849,7 +842,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
          * timesync because without trusted time the bound is unevaluable,
          * and an unevaluable bound must not reject live traffic (tier-1
          * acceptance is not the fail-closed layer, tier-2 is). */
-        /* Ordering note (#163): replay_check_and_add above has already
+        /* Ordering note: replay_check_and_add above has already
          * advanced high_water/window/dirty for this counter by the time
          * the freshness check below can still drop the packet. That is
          * intentional, not a bug. This code only runs post-decrypt (see
@@ -875,7 +868,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
                 return;
             }
         }
-        /* Fix 3 (red-team panel): a CHAT counter accepted here via tier-1
+        /* A CHAT counter accepted here via tier-1
          * must also be recorded in the tier-2 deferred cache. Without
          * this, a counter that later ages out of the 64-entry tier-1
          * window is in NEITHER dedup structure: a captured, genuinely
@@ -890,7 +883,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             uint32_t now_s = (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000);
             replay_deferred_mark_seen(&s_deferred, src_addr, rx_counter, now_s);
         }
-        /* Tier-2 deferred acceptance (Task 0.6): a chat message can
+        /* Tier-2 deferred acceptance: a chat message can
          * legitimately arrive outside the tier-1 sliding window (long
          * store-and-forward delay), but only chat carries an authenticated
          * sent_at to bound how old is too old. now_s uses network time
@@ -1000,7 +993,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
                         reassembly_get_first_packet_id(&s_reassembly, frag_hdr.message_id);
 
                     size_t reasm_sz =
-                        frag_hdr.frag_total * FRAG_MAX_PLAINTEXT; /* F27: size to actual count */
+                        frag_hdr.frag_total * FRAG_MAX_PLAINTEXT; /* size to actual count */
                     uint8_t* reassembled = malloc(reasm_sz);
                     if (!reassembled) {
                         ESP_LOGE(TAG, "OOM for reassembly buffer");
@@ -1310,7 +1303,7 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
     if (dedup_check_and_add(&s_dedup, dedup_key, now_ms())) {
         maybe_emit_implicit_broadcast_delivery(&header, pkt);
 
-        /* Task 6 (GAP A): a duplicate unicast DATA addressed to us is the
+        /* A duplicate unicast DATA addressed to us is the
          * sender's retransmit of an already-delivered message (its first
          * ACK was lost in transit). Re-send the ACK (idempotent, gives the
          * retransmit's sender another chance to hear the confirmation)
@@ -1321,8 +1314,7 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
          * packet_id) pair already passed full auth_hmac verification,
          * decrypt, and local delivery (handle_data), so a hit here can only
          * be produced by replaying bytes that already cleared that bar
-         * once. Finding 3 (final whole-branch review): for consistency with
-         * the Task-5 lesson of never acting on unauthenticated wire bytes,
+         * once. Because nothing here may act on unauthenticated wire bytes,
          * the re-ACK itself is additionally gated on data_auth_verify here
          * (same network-key MAC check the PKT_TYPE_DATA case below runs),
          * so a re-ACK can only be triggered by a frame that is ALSO a valid,
@@ -1349,7 +1341,7 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
             }
         }
 
-        /* Flooding F1 rebroadcast suppression: the dispatch dedup gate above
+        /* Rebroadcast suppression: the dispatch dedup gate above
          * catches the 2nd/3rd... copies of a flooded DATA frame and returns
          * BEFORE handle_data, so this is the one place a node can COUNT the
          * OTHER relays it overhears while its own rebroadcast still waits out
@@ -1367,20 +1359,20 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
             pkt->len >= BRAMBLE_DATA_NONCE_OFFSET) {
             uint32_t flood_dup_src;
             memcpy(&flood_dup_src, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
-            /* Finding (final whole-branch review): only an AUTHENTICATED
-             * duplicate copy may count toward suppression. The first
-             * legitimate copy inserts the s_dedup key ABOVE (dedup_check_and_
-             * add) BEFORE the network-key MAC is ever checked, so without this
-             * gate a keyless party could replay a garbage-MAC frame carrying a
-             * matching plaintext packet_id + src_addr, hit this dedup branch,
-             * and bump `heard` to FLOOD_SUPPRESS_AFTER -- cancelling a genuine
-             * node's pending relay and punching a targeted coverage hole in a
-             * sparse mesh. Verify the copy's network-key MAC first, mirroring
-             * the re-ACK carve-out above and handle_data's own data_auth_verify
-             * gate, so only genuine overheard copies suppress. Costs one HMAC
-             * per overheard flood duplicate (precedented, acceptable). The
-             * length guard is widened to BRAMBLE_DATA_NONCE_OFFSET so the 8
-             * auth_hmac bytes at BRAMBLE_DATA_AUTH_HMAC_OFFSET are in range. */
+            /* Only an AUTHENTICATED duplicate copy may count toward
+             * suppression. The first legitimate copy inserts the s_dedup key
+             * ABOVE (dedup_check_and_ add) BEFORE the network-key MAC is ever
+             * checked, so without this gate a keyless party could replay a
+             * garbage-MAC frame carrying a matching plaintext packet_id +
+             * src_addr, hit this dedup branch, and bump `heard` to
+             * FLOOD_SUPPRESS_AFTER -- cancelling a genuine node's pending relay
+             * and punching a targeted coverage hole in a sparse mesh. Verify
+             * the copy's network-key MAC first, mirroring the re-ACK carve-out
+             * above and handle_data's own data_auth_verify gate, so only
+             * genuine overheard copies suppress. Costs one HMAC per overheard
+             * flood duplicate (precedented, acceptable). The length guard is
+             * widened to BRAMBLE_DATA_NONCE_OFFSET so the 8 auth_hmac bytes at
+             * BRAMBLE_DATA_AUTH_HMAC_OFFSET are in range. */
             if (data_auth_verify(&header, flood_dup_src,
                                  pkt->data + BRAMBLE_DATA_AUTH_HMAC_OFFSET)) {
                 uint32_t flood_dup_key = header.packet_id ^ flood_dup_src;
@@ -1393,8 +1385,8 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
             }
         }
 
-        /* Flooding F1 Task 2: the same suppression bookkeeping for a flooded
-         * ACK. A flooded ACK addressed to someone else (i.e. NOT consumed by
+        /* The same suppression bookkeeping for a flooded ACK. A flooded ACK
+         * addressed to someone else (i.e. NOT consumed by
          * this node) is relayed via handle_ack's flood branch, which queues a
          * jittered rebroadcast keyed on ack.header.packet_id ^ ack.src_addr.
          * The 2nd/3rd... copies land here at the dispatch dedup gate; recompute
@@ -1405,17 +1397,16 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
          * big-endian here to match handle_ack's host-order ack.src_addr. */
         if (header.type == PKT_TYPE_ACK && s_flood_transport &&
             header.dest_addr != s_identity->address && pkt->len >= HEADER_SIZE + 4) {
-            /* Finding (final whole-branch review): as with the DATA flood
-             * above, only an AUTHENTICATED overheard copy may count toward
-             * suppression. handle_ack inserts the s_dedup key at the dispatch
-             * gate BEFORE ack_verify runs, so without this gate a garbage-MAC
-             * duplicate carrying a matching plaintext packet_id + src_addr
-             * would reach this counter and cancel a genuine node's pending ACK
-             * relay. Deserialize and verify the network-key MAC here, mirroring
-             * handle_ack's ack_verify gate, so only genuine copies suppress.
-             * dup_ack.src_addr (host order) equals the big-endian wire read
-             * this block previously did by hand (proven by
-             * test_flood_ack_wire_suppression_key_matches). Costs one
+            /* As with the DATA flood above, only an AUTHENTICATED overheard
+             * copy may count toward suppression. handle_ack inserts the s_dedup
+             * key at the dispatch gate BEFORE ack_verify runs, so without this
+             * gate a garbage-MAC duplicate carrying a matching plaintext
+             * packet_id + src_addr would reach this counter and cancel a
+             * genuine node's pending ACK relay. Deserialize and verify the
+             * network-key MAC here, mirroring handle_ack's ack_verify gate, so
+             * only genuine copies suppress. dup_ack.src_addr (host order)
+             * equals a by-hand big-endian read of the same wire field (proven
+             * by test_flood_ack_wire_suppression_key_matches). Costs one
              * deserialize + HMAC per overheard flooded-ACK duplicate. */
             bramble_ack_t dup_ack;
             if (bramble_ack_deserialize(&dup_ack, pkt->data, pkt->len) == ESP_OK &&
@@ -1431,8 +1422,8 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
             }
         }
 
-        /* Per-node identity Phase 3: the same suppression bookkeeping for a
-         * flooded identity attestation. Copies 2+ of a relayed attestation
+        /* The same suppression bookkeeping for a flooded identity
+         * attestation. Copies 2+ of a relayed attestation
          * land here at the dispatch dedup gate (same packet_id: the frame
          * relays unmodified except hop_limit); count each AUTHENTICATED
          * copy against any pending relay of ours so it cancels after
@@ -1491,13 +1482,13 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
         break;
     case PKT_TYPE_DATA: {
         /* components/routing/forwarding.c: data_rx_decide() owns the
-         * deliver-locally-vs-forward fork (Task 3, ws 1.5) AND, as of wire
-         * v4 (Task 4), the reverse-route-learning decision: every DATA
-         * frame we receive or forward teaches us a route back to its
-         * originator (src_addr) via prev_hop, the verified last radio hop.
-         * That is what leaves a breadcrumb route at every relay on the
-         * forward path, so the destination's ACK/receipt has somewhere to
-         * go home to instead of dying at route_lookup(src_addr) == NULL.
+         * deliver-locally-vs-forward fork AND, on wire v4, the reverse-route-
+         * learning decision: every DATA frame we receive or forward teaches
+         * us a route back to its originator (src_addr) via prev_hop, the
+         * verified last radio hop. That is what leaves a breadcrumb route at
+         * every relay on the forward path, so the destination's ACK/receipt
+         * has somewhere to go home to instead of dying at
+         * route_lookup(src_addr) == NULL.
          *
          * src_addr/prev_hop are read directly off the wire here (both are
          * plaintext outside the AEAD ciphertext; see packet.h). A frame too
@@ -1513,20 +1504,20 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
         memcpy(&data_src_addr, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
         memcpy(&data_prev_hop, pkt->data + BRAMBLE_DATA_PREV_HOP_OFFSET, 4);
 
-        /* Task 4-fix F1 (Critical): authenticate the frame's origin BEFORE
-         * learning any reverse route or forwarding. A relay never decrypts
-         * DATA, so the AEAD tag cannot gate this; the network-key auth_hmac
-         * over the masked header + src_addr is the DATA analogue of
-         * RREP/ACK/RERR's control-plane MAC. A keyless attacker (no network
-         * key) cannot forge it, so it can no longer inject a frame that
-         * poisons every node's route toward a spoofed victim. On failure we
-         * neither learn nor forward nor deliver -- a bad-MAC DATA frame is
-         * treated exactly like any unauthenticated control frame. A
-         * legitimate frame always carries a valid MAC (every originator
-         * signs; all provisioned nodes share the key), so this drops nothing
-         * real. When unprovisioned there is no key, so the verify fails
-         * closed (all-zero sentinel, rejected before compare) and the node is
-         * inert; only a keyed insider can forge (the remaining residual). */
+        /* Authenticate the frame's origin BEFORE learning any reverse route
+         * or forwarding. A relay never decrypts DATA, so the AEAD tag cannot
+         * gate this; the network-key auth_hmac over the masked header +
+         * src_addr is the DATA analogue of RREP/ACK/RERR's control-plane MAC.
+         * A keyless attacker (no network key) cannot forge it, so it cannot
+         * inject a frame that poisons every node's route toward a spoofed
+         * victim. On failure we neither learn nor forward nor deliver -- a
+         * bad-MAC DATA frame is treated exactly like any unauthenticated
+         * control frame. A legitimate frame always carries a valid MAC (every
+         * originator signs; all provisioned nodes share the key), so this
+         * drops nothing real. When unprovisioned there is no key, so the
+         * verify fails closed (all-zero sentinel, rejected before compare)
+         * and the node is inert; only a keyed insider can forge (the
+         * remaining residual). */
         if (!data_auth_verify(&header, data_src_addr, pkt->data + BRAMBLE_DATA_AUTH_HMAC_OFFSET)) {
             ESP_LOGW(TAG, "DATA auth_hmac failed (src=%08" PRIX32 " prev_hop=%08" PRIX32 "), drop",
                      data_src_addr, data_prev_hop);
@@ -1539,8 +1530,8 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
          * authenticated "that peer is alive right now" without leaning on the
          * relay-mutable prev_hop hint (a relayed frame teaches us nothing
          * authenticated about who transmitted it, so it is skipped). Beacon
-         * cadence alone left a peer we were actively talking to reading as
-         * minutes stale, and eventually purged mid-conversation. */
+         * cadence alone would leave a peer we are actively talking to reading
+         * as minutes stale, and eventually purge it mid-conversation. */
         if (data_prev_hop == data_src_addr) {
             mesh_note_peer_heard(data_src_addr, pkt->rssi, pkt->snr);
         }
@@ -1556,7 +1547,7 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
                            header.hop_limit, data_link_metric);
 
         if (data_rx.install_reverse_route) {
-            /* Task 4-fix F2: breadcrumbs install as ROUTE_SRC_BREADCRUMB so
+            /* Breadcrumbs install as ROUTE_SRC_BREADCRUMB so
              * they can never displace an HMAC-gated DISCOVERED route (and a
              * later DISCOVERED route always reclaims this entry). */
             route_install(&s_routes, data_rx.reverse_dest, data_rx.reverse_next_hop,
@@ -1564,13 +1555,12 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
                           ROUTE_SRC_BREADCRUMB, now_ms());
         }
 
-        /* Flooding F1 Task 1: DATA_RX_FORWARD means this is unicast for
-         * someone else. Reactive (s_flood_transport off, default): unchanged
-         * route-lookup forward. Flood (on): route it through handle_data
-         * instead, which now relays it via the shared flood engine
-         * (channel_flood_decide) rather than looking up a route; it never
-         * calls forward_data_packet in flood mode. DATA_RX_DELIVER (dest ==
-         * self or broadcast) is unaffected by the toggle: always handle_data. */
+        /* DATA_RX_FORWARD means this is unicast for someone else. Reactive
+         * (s_flood_transport off, default): route-lookup forward. Flood (on):
+         * route it through handle_data instead, which relays it via the shared
+         * flood engine (channel_flood_decide) rather than looking up a route; it
+         * never calls forward_data_packet in flood mode. DATA_RX_DELIVER (dest
+         * == self or broadcast) is unaffected by the toggle: always handle_data. */
         if (data_rx.action == DATA_RX_FORWARD) {
             if (s_flood_transport) {
                 handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
@@ -1594,7 +1584,7 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
         handle_probe_ack(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         break;
     case PKT_TYPE_IDENTITY_ATTESTATION:
-        /* Phase 3: verify (cheap MAC first) + TOFU-pin + flood relay.
+        /* Verify (cheap MAC first) + TOFU-pin + flood relay.
          * See handle_identity_attestation for the full order contract. */
         handle_identity_attestation(pkt->data, pkt->len);
         break;
@@ -1763,7 +1753,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
         *beacon_interval = beacon_next_interval_ms(base_interval, (uint16_t)(j[0] | (j[1] << 8)));
     }
 
-    /* Periodic identity attestation (Phase 2): low cadence, budget-gated.
+    /* Periodic identity attestation: low cadence, budget-gated.
      * s_attestation_wait_ms stays 0 until the post-boot send hook arms the
      * schedule, so this never fires before the radio-up boot send. */
     if (s_attestation_wait_ms != 0 && (t - s_attestation_last_ms) >= s_attestation_wait_ms) {
@@ -1822,12 +1812,12 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
         }
 
         /* Proactive DH-ratchet rekey: bump long-lived / high-volume DM sessions
-         * to the next epoch on the purge cadence (Task 4 post-compromise
-         * recovery). Cheap table scan, rate-limited per peer. */
+         * to the next epoch on the purge cadence, for post-compromise
+         * recovery. Cheap table scan, rate-limited per peer. */
         maybe_schedule_dm_epoch_rekey(t);
     }
 
-    /* Issue #72: rate-limited, dirty-gated flush of the replay high-water
+    /* Rate-limited, dirty-gated flush of the replay high-water
      * marks to NVS. Self-throttling (see REPLAY_FLUSH_INTERVAL_MS), so
      * calling it on the maintenance cadence costs a dirty-flag check when
      * there is nothing to write, and never touches flash on the RX path. */
@@ -1841,7 +1831,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
     /* Drain due jittered RREQ forwards every loop iteration (10ms cadence) */
     process_rreq_forward_queue(t);
 
-    /* Drain due jittered channel-flood relays (Task 5) every loop iteration */
+    /* Drain due jittered channel-flood relays every loop iteration */
     process_flood_relay_queue(t);
 
     /* Attested roll-call: re-announce rounds, staggered answers, ledger
@@ -1876,12 +1866,12 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                     discovery_remove(&s_pending_disc, pd->dest_addr);
                     i--; /* re-check same index after remove */
                 } else {
-                    /* Fresh query_id per retry (DES-2): nodes that heard an
+                    /* Fresh query_id per retry: nodes that heard an
                      * earlier attempt would eat a same-query retry via the
                      * 30s dedup window. A fresh query is a NEW query, so it
                      * gets a fresh pseudonym; incoming RREPs match because
                      * the pending discovery remembers every attempt's
-                     * query_id. Retries also widen the ring (DES-1). */
+                     * query_id. Retries also widen the ring. */
                     uint32_t retry_query = next_packet_id();
                     discovery_record_attempt(pd, retry_query, t);
                     ESP_LOGI(TAG,
@@ -1942,7 +1932,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                     ESP_LOGI(TAG, "Retransmit pkt %08" PRIX32 " to %08" PRIX32 " (attempt %u/%u)",
                              pa->packet_id, pa->dest_addr, pa->attempt + 1, pa->max_attempts);
 
-                    /* Budget-gated retransmission (DES-6). Deny behavior:
+                    /* Budget-gated retransmission. Deny behavior:
                      * a denied retry burns the attempt deliberately. The
                      * original TX already went out once; retries are pure
                      * redundancy, and burning the attempt bounds failure
@@ -1958,7 +1948,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                                  pa->packet_id, pa->attempt + 1, pa->max_attempts);
                     }
                     pa->attempt++;
-                    /* Exponential backoff with ±25% jitter (F25) */
+                    /* Exponential backoff with ±25% jitter */
                     uint32_t delay = tier_base_delay_ms(pa->tier) << pa->attempt;
                     uint32_t quarter = delay / 4;
                     if (quarter > 0) {
@@ -2105,7 +2095,7 @@ static void mesh_task(void* param) {
     send_beacon();
     last_beacon_ms = now_ms();
 
-    /* Post-boot identity attestation (Phase 2): radio is up and the beacon
+    /* Post-boot identity attestation: radio is up and the beacon
      * jitter already spread us out; announce {addr, X25519, Ed25519} once
      * now, then every ATTESTATION_INTERVAL_MS via periodic maintenance. */
     attempt_identity_attestation(now_ms());
@@ -2121,7 +2111,7 @@ static void mesh_task(void* param) {
 
         /* Check if the radio was flagged for reinit and reconfigure if so. The
          * flag is raised either by a stuck-BUSY hard reset or by a soft request
-         * after repeated CAD timeouts (issue #118), so the message covers both. */
+         * after repeated CAD timeouts, so the message covers both. */
         if (radio_check_and_clear_reinit()) {
             ESP_LOGW(TAG, "Radio reinit (stuck BUSY or repeated CAD timeout), reconfiguring");
         }
@@ -2177,8 +2167,8 @@ uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, size_t pay
     uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD + CHANNEL_MSG_SENT_AT_SIZE];
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
-    /* CHAT messages carry an authenticated sent_at inside the ciphertext
-     * (Task 0.6), so their wire ciphertext is CHANNEL_MSG_SENT_AT_SIZE bytes
+    /* CHAT messages carry an authenticated sent_at inside the ciphertext,
+     * so their wire ciphertext is CHANNEL_MSG_SENT_AT_SIZE bytes
      * longer than other app types; ct_len must account for that or the
      * memcpy/total-size math below truncates the last 4 bytes of a real
      * chat message's ciphertext. sent_at is network time (via timesync,
@@ -2247,10 +2237,10 @@ uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, size_t pay
      * (the first relay's receiver learns a 1-hop route to us via this).
      * Relay-mutable/MAC-excluded; see packet.h. */
     memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
-    /* Wire v4 (F1): network-key MAC over the origin-stable fields (masked
+    /* Wire v4: network-key MAC over the origin-stable fields (masked
      * header + src_addr), so relays can gate reverse-route learning without
      * decrypting. Origin-written, carried through every forward unchanged.
-     * Mandatory-provisioning (Task 2): abort if unprovisioned (INERT node
+     * Provisioning is mandatory: abort if unprovisioned (an INERT node
      * originates no authenticated DATA). */
     if (data_auth_sign(&header, s_identity->address, buf + BRAMBLE_DATA_AUTH_HMAC_OFFSET) != 0) {
         ESP_LOGD(TAG, "unprovisioned: inert, dropping DATA send");
@@ -2267,7 +2257,7 @@ uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, size_t pay
     tx_kind_t kind = (dest_addr == 0xFFFFFFFF) ? TX_KIND_DATA_BROADCAST : TX_KIND_DATA;
     int ret = mesh_tx(buf, (uint8_t)total, kind);
     if (ret == TX_GATE_OK) {
-        /* Register for ACK tracking (unicast only). Task 6 (GAP B): tier is
+        /* Register for ACK tracking (unicast only). Tier is
          * decided by msg_tier_for_send, the single source of truth for
          * this -- key exchange (APP_TYPE_KE, the handshake TRANSPORT) must
          * retry at MSG_TIER_CRITICAL (8 attempts), not the MSG_TIER_NORMAL
@@ -2288,7 +2278,7 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
         ESP_LOGE(TAG, "No channels initialized");
         return -1;
     }
-    /* F24: Validate s_channels[0] is actually the public channel */
+    /* Validate s_channels[0] is actually the public channel */
     if (s_channels[0].channel_id != 0) {
         ESP_LOGE(TAG, "mesh_send_broadcast: s_channels[0] is not the public channel (id=%u)",
                  (unsigned)s_channels[0].channel_id);
@@ -2398,7 +2388,7 @@ static uint32_t mesh_send_channel_uid(int channel_idx, uint32_t dest_addr, const
      * channel or an explicit channel picked by rpc_methods.c) converges
      * here before any bytes are encrypted. Broadcasts (dest_addr ==
      * 0xFFFFFFFF) have no peer to hold a session with and always fall
-     * through to the channel-key path below unchanged. */
+     * through to the channel-key path below. */
     if (dest_addr != 0xFFFFFFFFu) {
         return mesh_send_dm(channel_idx, dest_addr, data, len, uid);
     }
@@ -2571,7 +2561,7 @@ static uint32_t mesh_send_message_uid(uint32_t dest_addr, const uint8_t* data, s
         return 0;
     }
 
-    /* Flooding F1 Task 3: send-side flood origination. Under s_flood_transport
+    /* Send-side flood origination. Under s_flood_transport
      * there is NO route discovery: a unicast message FLOODS immediately, like a
      * broadcast. Gate the whole reactive neighbor/route + RREQ/queue block on
      * the toggle so that under flood we fall straight through to
@@ -2579,18 +2569,18 @@ static uint32_t mesh_send_message_uid(uint32_t dest_addr, const uint8_t* data, s
      * ROUTE_HOP_LIMIT_MAX, the flood hop budget that broadcast floods already
      * originate at; network-key auth-signed, AEAD-encrypted under the DM
      * session key for D) and hands it to mesh_tx as one budget-gated
-     * transmission. Every relay then floods it (Task 1); D's flooded ACK
-     * (Task 2) confirms it. send_data_packet/send_dm_packet register the
+     * transmission. Every relay then floods it; D's flooded ACK
+     * confirms it. send_data_packet/send_dm_packet register the
      * pending-confirmation whose pending_ack_tick retry re-transmits the SAME
      * stored broadcast frame (same packet_id) on no-ACK, which IS a re-flood
      * (mesh_tx never route-looks-up: relays flood it, and the destination's
-     * Phase 1 s_delivered_dedup re-ACK-on-duplicate gives another confirmation
+     * s_delivered_dedup re-ACK-on-duplicate gives another confirmation
      * chance), bounded by the tier max retries then FAILED. If no DM session to
      * D exists yet, mesh_send_dm still kicks off the KE handshake, whose
      * APP_TYPE_KE envelope rides this same DATA flood path (send_ke_envelope ->
      * send_data_packet), so key establishment floods too and stays CRITICAL
-     * tier. Toggle OFF (default): the reactive discovery+queue path is exactly
-     * as before this task. */
+     * tier. Toggle OFF (default): the reactive discovery+queue path below
+     * runs instead. */
     /* For non-neighbor destinations, check route table */
     neighbor_entry_t* nb = s_flood_transport ? NULL : neighbor_lookup(&s_neighbors, dest_addr);
     if (!s_flood_transport && !nb) {
@@ -2696,19 +2686,16 @@ bool mesh_cancel_parked_message(uint32_t uid) {
  *     so the queue cannot see it. mesh_flush_parked_for asks the pending-ack
  *     table instead, through pending_ack_is_active, and skips the row.
  *
- * Neither covers the other's case, and the second is the one that matters now
- * that a parked row stays QUEUED through its own transmit. Both are properties
- * of state the sender already keeps, so they hold for every caller, however
- * often and from wherever they ask.
+ * Neither covers the other's case, and the second is the one that matters
+ * because a parked row stays QUEUED through its own transmit. Both are
+ * properties of state the sender already keeps, so they hold for every caller,
+ * however often and from wherever they ask.
  *
- * It used to be a timing coincidence instead: the retry cooldown happened to
- * outlast both queue TTLs, so a second attempt could not land while the first
- * was still queued. That was true but fragile, since it silently depended on
- * every path into a flush respecting the cooldown, and two do not (a fresh
- * park re-arms a peer immediately, and the rejoin edge fires unconditionally).
- * With both mechanisms above in place the cooldown is free to be what it reads
- * as: an airtime knob, tunable on its own merits without a correctness argument
- * hanging off the number. */
+ * The retry cooldown is NOT part of this guarantee, however much its value
+ * looks like it could be: two paths into a flush do not respect it at all (a
+ * fresh park re-arms a peer immediately, and the rejoin edge fires
+ * unconditionally). It is an airtime knob, tunable on its own merits, with no
+ * correctness argument hanging off the number. */
 
 int mesh_flush_parked_for(uint32_t peer_addr) {
     /* static: mesh_flush_parked_for runs only on the mesh task, never
@@ -2891,14 +2878,14 @@ void mesh_task_start(bramble_identity_t* identity) {
     dedup_init(&s_delivered_dedup);
     replay_table_init(&s_replay);
     replay_table_init(&s_control_replay);
-    /* Issue #72: restore the persisted per-sender high-water marks so a
+    /* Restore the persisted per-sender high-water marks so a
      * reboot (notably an OTA reboot) does not reopen the replay window. */
     mesh_replay_store_load();
     identity_store_init(&s_identity_pins, now_ms());
-    /* Trust-anchor campaign (P2): if the fleet anchor was provisioned (loaded
+    /* If the fleet anchor was provisioned (loaded
      * from NVS in main.c before this task starts), mark the pin store ANCHORED
      * so it pins ONLY anchor-endorsed identities. Absent = not anchored = the
-     * default TOFU behavior, untouched. setAnchor at runtime refreshes this via
+     * default TOFU behavior. setAnchor at runtime refreshes this via
      * mesh_set_pin_anchor without a reboot. */
     if (identity_anchor_is_set()) {
         uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE];
@@ -2906,7 +2893,7 @@ void mesh_task_start(bramble_identity_t* identity) {
             identity_store_set_anchor(&s_identity_pins, anchor_pub);
         }
     }
-    /* Restore the persisted verified TOFU pin table (DM forward-secrecy + SAS)
+    /* Restore the persisted verified TOFU pin table
      * AFTER the anchor is provisioned above: identity_store_deserialize rebuilds
      * the pin bindings + verified bits while preserving the anchor, so a
      * "verified once, stays verified" model survives reboot. Must follow
@@ -2922,7 +2909,7 @@ void mesh_task_start(bramble_identity_t* identity) {
     pending_ack_init(&s_pending_acks);
     {
         /* One TX path: the gate owns the airtime budget and applies the
-         * regulatory duty-cycle cap from the frequency plan (DES-8). */
+         * regulatory duty-cycle cap from the frequency plan. */
         const bramble_freq_plan_t* plan = freq_plan_get_default();
         tx_gate_global_init(plan->max_duty_cycle_pct, plan->duty_cycle_enforced);
     }
@@ -2936,9 +2923,9 @@ void mesh_task_start(bramble_identity_t* identity) {
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(s_rreq_fwd_queue, 0, sizeof(s_rreq_fwd_queue)); /* Init jittered RREQ forward queue */
     memset(s_flood_relay_queue, 0,
-           sizeof(s_flood_relay_queue)); /* Init jittered channel-flood relay queue (Task 5) */
+           sizeof(s_flood_relay_queue)); /* Init jittered channel-flood relay queue */
     s_flood_relay_drops = 0;
-    probe_ingress_init(&s_probe_ingress, now_ms()); /* PROBE ingress buckets (issue #75) */
+    probe_ingress_init(&s_probe_ingress, now_ms()); /* PROBE ingress buckets */
     memset(&s_shared, 0, sizeof(s_shared));
     tx_gate_snapshot(&s_shared.airtime);
 
@@ -2950,7 +2937,7 @@ void mesh_task_start(bramble_identity_t* identity) {
     s_channel_has_psk[0] = false;
     ESP_LOGI(TAG, "Public channel initialized (%d channels)", s_num_channels);
 
-    /* Load additional channels from NVS using channel_storage (Phase 1) */
+    /* Load additional channels from NVS using channel_storage */
     {
         bramble_channel_t loaded_channels[MAX_CHANNELS];
         char loaded_names[MAX_CHANNELS][20];
@@ -3024,7 +3011,7 @@ void mesh_task_start(bramble_identity_t* identity) {
                  MAILBOX_MAX_ENTRIES, MAILBOX_MAX_PER_DEST, MAILBOX_MAX_PER_SOURCE);
     }
 
-    /* Flooding F1 Task 1: load the flood-transport toggle from NVS. */
+    /* Load the flood-transport toggle from NVS. */
     {
         nvs_handle_t fl_nvs;
         if (nvs_open(NVS_NS_FLOOD, NVS_READONLY, &fl_nvs) == ESP_OK) {
@@ -3034,7 +3021,7 @@ void mesh_task_start(bramble_identity_t* identity) {
                 ESP_LOGI(TAG, "Flood transport: %s (from NVS)",
                          s_flood_transport ? "enabled" : "disabled");
             }
-            /* Flooding F1 finalize: operator-settable flood hop budget. Clamp
+            /* Operator-settable flood hop budget. Clamp
              * on load so a stale/out-of-range NVS value can never originate an
              * invalid hop_limit. */
             uint8_t hop_limit = 0;
@@ -3323,15 +3310,15 @@ bool mesh_set_peer_verified(uint32_t addr, bool verified) {
     return true;
 }
 
-/* Trust-anchor campaign (P2): refresh the live pin store's anchor after a
- * runtime setAnchor, so provisioning an anchor takes effect on the pin gate
- * without a reboot. Called from the RPC path (rpc_set_anchor). The pin store
- * is otherwise mutated only on the mesh task; a setAnchor write here races an
- * in-flight attestation read benignly (has_anchor only ever goes false->true,
- * and the 32-byte key copy resolves within one attestation cadence), matching
- * the lock-free convention mesh_trigger_attestation already uses cross-thread.
- * The boot path (mesh_task_start) also loads the anchor, so a reboot is never
- * required for correctness; this just avoids waiting for one. */
+/* Refresh the live pin store's anchor after a runtime setAnchor, so
+ * provisioning an anchor takes effect on the pin gate without a reboot. Called
+ * from the RPC path (rpc_set_anchor). The pin store is otherwise mutated only
+ * on the mesh task; a setAnchor write here races an in-flight attestation read
+ * benignly (has_anchor only ever goes false->true, and the 32-byte key copy
+ * resolves within one attestation cadence), matching the lock-free convention
+ * mesh_trigger_attestation already uses cross-thread. The boot path
+ * (mesh_task_start) also loads the anchor, so a reboot is never required for
+ * correctness; this just avoids waiting for one. */
 void mesh_set_pin_anchor(const uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE]) {
     identity_store_set_anchor(&s_identity_pins, anchor_pub);
 }
@@ -3376,7 +3363,7 @@ traffic_debug_t* mesh_get_traffic_debug(void) { return &s_traffic_debug; }
 
 void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_rx,
                                    uint8_t sample_rate) {
-    /* F26: Update in-memory state under mutex, then do NVS I/O outside */
+    /* Update in-memory state under mutex, then do NVS I/O outside */
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     traffic_debug_enable(&s_traffic_debug, enabled);
     xSemaphoreGive(s_state_mutex);
@@ -3397,7 +3384,7 @@ void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_r
 
 void mesh_traffic_debug_get_config(bool* enabled, bool* include_tx, bool* include_rx,
                                    uint8_t* sample_rate) {
-    /* F26: Read in-memory state under mutex, then do NVS I/O outside */
+    /* Read in-memory state under mutex, then do NVS I/O outside */
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     if (enabled)
         *enabled = traffic_debug_is_enabled(&s_traffic_debug);

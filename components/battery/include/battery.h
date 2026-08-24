@@ -37,12 +37,12 @@ uint8_t battery_read_pct(void);
 /* ── Charging-aware status ────────────────────────────────────────────────
  *
  * The plugged-in T-Deck reads a dead-flat ~4798 mV: that is the charge
- * rail, not the cell, so the old pct-only API clamped to 100% while
- * plugged in and then cliffed to the true resting voltage the moment it
- * was unplugged. battery_get_status() is the fix: it separates "how
- * charged is the cell" from "is a charger driving the rail right now" so
- * callers (beacons, RPC, displays) can stop showing a percentage that a
- * charger has made meaningless.
+ * rail, not the cell, so a percentage derived from voltage alone pins to
+ * 100% while plugged in and then cliffs to the true resting voltage the
+ * moment it is unplugged. battery_get_status() separates "how charged is
+ * the cell" from "is a charger driving the rail right now" so callers
+ * (beacons, RPC, displays) never show a percentage that a charger has made
+ * meaningless.
  */
 
 typedef enum {
@@ -86,8 +86,8 @@ bool battery_reading_available(const battery_status_t* status);
 void battery_get_status(battery_status_t* out);
 
 /* Number of raw samples averaged into battery_status_t.mv on the ESP and
- * SAADC ADC paths. A plain mean, not a median: bench Task 1's 30-minute
- * trace showed a steady-state reading within +/-4 mV with no outlier
+ * SAADC ADC paths. A plain mean, not a median: a 30-minute bench trace
+ * measures a steady-state reading within +/-4 mV with no outlier
  * spikes, so there is nothing for a median to reject. Named so a future
  * board whose ADC noise profile actually needs one touches this constant
  * (and battery_average_mv's implementation), not call sites. */
@@ -97,14 +97,14 @@ void battery_get_status(battery_status_t* out);
  * Pure averaging helper shared by every target that samples multiple raw
  * readings (the ESP and SAADC ADC paths). Averages only the entries whose
  * matching valid[i] is true, so one failed conversion cannot drag a
- * healthy reading toward a false low-battery value the way including it
- * as a fabricated 0 mV sample would: with BATTERY_AVG_SAMPLE_COUNT == 8, a
+ * healthy reading toward a false low-battery value the way including it as
+ * a fabricated 0 mV sample would: with BATTERY_AVG_SAMPLE_COUNT == 8, a
  * single such zero pulls a real 4010 mV average down to 3509 mV, a false
  * drop from 83% to 30% that lands on the wire via the beacon and bypasses
  * battery_display_pct_ema's danger floor (which only ever sees the
  * already-corrupted average). valid may be NULL, meaning every sample is
- * treated as valid (the historical unconditional-mean behavior). Returns 0 when
- * count == 0, samples is NULL, or no sample is valid: this is exactly what
+ * treated as valid (a plain unconditional mean). Returns 0 when count ==
+ * 0, samples is NULL, or no sample is valid: this is exactly what
  * battery_status_t.mv's "0 = unavailable" means, a real signal that no
  * reading could be trusted, not a coincidental low value. No side effects,
  * no hardware access: host-testable in isolation.
@@ -141,9 +141,8 @@ battery_charging_t battery_charging_from_gpio(int chrg_gpio, int chrg_active_lev
  * (4542 mV) on the board it was actually measured against.
  *
  * The margin is deliberately asymmetric, wider toward avoiding false
- * positives than false negatives: a false negative here just leaves the
- * status quo (charging stays UNKNOWN, the existing behavior before this
- * inference existed), which costs nothing new. A false positive asserts
+ * positives than false negatives: a false negative here just leaves
+ * charging at UNKNOWN, which costs nothing. A false positive asserts
  * charging==YES, an untruth the beacon, display, and RPC surfaces all
  * treat as ground truth. Getting that wrong is strictly worse than
  * getting nothing.
@@ -192,30 +191,29 @@ uint8_t battery_beacon_pct(battery_charging_t charging, uint8_t pct, bool have_r
 
 /*
  * Display-smoothing tunables (charging == NO or UNKNOWN path only), chosen
- * and final from bench Task 1's measured unplug trace: the T-Deck's
- * charge-rail clamp (~4798 mV, 100%) drops to the true resting-cell
- * reading (~4010 mV, 83%) in a single ADC sample, an artifact step of
- * roughly 17 percentage points at the moment of unplug, not a gradual
- * discharge. EMA_NUM/DEN of 1/4 with a 5-point STEP_LIMIT walks that step
- * down in about 10 calls (~20s at the T-Deck LVGL status bar's 2s render
- * cadence): fast enough that a user watching the screen sees a deliberate
- * settle rather than a stuck reading, slow enough to read as smoothing
- * rather than a second jump. The EMA's job is masking this one-time rail
- * artifact, not tracking the subsequent steady-state wobble (bench-measured
- * at +/-4 mV, itself under a percentage point). Task 8 verifies this
- * against real hardware; it is not expected to change these constants.
+ * from a bench-measured unplug trace: the T-Deck's charge-rail clamp (~4798
+ * mV, 100%) drops to the true resting-cell reading (~4010 mV, 83%) in a
+ * single ADC sample, an artifact step of roughly 17 percentage points at
+ * the moment of unplug, not a gradual discharge. EMA_NUM/DEN of 1/4 with a
+ * 5-point STEP_LIMIT walks that step down in about 10 calls (~20s at the
+ * T-Deck LVGL status bar's 2s render cadence): fast enough that a user
+ * watching the screen sees a deliberate settle rather than a stuck reading,
+ * slow enough to read as smoothing rather than a second jump. The EMA's job
+ * is masking this one-time rail artifact, not tracking the subsequent
+ * steady-state wobble (bench-measured at +/-4 mV, itself under a percentage
+ * point).
  *
  * On a board where battery_infer_charging actually fires (the T-Deck
- * included), the cliff described above never reaches this smoothing at
- * all: while plugged, charging == YES takes the display's charge-indicator
+ * included), the cliff described above never reaches this smoothing at all:
+ * while plugged, charging == YES takes the display's charge-indicator
  * branch instead of the percentage path, so battery_display_pct is not
- * called during that whole period and its state goes stale; the first
- * call after unplugging sees a gap well past
- * BATTERY_DISPLAY_SNAP_INTERVAL_MS and snaps straight to the real resting
- * value instead of walking down from one. What remains for the EMA to do
- * on such a board is exactly the "subsequent steady-state wobble" case
- * above: smoothing normal percentage-path jitter and settle drift once
- * charging is UNKNOWN or NO, not the unplug cliff itself.
+ * called during that whole period and its state goes stale; the first call
+ * after unplugging sees a gap well past BATTERY_DISPLAY_SNAP_INTERVAL_MS
+ * and snaps straight to the real resting value instead of walking down from
+ * one. What remains for the EMA to do on such a board is exactly the
+ * "subsequent steady-state wobble" case above: smoothing normal
+ * percentage-path jitter and settle drift once charging is UNKNOWN or NO,
+ * not the unplug cliff itself.
  */
 #define BATTERY_DISPLAY_EMA_NUM 1    /* new-sample weight numerator */
 #define BATTERY_DISPLAY_EMA_DEN 4    /* new-sample weight denominator */

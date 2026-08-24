@@ -142,9 +142,9 @@ static bool s_cad_done;
 static bool s_cad_busy;
 static bool s_cad_async; /* an async radio_cad() is awaiting its cadres */
 
-/* CAD-timeout fail-open/closed policy (issue #118), mirroring radio_esp.c so
- * the emulator exercises the same decision. The counter is only touched on the
- * transmitting task, so it needs no lock; the reinit flag is set there and
+/* CAD-timeout fail-open/closed policy, mirroring radio_esp.c so the emulator
+ * exercises the same decision. The counter is only touched on the transmitting
+ * task, so it needs no lock; the reinit flag is set there and
  * read/cleared by radio_check_and_clear_reinit() on the mesh task, so it is
  * atomic. */
 static cad_timeout_policy_t s_cad_timeout_policy;
@@ -651,8 +651,8 @@ bool radio_cad_check(void) {
     radio_start_rx();
 
     if (!done) {
-        /* Fail-open/closed policy (issue #118), identical to radio_esp.c: the
-         * first BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD-1 consecutive timeouts
+        /* Fail-open/closed policy, identical to radio_esp.c: the first
+         * BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD-1 consecutive timeouts
          * fail open (transmit anyway) so a briefly silent broker never starves
          * TX; the threshold-th fails closed (report busy) and flags a reinit. */
         cad_timeout_action_t action = cad_timeout_policy_on_timeout(&s_cad_timeout_policy);
@@ -700,8 +700,8 @@ void radio_set_tx_done_callback(radio_tx_done_callback_t cb) { s_tx_done_cb = cb
 void radio_sleep(void) { atomic_store(&s_state, RADIO_STATE_SLEEP); }
 
 bool radio_check_and_clear_reinit(void) {
-    /* Honor the CAD-timeout fail-closed path (issue #118): if a run of CAD
-     * timeouts flagged the radio as wedged, report it once so the mesh loop
+    /* Honor the CAD-timeout fail-closed path: if a run of CAD timeouts flagged
+     * the radio as wedged, report it once so the mesh loop
      * runs radio_reconfigure, and clear the flag. Normal emulator runs never
      * set it, since the broker answers every CAD.
      *
@@ -709,7 +709,7 @@ bool radio_check_and_clear_reinit(void) {
      * That policy exists because a hardware recovery can fail and must then be
      * retried rather than dropped; there is no chip to bring up here, nothing
      * to fail, and so nothing to owe a retry. Clearing unconditionally is
-     * correct for this backend, not an older shape left behind. */
+     * correct for this backend. */
     return atomic_exchange(&s_needs_reinit, false);
 }
 

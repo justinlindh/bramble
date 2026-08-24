@@ -149,7 +149,7 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
     }
 
     /* Never transmit on a cleartext link, not even an auth error reply: a
-     * client that subscribed without pairing gets silence (issue #73). */
+     * client that subscribed without pairing gets silence. */
     if (!ble_link_payload_permitted(conn_is_encrypted(s_conn_handle))) {
         ESP_LOGW(TAG, "Suppressing notify on unencrypted link (conn=%d)", s_conn_handle);
         return;
@@ -331,8 +331,8 @@ static int nus_tx_access(uint16_t conn_handle, uint16_t attr_handle,
     /* The BLE_GATT_CHR_F_WRITE_ENC flags below already make the ATT server
      * reject unencrypted writes with "insufficient authentication". This is
      * the second, independent check: the auth token arrives on this
-     * characteristic, so a permission regression must not be able to leak it
-     * silently (issue #73). */
+     * characteristic, so a permission mistake must not be able to leak it
+     * silently. */
     if (!ble_link_payload_permitted(conn_is_encrypted(conn_handle))) {
         ESP_LOGW(TAG, "Rejecting BLE write on unencrypted link (conn=%d)", conn_handle);
         return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
@@ -376,7 +376,7 @@ static const struct ble_gatt_svc_def s_gatt_svcs[] = {
                     .access_cb = nus_tx_access,
                     /* _ENC: writes require an encrypted link. The RPC auth
                      * token is the first write on this characteristic, so
-                     * cleartext is not an option (issue #73). */
+                     * cleartext is not an option. */
                     .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP |
                              BLE_GATT_CHR_F_WRITE_ENC,
                 },
@@ -421,16 +421,14 @@ static int random_passkey(uint32_t* out) {
     return -1;
 }
 
-/* Advertising restart retry. start_advertising used to be fire-and-forget:
- * called once per disconnect, and if the host returned any transient error
- * (busy during a host reset, EPREEMPTED, momentary pool pressure) the
- * failure was logged and the device simply never advertised again while the
- * mesh kept running. On a consoleless board that is indistinguishable from
- * a dead node, and it is reachable in practice: a client that drops the
- * link mid-pairing can race the restart against SMP teardown. Reproduced on
- * the bench (T1000-E, killed bleak sessions) and seen once on the dev kit
- * after 11.7h. Any failed start now arms a one-shot retry timer; the timer
- * re-arms until advertising is up or a connection exists. */
+/* Advertising restart retry. start_advertising runs once per disconnect, and
+ * a transient host error (busy during a host reset, EPREEMPTED, momentary
+ * pool pressure) would otherwise leave the device logging the failure and
+ * never advertising again while the mesh keeps running. On a consoleless
+ * board that is indistinguishable from a dead node, and it is reachable in
+ * practice: a client that drops the link mid-pairing can race the restart
+ * against SMP teardown. Any failed start arms a one-shot retry timer; the
+ * timer re-arms until advertising is up or a connection exists. */
 #define BLE_ADV_RETRY_MS 1000
 
 static TimerHandle_t s_adv_retry_timer;
@@ -444,8 +442,8 @@ static void adv_retry_cb(TimerHandle_t t) {
 
 static void schedule_adv_retry(void) {
     /* Created once in ble_server_init, so no lazy-create race between the
-     * host task and the timer task; NULL only if creation failed at init,
-     * in which case the old fire-and-forget behavior is what remains. */
+     * host task and the timer task; NULL only if creation failed at init, in
+     * which case a failed advertising start is logged and never retried. */
     if (s_adv_retry_timer != NULL) {
         xTimerChangePeriod(s_adv_retry_timer, pdMS_TO_TICKS(BLE_ADV_RETRY_MS), 0);
     }
@@ -829,14 +827,14 @@ int ble_server_init(void) {
     ble_hs_cfg.sync_cb = on_sync;
 
     /*
-     * Security manager (issue #73).
+     * Security manager.
      *
      * sm_sc=1 selects LE Secure Connections: pairing is an ECDH P-256 key
      * agreement, so a passive observer that records the entire pairing
      * exchange still cannot derive the LTK. CONFIG_BT_NIMBLE_SM_LEGACY=n in
      * the board defaults compiles legacy pairing out, because legacy Just
      * Works is trivially recoverable from a sniffed exchange and a
-     * downgrade to it would silently undo this whole change.
+     * downgrade to it would silently undo the guarantee above.
      *
      * sm_io_cap and sm_mitm are set per board by apply_pairing_policy, which
      * maps ble_pairing_mode_resolve's three modes (ble_pairing_policy.h)

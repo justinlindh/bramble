@@ -198,11 +198,9 @@ static void splash_timer_cb(lv_timer_t* timer) {
      * not here.
      *
      * There is no global tab-content tick: screens that need live data own
-     * their own timer (scr_nodes, scr_node_detail, scr_map, scr_traffic). An
-     * earlier global one called layout_set_tab() every 5 s and destroyed
-     * scroll position and drill-down views, and what replaced it was an empty
-     * callback that only survived in the docs as a refresh mechanism that did
-     * not exist. */
+     * their own timer (scr_nodes, scr_node_detail, scr_map, scr_traffic). A
+     * global tick calling layout_set_tab() would destroy scroll position and
+     * drill-down views on every fire. */
     lv_timer_create(status_refresh_timer_cb, 2000, NULL); /* Status bar: 2s */
 
     /* Initialize sleep manager for automatic display power saving */

@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 /*
- * BLE link-layer security gate (issue #73).
+ * BLE link-layer security gate.
  *
  * The first pre-auth write on the NUS TX characteristic is the bare RPC auth
  * token, and every subsequent write is a JSON-RPC request against the full

@@ -1,10 +1,10 @@
 /**
- * mesh_internal.h: internal shared surface for the mesh_task translation-unit
- * split (issue #86).
+ * mesh_internal.h: internal shared surface across the mesh_task translation
+ * units.
  *
  * mesh_task.c owns the shared protocol state and the orchestration core (the
  * RX dispatch, the main task loop, init, and the send/TX API). The
- * per-responsibility modules split out of the former monolith:
+ * per-responsibility modules around it:
  *
  *   mesh_beacon.c       beacons, identity attestation, adaptive beacon policy
  *   mesh_reliability.c  ACKs, delivery receipts, delivery-event ring, telemetry
@@ -21,7 +21,7 @@
  * These modules include this header to reach the shared state and each other's
  * cross-module entry points. This is deliberately the ONE place visibility is
  * widened: anything not declared here stays static to its own translation
- * unit. This is a pure code-motion split, no behavior change.
+ * unit.
  */
 #ifndef MESH_INTERNAL_H
 #define MESH_INTERNAL_H

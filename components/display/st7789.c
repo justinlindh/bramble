@@ -29,7 +29,7 @@ static uint16_t* fb = NULL; /* Allocated in PSRAM */
 /* SPI device handle */
 static spi_device_handle_t spi;
 static bool initialized = false;
-static bool s_rotated_180 = false; /* API compatibility; no behavior change in Task 1 */
+static bool s_rotated_180 = false; /* recorded only; panel orientation is fixed at init */
 /* Power: the ST7789 backlight LEDs are one of the largest awake-state draws
  * on battery boards (tens of mA at full duty). 200/255 (~78% duty) is barely
  * dimmer to the eye but shaves a proportional slice of that current, so it is
@@ -549,7 +549,8 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t* buf) {
 }
 
 void display_set_rotated_180(bool rotated) {
-    /* Task 1 compatibility shim: track state only, no ST7789 behavior change. */
+    /* Records the flag only: this panel's orientation is fixed by the MADCTL written at
+     * init, so nothing on the glass rotates. */
     s_rotated_180 = rotated;
 }
 

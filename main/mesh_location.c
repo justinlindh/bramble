@@ -1,8 +1,10 @@
 /**
- * mesh_location.c: Location share TX/RX, peer-location persistence, and the policy tick.
+ * mesh_location.c: Location share TX/RX, peer-location persistence, and the policy
+ * tick.
  *
- * Split out of mesh_task.c (issue #86); pure code motion, no behavior change.
- * Shared state and cross-module entry points come from mesh_internal.h.
+ * Owns the share policy and its target set, directed and channel-keyed location TX,
+ * LOCATION RX decode, and self-position resolution. Shared state and cross-module entry
+ * points come from mesh_internal.h.
  */
 #include "mesh_internal.h"
 
@@ -283,8 +285,8 @@ static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, u
      * downgrading to a weaker key is never the answer.
      *
      * The POSITION is deliberately not queued to await that handshake the way
-     * DM chat does (Task 1.4). Location is real-time presence (RFC M6, never
-     * mailbox-deferred), and the receive path already refuses a late one: it
+     * DM chat does. Location is real-time presence, never mailbox-deferred,
+     * and the receive path already refuses a late one: it
      * drops REPLAY_REJECT_DUP and REPLAY_BELOW_WINDOW identically rather than
      * accepting out of order. Delivering the coordinate captured at handshake
      * time would present a stale fix as current. The next due tick sends a
@@ -306,7 +308,7 @@ static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, u
      * ahead of the ciphertext, so the framed output is DM_RATCHET_HEADER_SIZE
      * bytes longer than the plaintext. Pad the plaintext out to L_LOC_INNER +
      * CHANNEL_MSG_OVERHEAD so every tier lands on one fixed session-path size
-     * (M11 tier-hiding); the directed vs channel path is already
+     * (tier-hiding); the directed vs channel path is already
      * distinguishable from the cleartext FLAG_CHANNEL bit, so the 3-byte
      * ratchet header is not new metadata. */
     uint8_t session_inner[L_LOC_INNER + CHANNEL_MSG_OVERHEAD] = {0};
@@ -327,7 +329,7 @@ static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, u
                                                  sizeof(session_inner), nonce, ciphertext, tag,
                                                  &framed_len);
             if (enc_ret == 0)
-                sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
+                sess->last_active_ms = now_ms(); /* real activity, not eviction bait */
         }
     }
     DM_MUTEX_GIVE();
@@ -351,10 +353,10 @@ static uint32_t location_tx_directed(uint32_t dest_addr, const uint8_t* inner, u
     /* Wire v4: originator writes its own address as prev_hop, same as
      * send_data_packet/send_dm_packet. */
     memcpy(pkt + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
-    /* Wire v4 (F1): origin-authenticate; see send_data_packet. LOCATION
-     * shares the envelope so it carries the field, though it is never
-     * relayed today (handle_location delivers dest==self/broadcast only).
-     * Mandatory-provisioning (Task 2): abort if unprovisioned. */
+    /* Wire v4: origin-authenticate; see send_data_packet. LOCATION shares the
+     * envelope so it carries the field, though it is never relayed
+     * (handle_location delivers dest==self/broadcast only). An unprovisioned
+     * node has no key to sign with, so the send aborts. */
     if (data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET) != 0) {
         ESP_LOGD(TAG, "unprovisioned: inert, dropping location (session) send");
         return 0;
@@ -447,8 +449,8 @@ static uint32_t location_tx_channel(int channel_idx, const uint8_t* inner, uint8
     memcpy(pkt + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
     /* Wire v4: originator writes its own address as prev_hop. */
     memcpy(pkt + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
-    /* Wire v4 (F1): origin-authenticate; see send_data_packet. Mandatory-
-     * provisioning (Task 2): abort if unprovisioned. */
+    /* Wire v4: origin-authenticate; see send_data_packet. An unprovisioned node
+     * has no key to sign with, so the send aborts. */
     if (data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET) != 0) {
         ESP_LOGD(TAG, "unprovisioned: inert, dropping location (channel) send");
         return 0;
@@ -657,8 +659,8 @@ static void mesh_send_location_updates(uint32_t t, const location_policy_t* poli
 }
 
 /*
- * SEC-C1 RX channel-path glue (Task 2.2): trial-decrypts against the known
- * channels, then hands the resulting plaintext to location_parse_inner
+ * SEC-C1 RX channel-path glue: trial-decrypts against the known channels,
+ * then hands the resulting plaintext to location_parse_inner
  * (decrypt-mechanism-agnostic tier + position parsing, exported by the
  * location component; see its own comment for why it stays dependency-free
  * rather than owning this glue itself). This function is intentionally
@@ -681,13 +683,11 @@ static int location_rx_decode_channel(const uint8_t* nonce, const uint8_t* ciphe
 }
 
 void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
-    /* SEC-C1 RX (Task 2.2): location packet layout matches DATA's wire v4
-     * envelope: header(12) + src_addr(4) + prev_hop(4) + nonce(12) +
-     * ciphertext(N) + tag(16). LOCATION is never forwarded today (no relay
-     * path exists for it), so prev_hop is written by the originator only
-     * and not consulted for reverse-route learning here; see
-     * task-4-report.md for why that is in scope but deliberately not
-     * turned on. */
+    /* SEC-C1 RX: location packet layout matches DATA's wire v4 envelope:
+     * header(12) + src_addr(4) + prev_hop(4) + nonce(12) + ciphertext(N) +
+     * tag(16). LOCATION is never forwarded (no relay path exists for it), so
+     * prev_hop is written by the originator only and is not consulted for
+     * reverse-route learning here. */
     if (len < BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
         ESP_LOGW(TAG, "Location packet too short: %u", len);
         return;
@@ -705,7 +705,7 @@ void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr)
     }
 
     /* Origin-authenticate before the position is believed, the same
-     * network-key check handle_data applies (Task 4-fix F1). Every originator
+     * network-key check handle_data applies. Every originator
      * signs a LOCATION frame (both branches of the send path call
      * data_auth_sign), so this drops nothing legitimate. It matters most on
      * the channel path: BRAMBLE_PUBLIC_CHANNEL_PSK is public, so the AEAD tag
@@ -748,7 +748,7 @@ void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr)
         xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
         dm_session_t* sess = dm_lookup(s_dm_table, src_addr);
         if (sess && sess->state == DM_STATE_ACTIVE) {
-            /* Canonical session-path size (Task 2.1, M11): the encoder always
+            /* Canonical session-path size: the encoder always
              * pads the plaintext to exactly L_LOC_INNER + CHANNEL_MSG_OVERHEAD
              * bytes; the ratchet then prepends its DM_RATCHET_HEADER_SIZE
              * cleartext header, so the on-wire ciphertext is exactly that much
@@ -763,7 +763,7 @@ void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr)
                                            plaintext, &loc_pt_len) == DM_DECRYPT_OK &&
                 loc_pt_len == sizeof(plaintext)) {
                 ok = location_parse_inner(plaintext, sizeof(plaintext), &tier, &pos);
-                sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
+                sess->last_active_ms = now_ms(); /* real activity, not eviction bait */
             }
         }
         DM_MUTEX_GIVE();
@@ -774,14 +774,14 @@ void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr)
         return;
     }
 
-    /* SEC-M1/M6: the SAME node-global replay window DATA uses (Task 0.5):
-     * one nonce counter and one replay window per sender, shared across
+    /* SEC-M1/M6: the SAME node-global replay window DATA uses: one nonce
+     * counter and one replay window per sender, shared across
      * every packet type that sender's node encrypts, since a counter is
      * only ever used once regardless of what it authenticates. Never
-     * consults the deferred cache (that is chat-only, Task 0.6): location
+     * consults the deferred cache (that is chat-only): location
      * is real-time presence, so both REPLAY_REJECT_DUP and
      * REPLAY_BELOW_WINDOW are dropped identically, never accepted late.
-     * Fix 2 (red-team panel): skip this SHARED window entirely for a
+     * The SHARED window is skipped entirely for a
      * public-channel decrypt, whose src_addr is a free-to-forge claim
      * (BRAMBLE_PUBLIC_CHANNEL_PSK is public), same reasoning and same
      * helper as handle_data. Public-channel location updates rely on the
@@ -972,12 +972,12 @@ void mesh_get_location_state(location_manager_t* out) {
     *out = s_location_mgr;
     xSemaphoreGive(s_state_mutex);
     /* s_location_mgr only accumulates PEER positions from the mesh; nothing
-     * feeds its my_position (GPS fixes historically went to a separate manager
-     * in main.c that nobody read). Resolve self-position from the live source
-     * on the way out, same GPS-then-manual-NVS logic the location-share TX
-     * path uses, so the map sees exactly what the mesh would transmit. Outside
-     * the mutex on purpose: gps_get_position has its own lock and NVS reads
-     * must not run under s_state_mutex. */
+     * feeds its my_position, so the copy above leaves that field empty.
+     * Resolve self-position from the live source on the way out, same
+     * GPS-then-manual-NVS logic the location-share TX path uses, so the map
+     * sees exactly what the mesh would transmit. Outside the mutex on purpose:
+     * gps_get_position has its own lock and NVS reads must not run under
+     * s_state_mutex. */
     if (!mesh_resolve_self_position(&out->my_position)) {
         out->my_position.valid = false;
     }

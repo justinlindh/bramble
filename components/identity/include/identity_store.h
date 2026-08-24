@@ -8,7 +8,7 @@
 #include "packet.h" /* bramble_identity_attestation_t */
 
 /*
- * Verified TOFU identity pin store (per-node identity Phase 3, Part C).
+ * Verified TOFU identity pin store.
  *
  * Every node builds a verified table of its mesh: address -> {Ed25519
  * pub, X25519 pub}, populated from delivered (relay-gate-MAC-valid,
@@ -16,7 +16,7 @@
  * against the frame's own embedded key. Trust-on-first-use: the FIRST
  * verified binding for an address wins; a later attestation for the same
  * address under DIFFERENT keys is a CONFLICT and is REJECTED, keeping the
- * original binding. That refusal is the campaign's impersonation
+ * original binding. That refusal is the impersonation
  * detection: a keyed insider attesting a victim's address with its own
  * key can produce an internally valid frame, but it can never displace
  * the victim's established binding at any node that heard the victim
@@ -38,24 +38,23 @@
  *     verified" model survives reboot. The LRU bookkeeping (last_confirmed_ms)
  *     is not persisted and legitimately resets on reboot.
  *
- * Phase 4 (address rebind): the node address derives from the Ed25519
+ * Address<->key binding: the node address derives from the Ed25519
  * identity key, and identity_store_handle_attestation additionally
  * REQUIRES src_addr == crypto_derive_address(ed25519_pub), rejecting
  * mismatched claims even on first contact (IDENTITY_PIN_ADDR_MISMATCH).
- * identity_store_lookup is the query surface the Phase 4 gates
+ * identity_store_lookup is the query surface the binding gates
  * (timesync-quorum eligibility, DM key continuity) build on.
  */
 
 #define IDENTITY_STORE_CAPACITY 32
 
 /*
- * Bootstrap-quorum grace (NEW-SEC-4 "1.3c" race close). Within this window
- * after THIS node's boot, an established-but-unpinned peer may still count
- * toward the timesync corroboration quorum, so a fresh mesh with no verified
- * attestations pinned yet can still bootstrap its clock (liveness). After
- * the window ONLY pinned peers ever corroborate: an unattested or Sybil node
- * can no longer dominate the quorum and skew the mesh clock (the race is
- * closed).
+ * Bootstrap-quorum grace. Within this window after THIS node's boot, an
+ * established-but-unpinned peer may still count toward the timesync
+ * corroboration quorum, so a fresh mesh with no verified attestations pinned
+ * yet can still bootstrap its clock (liveness). After the window ONLY pinned
+ * peers ever corroborate: an unattested or Sybil node can no longer dominate
+ * the quorum and skew the mesh clock (the race is closed).
  *
  * Tradeoff on the value: a LONGER grace gives more liveness margin on large
  * or slow meshes where propagating and verifying the first attestations
@@ -69,7 +68,7 @@
 #define QUORUM_BOOTSTRAP_GRACE_MS 300000u
 
 /*
- * Bootstrap-grace early-exit threshold (trust-anchor P3a). Once this node
+ * Bootstrap-grace early-exit threshold. Once this node
  * holds at least this many verified pins it has real corroboration from
  * PINNED peers alone, so the unpinned-peer fallback is no longer needed: an
  * unpinned peer stops being grace-eligible the instant the pin count reaches
@@ -86,12 +85,12 @@
  * This early-exit is anchor-INDEPENDENT: it also tightens a NO-anchor TOFU
  * mesh to pinned-only once 3 TOFU pins exist. That is a deliberate strict
  * improvement (real corroboration removes the need for the unpinned fallback
- * whether or not the mesh is anchored), and a documented behavior change to
- * the #131 grace for ALL meshes, not just anchored ones.
+ * whether or not the mesh is anchored), and it applies to ALL meshes, not
+ * just anchored ones.
  *
  * A companion negative-intel "reject ring" (bar an address that attested and
- * failed endorsement from the grace) was considered and DROPPED by the P3a
- * red-team: it gives no durable protection (a self-revealing Sybil un-rings
+ * failed endorsement from the grace) is deliberately absent:
+ * it gives no durable protection (a self-revealing Sybil un-rings
  * itself for free by cycling 16 fresh keypairs through the FIFO) AND it is a
  * net-new targeted-denial lever against HONEST peers (a keyed insider who
  * grinds a ~2^32 address collision can push a victim's address into the ring
@@ -115,8 +114,8 @@ typedef struct {
     bool verified;        /* SAS confirmed out of band, survives reboot via NVS */
     char verified_sas[8]; /* the 7-digit identity SAS at verification time + NUL */
     /* RAM-only, NOT serialized: a genuine identity-key change was seen and not
-     * yet re-verified. Set by identity_store_mark_key_changed (Task 7's
-     * verified_cleared branch in mesh_task.c, the ONE genuine key-change site),
+     * yet re-verified. Set by identity_store_mark_key_changed (the
+     * verified_cleared branch in mesh_beacon.c, the ONE genuine key-change site),
      * cleared by identity_store_set_verified (re-verifying dismisses the
      * warning). Deliberately excluded from serialize/deserialize: the
      * security-critical persisted state is the verified bit; the key-change
@@ -137,16 +136,16 @@ typedef struct {
      * counts delivered (MAC-valid) attestations whose Ed25519 signature
      * did not verify, i.e. a keyed member sent garbage; addr_mismatches
      * counts delivered attestations whose src_addr is not the address
-     * their own Ed25519 key derives to (Phase 4 rebind), i.e. a keyed
+     * their own Ed25519 key derives to, i.e. a keyed
      * member tried to attest an address it does not hold the key for. */
     uint32_t conflicts;
     uint32_t sig_failures;
     uint32_t addr_mismatches;
-    /* Trust-anchor campaign (P2): when has_anchor is set this node pins ONLY
+    /* Trust anchor: when has_anchor is set this node pins ONLY
      * anchor-endorsed identities; anchor_pub is the fleet anchor's Ed25519
      * public key the endorsement is verified against. has_anchor false (the
-     * default from identity_store_init) = NOT anchored = today's TOFU
-     * behavior, bit-for-bit: the endorsement gate is skipped entirely and
+     * default from identity_store_init) = NOT anchored = plain TOFU:
+     * the endorsement gate is skipped entirely and
      * cert fields on the wire are ignored. The store stays PURE: the anchor
      * is pushed in via identity_store_set_anchor (never read from NVS here),
      * and the wall-clock epoch for the expiry check is a call parameter
@@ -158,7 +157,7 @@ typedef struct {
     uint32_t unendorsed;
     uint32_t expired;
 
-    /* Issue #88 observability, RAM-only and not serialized. `evictions`
+    /* Eviction observability, RAM-only and not serialized. `evictions`
      * counts pins recycled to make room for a new one. `evictions_verified`
      * counts the subset that were SAS-verified pins, which is the case that
      * downgrades a human-confirmed binding back to trust-on-first-use and is
@@ -168,15 +167,15 @@ typedef struct {
      * an attestation flood is washing verified pins out. */
     uint32_t evictions;
     uint32_t evictions_verified;
-    /* Trust-anchor campaign (P3a/P4b): set true when a runtime anchor CHANGE
-     * dropped existing pins (a re-hardening of a node that had already
-     * accumulated pins). While set, the bootstrap-quorum grace's unpinned
-     * fallback is force-closed: a re-hardened node must corroborate timesync
-     * from ENDORSED pins only, never from the unpinned window it would
-     * otherwise re-open by having its pin count reset to 0 inside the boot
-     * grace. It stays false through the boot-time FIRST anchoring (count 0, no
-     * pins dropped), so a fresh anchored mesh keeps the bootstrap grace it
-     * needs for liveness. Reset to false by the memset in identity_store_init. */
+    /* Set true when a runtime anchor CHANGE dropped existing pins (a re-hardening
+     * of a node that had already accumulated pins). While set, the
+     * bootstrap-quorum grace's unpinned fallback is force-closed: a re-hardened
+     * node must corroborate timesync from ENDORSED pins only, never from the
+     * unpinned window it would otherwise re-open by having its pin count reset to
+     * 0 inside the boot grace. It stays false through the boot-time FIRST
+     * anchoring (count 0, no pins dropped), so a fresh anchored mesh keeps the
+     * bootstrap grace it needs for liveness. Reset to false by the memset in
+     * identity_store_init. */
     bool grace_forced_closed;
 } identity_store_t;
 
@@ -187,12 +186,12 @@ typedef enum {
     IDENTITY_PIN_SELF,      /* our own address: ignored */
     IDENTITY_PIN_BAD_SIG,   /* Ed25519 signature invalid: not pinned */
     /* src_addr != crypto_derive_address(ed25519_pub): rejected even on
-     * first contact. The Phase 4 payoff: an insider cannot attest an
+     * first contact. The payoff: an insider cannot attest an
      * address without holding the key it hashes from (SHA256 preimage),
      * so address impersonation is cryptographically infeasible rather
      * than merely losing the TOFU race. */
     IDENTITY_PIN_ADDR_MISMATCH,
-    /* Trust-anchor campaign (P2), fire ONLY on an anchored node (has_anchor):
+    /* Fire ONLY on an anchored node (has_anchor):
      * UNENDORSED = the attestation carried no cert (not_after == 0) or one
      * that does not verify against our anchor for this exact ed25519_pub (a
      * missing, wrong-anchor, or cross-node-grafted cert); EXPIRED = the cert
@@ -226,8 +225,8 @@ identity_pin_result_t identity_store_pin(identity_store_t* s, uint32_t address,
  * gate in mesh_task.c / gosim's bridge runs BEFORE this): ignore self,
  * verify the Ed25519 signature over the canonical message
  * (bramble_identity_attestation_signed_msg) against the frame's embedded
- * ed25519_pub, then TOFU-pin. This is the ONLY place the expensive
- * Ed25519 verify runs on the receive side; relays never call it.
+ * ed25519_pub, then TOFU-pin. This is the ONLY place the expensive Ed25519
+ * verify runs on the receive side; relays never call it.
  *
  * now_ms is MONOTONIC boot-relative ms (LRU + bootstrap grace). epoch_ms is
  * the current network WALL-CLOCK in ms, or 0 when the clock is not
@@ -240,7 +239,7 @@ identity_pin_result_t identity_store_pin(identity_store_t* s, uint32_t address,
  * gate runs AFTER the existing self/addr/self-sig checks and BEFORE the TOFU
  * pin: a missing/invalid cert -> IDENTITY_PIN_UNENDORSED, an expired one ->
  * IDENTITY_PIN_EXPIRED, neither pinned. On a node with no anchor the gate is
- * skipped and behavior is identical to before this parameter existed.
+ * skipped entirely and epoch_ms is unused.
  */
 identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
                                                         const bramble_identity_attestation_t* att,
@@ -248,22 +247,22 @@ identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
                                                         uint64_t epoch_ms);
 
 /*
- * Trust-anchor campaign (P2): mark this store ANCHORED and record the fleet
- * anchor's Ed25519 public key. After this call identity_store_handle_
- * attestation pins ONLY identities the anchor has endorsed. Pure: copies the
- * key into the caller-owned struct, reads no NVS. identity_store_init leaves
- * a store UN-anchored (has_anchor false), so the anchored behavior is strictly
- * opt-in; a store that never sees this call keeps today's TOFU behavior.
+ * Mark this store ANCHORED and record the fleet anchor's Ed25519 public key.
+ * After this call identity_store_handle_ attestation pins ONLY identities the
+ * anchor has endorsed. Pure: copies the key into the caller-owned struct,
+ * reads no NVS. identity_store_init leaves a store UN-anchored (has_anchor
+ * false), so the anchored behavior is strictly opt-in; a store that never sees
+ * this call keeps plain TOFU behavior.
  */
 void identity_store_set_anchor(identity_store_t* s, const uint8_t anchor_pub[32]);
 
-/* Phase 4 query surface: the pinned entry for address, or NULL. */
+/* Query surface: the pinned entry for address, or NULL. */
 const identity_pin_t* identity_store_lookup(const identity_store_t* s, uint32_t address);
 
 /*
- * Phase 4 timesync-quorum gate: whether a peer may count toward the
+ * Timesync-quorum gate: whether a peer may count toward the
  * pre-commit corroboration quorum (timesync_handle_sync's
- * source_established input, ws 1.3c / NEW-SEC-4).
+ * source_established input).
  *
  * CHOSEN SEMANTIC (documented here, tested in test_identity_store.c):
  *   if (!established)                       -> false  (tenure never relaxed)
@@ -277,23 +276,23 @@ const identity_pin_t* identity_store_lookup(const identity_store_t* s, uint32_t 
  * - A PINNED peer is always eligible (subject to tenure): once we hold a
  *   peer's verified binding it corroborates time regardless of the grace.
  * - An UNPINNED peer is eligible ONLY inside the bounded per-boot grace,
- *   which P3a tightens with the count early-exit beyond the time window:
+ *   which the count early-exit tightens beyond the time window:
  *     (time)  now_ms - boot_ms < QUORUM_BOOTSTRAP_GRACE_MS -- the backstop,
  *             so a fresh mesh can bootstrap timesync before any pin exists;
  *     (count) fewer than QUORUM_GRACE_MIN_PINS pins held -- early-exit: once
  *             real pinned corroboration exists the unpinned fallback closes,
  *             typically well before the time bound. Anchor-INDEPENDENT (it
- *             tightens no-anchor TOFU meshes too: a documented change to the
- *             #131 grace for ALL meshes, see QUORUM_GRACE_MIN_PINS).
+ *             tightens no-anchor TOFU meshes too: it applies to ALL meshes,
+ *             see QUORUM_GRACE_MIN_PINS).
  *   After the grace (or once enough pins) an unpinned peer NEVER corroborates,
- *   even with zero pins held. That closes NEW-SEC-4's bootstrap-quorum race:
+ *   even with zero pins held. That closes the bootstrap-quorum race:
  *   an unattested or Sybil node can no longer dominate the quorum and skew the
  *   mesh clock once the window ends.
- * - RESIDUAL (documented, inherent, NOT closed by P3a): while the grace is
+ * - RESIDUAL (documented and inherent): while the grace is
  *   open and the node holds < MIN_PINS pins, an established UNPINNED peer --
  *   silent OR self-revealing Sybil alike -- can still ride the bounded window.
- *   A negative-intel reject ring to bar self-revealing Sybils was considered
- *   and DROPPED (flushable for free by cycling fresh keypairs, and a targeted
+ *   A negative-intel reject ring to bar self-revealing Sybils is deliberately
+ *   absent (flushable for free by cycling fresh keypairs, and a targeted
  *   deny lever against honest peers; see QUORUM_GRACE_MIN_PINS). The bounded
  *   window is the accepted residual; it is bounded by BOTH the time backstop
  *   and the 3-pin early-exit, whichever comes first.
@@ -311,14 +310,14 @@ bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address,
 int identity_store_count(const identity_store_t* s);
 
 /*
- * SAS verification state (DM forward-secrecy + SAS). The verified bit lives on
- * the TOFU pin, not on the DM session, so it is stable across ratchet steps,
- * epoch bumps, desync-heal, and reboot; only a pin key change invalidates it.
+ * SAS verification state (DM forward-secrecy + SAS). The verified bit lives on the
+ * TOFU pin, not on the DM session, so it is stable across ratchet steps, epoch
+ * bumps, desync-heal, and reboot; only a pin key change invalidates it.
  *
- * set_verified records the bit AND the SAS string the users compared out of
- * band (identity_store_serialize persists both); returns false if no pin exists
- * for address (verification must follow a pin). clear_verified drops the bit
- * (Task 7 calls it on a DM_VERIFY_ERR_PIN_MISMATCH key-change red flag) and
+ * set_verified records the bit AND the SAS string the users compared out of band
+ * (identity_store_serialize persists both); returns false if no pin exists for
+ * address (verification must follow a pin). clear_verified drops the bit
+ * (mesh_beacon.c calls it on a DM_VERIFY_ERR_PIN_MISMATCH key-change red flag) and
  * returns false if there is no pin. is_verified is the query surface for the UX
  * and the session snapshot.
  */

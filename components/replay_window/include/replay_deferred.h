@@ -22,7 +22,7 @@ typedef struct {
 
 typedef struct {
     replay_dslot_t slots[REPLAY_DEFERRED_MAX];
-    /* Issue #88 observability, RAM-only. `evictions` counts records actually
+    /* Eviction observability, RAM-only. `evictions` counts records actually
      * recycled; `evict_denied` counts insertions refused because every record
      * was still inside DEFERRED_TTL_S and therefore still needed. */
     uint32_t evictions;
@@ -41,18 +41,17 @@ int replay_deferred_accept(replay_deferred_t* d, uint32_t src, uint64_t counter,
                            uint32_t now_s, int timesync_ok);
 
 /*
- * Fix 3 (red-team panel, post-Task-3.6): records that (src, counter) has
- * already been legitimately delivered via the TIER-1 sliding window
- * (replay_window.h), independent of and with no time/skew validation
- * (the caller already accepted it through a different, non-time-based
- * path). Without this, a counter accepted by tier-1 and later aged out of
- * its 64-entry window is in NEITHER dedup structure: replaying the
- * original captured packet reads BELOW_WINDOW at tier-1, then tier-2
- * (replay_deferred_accept) sees a src/counter pair it has never heard of
- * and re-accepts it as if it were a legitimate delayed delivery. Callers
- * must invoke this on every tier-1 REPLAY_ACCEPT for a CHAT message (the
- * only app type replay_deferred_accept ever defers), not just on
- * below-window arrivals.
+ * Records that (src, counter) has already been legitimately delivered via
+ * the TIER-1 sliding window (replay_window.h), independent of and with no
+ * time/skew validation (the caller already accepted it through a
+ * different, non-time-based path). Without this, a counter accepted by
+ * tier-1 and later aged out of its 64-entry window is in NEITHER dedup
+ * structure: replaying the original captured packet reads BELOW_WINDOW at
+ * tier-1, then tier-2 (replay_deferred_accept) sees a src/counter pair it
+ * has never heard of and re-accepts it as if it were a legitimate delayed
+ * delivery. Callers must invoke this on every tier-1 REPLAY_ACCEPT for a
+ * CHAT message (the only app type replay_deferred_accept ever defers),
+ * not just on below-window arrivals.
  */
 void replay_deferred_mark_seen(replay_deferred_t* d, uint32_t src, uint64_t counter,
                                uint32_t now_s);

@@ -141,7 +141,7 @@ int ota_rollback_gate(const char* new_version, uint32_t candidate_secure_version
     }
 
     /* Deliberate downgrade: lower the floor so the device is not stranded
-     * under the old floor after rebooting into the older firmware.
+     * under a floor above the version it is about to boot into.
      *
      * Known window, accepted: this runs at gate time, BEFORE signature
      * verification, against the unverified image descriptor. A failed

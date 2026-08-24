@@ -1,7 +1,6 @@
 /**
  * mesh_routing.c: RREQ/RREP/RERR routing, jittered RREQ and flood relay, unicast forwarding.
  *
- * Split out of mesh_task.c (issue #86); pure code motion, no behavior change.
  * Shared state and cross-module entry points come from mesh_internal.h.
  */
 #include "mesh_internal.h"
@@ -21,11 +20,9 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop);
 static void schedule_rreq_forward(const bramble_rreq_t* fwd);
 
 void send_rreq(const bramble_rreq_t* rreq) {
-    /* Red-team audit: was buf[64], a hand-counted constant. RREQ_SIZE (30)
-     * is unaffected by the ws 1.3b size bumps and always fit, but
-     * macro-ized for the same reason as the other TX buffers in this
-     * file: a hand-counted constant can't warn you when it stops being
-     * big enough. */
+    /* RREQ_SIZE, not a hand-counted constant, for the same reason as the
+     * other TX buffers in this file: a hand-counted constant can't warn you
+     * when it stops being big enough. */
     uint8_t buf[RREQ_SIZE];
     if (bramble_rreq_serialize(rreq, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RREQ query=%08" PRIX32 " dest=%08" PRIX32, rreq->query_id,
@@ -40,27 +37,24 @@ void send_rreq(const bramble_rreq_t* rreq) {
 }
 
 static void send_rrep(const bramble_rrep_t* rrep) {
-    /* Mandatory-provisioning (Task 2): inert when unprovisioned. The RREP was
-     * built and rrep_sign'd elsewhere; without the network key that MAC is the
-     * all-zero sentinel, so do not transmit. */
+    /* Mandatory provisioning: inert when unprovisioned. The RREP is built and
+     * rrep_sign'd elsewhere; without the network key that MAC is the all-zero
+     * sentinel, so do not transmit. */
     if (!network_key_is_provisioned()) {
         ESP_LOGD(TAG, "unprovisioned: inert, skipping RREP");
         return;
     }
-    /* Red-team audit: was buf[64], a hand-counted constant. RREP_SIZE (40
-     * as of ws 1.3b) always fit, but macro-ized for the same reason as
-     * the other TX buffers in this file. */
+    /* RREP_SIZE, not a hand-counted constant, for the same reason as the
+     * other TX buffers in this file. */
     uint8_t buf[RREP_SIZE];
     if (bramble_rrep_serialize(rrep, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RREP query=%08" PRIX32 " → next=%08" PRIX32, rrep->query_id,
                  rrep->next_hop);
-        /* Pre-existing bug fixed here (found while adding ws 1.3b's seq
-         * field): this was HEADER_SIZE + 19 (31 bytes), 3 short of the
-         * struct's 22-byte payload (query_id+src_addr+next_hop+hop_count+
-         * route_metric+auth_hmac), truncating the last 3 bytes of
-         * auth_hmac on every real transmit. RREP_SIZE (the macro, not a
-         * hand-counted offset) is what every other RREP size check already
-         * uses, so this can't drift again the way HEADER_SIZE+19 did. */
+        /* Send RREP_SIZE (the macro every other RREP size check uses), never
+         * a hand-counted offset: HEADER_SIZE + 19 (31 bytes) is 3 short of
+         * the struct's 22-byte payload (query_id+src_addr+next_hop+hop_count+
+         * route_metric+auth_hmac) and truncates the last 3 bytes of auth_hmac
+         * on every transmit. */
         if (mesh_tx(buf, RREP_SIZE, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
             ESP_LOGW(TAG, "RREP denied by airtime budget");
         }
@@ -68,20 +62,19 @@ static void send_rrep(const bramble_rrep_t* rrep) {
 }
 
 static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
-    /* Mandatory-provisioning (Task 2): inert when unprovisioned (rerr_sign
+    /* Mandatory provisioning: inert when unprovisioned (rerr_sign
      * needs the network key). */
     if (!network_key_is_provisioned()) {
         ESP_LOGD(TAG, "unprovisioned: inert, skipping RERR");
         return;
     }
     /* components/routing/forwarding.c: rerr_build fills version/type/flags/
-     * hop_limit/dest_addr/reporter_addr/broken_dest/broken_next_hop
-     * identically to the struct literal this replaced. packet_id and seq
-     * are this node's own counters (rerr_build leaves them zeroed since it
-     * owns no sequencing state), so they're set here same as before. */
+     * hop_limit/dest_addr/reporter_addr/broken_dest/broken_next_hop.
+     * packet_id and seq are this node's own counters (rerr_build leaves them
+     * zeroed since it owns no sequencing state), so they are set here. */
     bramble_rerr_t rerr = rerr_build(s_identity->address, broken_dest, broken_next_hop);
     rerr.header.packet_id = next_packet_id();
-    /* ws 1.3b: every re-origination draws its own fresh seq (unlike RREP's
+    /* Every re-origination draws its own fresh seq (unlike RREP's
      * origin-stable seq, RERR's seq is per-hop, matching reporter_addr).
      * Fail-closed: no seq means no RERR goes out this call; the caller's
      * route-broken detection or forwarding chain simply doesn't propagate
@@ -95,19 +88,16 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
     bramble_seq48_pack(rerr.seq, rerr_seq);
     /* SEC-H1 (STAGED): re-signed on every call, including re-origination,
      * since this function builds a fresh struct each time (fresh
-     * reporter_addr/packet_id/seq), and reporter_addr/seq are now
-     * MAC-covered alongside the origin-stable broken_dest/broken_next_hop
-     * (ws 1.3b). */
+     * reporter_addr/packet_id/seq), and reporter_addr/seq are MAC-covered
+     * alongside the origin-stable broken_dest/broken_next_hop. */
     rerr_sign(&rerr);
-    /* Red-team audit: was buf[64], a hand-counted constant. RERR_SIZE (38
-     * as of ws 1.3b) always fit, but macro-ized for the same reason as
-     * the other TX buffers in this file. */
+    /* RERR_SIZE, not a hand-counted constant, for the same reason as the
+     * other TX buffers in this file. */
     uint8_t buf[RERR_SIZE];
     if (bramble_rerr_serialize(&rerr, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RERR broken_dest=%08" PRIX32, broken_dest);
-        /* RERR_SIZE (the macro), not a hand-counted offset: RREP's
-         * equivalent hand-counted offset drifted 3 bytes short of its
-         * struct for years before being caught in ws 1.3b Task 2. */
+        /* RERR_SIZE (the macro), not a hand-counted offset: an offset written
+         * out by hand silently drifts short as the struct grows. */
         if (mesh_tx(buf, RERR_SIZE, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
             ESP_LOGW(TAG, "RERR denied by airtime budget");
         }
@@ -123,7 +113,7 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
 
 /* ── End pseudonym helpers ───────────────────────────────────── */
 
-/* ── Jittered RREQ forwarding (DES-3) ────────────────────────── */
+/* ── Jittered RREQ forwarding ────────────────────────────────── */
 
 /**
  * Queue an RREQ forward with random jitter so same-hop relays do not
@@ -162,17 +152,17 @@ void process_rreq_forward_queue(uint32_t t) {
 
 /* ── End jittered RREQ forwarding ──────────────────────────────── */
 
-/* ── Jittered channel-flood relay (Task 5) ──────────────────────── */
+/* ── Jittered channel-flood relay ───────────────────────────────── */
 
 /**
  * Queue a broadcast/channel DATA rebroadcast with random jitter, exactly
  * like schedule_rreq_forward: same-hop relays that all decided to flood the
  * same frame should not key up at the same instant. DROPS the relay when the
- * queue is full (issue #87): a full queue means this node is already
- * congested, and the old behaviour of transmitting immediately, without
- * jitter, inverted backpressure exactly there. Placement, the drop, and the
- * drop accounting live in channel_flood_relay_admit so they are unit-
- * testable on the host; see channel_flood.h for the full rationale.
+ * queue is full: a full queue means this node is already congested, and
+ * transmitting immediately, without jitter, inverts backpressure exactly
+ * there. Placement, the drop, and the drop accounting live in
+ * channel_flood_relay_admit so they are unit-testable on the host; see
+ * channel_flood.h for the full rationale.
  *
  * buf/len are the ALREADY relay-mutated wire bytes (hop_limit decremented,
  * prev_hop rewritten to this node -- see the caller in handle_data): this
@@ -181,14 +171,14 @@ void process_rreq_forward_queue(uint32_t t) {
  * flood_key = packet_id ^ src_addr (the caller already computed it for the
  * src-qualified flood dedup) is recorded on the queued entry so an overheard
  * duplicate of the SAME frame can find and suppress this pending relay before
- * it fires (Flooding F1; see channel_flood_note_overheard). heard starts at 0
- * -- the copy that triggered this schedule is the FIRST copy, never counted
- * as an overheard one.
+ * it fires (see channel_flood_note_overheard). heard starts at 0 -- the copy
+ * that triggered this schedule is the FIRST copy, never counted as an
+ * overheard one.
  *
  * tx_kind is the airtime lane the relay is sent on: TX_KIND_DATA_BROADCAST
- * for a flooded DATA frame, TX_KIND_ACK for a flooded ACK (Flooding F1
- * Task 2). One queue + one suppression engine serves both; only the lane the
- * final mesh_tx debits differs.
+ * for a flooded DATA frame, TX_KIND_ACK for a flooded ACK. One queue + one
+ * suppression engine serves both; only the lane the final mesh_tx debits
+ * differs.
  */
 void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms, uint32_t flood_key,
                           tx_kind_t tx_kind) {
@@ -237,7 +227,7 @@ void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
      * effect. Note this is a participation gate, not RREQ authentication: the
      * RREQ itself carries no HMAC (there is no rreq_verify), so a route learned
      * from it is only ever an unauthenticated hint (see the ROUTE_SRC_BREADCRUMB
-     * installs below and issue #74). */
+     * installs below). */
     if (!network_key_is_provisioned()) {
         return;
     }
@@ -267,7 +257,7 @@ void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         ESP_LOGI(TAG, "RREQ is for us; sending RREP");
         bramble_rrep_t rrep = rrep_build_destination(&rreq, s_identity->address);
 
-        /* ws 1.3b: draw the 48-bit origin seq and re-sign to cover it
+        /* Draw the 48-bit origin seq and re-sign to cover it
          * (rrep_build_destination already signed once with seq=0 from the
          * zeroed struct; this re-sign is the one that ships). Fail-closed:
          * no seq means no RREP goes out this round, and the RREQ
@@ -291,17 +281,17 @@ void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         /* Install route to the source via prev_hop. The link penalty
          * subtracts from the higher-is-better path metric.
          *
-         * Trust class is ROUTE_SRC_BREADCRUMB, NOT ROUTE_SRC_DISCOVERED
-         * (issue #74). prev_hop, hop_count and metric all come from an
-         * unauthenticated RREQ (there is no rreq_verify; RREQ has no HMAC
-         * field on the wire), so a keyless attacker can forge them. Classing
-         * this as DISCOVERED, the most-trusted route class, handed that
-         * attacker the strongest route-poisoning primitive in the stack: the
-         * route_install trust rules refuse to let anything displace or evict
-         * a DISCOVERED entry. As a BREADCRUMB it is exactly what it is: an
-         * unauthenticated next-hop hint that a real HMAC-gated DISCOVERED
-         * route (learned via the signed RREP this RREQ triggers) always
-         * reclaims. No wire change: source is internal routing-table state. */
+         * Trust class is ROUTE_SRC_BREADCRUMB, NOT ROUTE_SRC_DISCOVERED.
+         * prev_hop, hop_count and metric all come from an unauthenticated
+         * RREQ (there is no rreq_verify; RREQ has no HMAC field on the wire),
+         * so a keyless attacker can forge them. Classing this as DISCOVERED,
+         * the most-trusted route class, would hand that attacker the
+         * strongest route-poisoning primitive in the stack: the route_install
+         * trust rules refuse to let anything displace or evict a DISCOVERED
+         * entry. As a BREADCRUMB it is exactly what it is: an unauthenticated
+         * next-hop hint that a real HMAC-gated DISCOVERED route (learned via
+         * the signed RREP this RREQ triggers) always reclaims. The source
+         * class is internal routing-table state, never on the wire. */
         uint8_t metric = metric_apply_link_penalty(rreq.metric, (int8_t)rssi, snr);
         route_install(&s_routes, rreq.prev_hop, rreq.prev_hop, rreq.hop_count, metric, ROUTE_ACTIVE,
                       ROUTE_SRC_BREADCRUMB, now_ms());
@@ -309,11 +299,10 @@ void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     }
 
     /* Not for us: check whether we already hold a fresh, trustworthy route
-     * to the destination (Phase 2 "save reactive routing": intermediate-
-     * node RREP; see discovery.h's rrep_build_intermediate/
-     * intermediate_rrep_route_usable doc comments for the trust/freshness
-     * rules). Answering here short-circuits discovery for this whole
-     * subtree instead of needing the flood to reach D itself.
+     * to the destination (intermediate-node RREP; see discovery.h's
+     * rrep_build_intermediate/intermediate_rrep_route_usable doc comments for
+     * the trust/freshness rules). Answering here short-circuits discovery for
+     * this whole subtree instead of needing the flood to reach D itself.
      *
      * Having replied, this node does NOT also forward the RREQ onward:
      * that is the airtime-saving half of the tradeoff (the point of this
@@ -353,8 +342,7 @@ void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
          * answering on D's behalf and should be just as reachable from the
          * source as the real destination would have been. Same trust-class
          * reasoning too: ROUTE_SRC_BREADCRUMB, not DISCOVERED, because the
-         * prev_hop/hop_count/metric come from an unauthenticated RREQ (issue
-         * #74). */
+         * prev_hop/hop_count/metric come from an unauthenticated RREQ. */
         uint8_t src_metric = metric_apply_link_penalty(rreq.metric, (int8_t)rssi, snr);
         route_install(&s_routes, rreq.prev_hop, rreq.prev_hop, rreq.hop_count, src_metric,
                       ROUTE_ACTIVE, ROUTE_SRC_BREADCRUMB, now_ms());
@@ -395,7 +383,7 @@ void handle_rrep(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     ESP_LOGI(TAG, "RX RREP query=%08" PRIX32 " src=%08" PRIX32 " hops=%u", rrep.query_id,
              rrep.src_addr, rrep.hop_count);
 
-    /* ws 1.3b: replay check on the authenticated signer (rrep.src_addr is
+    /* Replay check on the authenticated signer (rrep.src_addr is
      * MAC-covered, so an attacker cannot dodge the window by mutating it).
      * Checked after rrep_verify and strictly before route_install, so a
      * replayed RREP never resurrects a stale route. */
@@ -477,9 +465,9 @@ void handle_rerr(const uint8_t* data, uint8_t len) {
     ESP_LOGW(TAG, "RX RERR: dest=%08" PRIX32 " broken_hop=%08" PRIX32, rerr.broken_dest,
              rerr.broken_next_hop);
 
-    /* ws 1.3b: replay check on the authenticated (reporter_addr, seq) pair
-     * (both MAC-covered as of this change, so an attacker cannot dodge the
-     * window by mutating either). Checked after rerr_verify and strictly
+    /* Replay check on the authenticated (reporter_addr, seq) pair (both
+     * MAC-covered, so an attacker cannot dodge the window by mutating
+     * either). Checked after rerr_verify and strictly
      * before any teardown effect (route_marked_broken, forwarding,
      * failfast), so a replayed RERR never re-tears-down a live route. */
     uint64_t rerr_seq = bramble_seq48_unpack(rerr.seq);
@@ -491,9 +479,9 @@ void handle_rerr(const uint8_t* data, uint8_t len) {
 
     /* Invalidate route if it uses the broken next hop. components/routing/
      * forwarding.c: rerr_handle does the route_lookup + state/fail_count
-     * mutation (identical to the inline logic this replaced) and reports
-     * back whether it actually marked a route broken, since only mesh_task
-     * needs that to decide on re-origination and logging. */
+     * mutation and reports back whether it actually marked a route broken,
+     * since only mesh_task needs that to decide on re-origination and
+     * logging. */
     bool route_marked_broken = rerr_handle(&s_routes, &rerr);
     if (route_marked_broken) {
         ESP_LOGW(TAG, "Route to %08" PRIX32 " marked BROKEN", rerr.broken_dest);
@@ -517,24 +505,22 @@ void handle_rerr(const uint8_t* data, uint8_t len) {
 void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_header_t* header) {
     /* components/routing/forwarding.c: forward_data() owns the route-lookup
      * plus hop-limit-decrement decision (the same function gosim's bridge.c
-     * already calls, and test_forwarding.c already exercises). Task 2 (ws
-     * 1.4): mesh_task keeps only its own side effects around the decision:
-     * mailbox-store-on-no-route, RERR-on-no-route, the actual TX, and stats.
-     * Two behavioral deltas came along for the ride, both resolved by
-     * adopting the tested/shipped-by-gosim behavior rather than silently
-     * keeping the untested one (see task-2-report.md for the full list):
-     *   - a STALE route used to forward is now promoted to ACTIVE with a
-     *     refreshed last_confirmed (forward_data_packet never did this);
-     *   - route last_used/use_count are now bumped at decision time
-     *     (inside forward_data()) rather than only after a successful
-     *     mesh_tx, so a budget-denied forward still counts as "used". */
+     * calls and test_forwarding.c exercises). mesh_task keeps only its own
+     * side effects around the decision: mailbox-store-on-no-route,
+     * RERR-on-no-route, the actual TX, and stats. Two consequences of the
+     * decision living there:
+     *   - a STALE route used to forward is promoted to ACTIVE with a
+     *     refreshed last_confirmed;
+     *   - route last_used/use_count are bumped at decision time (inside
+     *     forward_data()) rather than only after a successful mesh_tx, so a
+     *     budget-denied forward still counts as "used". */
     uint8_t hop_limit = header->hop_limit;
     forward_result_t fwd = forward_data(&s_routes, header->dest_addr, &hop_limit, now_ms());
 
     if (!fwd.should_send) {
         if (!fwd.route_error) {
-            /* Hop limit already exhausted: silent drop, no mailbox/RERR,
-             * matching the pre-refactor behavior exactly. */
+            /* Hop limit already exhausted: silent drop, no mailbox and no
+             * RERR. */
             ESP_LOGD(TAG, "Data packet hop limit reached, dropping");
             return;
         }
@@ -566,11 +552,11 @@ void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_header_
     bramble_header_serialize(&fwd_hdr, buf, HEADER_SIZE);
 
     /* Wire v4: overwrite prev_hop with OUR OWN address before rebroadcast,
-     * mirroring RREP's forwarder-address rewrite (#119). This is what lets
-     * the next hop learn a route back to this DATA's originator via US,
-     * closing the reverse-route gap that made multi-hop delivery
-     * confirmations die at the first relay. Relay-mutable/MAC-excluded, so
-     * this rewrite never touches anything under the AEAD tag. */
+     * mirroring RREP's forwarder-address rewrite. This is what lets the next
+     * hop learn a route back to this DATA's originator via US; without it
+     * there is no reverse route and multi-hop delivery confirmations die at
+     * the first relay. Relay-mutable/MAC-excluded, so this rewrite never
+     * touches anything under the AEAD tag. */
     if (len >= BRAMBLE_DATA_PREV_HOP_OFFSET + 4) {
         memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
     }

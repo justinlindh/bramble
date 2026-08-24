@@ -79,7 +79,7 @@ static void bubble_btn_add(lv_obj_t* btn) {
     s_bubble_btns[s_bubble_btn_count++] = btn;
 }
 
-/* Key-change interstitial (DM forward-secrecy + SAS, Task 8): which DM this
+/* Key-change interstitial (DM forward-secrecy + SAS): which DM this
  * interstitial's buttons act on. Set right before it is shown, read only from
  * its own click callbacks. */
 static bramble_layout_t* s_interstitial_layout = NULL;
@@ -217,7 +217,7 @@ static void channel_cycle_click_cb(lv_event_t* e) {
     render_messages_for_target(true);
 }
 
-/* DM header verify glyph (DM forward-secrecy + SAS, Task 8): three states
+/* DM header verify glyph (DM forward-secrecy + SAS): three states
  * driven by mesh_get_peer_verification, matching the pager UX spec. No pin at
  * all reads the same as unverified: there is nothing to distinguish for the
  * user until a pin exists. */
@@ -752,11 +752,8 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
 
         if (badge.color_role == CHAT_DELIVERY_COLOR_DELIVERED) {
             /* Success-green, same green as everywhere else success is signalled.
-             * The bubble fill is now blue (BR_COLOR_SENT), so green-on-blue is
-             * both visible and semantically consistent. This used to be forced
-             * to BR_COLOR_ON_SENT because the bubble was green and green-on-green
-             * was invisible; splitting SENT off from the brand green fixed the
-             * root cause. */
+             * The bubble fill is blue (BR_COLOR_SENT), so green-on-blue is both
+             * visible and semantically consistent. */
             meta_color = BR_COLOR_SUCCESS;
         } else if (badge.color_role == CHAT_DELIVERY_COLOR_FAILED) {
             meta_color = BR_COLOR_DANGER;
@@ -1172,9 +1169,9 @@ static void chat_view_builder(bramble_layout_t* layout, void* ctx) {
         lv_obj_set_style_border_color(target_btn, BR_COLOR_BORDER, 0);
         lv_obj_set_style_border_width(target_btn, 1, 0);
         lv_obj_t* tgt_lbl = lv_label_create(target_btn);
-        /* Shuffle glyph reads as "switch conversation", unlike the old refresh
-         * glyph that looked like a reload; the title already names the active
-         * channel, so the button just needs to signal the switch action. */
+        /* Shuffle glyph reads as "switch conversation" rather than a reload;
+         * the title already names the active channel, so the button just needs
+         * to signal the switch action. */
         lv_label_set_text(tgt_lbl, LV_SYMBOL_SHUFFLE " Switch");
         lv_obj_set_style_text_font(tgt_lbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(tgt_lbl, BR_COLOR_TEXT_SEC, 0);
@@ -1296,7 +1293,7 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
     layout_rebuild_content(layout, chat_view_builder, NULL);
 }
 
-/* Key-change interstitial (DM forward-secrecy + SAS, Task 8): a genuine
+/* Key-change interstitial (DM forward-secrecy + SAS): a genuine
  * identity-key change on this peer was seen and not yet re-verified. Shown
  * before messages on DM open in place of the normal DM view; "Verify Now"
  * goes straight to the SAS screen, "Continue" opens the DM anyway (reading

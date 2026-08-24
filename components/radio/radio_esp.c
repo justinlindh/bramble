@@ -54,8 +54,7 @@ static SemaphoreHandle_t s_cad_sem;
  * service the TX-done / CAD-done IRQ, so making radio_task take the gate would
  * deadlock (radio_task could not drain the IRQ that wakes the waiter that holds
  * the gate). This dedicated lock is never held by any path that waits on
- * radio_task, so radio_task can always make progress (issue #225, following up
- * on the TX-side serialization from #82). */
+ * radio_task, so radio_task can always make progress. */
 static SemaphoreHandle_t s_rx_seq_mutex;
 
 static void rx_seq_lock(void) {
@@ -68,7 +67,7 @@ static void rx_seq_unlock(void) {
         xSemaphoreGive(s_rx_seq_mutex);
 }
 
-/* Consecutive CAD-timeout run state for the fail-open/closed policy (#118). */
+/* Consecutive CAD-timeout run state for the fail-open/closed policy. */
 static cad_timeout_policy_t s_cad_timeout_policy;
 
 /* Retry state for radio_check_and_clear_reinit(); mesh-task-only. */
@@ -216,9 +215,9 @@ static void IRAM_ATTR dio1_isr_handler(void* arg) {
 /* Read one received frame under the RX-sequence lock, so a concurrent
  * radio_reconfigure cannot splice its commands between GetRxBufferStatus,
  * ReadBuffer and GetPacketStatus and return RSSI/SNR that belong to a different
- * radio configuration (issue #225). The user callback runs AFTER the lock is
- * released: it may be slow or re-enter the radio, and holding the sequence lock
- * across it would needlessly serialize it against reconfigure. */
+ * radio configuration. The user callback runs AFTER the lock is released: it
+ * may be slow or re-enter the radio, and holding the sequence lock across it
+ * would needlessly serialize it against reconfigure. */
 static void radio_handle_rx_done(uint8_t* buf, size_t buf_size) {
     rx_seq_lock();
 
@@ -305,15 +304,14 @@ int radio_reconfigure(const radio_config_t* config) {
      * is reachable from the UI settings task and the RPC task, and its command
      * sequence (standby, delay, configure_radio's ~8 commands, radio_start_rx)
      * would otherwise splice into an in-flight radio_transmit_raw between its
-     * write_buffer, set_packet_params, clear_irq and set_tx, since transmits
-     * are serialized on this same lock but reconfigure took no lock at all
-     * (issue #82). */
+     * write_buffer, set_packet_params, clear_irq and set_tx: transmits are
+     * serialized on this same lock, so reconfigure must take it too. */
     tx_gate_radio_lock();
     /* Also exclude radio_task's RX-done read: changing the PA, frequency or
      * modulation partway through GetRxBufferStatus -> ReadBuffer ->
-     * GetPacketStatus would hand the mesh telemetry for a different config
-     * (issue #225). Ordered strictly inside the gate lock; nothing acquires
-     * these in the opposite order, so there is no deadlock. */
+     * GetPacketStatus would hand the mesh telemetry for a different config.
+     * Ordered strictly inside the gate lock; nothing acquires these in the
+     * opposite order, so there is no deadlock. */
     rx_seq_lock();
 
     /* Put radio in standby before reconfiguring (0 = RC oscillator). A failure
@@ -407,7 +405,7 @@ int radio_init(const radio_config_t* config) {
 
     /* Create the RX-sequence lock before the radio task or DIO1 ISR can fire,
      * so the very first RX-done read is already serialized against a concurrent
-     * reconfigure (issue #225). */
+     * reconfigure. */
     s_rx_seq_mutex = xSemaphoreCreateMutex();
     if (!s_rx_seq_mutex) {
         ESP_LOGE(TAG, "Failed to create RX sequence mutex");
@@ -569,8 +567,8 @@ void radio_start_rx(void) {
     }
 
     if (rc != 0) {
-        /* Do not claim RX. Setting the state unconditionally used to make
-         * radio_get_state() report a healthy receiver while the node was a
+        /* Do not claim RX. Setting the state unconditionally would make
+         * radio_get_state() report a healthy receiver while the node is a
          * black hole; IDLE is the honest answer for a chip that is not
          * listening, and the reinit path is what brings it back. */
         if (rc == SX1262_ERR_RESET) {
@@ -618,15 +616,14 @@ bool radio_cad_check(void) {
 
     /* radio_cad() already does the standby and IRQ clear, with error handling.
      * If it cannot arm CAD it leaves the state IDLE and no CAD_DONE arrives,
-     * so the take below expires and this returns false ("channel clear"),
-     * which is the same fail-open the timeout path has always had. Checking
-     * radio_get_state() here instead would race the CAD_DONE IRQ, which can
-     * land before the check on short spreading factors. */
+     * so the take below expires and the CAD-timeout policy decides the answer.
+     * Checking radio_get_state() here instead would race the CAD_DONE IRQ,
+     * which can land before the check on short spreading factors. */
     radio_cad();
 
-    /* Scale the wait with the live radio config. A fixed 50 ms could not
-     * cover a 4-symbol CAD above SF10 at 125 kHz (SF12 alone is 131 ms), so
-     * the take always expired and listen-before-talk silently degraded to
+    /* Scale the wait with the live radio config. A 4-symbol CAD above SF10 at
+     * 125 kHz needs more than 50 ms (SF12 alone is 131 ms), so a fixed short
+     * wait would expire every time and silently degrade listen-before-talk to
      * nothing on long-range profiles. */
     uint32_t timeout_ms =
         bramble_cad_timeout_ms(s_config.sf, s_config.bw_hz, BRAMBLE_CAD_SYMBOL_NUM_REG);
@@ -650,8 +647,8 @@ bool radio_cad_check(void) {
             sx1262_request_reinit();
             return true;
         }
-        /* Fail open: transmit anyway, as before. A one-off timeout is more
-         * likely a transient missed IRQ than a dead radio. */
+        /* Fail open: transmit anyway. A one-off timeout is more likely a
+         * transient missed IRQ than a dead radio. */
         ESP_LOGW(TAG, "CAD check timed out after %u ms (sf=%u bw=%u), failing open",
                  (unsigned)timeout_ms, (unsigned)s_config.sf, (unsigned)s_config.bw_hz);
         return false;
@@ -683,8 +680,8 @@ int8_t radio_tx_power_max_dbm(void) { return SX1262_TX_POWER_MAX_DBM; }
  *
  * Assumes the caller holds the transmit gate and the RX-sequence lock: these
  * are three more SPI command sequences, and splicing them into an in-flight
- * transmit is exactly the hazard issues #82 and #225 closed. Kept separate
- * from radio_get_health so radio_reconfigure can read inside the region it
+ * transmit is exactly what those two locks exclude. Kept separate from
+ * radio_get_health so radio_reconfigure can read inside the region it
  * already holds rather than releasing and immediately re-acquiring, which
  * would expose the reconfigure to a second full gate wait (a holder can own
  * the gate for seconds across LBT backoff plus a TX-done wait). */

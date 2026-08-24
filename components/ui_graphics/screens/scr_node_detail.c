@@ -44,8 +44,8 @@ static void node_detail_format_location(char* out, size_t out_len, bool has_loca
     if (!age_known) {
         /* Restored from flash: the receipt time belongs to an earlier boot's
          * uptime clock, so subtracting it from this one's yields a number with
-         * no meaning. It used to fall through to age_s == 0 and label a
-         * position of any age "(now)". */
+         * no meaning. Without this guard the difference lands at age_s == 0 and
+         * labels a position of any age "(now)". */
         snprintf(out, out_len, "%.6f, %.6f (last known)", lat, lon);
         return;
     }
@@ -309,12 +309,12 @@ void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neig
     lv_timer_t* refresh = lv_timer_create(node_detail_refresh_cb, 1000, NULL);
     lv_obj_add_event_cb(card, node_detail_delete_cb, LV_EVENT_DELETE, refresh);
 
-    /* Actions: ONE horizontal row instead of the old column of four
-     * screen-wide buttons. The stack forced this screen to scroll (and put
-     * the top button flush against the clip edge); a single row of compact
-     * buttons fits the whole screen without scrolling. Back is a fixed-width
-     * arrow (leftmost, mirroring where back lives in the chrome), the three
-     * real actions share the rest of the width. */
+    /* Actions: ONE horizontal row, not a column of screen-wide buttons. A
+     * stacked column forces this screen to scroll (and puts the top button
+     * flush against the clip edge); a single row of compact buttons fits the
+     * whole screen without scrolling. Back is a fixed-width arrow (leftmost,
+     * mirroring where back lives in the chrome), the three real actions share
+     * the rest of the width. */
     lv_obj_t* actions = lv_obj_create(card);
     lv_obj_set_width(actions, lv_pct(100));
     lv_obj_set_height(actions, LV_SIZE_CONTENT);

@@ -1,6 +1,5 @@
 /*
- * Bramble GPIO observer/injector (P2.2).
- * See hw/xtensa/bramble_gpio.c.
+ * Bramble GPIO observer/injector. See hw/xtensa/bramble_gpio.c.
  */
 
 #ifndef HW_XTENSA_BRAMBLE_GPIO_H
@@ -13,7 +12,7 @@
  * Attach the Bramble GPIO observer/injector to the running esp32s3 machine.
  * Called from esp32s3_machine_init() where the SoC state pointer is in scope
  * (Esp32s3SocState is private to hw/xtensa/esp32s3.c, so we wire in at the
- * machine-init site rather than exporting SoC internals; see P2.2 in
+ * machine-init site rather than exporting SoC internals; see
  * docs/archive/plans/emulator-phase2-qemu-spec.md).
  *
  *   sys_mem  the system address space the esp32s3 GPIO region lives in.

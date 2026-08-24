@@ -266,13 +266,13 @@ bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
         if (s_msgs && s_msgs[idx].packet_id == packet_id) {
             /* Parked is sticky here too, on exactly the rule
              * msg_store_update_by_uid's doc comment states: DELIVERED is the
-             * only status a QUEUED row accepts. This is the path that used to
-             * strand a parked message. The ACK retry tick reports FAILED
-             * against a packet_id, and a parked row that had been marked SENT
-             * by its own retry was no longer QUEUED when that landed, so the
-             * old FAILED-only guard did not fire and the row left the parked
-             * state for good. Keeping the row QUEUED through the transmit is
-             * what makes this guard the one that catches it. */
+             * only status a QUEUED row accepts. This is the path that would
+             * otherwise strand a parked message: the ACK retry tick reports
+             * FAILED against a packet_id, and a parked row marked SENT by its
+             * own retry would no longer be QUEUED when that lands, so this
+             * guard would not fire and the row would leave the parked state
+             * for good. Keeping the row QUEUED through the transmit is what
+             * makes this guard the one that catches it. */
             bool sticky = s_msgs[idx].status == MSG_STATUS_QUEUED && status != MSG_STATUS_DELIVERED;
             changed = !sticky && s_msgs[idx].status != status;
             if (!sticky)

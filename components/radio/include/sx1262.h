@@ -241,9 +241,9 @@ static inline sx1262_pa_op_point_t sx1262_pa_op_point_for(int8_t power_dbm) {
  * these three bandwidths; anything above 250 kHz maps to the 500 kHz code.
  *
  * This is the single source of truth for the mapping. It is deliberately a
- * pure inline in the header so it is host-testable without the SPI driver: the
- * previous kHz-through-uint8_t path truncated 500 to 244 and silently ran the
- * radio at 125 kHz (issue #149). */
+ * pure inline in the header so it is host-testable without the SPI driver, and
+ * it takes Hz: passing kHz through a uint8_t truncates 500 to 244 and silently
+ * runs the radio at 125 kHz. */
 static inline uint8_t sx1262_bw_reg_from_hz(uint32_t bw_hz) {
     if (bw_hz <= 125000)
         return 0x04;

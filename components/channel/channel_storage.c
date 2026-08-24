@@ -1,5 +1,5 @@
 /**
- * Channel persistence using NVS (Phase 1)
+ * Channel persistence using NVS.
  * Stores channel keys, names, and default channel index robustly.
  */
 

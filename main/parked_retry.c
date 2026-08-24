@@ -84,7 +84,7 @@ bool parked_retry_beacon_decide_flush(neighbor_table_t* table, const parked_swee
         return false;
     }
 
-    /* The rejoin edge, unchanged: a beacon that ADMITTED this address is the
+    /* The rejoin edge: a beacon that ADMITTED this address is the
      * "they came back" event, and it flushes whether or not anything armed the
      * entry, because an address that was not in the table could not be armed. */
     if (is_new_peer)

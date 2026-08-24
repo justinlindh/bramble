@@ -1,8 +1,7 @@
 /*
- * Verified TOFU identity pin store (per-node identity Phase 3, Part C).
- * See identity_store.h for the trust model. Pure C over a caller-owned
- * struct: host-testable directly, one instance per node in gosim, one
- * static instance in mesh_task.c.
+ * Verified TOFU identity pin store. See identity_store.h for the trust
+ * model. Pure C over a caller-owned struct: host-testable directly, one
+ * instance per node in gosim, one static instance in mesh_task.c.
  */
 #include "identity_store.h"
 
@@ -10,20 +9,20 @@
 #include <string.h>
 
 #include "crypto.h"   /* crypto_ed25519_verify */
-#include "identity.h" /* identity_endorsement_verify (trust-anchor P2) */
+#include "identity.h" /* identity_endorsement_verify */
 
 void identity_store_init(identity_store_t* s, uint32_t now_ms) {
     memset(s, 0, sizeof(*s));
     s->boot_ms = now_ms;
     /* has_anchor stays false: a fresh store is NOT anchored, so the
-     * endorsement gate is skipped and behavior is today's TOFU exactly.
+     * endorsement gate is skipped and behavior is plain TOFU.
      * Anchoring is opt-in via identity_store_set_anchor. */
 }
 
 void identity_store_set_anchor(identity_store_t* s, const uint8_t anchor_pub[32]) {
     /* Whether this call changes the effective anchor: first-ever anchoring, or a
      * rotation to a different key. An idempotent same-key re-provision is NOT a
-     * change (P1 idempotency concern), so it must keep the endorsed pins. */
+     * change, so it must keep the endorsed pins. */
     bool changed = !s->has_anchor || memcmp(s->anchor_pub, anchor_pub, 32) != 0;
     /* Snapshot whether pins existed BEFORE we clear anything: this decides
      * whether the anchor change is a re-hardening (had pins, now dropping them)
@@ -45,7 +44,7 @@ void identity_store_set_anchor(identity_store_t* s, const uint8_t anchor_pub[32]
      * diagnostic counters are cumulative); idempotent same-key re-set leaves the
      * endorsed pins in place.
      *
-     * Bootstrap-grace interaction (P4b): clearing the pins resets the pin count
+     * Bootstrap-grace interaction: clearing the pins resets the pin count
      * to 0, which would by itself RE-OPEN the timesync bootstrap grace's
      * unpinned fallback (the count < QUORUM_GRACE_MIN_PINS clause flips true
      * again) whenever this runs inside the per-boot grace window. To stop a
@@ -77,10 +76,10 @@ static identity_pin_t* find_entry(identity_store_t* s, uint32_t address) {
  * uint32 wraparound semantics, the same idiom the rest of the codebase
  * uses for now_ms arithmetic.
  *
- * Issue #88: verified pins are NOT interchangeable with unverified ones. A
+ * Verified pins are NOT interchangeable with unverified ones. A
  * verified pin encodes a human comparing a SAS out of band; an unverified
  * one is trust-on-first-use that re-establishes for free on the next
- * attestation. Evicting purely by age let an attestation flood from
+ * attestation. Evicting purely by age would let an attestation flood from
  * throwaway addresses push SAS-verified pins out and silently downgrade
  * them back to TOFU, which is the exact impersonation window the verified
  * bit exists to close.
@@ -165,7 +164,7 @@ identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
     if (att->src_addr == self_addr)
         return IDENTITY_PIN_SELF;
 
-    /* Phase 4 address<->key binding, checked BEFORE the expensive Ed25519
+    /* Address<->key binding, checked BEFORE the expensive Ed25519
      * verify (one SHA256): the claimed src_addr must BE the address the
      * frame's own Ed25519 key derives to. Without this, any keyed insider
      * could attest any address under its own (validly signing) key and
@@ -191,11 +190,11 @@ identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
         return IDENTITY_PIN_BAD_SIG;
     }
 
-    /* Trust-anchor endorsement gate (P2): runs ONLY on an anchored node, and
+    /* Trust-anchor endorsement gate: runs ONLY on an anchored node, and
      * ONLY after the existing self/addr/self-sig checks above (so BAD_SIG and
      * ADDR_MISMATCH still take precedence: a frame that is both unendorsed and
      * addr-mismatched returns ADDR_MISMATCH). A node with no anchor skips this
-     * block entirely and its behavior is today's TOFU, bit-for-bit: the opt-in
+     * block entirely and its behavior is plain TOFU: the opt-in
      * guarantee. This gates PINNING only; the caller still relays the frame. */
     if (s->has_anchor) {
         /* (a) cert present: not_after == 0 is the "no cert" sentinel (the
@@ -216,8 +215,8 @@ identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
         }
         /* (c) expiry: a non-permanent cert is expired once the SYNCED wall
          * clock is past its not_after. v1 always issues UINT64_MAX (permanent)
-         * so this never fires live, but the wire format is frozen now, so it
-         * is implemented and tested for P-future expiring certs. epoch_ms == 0
+         * so this never fires live, but the wire format is frozen, so it
+         * is implemented and tested for future expiring certs. epoch_ms == 0
          * means the clock is unsynced: expiry is NOT enforced (a would-be
          * expiring cert is provisionally accepted until the clock syncs,
          * matching the design's "expiry only after sync" resolution; a
@@ -246,8 +245,8 @@ bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address,
         return false; /* tenure requirement is never relaxed */
     if (identity_store_lookup(s, address) != NULL)
         return true; /* pinned: always eligible (subject to tenure) */
-    /* Unpinned: eligible ONLY inside the bounded per-boot grace, and P3a
-     * tightens that fallback with the count early-exit so the residual
+    /* Unpinned: eligible ONLY inside the bounded per-boot grace, which the
+     * count early-exit tightens so the residual
      * unpinned-trust window is as small as possible:
      *   (1) within QUORUM_BOOTSTRAP_GRACE_MS of boot -- the time backstop, so a
      *       fresh mesh can bootstrap timesync before any attestation is pinned;
@@ -256,9 +255,9 @@ bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address,
      *       is no longer needed, so the gate tightens to pinned-only the instant
      *       enough pins exist, typically well before the time bound. This is
      *       anchor-INDEPENDENT (it applies to no-anchor TOFU meshes too, a
-     *       deliberate strict improvement to the #131 grace: see the header).
+     *       deliberate strict improvement: see the header).
      * The subtraction is uint32 wraparound-safe, the same now_ms idiom used for
-     * LRU age above. (A negative-intel reject ring was considered and dropped;
+     * LRU age above. (A negative-intel reject ring is deliberately absent;
      * see QUORUM_GRACE_MIN_PINS for why.) */
     if (s->grace_forced_closed)
         return false; /* a runtime re-hardening (anchor change that dropped

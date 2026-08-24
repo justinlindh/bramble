@@ -182,14 +182,14 @@ uint32_t bramble_cad_timeout_ms(uint8_t sf, uint32_t bw_hz, uint8_t cad_symbol_n
 
 /**
  * Consecutive CAD timeouts before radio_cad_check() stops failing open and
- * fails closed (issue #118). Now that #117 sizes the CAD budget correctly, a
+ * fails closed. The CAD budget is sized from the live SF and bandwidth, so a
  * timeout means the radio did not answer within roughly twice the CAD
  * duration, which points at a stuck SX1262, a wedged DIO1 path or severe SPI
  * starvation. A single timeout is still weak evidence (a one-off missed IRQ
  * under contention), so the first two fail open and transmit anyway; the third
  * fails closed and flags the radio for reinit. Set to 3 to match the driver's
- * existing BUSY_STUCK_THRESHOLD, so BUSY and CAD share one three-strikes trip
- * point, and to bound the blind-transmit (no-LBT) exposure to two frames. */
+ * BUSY_STUCK_THRESHOLD, so BUSY and CAD share one three-strikes trip point,
+ * and to bound the blind-transmit (no-LBT) exposure to two frames. */
 #define BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD 3u
 
 /** Verdict from the CAD-timeout fail-open/closed policy. */

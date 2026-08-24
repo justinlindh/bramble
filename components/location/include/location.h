@@ -19,7 +19,7 @@
 #define LOCATION_PRESENCE_SIZE 1 /* status(1) */
 
 /*
- * SEC-C1 (Task 2.1, RFC section 2, M11): the sharing tier moves into the
+ * SEC-C1 (see docs/SECURITY-MODEL.md): the sharing tier lives in the
  * encrypted plaintext instead of the cleartext header flags, and every
  * tier is padded to one canonical inner size so an observer cannot infer
  * the tier (and therefore how much a sender trusts the recipient) from
@@ -116,7 +116,7 @@ int location_serialize_for_tier(const bramble_position_t* pos, uint8_t tier, uin
                                 size_t buf_len);
 
 /*
- * SEC-C1 RX (Task 2.2): the decrypt-mechanism-agnostic tail, shared by both
+ * SEC-C1 RX: the decrypt-mechanism-agnostic tail, shared by both
  * handle_location's channel path (after channel_msg_decrypt) and its
  * session path (after dm_session_decrypt). Deliberately kept dependency-free
  * (no channel_msg.h / dm_session.h include here): it only takes
@@ -127,7 +127,7 @@ int location_serialize_for_tier(const bramble_position_t* pos, uint8_t tier, uin
  * and pos_out), -1 on any parse failure. The decrypt-specific glue (trial
  * against channels, or a session lookup) lives in mesh_task.c, which
  * already depends on both channel_msg.h and dm_session.h; adding either as
- * a REQUIRES of the location component here rippled into unrelated host
+ * a REQUIRES of the location component here ripples into unrelated host
  * test targets that only need location's other, decrypt-independent API.
  */
 int location_parse_inner(const uint8_t* plaintext, size_t plaintext_len, uint8_t* tier_out,
@@ -175,9 +175,9 @@ bool location_age_is_fresh(bool age_known, uint32_t received_ms, uint32_t now_ms
  *
  * On-flash record for a peer's last known position: NVS namespace
  * NVS_NS_LOCATION, key PEER_LOCATION_KEY_PREFIX followed by the peer address
- * as 8 uppercase hex digits. ONE definition of the layout, deliberately: it
- * used to be hand-copied into three translation units, and a hand-maintained
- * second copy of a flash layout drifts and then mis-reads flash in silence.
+ * as 8 uppercase hex digits. ONE definition of the layout, deliberately: a
+ * hand-maintained second copy of a flash layout drifts and then mis-reads
+ * flash in silence.
  *
  * received_ms is a raw uptime millisecond count, so it only means something
  * inside the boot that wrote it. The counter restarts at zero on every reset,

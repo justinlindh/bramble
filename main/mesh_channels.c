@@ -1,8 +1,10 @@
 /**
- * mesh_channels.c: Channel table management (add/remove/query/default + PSK-flag NVS).
+ * mesh_channels.c: Channel table management (add/remove/query/default + PSK-flag
+ * NVS).
  *
- * Split out of mesh_task.c (issue #86); pure code motion, no behavior change.
- * Shared state and cross-module entry points come from mesh_internal.h.
+ * Owns the in-RAM channel table, the default-channel selection, and the NVS mirror
+ * recording which slots carry a PSK. Shared state and cross-module entry points come
+ * from mesh_internal.h.
  */
 #include "mesh_internal.h"
 
@@ -99,7 +101,7 @@ int mesh_add_channel(const char* name, const uint8_t* psk, size_t psk_len) {
         s_channel_names[idx][0] = '\0';
     }
 
-    /* Persist all channels using channel_storage (Phase 1) */
+    /* Persist all channels using channel_storage */
     if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) !=
         0) {
         ESP_LOGW(TAG, "Failed to persist channels to NVS");
@@ -143,7 +145,7 @@ int mesh_remove_channel(int index) {
         s_default_channel_idx = 0;
     }
 
-    /* Persist channels after removal (Phase 1) */
+    /* Persist channels after removal */
     if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) !=
         0) {
         ESP_LOGW(TAG, "Failed to persist channels to NVS after removal");
@@ -224,7 +226,7 @@ int mesh_set_default_channel(int index) {
 
     s_default_channel_idx = index;
 
-    /* Persist default channel (Phase 1) */
+    /* Persist default channel */
     if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) !=
         0) {
         ESP_LOGW(TAG, "Failed to persist default channel to NVS");

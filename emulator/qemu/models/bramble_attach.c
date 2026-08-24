@@ -1,14 +1,15 @@
 /*
- * Bramble device-model fan-out (QEMU esp32s3, Phase 2 emulator).
+ * Bramble device-model fan-out (QEMU esp32s3).
  *
  * esp32s3_machine_init() makes ONE call, bramble_attach(), which wires in every
- * Bramble device model. Previously each model was injected by its own patch that
- * edited both hw/xtensa/meson.build and this machine-init site, hand-placed to
- * dodge its siblings' git-apply context windows; that O(N^2) fragility is why
- * this shim exists. Adding a model is now: drop its source in this directory,
- * list it in meson.build, and add its attach call below - no new patch to stock
- * QEMU. The models stay independent translation units, each with its own
- * type_init; this file only owns the attach ORDER and the handle plumbing.
+ * Bramble device model. That single call site is the point of this shim: adding
+ * a model means dropping its source in this directory, listing it in
+ * meson.build, and adding its attach call below, with no new patch against
+ * stock QEMU. Giving each model its own patch to both hw/xtensa/meson.build and
+ * the machine-init site makes every patch hand-placed to dodge its siblings'
+ * git-apply context windows, which is O(N^2) fragile. The models stay
+ * independent translation units, each with its own type_init; this file only
+ * owns the attach ORDER and the handle plumbing.
  *
  * No vCPU runs during machine init, so the attach order below is not timing-
  * sensitive; it simply reads top-down in dependency order (shared GPIO overlay
@@ -27,7 +28,7 @@
 
 void bramble_attach(MemoryRegion *sys_mem, DeviceState *gdma, DeviceState *intc)
 {
-    /* Injection-scaffold proof: a log line at machine realize (P2.2-infra). */
+    /* Injection-scaffold proof: a log line at machine realize. */
     bramble_scaffold_init();
 
     /* GPIO observer/injector: the shared board pins (buttons, GNSS_EN, LED /
@@ -35,11 +36,11 @@ void bramble_attach(MemoryRegion *sys_mem, DeviceState *gdma, DeviceState *intc)
      * back and drive. Attached first so its accessors are live for them. */
     bramble_gpio_attach(sys_mem, intc);
 
-    /* SAR ADC oneshot stub so battery_read_mv() completes (P2.3b). */
+    /* SAR ADC oneshot stub so battery_read_mv() completes. */
     bramble_adc_attach(sys_mem);
 
     /* GPSPI2 (SPI2_HOST) controller plus its two register-accurate SSI slaves,
-     * the SX1262 radio (P2.4) and the SSD1680 e-paper (P2.5). */
+     * the SX1262 radio and the SSD1680 e-paper. */
     bramble_gpspi2_attach(sys_mem, gdma, intc);
 
     /* LEDC buzzer overlay + the LED/vibra/buzzer -> emu-link `ind` bridge. */

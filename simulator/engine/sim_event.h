@@ -7,11 +7,11 @@
 #define MAX_EVENT_QUEUE 100000
 
 typedef enum {
-    /* Repurposed (Task 5, channel flood): a due-timestamped jittered
-     * channel-flood relay. data.packet.src_addr carries the RELAYING
-     * node's own address (which node fires this event, not a radio
-     * source); data.packet.data/len is the exact relay-mutated frame to
-     * transmit. See simulator/gosim/bridge.c's bridge_handle_flood_relay. */
+    /* Channel flood: a due-timestamped jittered channel-flood relay.
+     * data.packet.src_addr carries the RELAYING node's own address (which
+     * node fires this event, not a radio source); data.packet.data/len is
+     * the exact relay-mutated frame to transmit. See
+     * simulator/gosim/bridge.c's bridge_handle_flood_relay. */
     EVT_SEND_PACKET = 0,
     EVT_RECEIVE_PACKET,
     EVT_TIMER_FIRE,
@@ -24,29 +24,28 @@ typedef enum {
     EVT_METRICS_TICK,
     EVT_TICK_NODE,          /* per-node periodic tick */
     EVT_BROADCAST_DELIVERY, /* synthetic bramble.onBroadcastDelivery notification */
-    /* Per-node identity Phase 3: a scripted identity-attestation
-     * origination ("send_attestation" scenario event). data.node.node_id
-     * is the ORIGINATING node; data.node.addr is the CLAIMED address (0 =
-     * the node's own address; a nonzero different address models a keyed
-     * insider impersonating another node, the conflict-detection case). */
+    /* A scripted identity-attestation origination ("send_attestation"
+     * scenario event). data.node.node_id is the ORIGINATING node;
+     * data.node.addr is the CLAIMED address (0 = the node's own address; a
+     * nonzero different address models a keyed insider impersonating
+     * another node, the conflict-detection case). */
     EVT_GENERATE_ATTESTATION,
-    /* Trust-anchor campaign (P2 red-team): a scripted runtime anchor
-     * provisioning ("provision_anchor" scenario event), the sim analog of an
-     * operator running bramble.setAnchor mid-life to harden an un-anchored
-     * fleet. data.node.node_id is the node being (re-)anchored to the fleet
-     * test anchor; the drop-stale-pins behavior of identity_store_set_anchor is
-     * what the event exercises. */
+    /* A scripted runtime anchor provisioning ("provision_anchor" scenario
+     * event), the sim analog of an operator running bramble.setAnchor mid-life
+     * to harden an un-anchored fleet. data.node.node_id is the node being
+     * (re-)anchored to the fleet test anchor; the drop-stale-pins behavior of
+     * identity_store_set_anchor is what the event exercises. */
     EVT_PROVISION_ANCHOR,
-    /* Location sharing (issue #172): a scripted GPS position broadcast
+    /* Location sharing: a scripted GPS position broadcast
      * ("send_location" scenario event). data.location.node_id is the
      * originating node; the fix-degree coordinates from the scenario are
      * carried as e7 integers (the firmware's own bramble_position_t
      * representation) so no float precision is lost on the way to
      * location_serialize_for_tier. */
     EVT_GENERATE_LOCATION,
-    /* Receipt reliability campaign: one pending broadcast delivery receipt
-     * has come due for transmission on one node, the sim analog of
-     * firmware's MESH_EVT_RECEIPT_TX (main/mesh_internal.h) fired by the
+    /* One pending broadcast delivery receipt has come due for
+     * transmission on one node, the sim analog of firmware's
+     * MESH_EVT_RECEIPT_TX (main/mesh_internal.h) fired by the
      * s_receipt_timer. data.receipt_tx names the node and its queue slot;
      * the receipt bytes and the attempt/defer counters live in that slot
      * (bridge.h's bridge_node_ext_t.receipt_queue), exactly like firmware
@@ -90,7 +89,7 @@ typedef struct {
     uint32_t addr;
     float x;
     float y;
-    /* node_join only (issue #144): true when the scenario event supplied
+    /* node_join only: true when the scenario event supplied
      * explicit x/y. A coordinate-less rejoin restores the node's original
      * scenario position instead of teleporting it to (0,0). */
     bool has_coords;

@@ -1,14 +1,14 @@
 /*
- * Bramble SAR ADC oneshot stub (QEMU esp32s3, Phase 2 milestone P2.3b).
+ * Bramble SAR ADC oneshot stub (QEMU esp32s3).
  *
- * P2.3 unwedged the GPSPI2 spin so the pager firmware now boots through
- * show_splash / button_init / battery_init and then WEDGES at the first SAR ADC
- * oneshot conversion in battery_read_mv() (components/battery/battery.c). The
- * IDF oneshot driver kicks a conversion and then spins in
+ * Without this stub the pager firmware boots through show_splash /
+ * button_init / battery_init and then WEDGES at the first SAR ADC oneshot
+ * conversion in battery_read_mv() (components/battery/battery.c). The IDF
+ * oneshot driver kicks a conversion and then spins in
  * adc_oneshot_ll_get_event() waiting on a "done" bit that never sets, because
- * the SAR ADC is not modeled. (P2.1 stubbed ADC *calibration* via the eFuse
- * image; that gets past self-calibration, but the first real *conversion* now
- * spins.)
+ * stock QEMU does not model the SAR ADC. (The eFuse image stubs ADC
+ * *calibration*, which gets past self-calibration, but not a real
+ * *conversion*.)
  *
  * On the esp32s3 the ADC oneshot ("RTC single read") path drives the SENS
  * peripheral, NOT the APB_SARADC digital controller (hal/esp32s3/adc_ll.h):
@@ -26,8 +26,8 @@
  * registers the oneshot poll touches: when the driver writes the START bit we
  * immediately latch DONE and a fixed, plausible raw result; the idle-status
  * register reads back 0 so the pre-conversion wait loop falls through. Every
- * other SENS register reads 0 / drops writes exactly as the catch-all did, so
- * the ADC-config path the firmware already completed is unchanged. Battery
+ * other SENS register reads 0 / drops writes exactly as the catch-all does, so
+ * the ADC-config path the firmware already completed is unaffected. Battery
  * voltage does not matter for the emulator; any finite result that lets the
  * poll finish is enough. BRAMBLE_ADC_RAW is a mid-scale 12-bit reading (~1.6V
  * at the pin) which maps, through battery.c's calibration and divider, to a

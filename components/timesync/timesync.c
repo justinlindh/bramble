@@ -23,10 +23,9 @@ static void purge_stale(timesync_state_t* ts, uint32_t local_now_ms) {
 
 /* Count distinct source addresses among ESTABLISHED entries in the pending
  * pool. Only established sources count toward the pre-commit corroboration
- * quorum (ws 1.3c, NEW-SEC-4 mitigation): a non-established entry can still
- * sit in the pool (and its offset still feeds compute_weighted_offset once
- * a quorum has committed via the post-sync path), it just doesn't help
- * reach the FIRST commit. */
+ * quorum: a non-established entry can still sit in the pool (and its
+ * offset still feeds compute_weighted_offset once a quorum has committed
+ * via the post-sync path), it just doesn't help reach the FIRST commit. */
 static int count_distinct_established_sources(const timesync_state_t* ts) {
     uint32_t seen[PENDING_POOL_SIZE];
     int n = 0;
@@ -89,7 +88,7 @@ int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t r
             return -2;
         }
     } else if (ts->pending_count > 0) {
-        /* NEW-SEC-4 (Task 3.5, STAGED, see network_key.h): before the
+        /* Bootstrap outlier clamp (STAGED, see network_key.h): before the
          * first sync commits, ts->offset_ms is not yet meaningful (it is
          * still its zero-init value), so a lone huge proposal cannot be
          * judged against it the way the synchronized branch above does.
@@ -157,7 +156,7 @@ int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t r
 
 check_commit:;
     /* Require corroboration from distinct ESTABLISHED sources before first
-     * sync (ws 1.3c anti-Sybil lever). Once synchronized, this gate is
+     * sync (anti-Sybil lever). Once synchronized, this gate is
      * skipped entirely (see the outer if), so post-commit re-syncs
      * (self-heal) are unaffected by source tenure. */
     int distinct_established = count_distinct_established_sources(ts);

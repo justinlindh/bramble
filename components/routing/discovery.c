@@ -6,7 +6,7 @@
 /* Saturating 8-bit hop-count arithmetic. hop_count is a single wire byte and,
  * on an unauthenticated RREQ, is fully attacker-controlled. A plain ++ or +
  * wraps 255 -> 0, which lets a forged hop_count of 255 be laundered into a
- * zero-hop advertisement: the most attractive route possible (issue #74).
+ * zero-hop advertisement: the most attractive route possible.
  * Saturating at 255 pins a forged count at the maximum instead of rolling
  * over. A legitimate mesh never approaches 255 hops, so this only ever
  * changes the pathological / forged case. */
@@ -123,7 +123,7 @@ bramble_rreq_t rreq_forward(const bramble_rreq_t* incoming, uint32_t my_addr, in
 /* query_id(4) || src_addr(4) || hop_count(1) || route_metric(1) || seq(6),
  * big-endian for the multi-byte fields: the origin-stable fields, exactly
  * excluding next_hop and header.dest_addr (the only two fields rrep_forward
- * mutates). seq (ws 1.3b) is origin-stable like the rest: rrep_forward
+ * mutates). seq is origin-stable like the rest: rrep_forward
  * carries it through unchanged, so it belongs in the same coverage set. */
 static void rrep_build_auth_buf(const bramble_rrep_t* r, uint8_t buf[16]) {
     buf[0] = (uint8_t)(r->query_id >> 24);

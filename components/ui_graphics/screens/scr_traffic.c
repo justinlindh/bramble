@@ -20,11 +20,10 @@ extern traffic_debug_t* mesh_get_traffic_debug(void);
  * Packet type → short display name (max 5 chars)
  *
  * Cases come from the PKT_TYPE_* constants in packet.h, the same source of
- * truth the traffic classifier uses. Hand-copied hex mirrors used to live
- * here and drifted from the protocol: they carried names for type codes that
- * were never assigned (0x08/0x09/0x0F/0x10/0x11) and never grew
- * PKT_TYPE_IDENTITY_ATTESTATION, so a real attestation rendered as raw hex.
- * Any genuinely unknown type falls through to the hex default below.
+ * truth the traffic classifier uses. Never mirror the type codes as
+ * hand-copied hex here: a second copy drifts from the protocol, naming codes
+ * that do not exist and missing ones that do, so a real packet renders as raw
+ * hex. Any genuinely unknown type falls through to the hex default below.
  * ------------------------------------------------------------------------- */
 static const char* pkt_type_name(uint8_t pkt_type) {
     switch (pkt_type) {

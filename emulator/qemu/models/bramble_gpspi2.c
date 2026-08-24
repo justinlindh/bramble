@@ -1,5 +1,5 @@
 /*
- * Bramble GPSPI2 (SPI2_HOST) controller model (QEMU esp32s3, Phase 2 P2.3).
+ * Bramble GPSPI2 (SPI2_HOST) controller model (QEMU esp32s3).
  *
  * The espressif/qemu esp32s3 machine models only the flash MEM controller
  * (hw/ssi/esp32s3_spi.c: SPI_MEM_* / FLASH_* registers at DR_REG_SPI1_BASE),
@@ -9,7 +9,8 @@
  * not model or map. Reads/writes to that window hit the catch-all IO region,
  * the SPI "user transaction done" bit never clears, and the IDF spi_master
  * polling driver spins forever (spi_device_polling_transmit ->
- * spi_hal_usr_is_done). Boot wedges in show_splash at the first e-paper command.
+ * spi_hal_usr_is_done). Without this model boot wedges in show_splash at the
+ * first e-paper command.
  *
  * This model overlays the GPSPI2 register window (like bramble_gpio overlays the
  * GPIO window) and implements just enough of the spi_master user-transaction
@@ -40,11 +41,11 @@
  *     MISO is enabled, push captured bytes back via the IN channel. See the
  *     CS-routing / channel-disambiguation notes below.
  *
- * CS routing (implemented in P2.4a, refined by P2.5). The pager mixes CS
- * styles, and two register-accurate slaves share the bus (SX1262 radio +
- * SSD1680 display), so every transfer must go to exactly one:
+ * CS routing. The pager mixes CS styles, and two register-accurate slaves
+ * share the bus (SX1262 radio + SSD1680 display), so every transfer must go
+ * to exactly one:
  *   - Radio (sx1262.c) uses MANUAL software CS: spics_io_num = -1 and the driver
- *     toggles gpio_set_level(GPIO8) by hand; the P2.2 bramble_gpio overlay
+ *     toggles gpio_set_level(GPIO8) by hand; the bramble_gpio overlay
  *     observes GPIO8. So the radio slave's select is derived from the GPIO8
  *     level read back through bramble_gpio_out_level(), NOT from this
  *     peripheral's CS lines. When GPIO8 is low the transfer routes to the
@@ -52,13 +53,12 @@
  *   - Display (ssd1680_io.c) uses HARDWARE CS: spics_io_num = GPIO4. The
  *     display is added first (display_init runs before radio_init), so it is
  *     SPI device 0 and owns CS0; the IDF spi_master enables it per transaction
- *     via SPI_MISC_REG.CS0_DIS. P2.5 selects the display POSITIVELY off that
- *     bit (CS0_DIS clear) rather than the P2.4 stub's "GPIO8 not low"
- *     simplification: disp_sel = (GPIO8 high) AND (CS0 enabled). The SSD1680
+ *     via SPI_MISC_REG.CS0_DIS. The display is selected POSITIVELY off that
+ *     bit (CS0_DIS clear), not merely by "GPIO8 not low":
+ *     disp_sel = (GPIO8 high) AND (CS0 enabled). The SSD1680
  *     slave (register-accurate, TYPE_BRAMBLE_SSD1680, bramble_ssd1680.c).
  * Both slaves are SSI_CS_LOW; bramble_gpspi2_route drives their SSI_GPIO_CS
- * inputs from that decision so exactly one answers each ssi_transfer. The radio
- * routing is unchanged from P2.4.
+ * inputs from that decision so exactly one answers each ssi_transfer.
  */
 
 #include "qemu/osdep.h"
@@ -202,7 +202,7 @@ static void bramble_gpspi2_update_irq(BrambleGpspi2State *s)
 }
 
 /* Select the bus slave this transfer targets. The radio's manual chip select is
- * GPIO8 (driven by sx1262.c via gpio_set_level and observed by the P2.2
+ * GPIO8 (driven by sx1262.c via gpio_set_level and observed by the GPIO
  * overlay): GPIO8 low selects the SX1262 slave. The display uses hardware CS0
  * (it is SPI device 0, added by display_init before radio_init), which the IDF
  * spi_master enables per transaction via SPI_MISC_REG.CS0_DIS; it is selected
@@ -267,11 +267,11 @@ static void bramble_gpspi2_transfer(BrambleGpspi2State *s)
     if (data_bytes) {
         /* Shift through stack buffers for the common case; spill to the heap
          * only for an oversized transfer the pager never issues. Neither buffer
-         * is pre-zeroed (the old g_malloc0 was fully wasted on the hot path):
-         * rxbuf is completely written by the shift loop, and txbuf is filled
-         * below - with an explicit tail-zero on the CPU path past the 64-byte
-         * W-buffer, and on a missed DMA fetch, to preserve the g_malloc0
-         * semantics the register-accurate slaves may depend on. */
+         * is pre-zeroed, which would be wasted work on the hot path: rxbuf is
+         * completely written by the shift loop, and txbuf is filled below,
+         * with an explicit tail-zero on the CPU path past the 64-byte
+         * W-buffer and on a missed DMA fetch, so the register-accurate slaves
+         * never read uninitialised bytes. */
         uint8_t txstack[GPSPI2_MAX_XFER];
         uint8_t rxstack[GPSPI2_MAX_XFER];
         g_autofree uint8_t *txheap = NULL;
@@ -290,10 +290,10 @@ static void bramble_gpspi2_transfer(BrambleGpspi2State *s)
                                                  ESP_GDMA_OUT_IDX, &chan) ||
                     !esp_gdma_read_channel(s->gdma, chan, txbuf, data_bytes)) {
                     /* Best-effort: a stub slave discards MOSI, so a missed DMA
-                     * fetch does not wedge boot. Zero-fill to match the old
-                     * g_malloc0 (a register-accurate slave then sees zeros, not
-                     * stale stack bytes). Correct framebuffer bytes are a P2.5
-                     * concern (see channel-disambiguation note below). */
+                     * fetch does not wedge boot. Zero-fill so a
+                     * register-accurate slave sees zeros rather than stale
+                     * stack bytes; getting the framebuffer bytes themselves
+                     * right is the channel-disambiguation note below. */
                     memset(txbuf, 0, data_bytes);
                     qemu_log_mask(LOG_UNIMP,
                         "bramble-gpspi2: SPI2 GDMA OUT fetch failed (%u bytes)\n",

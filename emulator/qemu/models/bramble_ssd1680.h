@@ -1,6 +1,6 @@
 /*
- * Bramble SSD1680 e-paper SSI slave (Phase 2 emulator).
- * See hw/xtensa/bramble/bramble_ssd1680.c.
+ * Bramble SSD1680 e-paper SSI slave. See
+ * hw/xtensa/bramble/bramble_ssd1680.c.
  */
 
 #ifndef HW_XTENSA_BRAMBLE_SSD1680_H

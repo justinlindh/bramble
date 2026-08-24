@@ -1,5 +1,5 @@
 /*
- * Bramble indicator bridge + minimal LEDC model (QEMU esp32s3, Phase 2 emulator).
+ * Bramble indicator bridge + minimal LEDC model (QEMU esp32s3).
  *
  * The QEMU pager runs the REAL indicators.c, which drives hardware the browser
  * cannot see: LED = GPIO48, vibra = GPIO16 (both gpio_set_level), buzzer =
@@ -94,9 +94,8 @@ static void bramble_ind_note_buzzer(uint32_t hz)
  * The pager's buzzer is GPIO15 driven by an LEDC PWM tone (indicators.c:
  * LEDC_LOW_SPEED_MODE, timer 1, channel 1). The stock esp32s3 QEMU does not
  * model LEDC at all: the peripheral window (DR_REG_LEDC_BASE) hits the catch-all
- * IO region, so writes vanish and reads return 0. The P2.2 GPIO overlay
- * therefore never sees the buzzer (it is not a gpio_set_level pin), and no
- * emu-link `ind` ever carried it.
+ * IO region, so writes vanish and reads return 0. The GPIO overlay cannot see
+ * the buzzer either: it is not a gpio_set_level pin.
  *
  * This overlay models just the channel-1 registers needed to tell whether the
  * tone is sounding: the output-enable bit (LSCH1_CONF0.SIG_OUT_EN) and the duty

@@ -96,9 +96,8 @@ void battery_init(void) {
  * sample battery_get_status averages. Reports success via the return
  * value instead of folding a failure into a fabricated 0 mV sample: see
  * battery_average_mv's doc comment for why averaging a real failure in as
- * 0 would corrupt the whole reading toward a false low battery, rather
- * than degrading it the way a single-sample 0 mV used to (an obviously
- * unavailable reading, not a plausible-looking low one). */
+ * 0 corrupts the whole reading toward a false low battery: a
+ * plausible-looking low value rather than an obviously unavailable one. */
 static bool read_one_sample_mv(uint32_t* out_mv) {
     int raw = 0;
     esp_err_t err = adc_oneshot_read(s_adc_handle, s_board->battery.adc_channel, &raw);

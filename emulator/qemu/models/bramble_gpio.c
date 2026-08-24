@@ -1,12 +1,12 @@
 /*
- * Bramble GPIO observer/injector (QEMU esp32s3, Phase 2 milestone P2.2).
+ * Bramble GPIO observer/injector (QEMU esp32s3).
  *
  * The espressif/qemu esp32s3 GPIO model (hw/gpio/esp32s3_gpio.c, a thin
  * subclass of hw/gpio/esp32_gpio.c) is a near-stub: it answers the GPIO_STRAP
  * read for boot straps and otherwise no-ops every write and returns 0 for
  * every read. It exposes no per-pin qemu_irq out lines and no qdev_get_gpio_in
- * inputs, so the "connect observer IRQ sinks" design the P2.2 brief sketched is
- * not available: there is nothing to sink from.
+ * inputs, so connecting observer IRQ sinks is not an option: there is nothing
+ * to sink from.
  *
  * Rather than rewrite the shared esp32_gpio base register decode (which esp32,
  * esp32c3 and esp32s3 all share), this model installs a higher-priority
@@ -15,8 +15,9 @@
  * only meaningful stub behaviour (GPIO_STRAP -> strap mode) and additionally
  *   - decodes the OUT / OUT_W1TS / OUT_W1TC (+ OUT1 for pins 32..48) writes so
  *     every output level transition the firmware drives is logged as a
- *     greppable "bramble-gpio: OUT ..." line (event wiring to emu-link is a
- *     LATER milestone; here we only observe);
+ *     greppable "bramble-gpio: OUT ..." line, and handed to the registered
+ *     out observer (bramble_gpio_set_out_observer), which is how
+ *     bramble_indicators.c forwards LED / vibra levels to emu-link;
  *   - serves GPIO_IN / GPIO_IN1 reads from an injectable input bitmap so a
  *     button press asserted from outside the VM changes what gpio_get_level()
  *     sees;
@@ -24,12 +25,11 @@
  *     press edge, so the interrupt path a real edge drives is exercised.
  *
  * Because the overlay fully shadows the stub for the whole window and
- * replicates its strap behaviour, boot is unchanged (same GPSPI2 wedge).
+ * replicates its strap behaviour, boot behaves as it does on the stock stub.
  *
- * Button injection transport is PROVISIONAL: three QMP-settable bool
- * properties (select/up/down) on /machine/bramble-gpio. The gosim emu-link
- * bridge (P2.4 shim / P2.6 integration) will own the real transport; this is
- * the minimum surface that proves the injection path end to end today.
+ * Button injection transport is three QMP-settable bool properties
+ * (select/up/down) on /machine/bramble-gpio: the minimum surface that drives
+ * the injection path end to end.
  */
 
 #include "qemu/osdep.h"
@@ -97,28 +97,28 @@ static const BrambleButton bramble_buttons[] = {
 };
 
 /* Friendly names for the output pins the pager firmware drives, so the log is
- * readable. Alert outputs (LED/vibra/GNSS_EN) only fire after the main loop
- * starts, which is past the P2.3 GPSPI2 wedge; the SPI CS / reset / DC pins
- * fire in board_init, before the wedge, and are what P2.2 can observe today.
+ * readable. Alert outputs (LED/vibra/GNSS_EN) only fire once the main loop
+ * starts; the SPI CS / reset / DC pins fire earlier, in board_init.
  * buzzer=GPIO15 is intentionally absent: the firmware drives it via LEDC PWM
  * (components/indicators/indicators.c), not gpio_set_level, so a plain GPIO
- * model never sees it (LEDC is unmodeled on S3; deferred to a later touch). */
+ * model never sees it. bramble_indicators.c overlays the LEDC window to pick
+ * the tone up instead. */
 typedef struct {
     int pin;
     const char *name;
 } BramblePinName;
 
 static const BramblePinName bramble_out_names[] = {
-    { 48, "LED" },       /* alert output, post-wedge */
-    { 16, "VIBRA" },     /* alert output, post-wedge */
-    { 38, "GNSS_EN" },   /* GNSS power gate, active low, post-wedge */
-    { 8,  "RADIO_CS" },  /* board_init, pre-wedge */
-    { 12, "RADIO_RST" }, /* board_init, pre-wedge */
-    { 4,  "EPD_CS" },    /* board_init, pre-wedge */
-    { 5,  "EPD_DC" },    /* board_init, pre-wedge */
-    { 6,  "EPD_RST" },   /* board_init, pre-wedge */
-    { 9,  "SPI_SCK" },   /* board_init, pre-wedge */
-    { 10, "SPI_MOSI" },  /* board_init, pre-wedge */
+    { 48, "LED" },       /* alert output, main loop */
+    { 16, "VIBRA" },     /* alert output, main loop */
+    { 38, "GNSS_EN" },   /* GNSS power gate, active low, main loop */
+    { 8,  "RADIO_CS" },  /* board_init */
+    { 12, "RADIO_RST" }, /* board_init */
+    { 4,  "EPD_CS" },    /* board_init */
+    { 5,  "EPD_DC" },    /* board_init */
+    { 6,  "EPD_RST" },   /* board_init */
+    { 9,  "SPI_SCK" },   /* board_init */
+    { 10, "SPI_MOSI" },  /* board_init */
 };
 
 struct BrambleGpioState {
@@ -175,11 +175,10 @@ static const char *bramble_out_name(int pin)
  * GPIO_STATUS bit. A real GPIO interrupt is a LEVEL held while any enabled
  * status bit is set: the ESP-IDF gpio_isr reads GPIO_STATUS, dispatches to
  * per-pin handlers, then clears the bits (STATUS_W1TC), which is what releases
- * the line. Modelling it as a held level (not a one-shot pulse) is what lets
- * the P2.4a interrupt-matrix level-forward fix actually deliver DIO1 edges: a
- * pulse raised and lowered inside one callback is sampled by the CPU only after
- * it has already dropped and is lost, exactly the class of bug that fix
- * addressed for the SPI2 line. */
+ * the line. Model it as a held level, not a one-shot pulse: the interrupt
+ * matrix forwards levels, and a pulse raised and lowered inside one callback
+ * is sampled by the CPU only after it has already dropped, so DIO1 edges get
+ * lost. The SPI2 line has the same requirement. */
 static void bramble_gpio_update_intr(BrambleGpioState *s)
 {
     if (s->intr) {

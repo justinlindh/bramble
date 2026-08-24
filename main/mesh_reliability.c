@@ -1,7 +1,6 @@
 /**
  * mesh_reliability.c: ACKs, delivery receipts, the delivery-event ring, and broadcast telemetry.
  *
- * Split out of mesh_task.c (issue #86); pure code motion, no behavior change.
  * Shared state and cross-module entry points come from mesh_internal.h.
  */
 #include "mesh_internal.h"
@@ -160,7 +159,7 @@ static void mesh_schedule_next_receipt_timer(void) {
 }
 
 void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id) {
-    /* Mandatory-provisioning (Task 2): inert when unprovisioned (the receipt is
+    /* Mandatory provisioning: inert when unprovisioned (the receipt is
      * receipt_sign'd with the network key inside the builder). */
     if (!network_key_is_provisioned()) {
         ESP_LOGD(TAG, "unprovisioned: inert, skipping delivery receipt");
@@ -175,7 +174,7 @@ void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t origi
         mesh_broadcast_receipt_policy(0xFFFFFFFFu, (uint8_t)neighbor_count(&s_neighbors));
     uint8_t hop_limit = (policy >= 2) ? 8 : 1; /* full=8, neighbors-only=1 */
 
-    /* ws 1.3b: draw the 48-bit origin seq once per receipt; the retry
+    /* Draw the 48-bit origin seq once per receipt; the retry
      * queue below resends the SAME serialized bytes on loss (not a fresh
      * re-origination), so one seq draw per receipt is correct. Fail-closed:
      * no seq means no receipt goes out this round. */
@@ -385,17 +384,15 @@ void mesh_process_receipt_tx_event(void) {
     receipt_retry_scale(&scale_num, &scale_den);
 
     /* Retry spacing re-draws a FULL contention slot, salted by the attempt
-     * number, instead of the old short fixed backoff (500+700i ms plus small
-     * jitter). Bench telemetry showed why the old shape lost receipts: first
-     * attempts are slot-spread across a window sized to the peer count, but
-     * short-backoff retries folded attempts 2 and 3 back into OTHER nodes'
-     * first-attempt slots, so during a 9-receipt storm each transmission was
-     * received by fewer than half the nodes in range and some receipts lost
-     * every copy at the origin. Salting the slot hash with the attempt
-     * number scatters each retry into a fresh pseudo-random slot of the
-     * next window, decorrelated from every other sender's attempts, at
-     * unchanged TX volume. The budget-pressure scale still stretches the
-     * result when the receipt lane is under pressure. */
+     * number. First attempts are slot-spread across a window sized to the
+     * peer count, so a short fixed backoff would fold retries back into OTHER
+     * nodes' first-attempt slots: during a receipt storm each transmission
+     * then collides with the nodes it needs to reach, and a receipt can lose
+     * every copy at the origin. Salting the slot hash with the attempt number
+     * scatters each retry into a fresh pseudo-random slot of the next window,
+     * decorrelated from every other sender's attempts, at the same TX volume.
+     * The budget-pressure scale still stretches the result when the receipt
+     * lane is under pressure. */
     uint32_t reslot_ms = mesh_broadcast_receipt_slot_delay_ms(
         s_identity->address, item->original_packet_id ^ ((uint32_t)item->attempts_sent << 28),
         (uint8_t)neighbor_count(&s_neighbors));
@@ -420,14 +417,14 @@ void mesh_receipt_timer_cb(void* arg) {
 }
 
 void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
-    /* Mandatory-provisioning (Task 2): inert when unprovisioned (ack_sign
+    /* Mandatory provisioning: inert when unprovisioned (ack_sign
      * needs the network key). The sender's retransmission timer covers the
      * missing ACK exactly like a lost one. */
     if (!network_key_is_provisioned()) {
         ESP_LOGD(TAG, "unprovisioned: inert, skipping ACK");
         return;
     }
-    /* ws 1.3b: draw the 48-bit origin seq before building the struct, so it
+    /* Draw the 48-bit origin seq before building the struct, so it
      * can go straight into the designated initializer below instead of a
      * second pass. Fail-closed: no seq means no ACK goes out; the sender's
      * retransmission timer covers a missing ACK exactly like a lost one. */
@@ -460,14 +457,13 @@ void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
     bramble_seq48_pack(ack.seq, ack_seq);
     /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
      * hop_count/hop_limit is set (those are excluded from the MAC and
-     * legitimately change per relay hop); seq is set above and IS covered
-     * (ws 1.3b). */
+     * legitimately change per relay hop); seq is set above and IS covered. */
     ack_sign(&ack);
 
-    /* Red-team audit: was buf[64], a hand-counted constant. Not currently
-     * truncating (send_ack always originates with hop_count 1), but
-     * macro-ized to ACK_MAX_SIZE anyway so it can't silently start
-     * truncating if that ever changes, matching forward_ack's fix below. */
+    /* ACK_MAX_SIZE, not a hand-counted constant: send_ack always originates
+     * with hop_count 1, so nothing truncates as written, but the macro is what
+     * keeps that true if the originating hop_count ever changes. forward_ack
+     * below sizes its buffer the same way. */
     uint8_t buf[ACK_MAX_SIZE];
     esp_err_t err = bramble_ack_serialize(&ack, buf, sizeof(buf));
     if (err != ESP_OK) {
@@ -505,10 +501,10 @@ static void forward_ack(bramble_ack_t* ack) {
         return;
     }
 
-    /* Red-team fix: was buf[64], a hand-counted constant. ACK_MAX_SIZE (a
-     * full 8-hop path) is 69 as of the ws 1.3b size bump, so a 7-hop (65B)
-     * or 8-hop (69B) ACK overflowed this buffer and was silently dropped
-     * (bramble_ack_serialize's len < need guard). */
+    /* ACK_MAX_SIZE (a full 8-hop path), not a hand-counted constant: a
+     * forwarded ACK grows with its relay path, and a buffer short of the
+     * full-path size makes bramble_ack_serialize's len < need guard drop the
+     * longest-path ACKs silently. */
     uint8_t buf[ACK_MAX_SIZE];
     esp_err_t err = bramble_ack_serialize(ack, buf, sizeof(buf));
     if (err != ESP_OK)
@@ -537,7 +533,7 @@ void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         return;
     }
 
-    /* ws 1.3b: replay check on the authenticated signer (ack.src_addr is
+    /* Replay check on the authenticated signer (ack.src_addr is
      * MAC-covered, so an attacker cannot dodge the window by mutating it).
      * Checked after ack_verify and strictly before BOTH the forward branch
      * and the for-us effects below (pending_ack_remove, msg_store_update),
@@ -561,7 +557,7 @@ void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     /* Not for us, forward it */
     if (ack.header.dest_addr != s_identity->address) {
         if (s_flood_transport) {
-            /* Flooding F1 Task 2: under s_flood_transport there are no routes,
+            /* Under s_flood_transport there are no routes,
              * so the ACK cannot be route-forwarded home. It FLOODS back
              * through the SAME engine the DATA flood uses (channel_flood_decide
              * + the jittered schedule_flood_relay queue + FLOOD_SUPPRESS_AFTER
@@ -575,7 +571,8 @@ void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
              * suppression instead (see mesh_process_rx_packet). A re-ACK of a
              * duplicate DATA carries a FRESH header.packet_id (send_ack draws
              * next_packet_id every call), so it is not deduped and floods
-             * anew, preserving the Phase 1 re-ACK-on-duplicate second chance.
+             * anew, which is what gives a re-ACK-on-duplicate its second
+             * chance.
              *
              * The flood dedup key mirrors the DATA flood's packet_id ^ src:
              * both fields are stable across relay hops (only relay_path/
@@ -688,10 +685,8 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t* receipt) {
         return;
     }
 
-    /* Red-team audit: was buf[96], a hand-counted constant. Not currently
-     * truncating (DELIVERY_RECEIPT_MAX_SIZE is 68 as of ws 1.3b), but
-     * macro-ized for the same reason as the other TX buffers in this
-     * file. */
+    /* DELIVERY_RECEIPT_MAX_SIZE, not a hand-counted constant, for the same
+     * reason as the other TX buffers in this file. */
     uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
     esp_err_t err = bramble_delivery_receipt_serialize(receipt, buf, sizeof(buf));
     if (err != ESP_OK)
@@ -734,7 +729,7 @@ void handle_delivery_receipt(const uint8_t* data, uint8_t len, int16_t rssi, int
         return;
     }
 
-    /* ws 1.3b: replay check on the authenticated signer (receipt.src_addr
+    /* Replay check on the authenticated signer (receipt.src_addr
      * is MAC-covered, so an attacker cannot dodge the window by mutating
      * it). Checked after receipt_verify and strictly before BOTH the
      * forward branch and the for-us effect (the broadcast delivery

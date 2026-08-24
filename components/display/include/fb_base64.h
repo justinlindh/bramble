@@ -7,9 +7,9 @@
  * The linux-target emulator builds one of two mutually exclusive virtual
  * backends (display_virt.c for the SSD1680 e-paper, display_virt_oled.c for the
  * SSD1306 OLED) and ships each framebuffer to the emu-link frontend as a
- * base64-encoded "fb" string. Both used to carry a byte-identical fb_to_b64
- * that differed only in the framebuffer size constant, which is passed here as
- * `len`.
+ * base64-encoded "fb" string. This is the ONE encoder both backends use, so
+ * neither carries a copy of its own; the framebuffer size is the only thing
+ * that differs between them, and it is passed here as `len`.
  *
  * Encodes `len` bytes from `in` into `out`, which must hold at least
  * ((len + 2) / 3) * 4 + 1 bytes, and writes a trailing NUL. Both live

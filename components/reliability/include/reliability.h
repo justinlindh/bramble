@@ -52,7 +52,7 @@ void pending_ack_tick(pending_ack_table_t* table, uint32_t now_ms);
 uint8_t tier_max_retries(uint8_t tier);
 uint32_t tier_base_delay_ms(uint8_t tier);
 /*
- * Task 6 (GAP B): the single source of truth for which reliability tier a
+ * The single source of truth for which reliability tier a
  * DATA send registers under. Key exchange (handshake-in-DATA, APP_TYPE_KE)
  * must use MSG_TIER_CRITICAL (8 retries) per spec: losing a handshake
  * message stalls session establishment entirely, unlike an ordinary chat

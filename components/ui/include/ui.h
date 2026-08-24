@@ -116,8 +116,8 @@ bool ui_needs_redraw(const ui_state_t* state);
 void ui_mark_drawn(ui_state_t* state);
 
 /*
- * E-paper full-refresh policy (bramble#196: partial-only screen switches
- * accumulate SSD1680 ghosting until text becomes unreadable). The screen
+ * E-paper full-refresh policy: partial-only screen switches accumulate
+ * SSD1680 ghosting until text becomes unreadable. The screen
  * ring cannot fully rely on the display engine's own byte-diff heuristic:
  * this is a sparse text UI, so a screen change often flips well under the
  * heuristic's change-fraction threshold even though it is exactly the
@@ -126,7 +126,7 @@ void ui_mark_drawn(ui_state_t* state);
  * rules: every UI_FULL_REFRESH_EVERY_N_SCREENS screen changes (a ceiling on
  * how much ghosting any screen can carry), and unconditionally on entering
  * SCREEN_SETTINGS (the most text-dense screen and the one where a stale
- * reading is a functional problem, not just cosmetic; see the issue). A
+ * reading is a functional problem, not just cosmetic). A
  * full refresh flashes the panel and takes ~3s (SSD1680_BUSY_MS_FULL), so
  * this deliberately does not fire on every screen change.
  */

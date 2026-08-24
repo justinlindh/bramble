@@ -229,14 +229,14 @@ int crypto_generate_identity(bramble_identity_t* id) {
     ok = (mbedtls_ecp_mul(&grp, &Q, &d, &grp.G, crypto_rng_callback, NULL) == 0) &&
          (mbedtls_mpi_write_binary_le(&Q.MBEDTLS_PRIVATE(X), tmp.public_key, 32) == 0);
 
-    /* Ed25519 signing identity alongside X25519 (Phase 1). Fail closed: if
+    /* Ed25519 signing identity alongside X25519. Fail closed: if
      * keygen fails (e.g. entropy gate shut), propagate failure rather than
      * hand back a partial identity. */
     if (ok && crypto_ed25519_keypair(tmp.ed25519_public_key, tmp.ed25519_private_key) != 0)
         ok = 0;
 
     if (ok) {
-        /* Phase 4 rebind: the address (and pubkey_hash) derive from the
+        /* The address (and pubkey_hash) derive from the
          * Ed25519 identity key, the key attestations are signed with, so an
          * address claim is only satisfiable by the keyholder. */
         tmp.address = crypto_derive_address(tmp.ed25519_public_key);

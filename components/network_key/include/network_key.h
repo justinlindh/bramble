@@ -4,8 +4,8 @@
 #include <stddef.h>
 
 /*
- * Fail-closed control-plane network key provider (mandatory-provisioning
- * campaign). An UNPROVISIONED node has NO usable network key: there is no
+ * Fail-closed control-plane network key provider.
+ * An UNPROVISIONED node has NO usable network key: there is no
  * public-PSK fallback. network_key_get() fails, network_key_mac() emits no
  * valid MAC, and network_key_fingerprint() reports the all-zero sentinel.
  * A node becomes provisioned only by generating a fresh key
@@ -17,8 +17,7 @@
  * This component is the fail-closed FOUNDATION; it does not on its own make
  * an unprovisioned node inert. The control-plane call sites that build MACs
  * (routing_auth, discovery, mesh_task) must check network_key_mac()'s return
- * value and refuse to originate/verify when it is nonzero: that hardening is
- * the campaign's Task 2.
+ * value and refuse to originate/verify when it is nonzero.
  */
 
 /* Marks the node as provisioned with a real, non-public network key and
@@ -58,7 +57,8 @@ int network_key_generate_provision(uint8_t key_out[32]);
 /*
  * Loads a persisted network key from storage and provisions it in memory.
  * Returns 0 if a key was loaded, nonzero if none is stored. Does NOT
- * re-persist (load is a read). Boot wiring is the campaign's Task 2.
+ * re-persist (load is a read). Called at boot by mesh_load_network_key
+ * (main/mesh_persist.c).
  */
 int network_key_load_from_nvs(void);
 
@@ -68,7 +68,7 @@ int network_key_load_from_nvs(void);
  * When UNPROVISIONED, returns nonzero and writes the all-zero sentinel to out
  * (it never computes an HMAC over a fallback or zeroed key). Callers MUST
  * check the return value: on nonzero they must refuse to originate or verify
- * the message rather than trust the sentinel bytes (Task 2 hardening). The
+ * the message rather than trust the sentinel bytes. The
  * per-type label (e.g. "bramble-rrep-v2") domain-separates message types.
  * len is the data length only (not the label) and is bounded at RUNTIME (255
  * bytes of data, 32 bytes of label): an over-long request returns nonzero and

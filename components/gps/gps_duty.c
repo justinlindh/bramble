@@ -1,6 +1,6 @@
 /*
- * GPS duty-cycling policy (Task 9). Pure decision of whether GNSS power
- * should be on right now: rules 1-4 are exact-state shortcuts (user
+ * GPS duty-cycling policy. Pure decision of whether GNSS power should
+ * be on right now: rules 1-4 are exact-state shortcuts (user
  * preference, not sharing, interval too short to bother cycling, first
  * share ever), rule 5 is the general case, wake early enough for a warm
  * reacquisition before the next scheduled send. See gps_duty.h for the

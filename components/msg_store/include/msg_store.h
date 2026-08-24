@@ -25,8 +25,8 @@ extern "C" {
  * peer-keyed, not channel-keyed; a negative channel index is the sole marker
  * that tells a DM apart from channel traffic (both share the INCOMING/OUTGOING
  * directions). Storing a real channel index (0 is the unicast/broadcast default)
- * files the DM under that channel and hides it from its own thread: that was
- * bug F1. msg_store_add_dm() / msg_store_add_channel() own this convention so no
+ * files the DM under that channel and hides it from its own thread.
+ * msg_store_add_dm() / msg_store_add_channel() own this convention so no
  * caller has to remember it. */
 #define MSG_STORE_DM_CHANNEL ((int16_t)-1)
 

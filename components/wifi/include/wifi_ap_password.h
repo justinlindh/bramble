@@ -7,11 +7,11 @@
 /*
  * Per-device SoftAP WPA2 password derivation.
  *
- * The AP password used to be a build-time constant compiled into every node
- * from a public Kconfig default, so anyone reading the repository held the
- * PSK for every Bramble AP in the world. It is now derived from this node's
- * own identity secret, which makes it unique per device and unknowable to
- * anyone who has not been shown it by the device itself.
+ * The AP password is derived from this node's own identity secret, which
+ * makes it unique per device and unknowable to anyone who has not been shown
+ * it by the device itself. A build-time constant from a public Kconfig
+ * default would instead hand every reader of the repository the PSK for every
+ * Bramble AP in the world.
  *
  * Properties this derivation is built for:
  *

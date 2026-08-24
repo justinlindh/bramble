@@ -38,16 +38,16 @@ void rreq_fwd_init(rreq_fwd_limiter_t* rl, uint32_t now_ms);
 bool rreq_fwd_allow(rreq_fwd_limiter_t* rl, uint32_t now_ms);
 
 /*
- * PROBE ingress backpressure (issue #75).
+ * PROBE ingress backpressure.
  *
  * PROBE is UNAUTHENTICATED BY DESIGN and stays that way: an unprovisioned
  * node asking "who can hear me" is the entire feature, so there is no MAC
- * check and no provisioning gate on the receive path. What was broken is the
- * AMPLIFICATION. `handle_probe` did one length check and nothing else, and
- * each accepted probe bought a three-send PROBE_ACK burst plus a
- * rebroadcast. Dedup keys on a `packet_id` an attacker varies freely, so one
- * injected 16-byte frame cost every node in earshot four transmissions, with
- * no ceiling and no cost to the attacker. These buckets put a ceiling on it.
+ * check and no provisioning gate on the receive path. The exposure is
+ * AMPLIFICATION: each accepted probe buys a three-send PROBE_ACK burst plus
+ * a rebroadcast, and dedup keys on a `packet_id` an attacker varies freely,
+ * so absent a ceiling one injected 16-byte frame costs every node in earshot
+ * four transmissions, at no cost to the attacker. These buckets are that
+ * ceiling.
  *
  * Two GLOBAL token buckets, deliberately not keyed per-sender:
  *
@@ -58,7 +58,7 @@ bool rreq_fwd_allow(rreq_fwd_limiter_t* rl, uint32_t now_ms);
  *             across the mesh. Running the forward bucket dry first means a
  *             probe flood stops propagating while the node keeps answering
  *             its own neighbors, so PROBE stays useful as a reachability
- *             tool under exactly the pressure that used to weaponize it.
+ *             tool under exactly the pressure that would weaponize it.
  *
  * WHY NOT PER-SENDER: this follows SEC-M4's forwarded-RREQ decision
  * (`rreq_fwd_allow` above) for the same reasons, and the reasoning is worth

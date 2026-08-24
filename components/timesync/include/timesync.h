@@ -27,7 +27,7 @@ typedef struct {
     uint32_t source_addr;  /* Which node contributed this offset */
     uint32_t timestamp_ms; /* local_now_ms when this entry was recorded */
     uint8_t stratum;       /* Remote stratum of the source */
-    bool established;      /* Source was an established neighbor when admitted/updated (ws 1.3c) */
+    bool established;      /* Source was an established neighbor when admitted/updated */
 } timesync_pending_t;
 
 typedef struct {
@@ -46,9 +46,9 @@ void timesync_init(timesync_state_t* ts);
 /*
  * Ingest a time observation from a beacon.
  *
- * source_established (ws 1.3c, NEW-SEC-4 mitigation): whether source_addr is
- * an established neighbor (neighbor_is_established) at the time this beacon
- * arrived. Only established sources count toward the pre-commit
+ * source_established: whether source_addr is an established neighbor
+ * (neighbor_is_established) at the time this beacon arrived. Only
+ * established sources count toward the pre-commit
  * corroboration quorum (CORROBORATION_REQUIRED distinct established
  * sources), so an insider fabricating fresh source addresses cannot
  * bootstrap the clock instantly: their addresses must first accumulate
@@ -75,17 +75,16 @@ uint8_t timesync_get_stratum(const timesync_state_t* ts);
 
 /*
  * Whether network time is trustworthy enough to gate a security decision on
- * (e.g. deferred replay acceptance in handle_data, NEW-SEC-4). Task 3.5:
- * this is the real signal, not a placeholder. `synchronized` can only ever
- * become true via timesync_handle_sync's commit path, which requires
- * CORROBORATION_REQUIRED distinct sources to have already agreed (within
- * MAX_TIME_SHIFT_MS of each other once a quorum exists; see the bootstrap
- * clamp in timesync_handle_sync), so "synchronized" already IS
- * "synchronized and corroborated": there is no path to true that skips
- * corroboration.
+ * (e.g. deferred replay acceptance in handle_data). This is the real
+ * signal, not a placeholder. `synchronized` can only ever become true via
+ * timesync_handle_sync's commit path, which requires CORROBORATION_REQUIRED
+ * distinct sources to have already agreed (within MAX_TIME_SHIFT_MS of each
+ * other once a quorum exists; see the bootstrap clamp in
+ * timesync_handle_sync), so "synchronized" already IS "synchronized and
+ * corroborated": there is no path to true that skips corroboration.
  *
- * Confidence is revertible (ws 1.3c): it also requires the last committed
- * sync to be no older than CONFIDENCE_MAX_AGE_MS relative to local_now_ms.
+ * Confidence is revertible: it also requires the last committed sync to be
+ * no older than CONFIDENCE_MAX_AGE_MS relative to local_now_ms.
  * `last_sync_ms` refreshes on every committed sync, so confidence persists
  * while corroboration keeps arriving and LAPSES back to false once it goes
  * stale (the source stops beaconing, or its pending entries age out with no

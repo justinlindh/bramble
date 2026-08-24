@@ -211,7 +211,7 @@ int crypto_generate_identity(bramble_identity_t* id) {
             /* Ed25519 signing identity alongside X25519; fail closed (no
              * partial identity) if keygen fails. */
             crypto_ed25519_keypair(tmp.ed25519_public_key, tmp.ed25519_private_key) == 0) {
-            /* Phase 4 rebind: the address (and pubkey_hash) derive from the
+            /* The address (and pubkey_hash) derive from the
              * Ed25519 identity key, the key attestations are signed with,
              * so an address claim is only satisfiable by the keyholder. */
             tmp.address = crypto_derive_address(tmp.ed25519_public_key);

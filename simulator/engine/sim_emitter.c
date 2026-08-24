@@ -25,16 +25,16 @@ static const char* pkt_type_name(uint8_t t) {
     case PKT_TYPE_DATA:
         return "DATA";
     case PKT_TYPE_ACK:
-        /* Phase 2 Task 0: also the flood-comparison baseline's flooded ACK
-         * (gosim/flood.go), not just a firmware ACK use; kept as one label
+        /* Also the flood-comparison baseline's flooded ACK
+         * (gosim/flood.go), not just a firmware ACK use; one label
          * since both are genuinely PKT_TYPE_ACK on the wire. */
         return "ACK";
     case PKT_TYPE_DELIVERY_RECEIPT:
-        /* Flooding F1 Task 2: the confirmation receipt is now a first-class
-         * flooded packet (broadcast under flood transport, unicast-routed
-         * under reactive), so label it instead of leaving it "UNKNOWN" and let
-         * scenarios distinguish a flooded receipt (dest 0xFFFFFFFF) from a
-         * routed one. */
+        /* The confirmation receipt is a first-class flooded packet
+         * (broadcast under flood transport, unicast-routed under reactive),
+         * so it gets its own label rather than "UNKNOWN", letting scenarios
+         * distinguish a flooded receipt (dest 0xFFFFFFFF) from a routed
+         * one. */
         return "DELIVERY_RECEIPT";
     default:
         return "UNKNOWN";

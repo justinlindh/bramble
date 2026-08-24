@@ -1,7 +1,6 @@
 /**
  * mesh_persist.c: NVS persistence: nonce ceiling, pin store, replay store, network key.
  *
- * Split out of mesh_task.c (issue #86); pure code motion, no behavior change.
  * Shared state and cross-module entry points come from mesh_internal.h.
  */
 #include "mesh_internal.h"
@@ -101,29 +100,28 @@ void mesh_pin_store_load(void) {
 }
 
 /*
- * Replay-window persistence (issue #72).
+ * Replay-window persistence.
  *
- * The replay windows were RAM-only while the SENDER-side nonce counter is
- * durable (nonce_counter's reserve-ahead ceiling). That asymmetry is the
- * bug: after we reboot, our high-water marks are all zero, so a batch
- * captured off the air before the reboot replays cleanly in ascending
- * counter order. Replayed RERR tears down routes; replayed LOCATION and
- * CHAT are integrity and privacy problems. OTA reboots the node on demand,
- * which hands an attacker the trigger.
+ * The receive-side windows must be as durable as the SENDER-side nonce
+ * counter (nonce_counter's reserve-ahead ceiling). Held in RAM only, the
+ * high-water marks come back all zero after a reboot, so a batch captured
+ * off the air beforehand replays cleanly in ascending counter order.
+ * Replayed RERR tears down routes; replayed LOCATION and CHAT are integrity
+ * and privacy problems. OTA reboots the node on demand, which hands an
+ * attacker the trigger.
  *
  * Write strategy, because NVS lives on NOR flash with finite erase
  * endurance and this table is touched on EVERY received packet: never write
  * on the receive path. The table sets a dirty flag, and a periodic tick
  * flushes at most once per REPLAY_FLUSH_INTERVAL_MS, and only when
- * something actually changed. See docs/quality-policy.md style: the
- * endurance arithmetic is in the PR body.
+ * something actually changed.
  *
  * The residual exposure is bounded by the flush interval rather than by
  * "everything ever captured": an unclean crash can lose at most one
  * interval of high-water advance. Two things narrow that further. Restored
  * slots come back with a full below-window bitmap (fail closed), and the
- * tier-1 CHAT path below now also applies the authenticated sent_at
- * freshness bound that previously only ran on the below-window path.
+ * tier-1 CHAT path applies the authenticated sent_at freshness bound on the
+ * accept path, not only on the below-window path.
  *
  * Mirrors mesh_pin_store_save: the IN-MEMORY table is authoritative, so a
  * write failure is logged and swallowed. Runs on the mesh task, the only
@@ -134,10 +132,9 @@ static uint32_t s_last_replay_flush_ms;
 
 /* Static rather than a stack buffer: the flush runs from
  * mesh_periodic_maintenance, which already sits at the bottom of a deep call
- * chain on the 10 KB mesh task stack, and this repo has burned itself on
- * stack overflows that only reproduced on real hardware. Both the save and
- * load paths run on the mesh task and never overlap, so one buffer serves
- * both. */
+ * chain on the 10 KB mesh task stack, where a blob-sized frame risks an
+ * overflow that only shows on real hardware. Both the save and load paths run
+ * on the mesh task and never overlap, so one buffer serves both. */
 static uint8_t s_replay_blob[REPLAY_TABLE_BLOB_MAX];
 
 static void mesh_replay_store_save_one(nvs_handle_t h, const char* key, replay_table_t* t) {
@@ -158,12 +155,11 @@ static void mesh_replay_store_save_one(nvs_handle_t h, const char* key, replay_t
 
 /* Flush both windows if either is dirty, rather than gating each blob's
  * write independently on its own dirty flag. Writing only the dirty table
- * was considered and rejected: it would need a second rate-limit
- * timestamp so the two blobs' flush cadence cannot skew apart, for a
- * savings the endurance budget does not need. The endurance arithmetic in
- * PR #150 already assumes two full blobs per flush round and still lands
- * at roughly 27 years of NOR headroom, so always writing both blobs is
- * not a hidden cost, just simpler. force=true bypasses the rate limit
+ * would need a second rate-limit timestamp so the two blobs' flush cadence
+ * cannot skew apart, for a savings the endurance budget does not need: that
+ * budget assumes two full blobs per flush round and still lands at roughly
+ * 27 years of NOR headroom, so always writing both blobs is not a hidden
+ * cost, just simpler. force=true bypasses the rate limit
  * (used before a deliberate reboot, e.g. OTA). */
 void mesh_replay_store_save(bool force) {
     if (!replay_table_is_dirty(&s_replay) && !replay_table_is_dirty(&s_control_replay))
@@ -201,8 +197,8 @@ static void mesh_replay_store_load_one(nvs_handle_t h, const char* key, replay_t
         return; /* nothing persisted yet: fresh device */
     if (replay_table_deserialize(t, buf, len, now_ms()) != 0) {
         /* Corruption is DETECTED, not silently loaded. There is no data to
-         * fall back to, so the window starts empty exactly as it did before
-         * this change, but it is loud instead of invisible. */
+         * fall back to, so the window starts empty, but loudly rather than
+         * invisibly. */
         ESP_LOGW(TAG,
                  "persisted replay window '%s' rejected (corrupt/old format); "
                  "replay protection for known senders restarts empty",
@@ -228,11 +224,11 @@ void mesh_replay_store_load(void) {
 /*
  * Boot-time restore of the peer-location cache.
  *
- * Peer positions were persisted on receipt and never read back, so the T-Deck
- * map (which draws the in-RAM cache) showed nothing after a reboot until a
- * fresh share happened to arrive, while bramble.getPeerLocations (which reads
- * flash) listed the same peers the whole time. Two surfaces, two sources, one
- * of them empty.
+ * Peer positions are persisted on receipt, and two surfaces read them from
+ * different places: the T-Deck map draws the in-RAM cache, while
+ * bramble.getPeerLocations reads flash. Without this restore the RAM cache
+ * comes back empty after a reboot and the map shows nothing until a fresh
+ * share arrives, while the RPC still lists every persisted peer.
  *
  * Two phases, exactly like mesh_send_location_updates and for exactly the same
  * reason: location_store_collect holds the NVS shim's mutex for the whole
@@ -242,9 +238,9 @@ void mesh_replay_store_load(void) {
  * s_state_mutex and complete a cycle with mesh_add_channel's
  * s_state_mutex-then-NVS ordering.
  *
- * The collect buffer is static rather than stack: it is ~700 bytes, the mesh
- * task's stack has been overflowed on real hardware before, and this runs once
- * so nothing overlaps.
+ * The collect buffer is static rather than stack: it is ~700 bytes, which the
+ * mesh task's stack cannot spare on a deep call chain, and this runs once so
+ * nothing overlaps.
  */
 static peer_location_restore_entry_t s_restore_buf[LOCATION_MAX_CONTACTS];
 
@@ -269,12 +265,12 @@ void mesh_peer_location_restore(void) {
 }
 
 /*
- * Mandatory-provisioning (Task 2): consolidate boot-time key load onto the
- * network_key component (single source of truth for the NVS namespace/key and
- * the in-memory provisioning state). A stored key -> provisioned; none stored
- * -> the node stays UNPROVISIONED and INERT (no public-PSK fallback), which is
- * the shipped default until an operator provisions one. Logged clearly so the
- * boot state is unambiguous (a status field for Task 3's provisioning UX).
+ * Mandatory provisioning: the boot-time key load goes through the network_key
+ * component (single source of truth for the NVS namespace/key and the
+ * in-memory provisioning state). A stored key -> provisioned; none stored ->
+ * the node stays UNPROVISIONED and INERT (no public-PSK fallback) until an
+ * operator provisions one. Logged clearly so the boot state is unambiguous,
+ * which is also what the provisioning UX reports.
  */
 void mesh_load_network_key(void) {
 #ifdef CONFIG_IDF_TARGET_LINUX
@@ -286,9 +282,11 @@ void mesh_load_network_key(void) {
     emu_node_seed_network_key_from_env();
 #endif
 #ifdef BRAMBLE_PLATFORM_NRF
-    /* Bench only: the nRF target has no RPC transport until P2, so a local
-     * build may seed the key at compile time (nrf/src/nrf_provision.c). No-op
-     * without the define; the key value is never committed. */
+    /* Bench only: a local build may seed the key at compile time
+     * (nrf/src/nrf_provision.c) so a freshly flashed dev kit joins the mesh
+     * without a pairing round-trip. The real path stays bramble.setNetworkKey
+     * over the BLE link. No-op without the define; the key value is never
+     * committed. */
     extern int nrf_seed_network_key_from_build(void);
     nrf_seed_network_key_from_build();
 #endif

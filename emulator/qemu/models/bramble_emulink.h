@@ -1,5 +1,5 @@
 /*
- * Bramble emu-link bridge (Phase 2 emulator): the QEMU pager's JSON-over-socket
+ * Bramble emu-link bridge: the QEMU pager's JSON-over-socket
  * link to the gosim ether. See hw/xtensa/bramble/bramble_emulink.c.
  */
 

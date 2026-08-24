@@ -96,10 +96,10 @@ void settings_connectivity_builder(bramble_layout_t* layout, void* ctx) {
     lv_obj_set_style_text_font(conn_hint, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(conn_hint, BR_COLOR_TEXT_SEC, 0);
 
-    /* AP-mode credentials. The SoftAP password is derived per device, so
-     * this screen is where a T-Deck user reads it off (issue #78). Shown
-     * only while the AP is actually up: in station mode there is nothing to
-     * join and nothing to display. */
+    /* AP-mode credentials. The SoftAP password is derived per device and
+     * printed nowhere else, so this screen is where a T-Deck user reads it
+     * off. Shown only while the AP is actually up: in station mode there is
+     * nothing to join and nothing to display. */
     {
         wifi_status_t wst;
         wifi_manager_get_status(&wst);

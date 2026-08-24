@@ -20,9 +20,9 @@
 typedef struct {
     uint8_t private_key[BRAMBLE_KEY_SIZE]; /* X25519 (DM sessions / DH only) */
     uint8_t public_key[BRAMBLE_KEY_SIZE];  /* X25519 (DM sessions / DH only) */
-    /* Ed25519 signing identity (Phase 1). Since the Phase 4 rebind this is
-     * THE identity key: the node address derives from it, and identity
-     * attestations are signed with it, binding address to keyholder. */
+    /* Ed25519 signing identity. This is THE identity key: the node address
+     * derives from it, and identity attestations are signed with it, binding
+     * address to keyholder. */
     uint8_t ed25519_public_key[BRAMBLE_ED25519_PUBKEY_SIZE];
     uint8_t ed25519_private_key[BRAMBLE_ED25519_SECKEY_SIZE];
     uint32_t address;     /* crypto_derive_address(ed25519_public_key), SHA256[0:4] */
@@ -40,7 +40,7 @@ typedef struct {
  *
  * That does NOT make the return value optional. A caller passing an
  * uninitialized struct still holds uninitialized bytes after a failure, and
- * using them as a keypair is how the bug this contract documents got shipped:
+ * using them as a keypair is exactly the bug this contract exists to prevent:
  * always check the return before touching id. */
 int crypto_generate_identity(bramble_identity_t* id);
 uint32_t crypto_derive_address(const uint8_t* public_key);

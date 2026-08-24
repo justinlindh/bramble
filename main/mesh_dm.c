@@ -1,8 +1,10 @@
 /**
  * mesh_dm.c: DM handshake, session, and ratchet plumbing (SEC-C2).
  *
- * Split out of mesh_task.c (issue #86); pure code motion, no behavior change.
- * Shared state and cross-module entry points come from mesh_internal.h.
+ * Owns the INIT/RESP handshake state machine, the session table and its
+ * per-message ratchet, the queue that holds DMs until a session establishes,
+ * and the proactive rekey schedule. Shared state and cross-module entry
+ * points come from mesh_internal.h.
  */
 #include "mesh_internal.h"
 
@@ -40,7 +42,7 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
  * we currently neighbor with, and at most once per interval per peer, so a
  * spray of undecryptable packets cannot be turned into a re-key / airtime DoS.
  * The DH-heavy INIT is queued to handshake_worker_task, never run on this (mesh
- * RX) task -- the same M7 rule process_ke_init/resp follow. */
+ * RX) task, the same rule process_ke_init/resp follow. */
 #define DM_REHANDSHAKE_MIN_INTERVAL_MS 15000u
 #define DM_REHANDSHAKE_TRACK 8
 static struct {
@@ -88,7 +90,7 @@ void maybe_trigger_dm_rehandshake(uint32_t peer) {
              peer);
 }
 
-/* Proactive DH-ratchet rekey schedule (Task 4, post-compromise recovery). A
+/* Proactive DH-ratchet rekey schedule (post-compromise recovery). A
  * session bumps to the next ke_epoch after DM_EPOCH_REKEY_MSGS messages sent OR
  * DM_EPOCH_REKEY_INTERVAL_MS elapsed on the current epoch, whichever comes
  * first. These bound the PCS latency (a device compromise heals within one
@@ -187,17 +189,17 @@ size_t mesh_get_dm_sessions(mesh_dm_session_info_t* out, size_t max) {
 }
 
 /*
- * SEC-C2 / Task 1.4: sends a chat payload under an ESTABLISHED session key
+ * SEC-C2: sends a chat payload under an ESTABLISHED session key
  * (dm_session_ratchet_encrypt), FLAG_ENCRYPT WITHOUT FLAG_CHANNEL. This is the DM
- * PAYLOAD path; it never falls back to the channel key. Caller MUST already
- * hold s_dm_mutex (this function reads/writes *sess, which lives inside
- * s_dm_table) and must have already checked sess->state == DM_STATE_ACTIVE.
- * Mirrors send_data_packet's nonce/TX/pending_ack handling exactly, minus
- * the channel_msg framing (a session is 1:1, so there is no channel_id/
- * epoch/app_type to multiplex; the wire layout is header+src_addr+nonce+
- * ciphertext+tag same as the channel path, just under a different key and
- * without FLAG_CHANNEL, which is exactly the signal handle_data uses to
- * pick the decrypt path on the other end).
+ * PAYLOAD path; it never falls back to the channel key. Caller MUST already hold
+ * s_dm_mutex (this function reads/writes *sess, which lives inside s_dm_table)
+ * and must have already checked sess->state == DM_STATE_ACTIVE. Mirrors
+ * send_data_packet's nonce/TX/pending_ack handling exactly, minus the channel_msg
+ * framing (a session is 1:1, so there is no channel_id/ epoch/app_type to
+ * multiplex; the wire layout is header+src_addr+nonce+ ciphertext+tag same as the
+ * channel path, just under a different key and without FLAG_CHANNEL, which is
+ * exactly the signal handle_data uses to pick the decrypt path on the other end).
+ *
  */
 static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_t payload_len,
                                dm_session_t* sess) {
@@ -248,8 +250,9 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
     /* Wire v4: ORIGINATOR writes its own address as prev_hop; see
      * send_data_packet's identical comment. */
     memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
-    /* Wire v4 (F1): origin-authenticate; see send_data_packet. Mandatory-
-     * provisioning (Task 2): abort if unprovisioned. */
+    /* Wire v4: origin-authenticate; see send_data_packet. An unprovisioned node
+     * has no key to sign with, so the send aborts rather than emit an
+     * unauthenticated DM. */
     if (data_auth_sign(&header, s_identity->address, buf + BRAMBLE_DATA_AUTH_HMAC_OFFSET) != 0) {
         ESP_LOGD(TAG, "unprovisioned: inert, dropping DM send");
         return 0;
@@ -264,14 +267,14 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
         pending_ack_add(&s_pending_acks, pkt_id, dest_addr, MSG_TIER_NORMAL, buf, (uint16_t)total,
                         now_ms());
         sess->msg_count++;
-        sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
+        sess->last_active_ms = now_ms(); /* real activity, not eviction bait */
         return pkt_id;
     }
     return 0;
 }
 
 /*
- * SEC-C2 / Task 1.4: sends a handshake message (INIT or RESP) as an
+ * SEC-C2: sends a handshake message (INIT or RESP) as an
  * APP_TYPE_KE inner payload of a DATA envelope under the CHANNEL key. This
  * is the handshake TRANSPORT (no session exists yet by definition), which
  * is why it reuses send_data_packet unmodified rather than send_dm_packet.
@@ -350,7 +353,7 @@ static void pending_eph_clear(uint32_t peer_addr) {
 }
 
 /*
- * Handshake dedup (SEC-C2 item 5). Returns 1 (dup, caller must drop without
+ * Handshake dedup (SEC-C2). Returns 1 (dup, caller must drop without
  * reprocessing) or 0 (fresh, recorded so the next identical INIT dedups).
  * eph_pub_hash is a plain truncated SHA-256 over the ephemeral pubkey (a
  * public value): this is a dedup cache key, not an authentication tag, so
@@ -386,8 +389,8 @@ static int hs_dedup_check_and_record(uint32_t src_addr, const uint8_t eph_pub[32
 }
 
 /*
- * B5 queue-and-trigger: queues a DM payload awaiting session establishment
- * and assigns it a real, trackable packet_id up front (unlike the legacy
+ * Queue-and-trigger: queues a DM payload awaiting session establishment
+ * and assigns it a real, trackable packet_id up front (unlike the
  * awaiting-route queue_message, which has no onAck story at all). Queue
  * pressure evicts the oldest QUEUE_REASON_SESSION entry with the same
  * visible onAck failure a TTL expiry gets, rather than dropping the new
@@ -493,16 +496,16 @@ static void flush_session_queue(uint32_t dest_addr) {
                      (unsigned)s_queued_msgs[i].len);
             /* A QUEUE_REASON_SESSION entry is always a DM (only DMs establish a
              * session), so store it channel-less exactly like the direct-send path
-             * in mesh_send_dm. Previously this stored the transport channel_idx
-             * (0 for the unicast default), which filed the flushed DM under
-             * channel 0 and hid it from its own thread: the F1 misfiling class,
-             * on the flush path, which msg_store_add_dm now makes unrepresentable.
+             * in mesh_send_dm. Passing the transport channel_idx here would file
+             * the DM under that channel and hide it from its own thread; the
+             * msg_store_add_dm* API takes no channel index, so the mistake is
+             * unrepresentable.
              *
              * The row already exists (stored pending when the message was queued),
-             * so stamp the real wire packet_id onto THAT row: the ACK still
-             * correlates by packet_id and now lands on the one row this message
-             * owns. Adding here is the fallback for a row evicted from the ring
-             * meanwhile, never the normal path. */
+             * so stamp the real wire packet_id onto THAT row: the ACK correlates
+             * by packet_id and lands on the one row this message owns. Adding here
+             * is the fallback for a row evicted from the ring meanwhile, never the
+             * normal path. */
             if (!msg_store_update_by_uid(s_queued_msgs[i].uid, pkt_id, MSG_STATUS_SENT)) {
                 msg_store_add_dm_uid(dest_addr, MSG_DIR_OUTGOING,
                                      (const char*)s_queued_msgs[i].data, s_queued_msgs[i].len, 0, 0,
@@ -518,17 +521,10 @@ static void flush_session_queue(uint32_t dest_addr) {
 }
 
 /*
- * Builds and sends a first-contact INIT (SEC-C2 handshake transport, under
- * the channel key via send_ke_envelope). Always first-contact: the only
- * caller (mesh_send_dm) reaches this exclusively for a peer with no
- * existing s_dm_table slot at all, so there is never a cached peer_id_pub
- * to rekey against here. Proactive rekey of an already-ACTIVE session is a
- * different trigger, out of this task's wiring scope.
- */
-/*
- * Sends a DM handshake INIT. rekey_epoch == 0 is the first-contact / desync-heal
+ * Sends a DM handshake INIT (SEC-C2 handshake transport, under the channel key
+ * via send_ke_envelope). rekey_epoch == 0 is the first-contact / desync-heal
  * path (key_id 0, no peer identity in the tag). rekey_epoch > 0 is a proactive
- * DH-ratchet rekey (Task 4): it reuses the SAME INIT/RESP machinery with
+ * DH-ratchet rekey: it reuses the SAME INIT/RESP machinery with
  * key_id = rekey_epoch and the cached peer X25519 identity (the dm_build_init
  * rekey path), so both sides land on the new epoch's root. A rekey requires an
  * ACTIVE session (for the cached peer_id_pub); if it has vanished, fall back to
@@ -581,7 +577,7 @@ static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx, uint16_t 
 }
 
 /*
- * SEC-C2 queue-and-trigger (item 4): the ONLY place a unicast DM decides
+ * SEC-C2 queue-and-trigger: the ONLY place a unicast DM decides
  * between the session path and queue-and-handshake. NEVER falls back to
  * the channel key for a DM payload: an ACTIVE session sends via
  * send_dm_packet; anything else queues and (if not already handshaking)
@@ -667,11 +663,11 @@ uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t* data, 
 
 /*
  * Responder side of the INIT/RESP state machine (runs on
- * handshake_worker_task, never inline on the mesh RX loop: M7). Item 2
- * downgrade defense: have_peer_id is derived from whatever s_dm_table
- * already holds for src_addr at the moment of the check, so a zero-tag
- * INIT can never be accepted as first-contact against an already-known
- * identity.
+ * handshake_worker_task, never inline on the mesh RX loop). Downgrade
+ * defense: have_peer_id is derived from whatever s_dm_table already
+ * holds for src_addr at the moment of the check, so a zero-tag INIT can
+ * never be accepted as first-contact against an already-known identity.
+ *
  */
 static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_key_exchange_t* init,
                             const uint8_t* pinned_x25519_or_null) {
@@ -690,7 +686,7 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
     int vrc = dm_verify_init(init, s_identity, have_peer_id, have_peer_id ? peer_id_pub : NULL,
                              pinned_x25519_or_null);
     if (vrc == DM_VERIFY_ERR_PIN_MISMATCH) {
-        /* Phase 4 DM key continuity RED FLAG: this address has an
+        /* DM key continuity RED FLAG: this address has an
          * attestation-verified pinned X25519 key and the handshake showed
          * up with a DIFFERENT one. Refuse the session loudly; a silent
          * accept here would let a keyed insider splice itself into a
@@ -781,7 +777,7 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
         /* Source verified from the persisted pin, not a hardcoded reset: the
          * verified bit keys on the pinned identity key (identity_store.h), so
          * a previously-verified peer re-establishes as verified across
-         * reboot / desync-heal / epoch bump alike (Task 7). */
+         * reboot / desync-heal / epoch bump alike. */
         sess->verified = identity_store_is_verified(&s_identity_pins, src_addr) ? 1 : 0;
         /* A failed ratchet derivation wipes the session's chains and reports
          * -1; fold it into ikm_ok so it takes the existing "ratchet not seeded"
@@ -864,8 +860,7 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
      * already verified against our own pending INIT (pending_eph_lookup above) and the
      * attestation pin (dm_verify_resp's PIN_MISMATCH gate), so allocate the slot now and
      * complete as first contact, mirroring the responder (process_ke_init also dm_allocs).
-     * For the outgoing and rekey paths the slot already exists, so dm_alloc returns it and
-     * their behavior is unchanged. */
+     * For the outgoing and rekey paths the slot already exists, so dm_alloc returns it. */
     dm_session_t* sess = dm_alloc(s_dm_table, src_addr, now_ms());
     if (sess) {
         int is_rekey = (ikm_ok == 0 && sess->state == DM_STATE_ACTIVE && sess->ratchet.recv.valid &&
@@ -939,9 +934,9 @@ void handshake_worker_task(void* arg) {
 /*
  * RX entry point for APP_TYPE_KE inner payloads (SEC-C2 handshake-in-DATA).
  * Does only cheap parsing/validation here; the DH-heavy INIT/RESP state
- * machine runs on handshake_worker_task (M7). src_addr is the OUTER DATA
- * envelope's already-authenticated src_addr (from channel_msg_decrypt's
- * AAD binding), not yet trusted to equal the inner struct's own claimed
+ * machine runs on handshake_worker_task. src_addr is the OUTER DATA
+ * envelope's already-authenticated src_addr (from channel_msg_decrypt's AAD
+ * binding), not yet trusted to equal the inner struct's own claimed
  * src_addr until checked below.
  */
 void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t* data, size_t data_len) {
@@ -962,7 +957,7 @@ void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t* data,
                  src_addr, msg.src_addr);
         return;
     }
-    /* Item 3: reject self-addressed (role-confusion-at-dispatch defense). */
+    /* Reject self-addressed (role-confusion-at-dispatch defense). */
     if (src_addr == s_identity->address) {
         ESP_LOGW(TAG, "Dropping self-addressed KE envelope");
         return;
@@ -981,7 +976,7 @@ void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t* data,
     item.src_addr = src_addr;
     item.channel_idx = channel_idx;
     item.msg = msg;
-    /* Phase 4 DM key continuity: snapshot the pinned X25519 key for this
+    /* DM key continuity: snapshot the pinned X25519 key for this
      * peer HERE, on the mesh task (the only mutator of s_identity_pins),
      * so the handshake worker verifies against an immutable copy instead
      * of reading the pin store cross-thread. No pin = NULL downstream =
@@ -999,16 +994,16 @@ void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t* data,
 
 /* Emulator only: tear down THIS node's DM sessions, leaving the peer's half
  * intact and this node still neighboring it. That is exactly the one-sided
- * "stale session" desync the emu-dm-desync scenario exists to reproduce (issue
- * #138): historically the scenario rebooted the receiver to clear its RAM-held
- * sessions, but reboot couples three real-time races into CI (RAM-clear timing,
- * beacon re-acquisition of the peer, and the sender's stale DM landing inside
- * that window). Dropping the session in-process instead constructs the desynced
- * state at an exact scenario-driven instant with the peer never lost as a
- * neighbor, so the very next session DM from the peer deterministically fails
- * to decrypt here and fires the #138 self-heal. Returns the number of sessions
- * torn down. Runs on the emu_autosend task; s_dm_mutex serializes it against the
- * mesh RX task exactly like every other s_dm_table access. */
+ * "stale session" desync the emu-dm-desync scenario exists to reproduce.
+ * Dropping the session in-process, rather than rebooting the receiver to clear
+ * its RAM-held sessions, keeps three real-time races out of CI (RAM-clear
+ * timing, beacon re-acquisition of the peer, and the sender's stale DM landing
+ * inside that window): the desynced state is constructed at an exact
+ * scenario-driven instant with the peer never lost as a neighbor, so the very
+ * next session DM from the peer deterministically fails to decrypt here and
+ * fires the desync self-heal. Returns the number of sessions torn down. Runs on
+ * the emu_autosend task; s_dm_mutex serializes it against the mesh RX task
+ * exactly like every other s_dm_table access. */
 /* Emulator only: how many DM sessions this node currently holds in any
  * non-NONE state. The drop task (emu_autosend.c) polls it so the desync
  * inject waits for the session it is about to drop, instead of trusting a
@@ -1037,18 +1032,16 @@ int emu_mesh_drop_dm_sessions(void) {
         if (peer != 0) {
             ESP_LOGI(TAG, "emu: dropped DM session with %08" PRIX32 " (one-sided desync inject)",
                      peer);
-            /* Reboot-faithful drop: the reboot this primitive replaces would
-             * also lose the RAM-held retransmit and awaiting-session state.
-             * Leaving them made the constructed desync racy: an undelivered
-             * delivery receipt for the peer kept retransmitting after the
-             * drop, its expiry requeued it "awaiting session", and THIS node
-             * then initiated a fresh handshake to the peer, replacing the
-             * peer's stale session half before the scenario's stale-session
-             * DM could land and fire the decrypt-failure symptom (observed
-             * as an occasional no-symptom emu-dm-desync run). Purge both,
-             * exactly as a RAM clear would. Cross-task access to these
-             * tables follows the existing discipline of the send paths,
-             * which already run on arbitrary caller tasks. */
+            /* Reboot-faithful drop: a RAM clear also loses the retransmit and
+             * awaiting-session state, so purge both. Leaving them makes the
+             * constructed desync racy: an undelivered delivery receipt for the
+             * peer keeps retransmitting after the drop, its expiry requeues it
+             * "awaiting session", and THIS node then initiates a fresh
+             * handshake, replacing the peer's stale session half before the
+             * scenario's stale-session DM can land and fire the
+             * decrypt-failure symptom. Cross-task access to these tables
+             * follows the existing discipline of the send paths, which already
+             * run on arbitrary caller tasks. */
             size_t acks =
                 rerr_ack_failfast_for_dest(&s_pending_acks, peer, "emu_desync_inject", NULL);
             int queued = 0;

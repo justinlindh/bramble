@@ -1,7 +1,6 @@
 /**
  * mesh_beacon.c: Beacons, identity attestation, and adaptive beacon-interval policy.
  *
- * Split out of mesh_task.c (issue #86); pure code motion, no behavior change.
  * Shared state and cross-module entry points come from mesh_internal.h.
  */
 #include "mesh_internal.h"
@@ -28,7 +27,7 @@ static int send_identity_attestation(void);
 /* ── Beacon TX ──────────────────────────────────────────────────────── */
 
 int send_beacon(void) {
-    /* Mandatory-provisioning (Task 2): an unprovisioned node is INERT. It has
+    /* Mandatory provisioning: an unprovisioned node is INERT. It has
      * no beacon key (mesh_rederive_beacon_key zeroes it) and must emit no
      * network-key-authenticated frame, so skip the beacon entirely. */
     if (!network_key_is_provisioned()) {
@@ -86,7 +85,7 @@ int send_beacon(void) {
         beacon.name[beacon.name_len] = '\0';
     }
 
-    /* ws 1.3b: draw the 48-bit origin seq before the HMAC, since seq lives
+    /* Draw the 48-bit origin seq before the HMAC, since seq lives
      * inside the HMAC-covered prefix. Fail-closed: no seq means this
      * interval's beacon doesn't go out; the next scheduled beacon tries
      * again. */
@@ -100,15 +99,14 @@ int send_beacon(void) {
     /* HMAC auth: use shared beacon key (derived from public channel PSK) */
     beacon_compute_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key));
 
-    /* Red-team fix: was buf[64], a hand-counted constant that predates the
-     * ws 1.3b size bumps. BEACON_SIZE + 1 + BEACON_NAME_MAX (the max wire
-     * size with a full-length name) is 71 as of BEACON_SIZE 54, so any
-     * name of 10+ characters overflowed this buffer, bramble_beacon_
-     * serialize's own len < need guard rejected it, and the node silently
-     * stopped beaconing entirely (no neighbor announce, mailbox flush, or
-     * timesync) until the name was cleared. Same size expression
-     * beacon_compute_hmac already uses for its own buffer, not a new
-     * magic number. */
+    /* BEACON_SIZE + 1 + BEACON_NAME_MAX is the max wire size, with a
+     * full-length name: the same size expression beacon_compute_hmac uses for
+     * its own buffer, not a new magic number. Never hand-count a constant
+     * here. Any buffer smaller than that expression makes
+     * bramble_beacon_serialize's len < need guard reject every beacon whose
+     * name pushes past it, and the node then silently stops beaconing
+     * entirely (no neighbor announce, mailbox flush, or timesync) until the
+     * name is cleared. */
     uint8_t buf[BEACON_SIZE + 1 + BEACON_NAME_MAX];
     if (bramble_beacon_serialize(&beacon, buf, sizeof(buf)) != ESP_OK) {
         ESP_LOGE(TAG, "Beacon serialize failed");
@@ -137,7 +135,7 @@ int send_beacon(void) {
     return ret;
 }
 
-/* ── Identity attestation TX (per-node identity Phase 2) ────────────── */
+/* ── Identity attestation TX ────────────────────────────────────────── */
 
 /* Low-cadence self-signed identity broadcast: 230 bytes (the relay-gated
  * frame carrying the endorsement cert, IDENTITY_ATTESTATION_SIZE) every 15
@@ -147,10 +145,7 @@ int send_beacon(void) {
  * or 181.9 ms on MEDIUM_RANGE (SF7/250k), so the per-node duty at this cadence
  * is ~0.129% and ~0.0202% respectively (computed via
  * components/radio/radio_airtime.c; the same frame is 2123.8 ms at the profile
- * table's SF10, the figure this comment used to quote, in us by a units typo.
- * The trust-anchor cert grew the frame 158 -> 230, a ~40% airtime bump that
- * stays negligible). Do not raise the cadence without re-flagging that
- * budget. */
+ * table's SF10). Do not raise the cadence without re-flagging that budget. */
 #define ATTESTATION_INTERVAL_MS (15u * 60u * 1000u)
 /* Short retry after a failed/denied send, so a boot-time budget denial
  * does not leave the node unattested for a full interval. */
@@ -161,7 +156,7 @@ int send_beacon(void) {
  * (PKT_TYPE_IDENTITY_ATTESTATION): {address, X25519 pub, Ed25519 pub}
  * signed by the node's OWN Ed25519 key over the canonical message
  * bramble_identity_attestation_signed_msg builds (packet.h), then
- * relay-gated under the network-key MAC (Phase 3, ident_relay_sign): the
+ * relay-gated under the network-key MAC (ident_relay_sign): the
  * Ed25519 sig carries the claim's truth, the MAC carries relay privilege
  * (see the struct comment in packet.h). Ordering matters: seq is
  * drawn and the Ed25519 sig computed BEFORE ident_relay_sign, because the
@@ -177,14 +172,14 @@ static int send_identity_attestation(void) {
     if (!s_identity)
         return -1;
 
-    /* Mandatory-provisioning (Task 2): inert when unprovisioned. The relay-gate
+    /* Mandatory provisioning: inert when unprovisioned. The relay-gate
      * MAC (ident_relay_sign) requires the network key; emit nothing without it. */
     if (!network_key_is_provisioned()) {
         ESP_LOGD(TAG, "unprovisioned: inert, skipping identity attestation");
         return -1;
     }
 
-    /* ws 1.3b pattern (send_ack): draw the 48-bit origin seq up front,
+    /* Same pattern as send_ack: draw the 48-bit origin seq up front,
      * fail-closed. No seq means no attestation goes out; the retry timer
      * covers it exactly like a budget denial. */
     uint64_t att_seq;
@@ -205,12 +200,12 @@ static int send_identity_attestation(void) {
     memcpy(att.x25519_pub, s_identity->public_key, sizeof(att.x25519_pub));
     memcpy(att.ed25519_pub, s_identity->ed25519_public_key, sizeof(att.ed25519_pub));
 
-    /* Endorsement cert (trust-anchor campaign, P1): carry our own cert when we
-     * have one, else leave the zero-initialized fields (not_after == 0 ==
-     * "no cert"). Set before ident_relay_sign below, which MACs the cert. The
-     * cert is NOT part of the Ed25519 self-signature (that stays the 84-byte
-     * canonical message); it is the anchor's signature, verified by receivers
-     * in a later phase. */
+    /* Endorsement cert: carry our own cert when we have one, else leave the
+     * zero-initialized fields (not_after == 0 == "no cert"). Set before
+     * ident_relay_sign below, which MACs the cert. The cert is NOT part of the
+     * Ed25519 self-signature (that stays the 84-byte canonical message); it is
+     * the anchor's signature, checked by an anchored receiver's pin gate in
+     * identity_store_handle_attestation. */
     identity_endorsement_get(&att.not_after, att.endorsement_sig);
 
     uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
@@ -223,7 +218,7 @@ static int send_identity_attestation(void) {
         return -1;
     }
 
-    /* Relay gate (Phase 3): write seq, then MAC. Both after the Ed25519
+    /* Relay gate: write seq, then MAC. Both after the Ed25519
      * sign above, since the MAC covers sig and seq. */
     bramble_seq48_pack(att.seq, att_seq);
     ident_relay_sign(&att);
@@ -256,10 +251,10 @@ void attempt_identity_attestation(uint32_t t) {
 }
 
 /*
- * ws 1.3b infra: control-plane seq draw + replay check. Called at the
- * control-plane origination sites (beacons and attestations here, RERR/RREP
- * in mesh_routing.c, delivery receipts and ACKs in mesh_reliability.c) and
- * exported via mesh_internal.h so every site shares the one counter.
+ * Control-plane seq draw. Called at the control-plane origination sites
+ * (beacons and attestations here, RERR/RREP in mesh_routing.c, delivery
+ * receipts and ACKs in mesh_reliability.c) and exported via
+ * mesh_internal.h so every site shares the one counter.
  *
  * control_seq_next mirrors the data-plane nonce draw above (e.g.
  * send_data_packet): take s_nonce_mutex, call nonce_counter_next, and on
@@ -281,7 +276,7 @@ int control_seq_next(uint64_t* out) {
 }
 
 /*
- * ws 1.3b infra: control-plane replay check, fed only after a MAC verify
+ * Control-plane replay check, fed only after a MAC verify
  * passes so signer_addr/seq are authenticated. Separate table from the
  * data-plane s_replay (see s_control_replay above).
  */
@@ -292,7 +287,7 @@ bool control_replay_ok(uint32_t signer_addr, uint64_t seq) {
 /* ── Packet handlers ────────────────────────────────────────────────── */
 
 void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
-    /* Mandatory-provisioning (Task 2): an unprovisioned node has no beacon key
+    /* Mandatory provisioning: an unprovisioned node has no beacon key
      * (mesh_rederive_beacon_key zeroes it), so it cannot authenticate a beacon.
      * Drop before any verify/effect: accepting one would mean trusting an HMAC
      * over an all-zero key (a forgery). Fail closed, accept nothing. */
@@ -317,14 +312,14 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         return;
     }
 
-    /* ws 1.3b: replay check on the authenticated signer (beacon.src_addr
-     * is HMAC-covered, so an attacker cannot dodge the window by mutating
+    /* Replay check on the authenticated signer (beacon.src_addr is
+     * HMAC-covered, so an attacker cannot dodge the window by mutating
      * it). Checked immediately after HMAC verify and strictly before every
      * effect below: address-collision handling, neighbor_update, name
      * store, and timesync_handle_sync. Gating timesync closes the part of
      * NEW-SEC-4 where a replayed beacon re-feeds stale network_time; the
-     * bootstrap-quorum race (1.3c) is closed separately by the bounded
-     * per-boot grace in identity_store_quorum_eligible. */
+     * bootstrap-quorum race is closed separately by the bounded per-boot
+     * grace in identity_store_quorum_eligible. */
     uint64_t beacon_seq = bramble_seq48_unpack(beacon.seq);
     if (!control_replay_ok(beacon.src_addr, beacon_seq)) {
         ESP_LOGW(TAG, "Beacon replay src=%08" PRIX32, beacon.src_addr);
@@ -345,9 +340,9 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
             return;
         }
         ESP_LOGW(TAG, "New identity: %08" PRIX32, s_identity->address);
-        /* Announce the regenerated identity promptly (Phase 2): new
-         * address + keys mean the old attestation no longer describes
-         * this node. Budget-gated like every attestation send. */
+        /* Announce the regenerated identity promptly: the new address and
+         * keys mean the last attestation no longer describes this node.
+         * Budget-gated like every attestation send. */
         attempt_identity_attestation(now_ms());
         /* Notify webapp */
         cJSON* params = cJSON_CreateObject();
@@ -383,17 +378,17 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
 
     /* Feed timesync from beacon: requires corroboration from multiple sources */
     if (beacon.network_time != 0 && beacon.time_confidence != 0xFFFF) {
-        /* ws 1.3c: only established neighbors count toward the pre-commit
+        /* Only established neighbors count toward the pre-commit
          * corroboration quorum (NEW-SEC-4 anti-Sybil lever). Computed after
          * neighbor_update above so the current beacon's tenure (beacon_count,
          * first_seen_ms) is reflected before the established check.
          *
-         * Phase 4 identity gate on top: a PINNED peer always corroborates
+         * An identity gate sits on top: a PINNED peer always corroborates
          * (a fabricated source address cannot be pinned post-rebind: it has
          * no deriving Ed key); an UNPINNED peer corroborates only within the
          * bounded per-boot bootstrap grace (QUORUM_BOOTSTRAP_GRACE_MS) so a
-         * fresh mesh still converges, and NEVER after it (NEW-SEC-4 1.3c
-         * bootstrap-quorum race closed). Full semantics + tests:
+         * fresh mesh still converges, and NEVER after it, which is what
+         * closes the NEW-SEC-4 bootstrap-quorum race. Full semantics + tests:
          * identity_store_quorum_eligible (identity_store.h). Runs on the
          * same task as handle_identity_attestation, so no locking. */
         bool established = neighbor_is_established(&s_neighbors, beacon.src_addr, t);
@@ -492,8 +487,8 @@ void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
 }
 
 /*
- * Per-node identity Phase 3 (Part B): receive, pin, and flood-relay an
- * identity attestation. Verification ORDER is the security design:
+ * Receive, pin, and flood-relay an identity attestation. Verification
+ * ORDER is the security design:
  *
  *   1. exact-length deserialize;
  *   2. ident_relay_verify: the CHEAP network-key MAC, checked before
@@ -543,7 +538,7 @@ void handle_identity_attestation(const uint8_t* data, uint8_t len) {
     uint32_t flood_key = att.header.packet_id ^ att.src_addr;
     bool is_dup = dedup_check_and_add(&s_flood_dedup, flood_key, now_ms());
 
-    /* Trust-anchor campaign (P2): the wall-clock epoch for the endorsement
+    /* Trust anchor: the wall-clock epoch for the endorsement
      * expiry check. Use network time ONLY when timesync is confident (the same
      * fail-closed gate handle_data uses for deferred replay); otherwise pass 0
      * so the store does not enforce expiry against an untrusted clock. v1 certs
@@ -586,7 +581,7 @@ void handle_identity_attestation(const uint8_t* data, uint8_t len) {
                  att.src_addr, s_identity_pins.sig_failures);
         break;
     case IDENTITY_PIN_ADDR_MISMATCH:
-        /* Phase 4 address<->key binding: a keyed member attested an
+        /* Address<->key binding: a keyed member attested an
          * address its own Ed25519 key does not derive to. Impersonation
          * attempt (or a badly broken sender), refused on first contact. */
         ESP_LOGW(TAG,
@@ -595,7 +590,7 @@ void handle_identity_attestation(const uint8_t* data, uint8_t len) {
                  att.src_addr, s_identity_pins.addr_mismatches);
         break;
     case IDENTITY_PIN_UNENDORSED:
-        /* Trust-anchor gate (P2): this node is anchored and the attestation
+        /* Trust-anchor gate: this node is anchored and the attestation
          * carried no cert (or one not signed by our anchor for this key).
          * NOT pinned; the frame was still relayed (endorsement gates pinning
          * only, never liveness). */
@@ -616,18 +611,17 @@ void handle_identity_attestation(const uint8_t* data, uint8_t len) {
         break;
     }
 
-    /* M2 TOFU-session teardown (identity-campaign follow-up): whenever this
-     * attestation left a TRUSTED pinned binding for att.src_addr (NEW,
-     * REFRESHED, or CONFLICT - the first-seen binding survives a CONFLICT and
-     * is authoritative), drop any ESTABLISHED DM session whose cached peer
-     * X25519 key disagrees with that pin. Such a session was a first-contact
-     * TOFU handshake pointed at an impostor: the attestation is self-signed,
-     * address-bound, and on an anchored node ALSO anchor-endorsed, so the pin
-     * is authoritative and the stale session is dropped (recovered by a fresh,
-     * now pin-continuity-checked handshake). This closes "a TOFU DM with a
-     * Sybil that never endorses gets torn down the instant the real endorsed
-     * peer pins." Fail-safe: it only ever DROPS; it never touches a
-     * key-MATCHING (healthy) session or a non-ACTIVE handshaking slot. The
+    /* TOFU-session teardown: whenever this attestation left a TRUSTED pinned
+     * binding for att.src_addr (NEW, REFRESHED, or CONFLICT - the first-seen
+     * binding survives a CONFLICT and is authoritative), drop any ESTABLISHED
+     * DM session whose cached peer X25519 key disagrees with that pin. Such a
+     * session was a first-contact TOFU handshake pointed at an impostor: the
+     * attestation is self-signed, address-bound, and on an anchored node ALSO
+     * anchor-endorsed, so the pin is authoritative and the stale session is
+     * dropped (recovered by a fresh, now pin-continuity-checked handshake). So
+     * a TOFU DM with a Sybil that never endorses is torn down the instant the
+     * real endorsed peer pins. Fail-safe: it only ever DROPS; it never touches
+     * a key-MATCHING (healthy) session or a non-ACTIVE handshaking slot. The
      * lookup+compare+teardown run as ONE critical section under s_dm_mutex
      * because process_ke_init/resp on the handshake worker mutate the same
      * slot; logging is deferred until after the lock is released, matching the
@@ -636,7 +630,7 @@ void handle_identity_attestation(const uint8_t* data, uint8_t len) {
         const identity_pin_t* pinned = identity_store_lookup(&s_identity_pins, att.src_addr);
         if (pinned) {
             bool torn_down = false;
-            /* Task 7: this is the ONE event where the identity key genuinely
+            /* This is the ONE event where the identity key genuinely
              * changed (a CONFLICT re-binds the pin, or a first pin lands under
              * a key an already-verified session did not expect), so it is also
              * the one place the verified bit is cleared, not just the session
@@ -663,17 +657,16 @@ void handle_identity_attestation(const uint8_t* data, uint8_t len) {
                  * compared out of band no longer matches this peer's actual
                  * key) and persist immediately, same save path as a new pin. */
                 identity_store_clear_verified(&s_identity_pins, att.src_addr);
-                /* RAM-only warning flag (Task 7.5): this IS the genuine
-                 * key-change site, unlike a deliberate user un-verify
-                 * (identity_store_clear_verified alone, Task 9), so it is the
-                 * one place that sets key_changed. No extra save: it never
-                 * persists. */
+                /* RAM-only warning flag: this IS the genuine key-change site,
+                 * unlike a deliberate user un-verify (a bare
+                 * identity_store_clear_verified), so it is the one place that
+                 * sets key_changed. No extra save: it never persists. */
                 identity_store_mark_key_changed(&s_identity_pins, att.src_addr);
                 mesh_pin_store_save();
-                /* Re-verify-needed signal: Tasks 8-9 own the UI surface (chat
-                 * banner / device list badge) for this; mesh_get_peer_verification
-                 * (Task 7.5) is now that sink's data source, this greppable log
-                 * line stays as a diagnostics trail. */
+                /* Re-verify-needed signal: the UI surfaces (chat banner,
+                 * device-list badge) read it through
+                 * mesh_get_peer_verification, and this greppable log line is
+                 * the diagnostics trail. */
                 ESP_LOGW(TAG,
                          "DM RE-VERIFY NEEDED: %08" PRIX32
                          "'s identity key changed, prior SAS verification revoked",
@@ -725,9 +718,9 @@ void record_churn_event(uint32_t t, uint8_t neighbor_count) {
  * production 60s. Neighbor discovery in a short scenario otherwise hinges on a
  * SINGLE beacon per node landing in the window (the next is 60s out); if those
  * two lone beacons collide on the half-duplex ether or one is dropped, neither
- * node ever learns the other and the DM falls back to a broadcast, which is the
- * historical ~1/3 nondeterminism this rig showed. A few-second interval gives
- * many independent discovery chances so a neighbor is learned every run.
+ * node ever learns the other and the DM falls back to a broadcast, which makes
+ * the run nondeterministic. A few-second interval gives many independent
+ * discovery chances so a neighbor is learned every run.
  * NEIGHBOR_EXPIRY_MS is 600s, so a short interval never churns the table.
  * Returns 0 when no override applies (production, or the env unset), so the
  * caller leaves the real 60s policy -- including any NVS-loaded value -- alone.
@@ -883,11 +876,11 @@ void mesh_rederive_beacon_key(void) {
      * runtime setNetworkKey so provisioning takes effect for beacons without a
      * reboot.
      *
-     * Mandatory-provisioning (Task 2): the public-PSK fallback is GONE. When
+     * Mandatory provisioning: there is no public-PSK fallback. When
      * unprovisioned there is no beacon key -- zero it so a stale key can never
      * be reused, and the node neither beacons (send_beacon is gated) nor
      * accepts beacons (handle_beacon is gated). Do NOT derive from
-     * BRAMBLE_PUBLIC_CHANNEL_PSK: that would re-introduce a control-plane
+     * BRAMBLE_PUBLIC_CHANNEL_PSK: that would give the control plane a
      * fallback key. */
     if (network_key_is_provisioned()) {
         uint8_t net_key[32];
