@@ -3,7 +3,9 @@ import type { Neighbor, PeerLocation, Route } from '../../types/bramble';
 
 export interface KnownPeer {
   addr: number;
-  hasNeighbor: boolean;
+  /** Set when the peer is a live radio neighbor; carries the neighbor's own
+   *  fields (rssi, snr, lastHeardMs) that no other source set provides. */
+  neighbor?: Neighbor;
   hasRoute: boolean;
   peerLocation?: PeerLocation;
 }
@@ -14,7 +16,7 @@ export function buildKnownPeers(neighbors: Neighbor[], routes: Route[], peerLoca
   for (const n of neighbors) {
     const addr = parseAddr(n.addr);
     if (!addr) continue;
-    byAddr.set(addr, { addr, hasNeighbor: true, hasRoute: false, peerLocation: byAddr.get(addr)?.peerLocation });
+    byAddr.set(addr, { addr, neighbor: n, hasRoute: false });
   }
 
   for (const r of routes) {
@@ -23,7 +25,7 @@ export function buildKnownPeers(neighbors: Neighbor[], routes: Route[], peerLoca
     const existing = byAddr.get(addr);
     byAddr.set(addr, {
       addr,
-      hasNeighbor: existing?.hasNeighbor ?? false,
+      neighbor: existing?.neighbor,
       hasRoute: true,
       peerLocation: existing?.peerLocation,
     });
@@ -35,7 +37,7 @@ export function buildKnownPeers(neighbors: Neighbor[], routes: Route[], peerLoca
     const existing = byAddr.get(addr);
     byAddr.set(addr, {
       addr,
-      hasNeighbor: existing?.hasNeighbor ?? false,
+      neighbor: existing?.neighbor,
       hasRoute: existing?.hasRoute ?? false,
       peerLocation: p,
     });

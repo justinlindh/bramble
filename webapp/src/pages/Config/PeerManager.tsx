@@ -7,7 +7,7 @@ import type { Neighbor, Route, PeerLocation } from '../../types/bramble';
 import { useStore } from '../../store/index';
 import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
-import { parseAddr, tryParseAddr } from '../../lib/addr';
+import { tryParseAddr } from '../../lib/addr';
 import { buildKnownPeers } from '../Nodes/knownPeers';
 import { safeGetItem, safeSetItem } from '../../utils/safeLocalStorage';
 import { formatAge } from '../../hooks/useAgeTick';
@@ -216,21 +216,17 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
 
   // Known peers: the same union the Nodes tab shows (neighbors, route
   // destinations, and peer locations), resolved through the shared
-  // buildKnownPeers so the two surfaces cannot drift. A peer known only via
-  // location telemetry belongs here too, which the old neighbors-plus-routes
-  // union silently dropped. lastHeardMs is neighbor-only, so carry it over
-  // from the neighbor list that feeds the union.
-  const peers = useMemo((): PeerEntry[] => {
-    const lastHeardByAddr = new Map<number, number>();
-    for (const n of neighbors) {
-      const addr = parseAddr(n.addr);
-      if (addr) lastHeardByAddr.set(addr, n.lastHeardMs);
-    }
-    return buildKnownPeers(neighbors, routes, peerLocations).map((p) => ({
-      addr: p.addr,
-      lastHeardMs: lastHeardByAddr.get(p.addr),
-    }));
-  }, [neighbors, routes, peerLocations]);
+  // buildKnownPeers so the two surfaces cannot drift on membership or order.
+  // lastHeardMs is neighbor-only, so it comes off the union's neighbor entry
+  // and is absent for a peer known only through routing or location telemetry.
+  const peers = useMemo(
+    (): PeerEntry[] =>
+      buildKnownPeers(neighbors, routes, peerLocations).map((p) => ({
+        addr: p.addr,
+        lastHeardMs: p.neighbor?.lastHeardMs,
+      })),
+    [neighbors, routes, peerLocations],
+  );
 
   const handleSaveName = (addr: number, name: string) => {
     setNames((prev) => {
