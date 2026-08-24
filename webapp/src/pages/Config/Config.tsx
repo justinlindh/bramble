@@ -21,6 +21,7 @@ export function Config() {
   const status = useStore((s) => s.status);
   const neighbors = useStore((s) => s.neighbors);
   const routes = useStore((s) => s.routes);
+  const peerLocations = useStore((s) => s.peerLocations);
 
   const handleClearHistory = async () => {
     if (!window.confirm('Clear all cached messages from this browser? This cannot be undone.')) return;
@@ -67,7 +68,7 @@ export function Config() {
       {/* ── Peer Manager ── */}
       <section className={styles.section}>
         <h2><IconPeers size={18} /> Peers</h2>
-        <PeerManager neighbors={neighbors ?? []} routes={routes} />
+        <PeerManager neighbors={neighbors ?? []} routes={routes} peerLocations={peerLocations} />
       </section>
 
       {/* ── Location ── */}

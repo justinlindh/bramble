@@ -1,13 +1,14 @@
 /**
- * PeerManager: lists known peers (union of neighbors + route destinations)
- * with client-side name assignment stored in localStorage.
+ * PeerManager: lists known peers (union of neighbors, route destinations, and
+ * peer locations) with client-side name assignment stored in localStorage.
  */
 import { useRef, useState, useMemo } from 'react';
-import type { Neighbor, Route } from '../../types/bramble';
+import type { Neighbor, Route, PeerLocation } from '../../types/bramble';
 import { useStore } from '../../store/index';
 import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { tryParseAddr } from '../../lib/addr';
+import { buildKnownPeers } from '../Nodes/knownPeers';
 import { safeGetItem, safeSetItem } from '../../utils/safeLocalStorage';
 import { formatAge } from '../../hooks/useAgeTick';
 import styles from './PeerManager.module.css';
@@ -200,9 +201,10 @@ function PeerRow({ peer, name, note, onSaveName, onSaveNote }: PeerRowProps) {
 interface PeerManagerProps {
   neighbors: Neighbor[];
   routes: Route[];
+  peerLocations: PeerLocation[];
 }
 
-export function PeerManager({ neighbors, routes }: PeerManagerProps) {
+export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerProps) {
   const [names, setNames] = useState<Map<number, string>>(loadNames);
   const [notes, setNotes] = useState<Map<number, string>>(loadNotes);
   const [addAddr, setAddAddr] = useState('');
@@ -212,21 +214,19 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
   const [importStatus, setImportStatus] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Build deduplicated peer list from neighbors + route destinations
-  const peers = useMemo((): PeerEntry[] => {
-    const map = new Map<number, PeerEntry>();
-
-    for (const n of neighbors) {
-      map.set(n.addr, { addr: n.addr, lastHeardMs: n.lastHeardMs });
-    }
-    for (const r of routes) {
-      if (!map.has(r.dest)) {
-        map.set(r.dest, { addr: r.dest });
-      }
-    }
-
-    return Array.from(map.values()).sort((a, b) => a.addr - b.addr);
-  }, [neighbors, routes]);
+  // Known peers: the same union the Nodes tab shows (neighbors, route
+  // destinations, and peer locations), resolved through the shared
+  // buildKnownPeers so the two surfaces cannot drift on membership or order.
+  // lastHeardMs is neighbor-only, so it comes off the union's neighbor entry
+  // and is absent for a peer known only through routing or location telemetry.
+  const peers = useMemo(
+    (): PeerEntry[] =>
+      buildKnownPeers(neighbors, routes, peerLocations).map((p) => ({
+        addr: p.addr,
+        lastHeardMs: p.neighbor?.lastHeardMs,
+      })),
+    [neighbors, routes, peerLocations],
+  );
 
   const handleSaveName = (addr: number, name: string) => {
     setNames((prev) => {

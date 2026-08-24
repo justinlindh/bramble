@@ -83,7 +83,7 @@ export function Nodes() {
                     <span className={styles.knownAddr}>{formatAddr0x(peer.addr)}</span>
                   </div>
                   <div className={styles.knownSource}>
-                    {peer.hasNeighbor ? (
+                    {peer.neighbor ? (
                       <span className={styles.liveBadge}>Live neighbor</span>
                     ) : (
                       <span className={styles.knownBadge}>Known only</span>
