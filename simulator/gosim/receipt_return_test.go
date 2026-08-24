@@ -2,8 +2,8 @@ package main
 
 import "testing"
 
-// TestReceiptReturnRateAllInRangeBroadcast is the receipt reliability
-// campaign's Task 1 proof: a 3-node cluster where every node is in direct
+// TestReceiptReturnRateAllInRangeBroadcast is the receipt-return-rate
+// metric's plumbing proof: a 3-node cluster where every node is in direct
 // radio range of every other, A sends one broadcast, and both B and C
 // (the only nodes other than the origin) store it and each send their own
 // delivery receipt home (bridge.c's bridge_send_broadcast_delivery_receipt,
@@ -14,11 +14,11 @@ import "testing"
 // receipt_return_rate is exactly 1.0.
 //
 // This is deliberately a SMALL, uncontended mesh: it proves the metric's
-// plumbing is wired correctly end to end, not the LBT blind-fire defect
-// this campaign exists to fix. A tiny mesh has no post-broadcast receipt
-// storm, so 100% return here is expected and required; the storm scenario
-// (and the honest baseline that is expected to fall short of 100%) is
-// Task 2's.
+// plumbing is wired correctly end to end, not that LBT deferral holds up
+// under contention. A tiny mesh has no post-broadcast receipt storm, so
+// 100% return here is expected and required; the contended storm scenario,
+// where the blind-fire baseline is expected to fall short of 100%, is
+// TestReceiptStormLBTDeferBeatsBlindFire's.
 func TestReceiptReturnRateAllInRangeBroadcast(t *testing.T) {
 	const scenarioJSON = `{
 		"name": "receipt-return-3node-all-in-range",

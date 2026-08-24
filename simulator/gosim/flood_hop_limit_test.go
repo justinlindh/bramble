@@ -100,9 +100,9 @@ func runFloodHopLimitScenario(t *testing.T, nodeCount, dest, floodHopLimit int) 
 	return delivered
 }
 
-// TestFloodHopLimitRaisingReachesFartherNode is Flooding F1 finalize's
-// system-level proof that the flood hop limit is operator-settable and it is
-// what sets reach: on a 12-node line, a flood from N0 to N10 (10 hops out)
+// TestFloodHopLimitRaisingReachesFartherNode is the system-level proof
+// that the flood hop limit is operator-settable and it is what sets
+// reach: on a 12-node line, a flood from N0 to N10 (10 hops out)
 // does NOT arrive at the default hop budget (8 < 10) but DOES arrive once the
 // operator raises flood_hop_limit to 12 (>= 10). Same topology and traffic in
 // both runs; only the hop budget changes, so the asymmetry is the config's own

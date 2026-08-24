@@ -59,7 +59,7 @@ type Command struct {
 	Radius        float32 `json:"radius,omitempty"`
 	TelemetryMode string  `json:"telemetry_mode,omitempty"`
 	// Node/BtnID/Edge: a face-button edge for an external firmware node's
-	// device card (Task 9 gateway / Task 13 UI, see extnode.go's sendButton).
+	// device card (see extnode.go's sendButton).
 	// Node is the emu-link hello id (matches node_joined's "node" field, NOT
 	// NodeID's simulated-node address space used by add/remove/move_node);
 	// BtnID is "up"|"down"|"select"|"reset"; Edge is "down"|"up".
@@ -91,7 +91,7 @@ type Sim struct {
 	metrics  C.metrics_state_t
 	anomaly  [C.MAX_NODES]C.node_anomaly_tracker_t
 	msgTrack [C.MAX_MSG_TRACK]C.msg_tracker_t
-	beacon   C.sim_beacon_policy_t // scenario-wide beacon interval policy (Task 3)
+	beacon   C.sim_beacon_policy_t // scenario-wide beacon interval policy
 
 	// Sim clock
 	simTime    uint64
@@ -128,21 +128,20 @@ type Sim struct {
 	headless               bool
 	broadcastTelemetryMode string
 
-	// Phase 2 Task 0 (flood-comparison baseline): "routing" scenario field,
-	// "reactive" (default, Bramble's real firmware AODV path via
-	// bridge_handle_*) or "flood" (Go-only managed-flooding mode, see
-	// flood.go). flood is nil in reactive mode.
+	// "routing" scenario field: "reactive" (default, Bramble's real firmware
+	// AODV path via bridge_handle_*) or "flood" (Go-only managed-flooding
+	// mode, see flood.go). flood is nil in reactive mode.
 	routingMode string
 	flood       *floodSim
 
-	// Emulator (Task 7): external full-firmware nodes attached over the
-	// emu-link protocol (extnode.go). realtime is set true whenever the
-	// loaded scenario declares firmware nodes or --emu-listen is given; it
-	// gates the wall-clock headless loop (runRealtimeHeadless). Pure harness
-	// scenarios leave all of these zero/nil and keep the untouched
-	// virtual-time drain path. extConns maps a live external node's radio
-	// address to its connection so EVT_RECEIVE_PACKET delivery can be routed
-	// out to the node process instead of into the C firmware. Every field
+	// Emulator: external full-firmware nodes attached over the emu-link
+	// protocol (extnode.go). realtime is set true whenever the loaded
+	// scenario declares firmware nodes or --emu-listen is given; it gates
+	// the wall-clock headless loop (runRealtimeHeadless). Pure harness
+	// scenarios leave all of these zero/nil and keep the plain virtual-time
+	// drain path. extConns maps a live external node's radio address to its
+	// connection so EVT_RECEIVE_PACKET delivery can be routed out to the
+	// node process instead of into the C firmware. Every field
 	// here is read/written only under s.mu, exactly like the C state above.
 	realtime             bool
 	emuListen            string
@@ -151,7 +150,7 @@ type Sim struct {
 	extConns             map[uint32]*extConn
 	pendingBrokerActions []brokerAction
 	// emuFreq is the ether's single-channel carrier (Hz), learned from the
-	// most recent tx's freq and echoed on every rx. The phase-1 model is
+	// most recent tx's freq and echoed on every rx. The model is
 	// single-channel, so a received frame's frequency is the channel's.
 	emuFreq int
 	// emuPHYPinned is true when the scenario's "radio" block declared sf or
@@ -220,9 +219,10 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 	}
 
 	// Bridge-level state, initialized only once fd 1 points at the capture
-	// pipe: bridge_init emits a public_channel_init event of its own, and
-	// before this ordering that one line went straight to the process's real
-	// stdout, so it reached neither a WebSocket client nor a captured run.
+	// pipe: bridge_init emits a public_channel_init event of its own, and if
+	// it ran before that redirect, that one line would go straight to the
+	// process's real stdout, reaching neither a WebSocket client nor a
+	// captured run.
 	C.bridge_init()
 
 	return s, nil
@@ -358,8 +358,8 @@ func (s *Sim) advanceSim() {
 }
 
 // pump advances the simulation clock to simNow, dispatches every C event due
-// at or before it, then fires any broker-side deferred actions (Task 7) that
-// have come due. Split out of advanceSim so both the wall-clock loops
+// at or before it, then fires any broker-side deferred actions that have
+// come due. Split out of advanceSim so both the wall-clock loops
 // (advanceSim, runRealtimeHeadless) and the emulator tests drive events the
 // same way. Non-realtime scenarios never schedule broker actions, so the
 // fireBrokerActions call is a no-op for them and their behavior is unchanged.
@@ -431,11 +431,12 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 	case C.EVT_TICK_NODE:
 		s.handleTickNode(evt)
 	case C.EVT_RECEIVE_PACKET:
-		// Task 7: a frame addressed to (or, being PHY-broadcast, audible at) an
+		// A frame addressed to (or, being PHY-broadcast, audible at) an
 		// external firmware node is delivered out over emu-link instead of into
 		// the C firmware. deliverToExternalIfTarget returns true when it owned
 		// the delivery; only harness (sim_node) receivers fall through to the C
-		// path below, so pure-harness scenarios take exactly the old branch.
+		// path below, so a pure-harness scenario (no firmware nodes) always
+		// dispatches through the C path here.
 		if s.deliverToExternalIfTarget(evt) {
 			return
 		}
@@ -469,23 +470,21 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 	case C.EVT_METRICS_TICK:
 		s.handleMetricsTick(evt)
 	case C.EVT_GENERATE_ATTESTATION:
-		// Per-node identity Phase 3: attestations always go through the
-		// real firmware C path in bridge.c (there is no Go-model flood
-		// equivalent; scenarios that script send_attestation use the
-		// default routing mode).
+		// Attestations always go through the real firmware C path in
+		// bridge.c (there is no Go-model flood equivalent; scenarios that
+		// script send_attestation use the default routing mode).
 		s.handleGenerateAttestation(evt)
 	case C.EVT_PROVISION_ANCHOR:
-		// Trust-anchor campaign (P2 red-team): runtime setAnchor equivalent;
-		// (re-)anchors a node and drops any stale un-endorsed pins.
+		// Runtime setAnchor equivalent; (re-)anchors a node and drops any
+		// stale un-endorsed pins.
 		s.handleProvisionAnchor(evt)
 	case C.EVT_RECEIPT_TX:
-		// Receipt reliability campaign Task 2: one queued broadcast delivery
-		// receipt has come due on one node (the sim's MESH_EVT_RECEIPT_TX).
+		// One queued broadcast delivery receipt has come due on one node
+		// (the sim's MESH_EVT_RECEIPT_TX).
 		s.handleReceiptTx(evt)
 	case C.EVT_GENERATE_LOCATION:
-		// Location sharing (issue #172): position broadcasts always go
-		// through the real firmware C path in bridge.c, same rationale as
-		// attestations above.
+		// Position broadcasts always go through the real firmware C path in
+		// bridge.c, same rationale as attestations above.
 		s.handleGenerateLocation(evt)
 	case C.EVT_GENERATE_ROLLCALL:
 		// Attested roll-call: a scripted initiation, driven through the
@@ -512,10 +511,10 @@ func (s *Sim) handleTickNode(evt *C.sim_event_t) {
 		return
 	}
 
-	// Phase 2 Task 0: managed flooding has no periodic control-plane duty
-	// (no beacons -- there is no neighbor table for one to serve -- no
-	// route maintenance, no per-hop retransmit ladder). Nothing to do on a
-	// tick, and nothing depends on rescheduling it: flood mode's own
+	// Managed flooding has no periodic control-plane duty (no beacons --
+	// there is no neighbor table for one to serve -- no route maintenance,
+	// no per-hop retransmit ladder). Nothing to do on a tick, and nothing
+	// depends on rescheduling it: flood mode's own
 	// EVT_RECEIVE_PACKET/EVT_SEND_PACKET handlers (flood.go) drive
 	// everything else.
 	if s.routingMode == "flood" {
@@ -532,7 +531,7 @@ func (s *Sim) handleTickNode(evt *C.sim_event_t) {
 			&s.nodes, &s.radio, &s.rng, &s.events, &s.metrics, C.uint64_t(ts))
 	}
 
-	// Check for retransmissions (Phase 1)
+	// Check for retransmissions
 	C.bridge_handle_retransmit(node, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics, C.uint64_t(ts))
 
 	// Reschedule next tick (1 second later)
@@ -551,16 +550,15 @@ func (s *Sim) handleGenerateMessage(evt *C.sim_event_t) {
 }
 
 // handleGenerateAttestation fires a scripted identity-attestation origination
-// (per-node identity Phase 3, "send_attestation" scenario event): the named
-// node signs and broadcasts its (or, for the impersonation scenario, someone
-// else's) address binding through the real firmware origination path in
-// bridge.c.
+// (the "send_attestation" scenario event): the named node signs and
+// broadcasts its (or, for the impersonation scenario, someone else's)
+// address binding through the real firmware origination path in bridge.c.
 func (s *Sim) handleGenerateAttestation(evt *C.sim_event_t) {
 	C.bridge_handle_generate_attestation(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
-// handleGenerateLocation (issue #172): a scripted GPS position broadcast
-// through the real firmware location serialization path in bridge.c. Every
+// handleGenerateLocation: a scripted GPS position broadcast through the
+// real firmware location serialization path in bridge.c. Every
 // in-range receiver caches it via the real location_cache_update.
 func (s *Sim) handleGenerateLocation(evt *C.sim_event_t) {
 	C.bridge_handle_generate_location(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
@@ -590,9 +588,9 @@ func (s *Sim) handleRollCallTx(evt *C.sim_event_t) {
 		&s.metrics, &s.anomaly[0], &s.msgTrack[0], C.MAX_MSG_TRACK)
 }
 
-// handleProvisionAnchor (trust-anchor campaign P2 red-team): a scripted runtime
-// setAnchor. Re-anchors the node to the fleet test anchor via the real
-// identity_store_set_anchor, dropping any stale pins it held while un-anchored.
+// handleProvisionAnchor: a scripted runtime setAnchor. Re-anchors the node to
+// the fleet test anchor via the real identity_store_set_anchor, dropping any
+// stale pins it held while un-anchored.
 func (s *Sim) handleProvisionAnchor(evt *C.sim_event_t) {
 	C.bridge_handle_provision_anchor(evt, &s.nodes)
 }
@@ -615,11 +613,10 @@ func (s *Sim) handleChannelFloodRelay(evt *C.sim_event_t) {
 }
 
 // applyDutyCycleCap re-applies the scenario's optional regulatory
-// duty-cycle cap (Task 5) to a node's real airtime budget via the real
+// duty-cycle cap to a node's real airtime budget via the real
 // airtime_budget_set_duty_cap. Must run after every node_activate, since
 // node_activate's airtime_budget_init resets the cap; no-op if the
-// scenario's "radio" block has no duty_cycle_pct (unlimited, today's
-// behavior).
+// scenario's "radio" block has no duty_cycle_pct (unlimited).
 func (s *Sim) applyDutyCycleCap(node *C.sim_node_t) {
 	if bool(s.radio.duty_cycle_set) {
 		C.bridge_apply_duty_cycle_cap(node, s.radio.duty_cycle_pct)
@@ -631,13 +628,13 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	nodeID := C.GoString(&nd.node_id[0])
 	ts := getEventTimestamp(evt)
 
-	// Issue #144 Bug 2: a rejoin must REUSE the existing entry, like
-	// firmware keeps its NVS identity across a reboot. Appending a
-	// duplicate left two entries with the same id and address, with every
-	// find-by-id lookup resolving to the deactivated corpse while the live
-	// node sat stranded at (0,0). nodeActivate below models the reboot:
-	// volatile protocol state (routes, neighbors, pending acks) is
-	// cleared, the persistent identity survives.
+	// A rejoin must REUSE the existing entry, like firmware keeps its NVS
+	// identity across a reboot. Appending a duplicate would leave two
+	// entries with the same id and address, with every find-by-id lookup
+	// resolving to the deactivated corpse while the live node sits stranded
+	// at (0,0). nodeActivate below models the reboot: volatile protocol
+	// state (routes, neighbors, pending acks) is cleared, the persistent
+	// identity survives.
 	idx := -1
 	for i := 0; i < int(s.nodes.count); i++ {
 		if C.GoString(&s.nodes.nodes[i].id[0]) == nodeID {
@@ -648,9 +645,9 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	var node *C.sim_node_t
 	if idx >= 0 {
 		node = C.node_array_get(&s.nodes, C.int(idx))
-		// Issue #144 Bug 1 follow-through: explicit event coordinates win;
-		// a coordinate-less rejoin restores the node's original scenario
-		// position rather than teleporting it to (0,0).
+		// Explicit event coordinates win over the node's remembered
+		// position; a coordinate-less rejoin restores the node's original
+		// scenario position instead of teleporting it to (0,0).
 		if bool(nd.has_coords) {
 			node.x = nd.x
 			node.y = nd.y
@@ -670,11 +667,11 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	s.applyDutyCycleCap(node)
 	anomalyInit(&s.anomaly[idx])
 
-	// Phase 6: Initialize extended node state (mailbox, location, etc.)
-	// node.addr, not nd.addr: node_array_add derives the address from the
-	// node's Ed25519 identity key (Phase 4 rebind). node.x/node.y, not
-	// nd.x/nd.y: the resolved position (event coords, or the restored
-	// original on a coordinate-less rejoin).
+	// Initialize extended node state (mailbox, location, etc.). node.addr,
+	// not nd.addr: node_array_add derives the address from the node's
+	// Ed25519 identity key. node.x/node.y, not nd.x/nd.y: the resolved
+	// position (event coords, or the restored original on a coordinate-less
+	// rejoin).
 	C.bridge_handle_node_join_ext(C.int(idx), node.addr,
 		node.x, node.y, C.uint64_t(ts))
 
@@ -735,13 +732,13 @@ func (s *Sim) handleInterferenceEnd(evt *C.sim_event_t) {
 }
 
 // putSharedMetrics fills the counter and rate fields the periodic "metrics"
-// tick and the terminal "final_metrics" event report identically into m. Both
-// events used to inline these 19 key/value pairs verbatim, so a change to one
-// (a renamed counter, a different divisor) had to be mirrored in the other or
-// the two payloads would silently drift, exactly the hazard the surrounding
-// comments warn about. The fields that legitimately differ between the two
-// events (messages_sent/delivered/dropped, which the final event ties to the
-// same terminal-state locals its rate math uses) are set by each caller.
+// tick and the terminal "final_metrics" event report identically into m.
+// Both events call this instead of inlining these 19 key/value pairs
+// verbatim, so a change to one field (a renamed counter, a different
+// divisor) cannot land in only one of the two payloads and let them silently
+// drift. The fields that legitimately differ between the two events
+// (messages_sent/delivered/dropped, which the final event ties to the same
+// terminal-state locals its rate math uses) are set by each caller.
 func (s *Sim) putSharedMetrics(m map[string]any) {
 	m["total_packets"] = uint64(s.metrics.total_packets)
 	m["retried"] = uint64(s.metrics.messages_retried)
@@ -812,7 +809,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		scenarioPath = fmt.Sprintf("%s/%s.json", s.scenarioDir, scenarioName)
 	}
 
-	// Task 7: tear down any emulator state from a prior load before rebuilding.
+	// Tear down any emulator state from a prior load before rebuilding.
 	// Safe to call under s.mu (it stops the supervisor, which never takes s.mu,
 	// and leaves the broker listener up for reuse).
 	s.resetEmulatorForReload()
@@ -838,14 +835,13 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// optional fields the C cJSON loader ignores. Read the file once here and
 	// hand the bytes to every parser instead of re-reading and re-parsing the
 	// same file per field; a read failure leaves scenarioData nil, and each
-	// parser falls open to its shipped default exactly as a read error did
-	// before.
+	// parser falls open to its shipped default.
 	scenarioData, _ := os.ReadFile(scenarioPath)
 
-	// Phase 2 Task 0: optional "routing"/"flood_hop_limit" fields, read
-	// directly off the scenario bytes (see flood.go's loadRoutingConfig),
-	// independent of the C-side cJSON parse above. Defaults to "reactive"
-	// (today's only behavior) for every scenario that omits "routing".
+	// Optional "routing"/"flood_hop_limit" fields, read directly off the
+	// scenario bytes (see flood.go's loadRoutingConfig), independent of the
+	// C-side cJSON parse above. Defaults to "reactive" for every scenario
+	// that omits "routing".
 	routingMode, floodHopLimit := loadRoutingConfig(scenarioData)
 	s.routingMode = routingMode
 	if routingMode == "flood" {
@@ -854,38 +850,38 @@ func (s *Sim) cmdLoad(cmd Command) {
 		s.flood = nil
 	}
 
-	// Phase 2 "save reactive routing" Part B: optional "intermediate_rrep"
-	// scenario field, read the same way as "routing" above (independent Go-
-	// side JSON read, so this schema extension needs no C-side sim_scenario
-	// changes). Defaults to true (firmware's always-on shipped behavior);
+	// Optional "intermediate_rrep" scenario field, read the same way as
+	// "routing" above (independent Go-side JSON read, so this schema
+	// extension needs no C-side sim_scenario changes). Defaults to true
+	// (firmware's always-on shipped behavior);
 	// explicitly re-applied on every run (not just when disabling) so one
 	// scenario's setting never leaks into the next run in the same process
 	// (see bridge.h's doc comment on bridge_set_intermediate_rrep_enabled).
 	C.bridge_set_intermediate_rrep_enabled(C.bool(loadIntermediateRREPConfig(scenarioData)))
 
-	// Flooding F1 Task 1: optional "flood_transport" scenario field, read the
-	// same way as "intermediate_rrep" above (independent Go-side JSON read,
-	// no C-side sim_scenario changes needed). Drives the REAL firmware flood
-	// transport through bridge.c (see flood.go's loadFloodTransportConfig doc
+	// Optional "flood_transport" scenario field, read the same way as
+	// "intermediate_rrep" above (independent Go-side JSON read, no C-side
+	// sim_scenario changes needed). Drives the REAL firmware flood transport
+	// through bridge.c (see flood.go's loadFloodTransportConfig doc
 	// comment); distinct from s.routingMode's Go-only "flood" MODEL.
 	// Defaults to false (firmware's shipped NVS default); re-applied on every
 	// load so one scenario's setting never leaks into the next run in the
 	// same process.
 	floodTransport, floodTransportHopLimit := loadFloodTransportConfig(scenarioData)
 	C.bridge_set_flood_transport_enabled(C.bool(floodTransport))
-	// Flooding F1 finalize: optional "flood_hop_limit" scenario field drives the
-	// flood-transport origination hop budget (firmware's s_flood_hop_limit),
-	// re-applied on every load. bridge_set_flood_hop_limit clamps to the
-	// firmware range; a farther-reaching flood needs a larger value here.
+	// Optional "flood_hop_limit" scenario field drives the flood-transport
+	// origination hop budget (firmware's s_flood_hop_limit), re-applied on
+	// every load. bridge_set_flood_hop_limit clamps to the firmware range; a
+	// farther-reaching flood needs a larger value here.
 	C.bridge_set_flood_hop_limit(C.uint8_t(floodTransportHopLimit))
 
-	// Receipt reliability campaign Task 2: optional "receipt_tx_kind" scenario
-	// field ("receipt" | "receipt_forward"), read Go-side like the fields
-	// above. Selects which real tx_kind_t an ORIGINATED broadcast delivery
-	// receipt is transmitted as, which is what decides whether exhausting LBT
-	// on a busy channel defers the send or blind-fires into it (see bridge.h).
-	// Defaults to the shipped firmware kind; re-applied on every load so no
-	// run leaks a previous run's arm.
+	// Optional "receipt_tx_kind" scenario field ("receipt" |
+	// "receipt_forward"), read Go-side like the fields above. Selects which
+	// real tx_kind_t an ORIGINATED broadcast delivery receipt is transmitted
+	// as, which is what decides whether exhausting LBT on a busy channel
+	// defers the send or blind-fires into it (see bridge.h). Defaults to the
+	// shipped firmware kind; re-applied on every load so no run leaks a
+	// previous run's arm.
 	C.bridge_set_broadcast_receipt_tx_kind(C.int(loadReceiptTxKindConfig(scenarioData)))
 
 	// Seed the RNG (scenario_load_file only seeds for stochastic mode)
@@ -907,14 +903,14 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// flood_transport/intermediate_rrep (no C-side sim_scenario change) in a
 	// single scenario parse. Each defaults to the fully-provisioned state for
 	// every node:
-	//   - "unprovisioned" (mandatory-provisioning Task 2): boots without the
-	//     network key and stays inert; defaults to provisioned.
-	//   - "unendorsed" (trust-anchor campaign P2): boots without a fleet-anchor
-	//     endorsement so anchored receivers refuse to pin it; defaults to
-	//     endorsed, so existing scenarios still pin under the endorsed-only gate.
-	//   - "unanchored" (trust-anchor campaign P2 red-team): boots without a fleet
-	//     anchor and TOFU-pins until a provision_anchor event hardens it;
-	//     defaults to anchored (the harness default).
+	//   - "unprovisioned": boots without the network key and stays inert;
+	//     defaults to provisioned.
+	//   - "unendorsed": boots without a fleet-anchor endorsement so anchored
+	//     receivers refuse to pin it; defaults to endorsed, so existing
+	//     scenarios still pin under the endorsed-only gate.
+	//   - "unanchored": boots without a fleet anchor and TOFU-pins until a
+	//     provision_anchor event hardens it; defaults to anchored (the
+	//     harness default).
 	// Trust overrides, applied to each listed node AFTER join (join defaults
 	// every node to the trusted state: provisioned, endorsed, and anchored).
 	// Each entry flips one trust bit for the nodes the scenario names under its
@@ -944,10 +940,9 @@ func (s *Sim) cmdLoad(cmd Command) {
 		anomalyInit(&s.anomaly[i])
 
 		// Initialize extended node state exactly like a dynamic join does
-		// (handleNodeJoin): position, and (per-node identity Phase 3) the
-		// node's Ed25519 identity keypair. Initial scenario nodes used to
-		// skip this, which left them without identities and unable to
-		// originate or pin attestations.
+		// (handleNodeJoin): position, and the node's Ed25519 identity
+		// keypair. Skipping this would leave initial scenario nodes without
+		// identities and unable to originate or pin attestations.
 		C.bridge_handle_node_join_ext(C.int(i), C.uint32_t(node.addr),
 			node.x, node.y, C.uint64_t(0))
 
@@ -988,11 +983,11 @@ func (s *Sim) cmdLoad(cmd Command) {
 	})
 	s.emitJSON(map[string]any{"type": "sim_ready"})
 
-	// Task 7: if this scenario declares firmware nodes (or --emu-listen opened
-	// the socket), bring up the emu-link broker and the process supervisor and
+	// If this scenario declares firmware nodes (or --emu-listen opened the
+	// socket), bring up the emu-link broker and the process supervisor and
 	// switch the scenario to real-time (wall-clock) execution. Pure harness
-	// scenarios declare no firmware nodes and leave s.realtime false, so their
-	// virtual-time path is untouched.
+	// scenarios declare no firmware nodes and leave s.realtime false, leaving
+	// their virtual-time path unaffected.
 	fwNodes := loadFirmwareNodes(scenarioData)
 	s.emuPHYPinned = scenarioPinsPHY(scenarioData)
 	if len(fwNodes) > 0 || s.emuListen != "" {
@@ -1109,7 +1104,7 @@ func (s *Sim) cmdAddNode(cmd Command) {
 	s.emitJSON(map[string]any{
 		"type": "node_joined", "timestamp_us": s.simTime,
 		// node.addr: derived from the node's Ed25519 identity key at
-		// node_array_add (Phase 4 rebind), not the sequential fallback.
+		// node_array_add, not the sequential fallback.
 		"node": nodeID, "addr": fmt.Sprintf("0x%08X", uint32(node.addr)),
 		"x": x, "y": y,
 	})
@@ -1130,13 +1125,10 @@ func (s *Sim) cmdRemoveNode(cmd Command) {
 }
 
 // cmdButton forwards a face-button edge from a device card (PagerDevice.tsx)
-// to the external firmware process attached under that emu-link hello id.
-// This was previously unwired: extConn.sendButton (extnode.go) had no caller,
-// so a browser click's { type:"btn", node, id, edge } frame reached gosim and
-// fell through handleCommand's default case as an "unknown command" -- the
-// UI's face buttons looked interactive but never reached firmware. Found and
-// fixed by emulator/e2e's functionality spec (Task 13), which drives buttons
-// through the real UI rather than injecting wire frames directly.
+// to the external firmware process attached under that emu-link hello id, via
+// extConn.sendButton (extnode.go). Exercised by emulator/e2e's functionality
+// spec, which drives buttons through the real UI rather than injecting wire
+// frames directly.
 func (s *Sim) cmdButton(cmd Command) {
 	if s.broker == nil {
 		log.Printf("btn: no broker attached (node %q)", cmd.Node)
@@ -1298,13 +1290,12 @@ func (s *Sim) complete() {
 
 	sent := uint64(s.metrics.messages_sent)
 	delivered := uint64(s.metrics.delivered_packets)
-	// Phase 2 "save reactive routing" Part A: confirmed is the TRUE
-	// confirmed-delivery count (bridge.c's bridge_msg_track_confirm, fired
-	// only when a delivery receipt reaches the true ORIGINATOR), as opposed
-	// to delivered above (destination reach only; see bridge.c's "don't
-	// wait for receipt to arrive at source" comment). confirmed <= delivered
-	// always, since a receipt can only exist after the destination decoded
-	// the message.
+	// confirmed is the TRUE confirmed-delivery count (bridge.c's
+	// bridge_msg_track_confirm, fired only when a delivery receipt reaches
+	// the true ORIGINATOR), as opposed to delivered above (destination reach
+	// only; see bridge.c's "don't wait for receipt to arrive at source"
+	// comment). confirmed <= delivered always, since a receipt can only
+	// exist after the destination decoded the message.
 	confirmed := uint64(s.metrics.confirmed_packets)
 	dropped := uint64(s.metrics.dropped_packets)
 	undelivered := uint64(0)
@@ -1313,9 +1304,9 @@ func (s *Sim) complete() {
 	}
 
 	// Per-node airtime distribution (real time-on-air transmitted), plus
-	// per-tier/per-limiter denial counts: budget_denied (Task 1) and
-	// rreq_rate_denied/rreq_fwd_denied (Task 2) live on each sim_node_t,
-	// summed here across the fleet for final_metrics.
+	// per-tier/per-limiter denial counts: budget_denied and
+	// rreq_rate_denied/rreq_fwd_denied live on each sim_node_t, summed here
+	// across the fleet for final_metrics.
 	var perNodeMs []uint64
 	var budgetDeniedNormal, budgetDeniedCritical, budgetDeniedBroadcast, budgetDeniedReceipt uint64
 	var rreqRateDenied, rreqFwdDenied uint64
@@ -1333,9 +1324,9 @@ func (s *Sim) complete() {
 		rreqRateDenied += uint64(node.rreq_rate_denied)
 		rreqFwdDenied += uint64(node.rreq_fwd_denied)
 	}
-	// Receipt reliability campaign Task 1: bridge_ext_metrics_t (bridge.h)
-	// is a single process-global struct, unlike the per-node counters
-	// summed above, so it is read once rather than accumulated per node.
+	// bridge_ext_metrics_t (bridge.h) is a single process-global struct,
+	// unlike the per-node counters summed above, so it is read once rather
+	// than accumulated per node.
 	extMetrics := C.bridge_ext_metrics_get()
 	broadcastReceiptsExpected := uint64(extMetrics.broadcast_receipts_expected)
 	broadcastReceiptsRegistered := uint64(extMetrics.broadcast_receipts_registered)
@@ -1359,7 +1350,7 @@ func (s *Sim) complete() {
 		offeredLoadErlangs = float64(s.metrics.airtime_total_us) / float64(s.duration)
 	}
 
-	// Per-type real time-on-air (Task 4): same accumulators
+	// Per-type real time-on-air: the same accumulators
 	// metrics_control_airtime_pct reads, charged once per actual TX at the
 	// single sim_radio_broadcast chokepoint. ms here (not us) to match the
 	// rest of this JSON's airtime fields.
@@ -1375,7 +1366,7 @@ func (s *Sim) complete() {
 		"other":   uint64(s.metrics.airtime_us_by_type[C.SIM_PKT_METRIC_OTHER]) / 1000,
 	}
 
-	// Airtime-BUDGET denials (Task 1), by lane. Note these are per-TIER, not
+	// Airtime-BUDGET denials, by lane. Note these are per-TIER, not
 	// per-packet-type: AIRTIME_IDX_BROADCAST covers both beacons and
 	// broadcast DATA, AIRTIME_IDX_CRITICAL covers RREQ+RREP+RERR together,
 	// so "attempted = sent + denied" only reconstructs at the tier level,
@@ -1406,9 +1397,9 @@ func (s *Sim) complete() {
 		"undelivered":   undelivered,
 		// beacons_sent/rreqs_sent/rreps_sent (and every per-type count/ToA
 		// bucket below) count SUCCESSFUL transmissions only, i.e. post the
-		// Task 1 airtime-budget gate and Task 2 RREQ rate limiters: a
-		// packet that was attempted but denied is NOT counted here, it is
-		// counted in budget_denied_by_tier / rreq_rate_denied / rreq_fwd_denied
+		// airtime-budget gate and RREQ rate limiters: a packet that was
+		// attempted but denied is NOT counted here, it is counted in
+		// budget_denied_by_tier / rreq_rate_denied / rreq_fwd_denied
 		// instead. "Attempted" for a given tier or limiter = sent + its
 		// denied counter; see budget_denied_by_tier's own note on why that
 		// reconstruction is per-tier, not per-packet-type, for the budget.
@@ -1435,28 +1426,28 @@ func (s *Sim) complete() {
 		// reports.
 		"confirmed":               confirmed,
 		"confirmed_delivery_rate": confirmedDeliveryRate(confirmed, delivered, dropped, undelivered),
-		// control_airtime_pct is now genuinely ToA-weighted:
-		// ToA(beacon+RREQ+RREP+RERR) / ToA(all). control_packet_pct is the
-		// OLD formula (beacon+RREQ+RREP packet COUNT / total packet count,
-		// RERR not included) kept under its own honest name for continuity.
+		// control_airtime_pct is ToA-weighted: ToA(beacon+RREQ+RREP+RERR) /
+		// ToA(all). control_packet_pct instead uses beacon+RREQ+RREP packet
+		// COUNT / total packet count (RERR not included), kept under its own
+		// name since the two measure different things and both are reported.
 		"control_airtime_pct": float64(C.metrics_control_airtime_pct(&s.metrics)),
 		"control_packet_pct":  float64(C.metrics_control_packet_pct(&s.metrics)),
-		// Per-tier airtime-budget denials (Task 1) and per-limiter RREQ
-		// denials (Task 2), so scale runs can see how much control/data
-		// traffic the real gates actually refused, not just what got sent.
+		// Per-tier airtime-budget denials and per-limiter RREQ denials, so
+		// scale runs can see how much control/data traffic the real gates
+		// actually refused, not just what got sent.
 		"budget_denied_by_tier": budgetDeniedByTier,
 		"rreq_rate_denied":      rreqRateDenied,
 		"rreq_fwd_denied":       rreqFwdDenied,
-		// Receipt reliability campaign Task 1: broadcast_receipts_expected
-		// is every (recipient, broadcast) pair where a node other than the
-		// origin stored the broadcast; broadcast_receipts_registered is how
-		// many of those pairs the origin actually saw a delivery receipt
-		// for (bridge.c's bridge_send_broadcast_delivery_receipt, gated
-		// through g_ext_metrics so the count survives exactly once per pair
-		// no matter how many redundant relay paths deliver the receipt).
-		// receipt_return_rate is the ratio the rest of this campaign tunes
-		// against; a broadcast-free scenario reports 1.0 (nothing was owed,
-		// nothing was missed), not 0.0.
+		// broadcast_receipts_expected is every (recipient, broadcast) pair
+		// where a node other than the origin stored the broadcast;
+		// broadcast_receipts_registered is how many of those pairs the
+		// origin actually saw a delivery receipt for (bridge.c's
+		// bridge_send_broadcast_delivery_receipt, gated through
+		// g_ext_metrics so the count survives exactly once per pair no
+		// matter how many redundant relay paths deliver the receipt).
+		// receipt_return_rate is the ratio that matters for receipt
+		// reliability; a broadcast-free scenario reports 1.0 (nothing was
+		// owed, nothing was missed), not 0.0.
 		"broadcast_receipts_expected":   broadcastReceiptsExpected,
 		"broadcast_receipts_registered": broadcastReceiptsRegistered,
 		"receipt_return_rate":           receiptReturnRate(broadcastReceiptsExpected, broadcastReceiptsRegistered),
@@ -1464,14 +1455,15 @@ func (s *Sim) complete() {
 	s.putSharedMetrics(finalMetrics)
 	s.emitJSON(finalMetrics)
 
-	// Phase 2 Task 0 (flood-comparison baseline): flood mode's own delivery
-	// bars. message_delivery_rate above is 0/0 in flood runs (flood.go never
-	// touches metrics.delivered_packets/dropped_packets -- see flood.go's
-	// package comment) and must not be read for flood scenarios; use these
-	// fields instead. flood_reached_rate is the LOOSE bar (destination ever
+	// Flood mode's own delivery bars. message_delivery_rate above is 0/0 in
+	// flood runs (flood.go never touches
+	// metrics.delivered_packets/dropped_packets -- see flood.go's package
+	// comment) and must not be read for flood scenarios; use these fields
+	// instead. flood_reached_rate is the LOOSE bar (destination ever
 	// received the DATA, no confirmation, how Meshtastic is actually used);
 	// flood_confirmed_rate is the STRICT bar (the true sender received a
-	// flooded ACK back, this task's chosen non-N/A confirmation signal).
+	// flooded ACK back, the confirmation signal chosen here since it is
+	// never N/A).
 	if s.flood != nil {
 		fl := s.flood
 		reachedRate, confirmedRate := 0.0, 0.0
@@ -1527,11 +1519,11 @@ func confirmedDeliveryRate(confirmed, delivered, dropped, undelivered uint64) fl
 	return float64(confirmed) / float64(total)
 }
 
-// receiptTxKindConfigJSON is the receipt reliability campaign's scenario-level
-// A/B switch for the tx_kind_t an originated broadcast delivery receipt is
-// transmitted as. A pointer so an omitted field (the shipped firmware kind)
-// stays distinguishable from an explicit one, the same convention
-// intermediateRREPConfigJSON and floodTransportConfigJSON use.
+// receiptTxKindConfigJSON is the scenario-level A/B switch for the tx_kind_t
+// an originated broadcast delivery receipt is transmitted as. A pointer so
+// an omitted field (the shipped firmware kind) stays distinguishable from an
+// explicit one, the same convention intermediateRREPConfigJSON and
+// floodTransportConfigJSON use.
 type receiptTxKindConfigJSON struct {
 	ReceiptTxKind *string `json:"receipt_tx_kind"`
 }
@@ -1540,7 +1532,7 @@ type receiptTxKindConfigJSON struct {
 // field and returns the tx_kind_t to originate broadcast delivery receipts
 // as. "receipt" (the default, and what firmware passes) is the kind
 // tx_gate.c's lbt_defers() defers on a busy channel; "receipt_forward" is a
-// real firmware kind that is NOT in that set, so it reproduces the pre-fix
+// real firmware kind that is NOT in that set, so choosing it reproduces
 // blind-fire-on-busy behavior for measurement. Any parse failure, omitted
 // field, or unrecognized value returns the default, the same fail-open
 // convention as the loaders above.
@@ -1798,9 +1790,9 @@ func RunHeadless(scenarioPath string) error {
 		return err
 	}
 
-	// Task 7: a scenario with external firmware nodes runs on the wall clock so
+	// A scenario with external firmware nodes runs on the wall clock so
 	// the real node processes have time to boot, beacon, and respond. Pure
-	// harness scenarios keep the instant virtual-time drain below untouched.
+	// harness scenarios use the instant virtual-time drain below instead.
 	if sim.realtime {
 		return sim.runRealtimeHeadless()
 	}

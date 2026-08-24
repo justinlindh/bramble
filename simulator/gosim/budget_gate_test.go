@@ -2,10 +2,10 @@ package main
 
 import "testing"
 
-// TestBeaconBudgetGateDeniesAndCountsOnceExhausted proves Task 1's wiring:
-// node_tick's beacon TX now goes through the real airtime budget
-// (airtime_budget_can_transmit / airtime_budget_debit), the same component
-// firmware's tx_gate uses, instead of transmitting unconditionally.
+// TestBeaconBudgetGateDeniesAndCountsOnceExhausted pins node_tick's beacon TX
+// to the real airtime budget (airtime_budget_can_transmit /
+// airtime_budget_debit), the same component firmware's tx_gate uses, rather
+// than letting it transmit unconditionally.
 //
 // Setup: a tiny 2-node scenario (A transmits, B is a silent neighbor in
 // range) with A's BROADCAST lane shrunk to less than two beacons' worth of
@@ -13,8 +13,7 @@ import "testing"
 // deterministically; ticking forward to each subsequent scheduled beacon
 // must eventually hit a tick where the lane can't cover the cost, at which
 // point the gate must deny (no packet on the air) and record it in
-// budget_denied[BROADCAST], rather than transmitting for free as it did
-// before this wiring existed.
+// budget_denied[BROADCAST] rather than transmitting for free.
 func TestBeaconBudgetGateDeniesAndCountsOnceExhausted(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()
@@ -64,7 +63,7 @@ func TestBeaconBudgetGateDeniesAndCountsOnceExhausted(t *testing.T) {
 
 // TestBeaconBudgetGateAllowsUnderGenerousBudget is the control: with the
 // default (non-shrunk) budget, node_tick's beacon path is unaffected by the
-// new gate and beacons still fire on schedule.
+// budget gate and beacons still fire on schedule.
 func TestBeaconBudgetGateAllowsUnderGenerousBudget(t *testing.T) {
 	h := newRadioHarness()
 	defer h.free()

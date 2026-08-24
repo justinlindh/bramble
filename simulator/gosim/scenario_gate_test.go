@@ -1,12 +1,12 @@
 package main
 
-// Adversarial-scenario gate (issue #95).
+// Adversarial-scenario gate.
 //
-// simulator/scenarios/ carries 32 hand-maintained JSON scenarios. Until now
-// emulator/ci/run_scenarios.sh gated three of them and exactly one gosim test
-// referenced a scenarios/*.json path at all, so the adversarial ones (the mesh
-// failure modes host unit tests cannot reach: partition, black hole, route
-// loop) were maintained but never executed and rotted silently.
+// simulator/scenarios/ carries hand-maintained JSON scenarios, including the
+// adversarial ones (the mesh failure modes host unit tests cannot reach:
+// partition, black hole, route loop). A scenario file that no test or CI job
+// executes can drift out of sync with the engine silently: nothing fails
+// until someone runs it by hand.
 //
 // This file runs a curated subset in-process, through the same
 // runScenario entry point the rest of the package uses, and asserts the
@@ -19,17 +19,17 @@ package main
 // retries, no sleeps, and no tolerance windows: per CLAUDE.md, a scenario that
 // only passes sometimes is a bug to fix, not a knob to tune.
 //
-// Issue #144 closed the gaps this header used to list: node_join now parses
-// coordinates and a coordinate-less rejoin restores the node's original
-// scenario position; a rejoin reuses the existing node entry (identity kept,
-// volatile state cleared) instead of appending a duplicate; mesh_partition
-// carries its detection time; the route_loop detector checks at each relay's
-// FORWARD (keyed on arriving hop_limit) so flood rebroadcasts and ACK
-// retransmissions no longer false-positive; and the reliability machinery
-// (retransmit ladder, duplicate re-ACK, RERR failfast) actually runs. All
-// three anomaly scenarios (partition incl. heal, black-hole, route-loop) are
-// gated below, non-vacuously: each proves real deliveries around its failure
-// mode before asserting the failure mode itself.
+// The engine guarantees these properties, and the tests below hold it to
+// them: node_join parses coordinates, and a coordinate-less rejoin restores
+// the node's original scenario position; a rejoin reuses the existing node
+// entry (identity kept, volatile state cleared) instead of appending a
+// duplicate; mesh_partition carries its detection time; the route_loop
+// detector checks at each relay's FORWARD (keyed on arriving hop_limit), so
+// flood rebroadcasts and ACK retransmissions do not false-positive; and the
+// reliability machinery (retransmit ladder, duplicate re-ACK, RERR failfast)
+// runs. All three anomaly scenarios (partition incl. heal, black-hole,
+// route-loop) are gated below, non-vacuously: each proves real deliveries
+// around its failure mode before asserting the failure mode itself.
 
 import (
 	"encoding/json"
@@ -215,10 +215,9 @@ func (r *scenarioRun) messagesSentBy(nodeID string) []string {
 //
 // route_loop is asserted only for scenarios whose traffic is unicast. The
 // detector (sim_anomaly.c anomaly_check_loop, called from bridge.c on every
-// packet RECEIVE) flags any packet id a node sees twice, which is normal and
-// expected for a flood: public-channel-broadcast trips it 11 times without any
-// actual loop. That detector false positive is reported in issue #144 and is
-// why no flooded scenario is gated on it here.
+// packet RECEIVE) flags any packet id a node sees twice, which is expected
+// and harmless for a flood: public-channel-broadcast trips it 11 times
+// without any actual loop, so no flooded scenario is gated on it here.
 func assertNoRoutingPathologies(t *testing.T, run *scenarioRun) {
 	t.Helper()
 	for _, a := range run.anomalies("route_loop") {
@@ -235,8 +234,10 @@ func assertNoRoutingPathologies(t *testing.T, run *scenarioRun) {
 //
 // The scenario is a 5-node line A-B-C-D-E with a 150-unit radio range and
 // 100-unit spacing, so C is the sole bridge between {A,B} and {D,E}. All
-// three phases are gated here; the heal phase joined the gate when issue
-// #144 fixed node_join (rejoin reuses the entry and restores position).
+// three phases are gated here: the heal phase depends on node_join's rejoin
+// reusing the existing node entry and restoring its original position,
+// which is what makes the heal assertions below meaningful instead of
+// vacuous.
 //
 // Phase 1 (connectivity): before anything is killed, A->E and E->A must each
 // traverse the full 4-hop line and have their delivery receipt return to the
@@ -332,10 +333,9 @@ func TestScenarioAnomalyPartition(t *testing.T) {
 		t.Errorf("mesh_partition node = %q, want \"network\" (a partition is a mesh-wide "+
 			"property, not a per-node one)", node)
 	}
-	// Issue #144: mesh_partition used to be the only anomaly emitted with
-	// timestamp_us 0 instead of its detection time. The kill is scripted at
-	// 60s and the sweep runs from the node_left handler, so the detection
-	// time IS the kill time.
+	// mesh_partition must carry its detection time, not timestamp_us 0. The
+	// kill is scripted at 60s and the sweep runs from the node_left handler,
+	// so the detection time IS the kill time.
 	if ts, _ := parts[0]["timestamp_us"].(float64); ts != 60000000 {
 		t.Errorf("mesh_partition timestamp_us = %v, want 60000000 (the kill's virtual time; "+
 			"0 means the detection-time regression is back)", parts[0]["timestamp_us"])
@@ -427,13 +427,14 @@ func TestScenarioAnomalyPartition(t *testing.T) {
 // prove multi-hop unicast picks the correct path and reports it accurately in
 // the returned delivery receipt.
 //
-// Same 5-node line as above with no kills, so it is unaffected by issue #144.
-// The invariant is exact route correctness, not a delivery-rate threshold:
-// every receipt that returns must have walked the unique shortest path along
-// the line between its endpoints, with a hop count that matches that path's
-// length. A tolerance-free assertion like this is the point, since a routing
-// regression that starts picking longer paths still delivers and would sail
-// past any "delivery rate above N" check.
+// Same 5-node line as above with no kills, so route discovery runs on a
+// mesh that is never disrupted. The invariant is exact route correctness,
+// not a delivery-rate threshold: every receipt that returns must have
+// walked the unique shortest path along the line between its endpoints,
+// with a hop count that matches that path's length. A tolerance-free
+// assertion like this is the point, since a routing regression that starts
+// picking longer paths still delivers and would sail past any "delivery
+// rate above N" check.
 //
 // The scenario's movement phase (move_node of C out of the line at 45s, back
 // at 70s) does execute: move_node is the engine's spelling and every gated
@@ -520,13 +521,11 @@ func TestScenarioReliabilityPathTrace(t *testing.T) {
 //
 // The topology is a 3-hop line A-B-C-D at 100-unit spacing (150-unit range, so
 // each node reaches only its neighbours) carrying six well-spaced bidirectional
-// A<->D sends under 5 percent intermittent packet loss. When #212 rebuilt this
-// fixture it had to leave it ungated: the retransmit ladder was inert because
-// the pending-ack state machine was double-driven, a bug coupled to the
-// route_loop-detector false positive tracked in #144. #240 fixed both, so the
-// ladder is now live and this scenario can finally assert what it was built for.
+// A<->D sends under 5 percent intermittent packet loss.
 //
-// Three invariants, each of which is exactly what #240 unblocked:
+// Three invariants guard against the ladder going quietly inert, where a
+// double-driven pending-ack state machine never retries and delivery still
+// looks fine on average because most frames happen not to drop:
 //   - every one of the six messages is delivered end to end; 5 percent loss on
 //     three hops must be fully masked by retransmission, not merely survived on
 //     average.
@@ -685,13 +684,15 @@ func fingerprintRun(run *scenarioRun) string {
 	return strings.Join(lines, "\n")
 }
 
-// TestScenarioLocationSharing gates simulator/scenarios/location-sharing.json
-// (issue #172): every scripted send_location must originate a real
-// PKT_TYPE_LOCATION broadcast, and every other node in this single-hop square
-// must receive and cache it with the exact coordinates the scenario supplied.
-// Before the fix the engine had no implementation for send_location at all, so
-// the scenario ran only its two chat messages while claiming to verify
-// position updates. Simulation result: deterministic under the scenario seed.
+// TestScenarioLocationSharing gates simulator/scenarios/location-sharing.json:
+// every scripted send_location must originate a real PKT_TYPE_LOCATION
+// broadcast, and every other node in this single-hop square must receive
+// and cache it with the exact coordinates the scenario supplied. A
+// regression that dropped or no-opped send_location would leave the
+// scenario running only its two chat messages while still claiming to
+// verify position updates, so this test asserts the location traffic
+// itself, not just that the run completed. Simulation result: deterministic
+// under the scenario seed.
 func TestScenarioLocationSharing(t *testing.T) {
 	run := runGatedScenario(t, "location-sharing")
 
@@ -794,8 +795,7 @@ func TestScenarioLocationSharing(t *testing.T) {
 	assertNoRoutingPathologies(t, run)
 }
 
-// TestScenarioAnomalyBlackHole gates simulator/scenarios/anomaly-black-hole.json
-// (issue #144).
+// TestScenarioAnomalyBlackHole gates simulator/scenarios/anomaly-black-hole.json.
 //
 // The 5-node line confirms a baseline exchange in both directions, then C is
 // killed and rejoined WITHOUT coordinates: the rejoin must restore its
@@ -906,8 +906,7 @@ func TestScenarioAnomalyBlackHole(t *testing.T) {
 	}
 }
 
-// TestScenarioAnomalyRouteLoop gates simulator/scenarios/anomaly-route-loop.json
-// (issue #144).
+// TestScenarioAnomalyRouteLoop gates simulator/scenarios/anomaly-route-loop.json.
 //
 // The cross topology (E reachable only through C) confirms four baseline
 // exchanges, then churns C through two kill/rejoin cycles with traffic
@@ -916,11 +915,12 @@ func TestScenarioAnomalyBlackHole(t *testing.T) {
 // rebooted C dies on its stale route (route_broken), a second send in the
 // same direction burns down the upstream stale route, and rediscovery then
 // confirms end to end. The headline assertion is ZERO route_loop anomalies
-// across all of it: with the detector now checking forwards (arriving
-// hop_limit as the discriminator), a quiet detector over a run with real
-// confirmed deliveries validates the routing design instead of passing
-// vacuously over a dead mesh, which is exactly the trap this scenario used
-// to be (issue #144: zero DATA ever originated).
+// across all of it: the detector checks forwards (arriving hop_limit as the
+// discriminator), so a quiet detector over a run with real confirmed
+// deliveries validates the routing design. A quiet detector over a mesh
+// that never actually originated any DATA would pass just as vacuously
+// while proving nothing, which is why the baseline and rediscovery
+// deliveries are asserted here too, not just the absence of loops.
 func TestScenarioAnomalyRouteLoop(t *testing.T) {
 	run := runGatedScenario(t, "anomaly-route-loop")
 

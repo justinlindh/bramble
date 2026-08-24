@@ -6,7 +6,7 @@ import (
 )
 
 // TestIdentityAnchorEndorsedPinsUnendorsedRejected is the system-level proof
-// for the trust-anchor pin gate (P2): under the REAL firmware pin store, an
+// for the trust-anchor pin gate: under the REAL firmware pin store, an
 // ANCHORED node pins ONLY anchor-endorsed identities. gosim anchors every node
 // to a fixed test anchor and endorses the whole fleet by default (bridge.c),
 // so an all-endorsed mesh pins normally through the flood; a node marked
@@ -134,7 +134,7 @@ func TestIdentityAnchorEndorsedPinsUnendorsedRejected(t *testing.T) {
 		}
 	}
 
-	// The P2 payoff: D's unendorsed attestation is pinned by NOBODY.
+	// D's unendorsed attestation is pinned by NOBODY.
 	for n := range pinnedD {
 		t.Fatalf("%s pinned unendorsed node D (%s): an anchored node must pin only "+
 			"endorsed identities", n, addrD)
@@ -156,20 +156,22 @@ func TestIdentityAnchorEndorsedPinsUnendorsedRejected(t *testing.T) {
 	}
 }
 
-// TestRuntimeSetAnchorDropsStalePins is the system-level proof for the P2
-// red-team fix: a fleet deployed un-anchored lets a node TOFU-pin its peers;
-// when an operator later provisions the fleet anchor at runtime (bramble.
-// setAnchor without a reboot, modeled by the provision_anchor event), those
-// un-endorsed stale pins MUST be dropped, not survive into the anchored store.
+// TestRuntimeSetAnchorDropsStalePins is the system-level proof that runtime
+// anchor provisioning drops stale pins: a fleet deployed un-anchored lets a
+// node TOFU-pin its peers; when an operator later provisions the fleet
+// anchor at runtime (bramble.setAnchor without a reboot, modeled by the
+// provision_anchor event), those un-endorsed stale pins MUST be dropped,
+// not survive into the anchored store.
 //
 // B boots un-anchored. A (endorsed) attests -> B TOFU-pins A on the self-sig
 // alone (ignoring the cert). Then B is anchored at runtime: A's stale pin is
 // dropped (anchor_provisioned reports dropped_pins=1). A attests again -> B, now
 // anchored, verifies A's endorsement and re-pins A as a fresh NEW binding. So B
 // emits identity_pinned for A exactly TWICE: the drop is what makes the second
-// attestation a NEW pin instead of a silent idempotent refresh. Without the fix
-// the stale pin would survive and the re-attestation would be a REFRESH (one
-// pin event, and an un-endorsed binding left pinned on an anchored node).
+// attestation a NEW pin instead of a silent idempotent refresh. Without the
+// pin-drop on provisioning, the stale pin would survive and the
+// re-attestation would be a REFRESH (one pin event, and an un-endorsed
+// binding left pinned on an anchored node).
 func TestRuntimeSetAnchorDropsStalePins(t *testing.T) {
 	const scenarioJSON = `{
 		"name": "p2-runtime-setanchor",
@@ -254,7 +256,8 @@ func TestRuntimeSetAnchorDropsStalePins(t *testing.T) {
 		}
 	}
 
-	// The fix: provisioning dropped exactly the one stale TOFU pin.
+	// The invariant under test: provisioning dropped exactly the one stale
+	// TOFU pin.
 	if droppedPins != 1 {
 		t.Fatalf("anchor_provisioned dropped_pins = %d, want 1 (the stale TOFU pin of A must be "+
 			"dropped when B is anchored at runtime)", droppedPins)

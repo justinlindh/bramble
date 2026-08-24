@@ -6,8 +6,8 @@ import (
 )
 
 // TestFloodModeMultiHopDeliveryAndConfirmation is the system-level proof
-// that Phase 2 Task 0's managed-flooding routing mode (flood.go) actually
-// relays across multiple hops with no route discovery, and that the
+// that the managed-flooding routing mode (flood.go) actually relays
+// across multiple hops with no route discovery, and that the
 // flooded-ACK mechanism gives the STRICT (delivery-with-confirmation) bar a
 // genuine, non-N/A signal.
 //

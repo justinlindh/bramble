@@ -15,21 +15,21 @@ import (
 // forward) B and C make on receipt, not the MAC/collision model, mirroring
 // intermediate_rrep_test.go's identical choice for the same reason.
 //
-// Task 1 is RECEIVE-side only (relay + deliver); send-side origination is
-// Task 3 and is untouched here, so A still has to discover a route to D
-// before it can originate the unicast DATA at all, exactly like the
-// pre-Task-1 reactive path (bridge_handle_generate_message's route_lookup +
-// RREQ/RREP fallback, main/mesh_task.c's mesh_send_message equivalent) --
-// this happens identically in BOTH scenarios below and is not what
-// flood_transport changes. What flood_transport changes is what B and C (the
-// RELAYS) do with the DATA once it is in flight: reactive forwards it as a
-// targeted unicast frame to the next hop off their route table; flood
-// rebroadcasts it (dest 0xFFFFFFFF) through channel_flood_decide without
-// ever consulting a route, the same engine the broadcast flood already uses.
-// That relay-time broadcast-vs-unicast wire behavior is the proof used here
-// (see runFloodTransportScenario / relayDataSends below); no scenario field
-// exists to pre-seed a route table (every scenario here starts with none),
-// so this is also the "empty route table" case the F1 plan asks for at the
+// This scenario exercises RECEIVE-side flood transport only (relay +
+// deliver); send-side origination is untouched here, so A still has to
+// discover a route to D before it can originate the unicast DATA at all,
+// exactly like the plain reactive path (bridge_handle_generate_message's
+// route_lookup + RREQ/RREP fallback, main/mesh_task.c's mesh_send_message
+// equivalent): this happens identically in BOTH scenarios below and is not
+// what flood_transport changes. What flood_transport changes is what B and
+// C (the RELAYS) do with the DATA once it is in flight: reactive forwards
+// it as a targeted unicast frame to the next hop off their route table;
+// flood rebroadcasts it (dest 0xFFFFFFFF) through channel_flood_decide
+// without ever consulting a route, the same engine the broadcast flood
+// already uses. That relay-time broadcast-vs-unicast wire behavior is the
+// proof used here (see runFloodTransportScenario / relayDataSends below);
+// no scenario field exists to pre-seed a route table (every scenario here
+// starts with none), so this is also the empty-route-table case at the
 // point the DATA is actually relayed.
 func floodTransportLineScenario(floodTransport bool) string {
 	type scenario struct {
@@ -127,10 +127,10 @@ func runFloodTransportScenario(t *testing.T, namePrefix string, floodTransport b
 	return delivered, relaySends
 }
 
-// TestFloodTransportRelaysAsBroadcastNotUnicastForward is Flooding F1 Task
-// 1's system-level proof, driven through gosim's bridge.c (the REAL firmware
-// flood decide, not the Go-only floodSim MODEL): with flood_transport:true,
-// B and C relay the unicast DATA A->D by REBROADCASTING it (dest_addr
+// TestFloodTransportRelaysAsBroadcastNotUnicastForward is the system-level
+// proof, driven through gosim's bridge.c (the REAL firmware flood decide,
+// not the Go-only floodSim MODEL): with flood_transport:true, B and C
+// relay the unicast DATA A->D by REBROADCASTING it (dest_addr
 // 0xFFFFFFFF) through the SAME flood engine (channel_flood_decide) the
 // broadcast flood already uses, never as a targeted unicast forward to a
 // specific next hop -- proving they flood, they do not route it, and D still

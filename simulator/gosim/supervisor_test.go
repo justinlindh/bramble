@@ -185,13 +185,14 @@ func consoleNodeFor(lines []string, marker string) string {
 	return ""
 }
 
-// TestSupervisorConsoleTaggedByBoundIDMultiGroup is the regression guard for the
-// resolveDeviceId multi-group mis-routing fix. Two firmware groups ("pager" and
-// "gateway") each spawn one instance, so both processes carry a "<label>-0"
-// label that ends in "-0": the old label-suffix heuristic mapped BOTH to
-// firmwareOrder[0] and cross-wired their consoles. With server-side tagging each
-// console line carries the node's bound emu-link hello id instead, so the two
-// nodes' consoles stay distinct regardless of label collisions.
+// TestSupervisorConsoleTaggedByBoundIDMultiGroup verifies that console lines
+// route by the node's bound emu-link hello id, not by process label. Two
+// firmware groups ("pager" and "gateway") each spawn one instance, so both
+// processes carry a "<label>-0" label that ends in "-0": routing by that
+// suffix alone would map both to firmwareOrder[0] and cross-wire their
+// consoles. With server-side tagging each console line instead carries the
+// node's bound emu-link hello id, so the two nodes' consoles stay distinct
+// regardless of label collisions.
 func TestSupervisorConsoleTaggedByBoundIDMultiGroup(t *testing.T) {
 	self, err := os.Executable()
 	if err != nil {
@@ -244,7 +245,8 @@ func TestSupervisorConsoleTaggedByBoundIDMultiGroup(t *testing.T) {
 		t.Errorf("gateway console tagged %q, want bound hello id %q", gatewayTag, gatewayID)
 	}
 	// No console line may be tagged with a raw process label ("pager-0" /
-	// "gateway-0"): that would mean the old label-based routing leaked back in.
+	// "gateway-0"): that would mean routing fell back to labels instead of
+	// the bound hello id.
 	lines := h.snapshot()
 	for _, l := range lines {
 		var ev struct {

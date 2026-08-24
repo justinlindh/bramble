@@ -14,8 +14,9 @@ type receiptSend struct {
 }
 
 // runFloodAckScenario runs the SAME 3-hop line floodTransportLineScenario
-// (A-B-C-D, D is 3 hops from A, out of direct radio range) that Task 1's test
-// uses, and returns the confirmation-return-path evidence:
+// (A-B-C-D, D is 3 hops from A, out of direct radio range) used by the
+// relay-transport tests in flood_transport_test.go, and returns the
+// confirmation-return-path evidence:
 //   - confirmed: the final_metrics "confirmed" count (sender-confirmed
 //     deliveries; this is exactly what confirmed_delivery_rate is built from);
 //   - senderConfirmed: whether A (the ORIGINAL sender) observed the
@@ -58,14 +59,15 @@ func runFloodAckScenario(t *testing.T, namePrefix string, floodTransport bool) (
 	return confirmed, senderConfirmed, receiptSends
 }
 
-// TestFloodedAckConfirmsSenderWithoutRoutes is Flooding F1 Task 2's
-// system-level proof, driven through gosim's bridge.c (the REAL firmware flood
-// engine): with flood_transport:true, D (3 hops from A) delivers A's unicast
-// DATA and FLOODS the confirmation receipt back. Every relay rebroadcasts that
-// receipt (dest 0xFFFFFFFF) through the same channel_flood_decide engine the
-// DATA flood uses, never a routed unicast toward a next hop off a route table:
-// the confirmation-return path consults NO route entries. A observes the
-// confirmation and confirmed_delivery_rate registers it (confirmed >= 1).
+// TestFloodedAckConfirmsSenderWithoutRoutes is the system-level proof for
+// the confirmation-return path, driven through gosim's bridge.c (the REAL
+// firmware flood engine): with flood_transport:true, D (3 hops from A)
+// delivers A's unicast DATA and FLOODS the confirmation receipt back.
+// Every relay rebroadcasts that receipt (dest 0xFFFFFFFF) through the same
+// channel_flood_decide engine the DATA flood uses, never a routed unicast
+// toward a next hop off a route table: the confirmation-return path
+// consults NO route entries. A observes the confirmation and
+// confirmed_delivery_rate registers it (confirmed >= 1).
 //
 // Compare TestFloodedAckOffRoutesReceipt below: identical topology/traffic
 // with the toggle off returns the receipt as a routed unicast instead. That
@@ -80,8 +82,8 @@ func TestFloodedAckConfirmsSenderWithoutRoutes(t *testing.T) {
 
 	// Every confirmation-return send must be a FLOOD (broadcast, dest
 	// 0xFFFFFFFF). If any receipt went to a specific next-hop address, a route
-	// lookup (forward_data) produced it, which is exactly what Task 2 removes
-	// from the confirmation path.
+	// lookup (forward_data) produced it, which is exactly what flood_transport
+	// removes from the confirmation path.
 	sawFloodedReceipt := false
 	for _, s := range receiptSends {
 		if s.dest == "0xFFFFFFFF" {

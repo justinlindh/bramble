@@ -6,11 +6,11 @@ import (
 )
 
 // TestIdentityAttestationMultiHopPinAndAddrMismatch is the system-level
-// proof for per-node identity Phases 3+4: identity attestations flood
+// proof for per-node identity attestation: identity attestations flood
 // through the REAL firmware relay path (relay-gate MAC, shared
 // channel-flood engine) and every receiver verifies + TOFU-pins; an
 // insider claiming someone else's address is refused by every receiver's
-// addr<->key check (Phase 4), pin or no pin.
+// addr<->key check, pin or no pin.
 //
 // Topology: a 5-node line (A-B-C-D-E), spacing 100 units, radio range 150,
 // so each node hears only its immediate neighbors. Two scripted events:
@@ -25,11 +25,12 @@ import (
 //     E (a keyed insider: it holds the network key, so its frame relays
 //     fine) attests A's ADDRESS under E's OWN Ed25519 key. The frame is
 //     internally valid (its sig verifies against its embedded key), but
-//     A's address does not derive from E's key: since the Phase 4 rebind
-//     EVERY receiver rejects it at the addr<->key check
-//     (identity_addr_mismatch), even one that never heard the genuine A.
-//     Pre-Phase-4 this was only caught by the TOFU pin (first-seen wins);
-//     now it is cryptographically infeasible to claim at all.
+//     A's address does not derive from E's key, so the addr<->key check
+//     makes EVERY receiver reject it (identity_addr_mismatch), even one
+//     that never heard the genuine A. Without that check, this claim
+//     would only be caught by the TOFU pin (first-seen wins), which
+//     depends on pin order; the addr<->key check instead makes the claim
+//     cryptographically infeasible regardless of order.
 func TestIdentityAttestationMultiHopPinAndAddrMismatch(t *testing.T) {
 	const scenarioJSON = `{
 		"name": "phase4-identity-attestation-line",
@@ -138,10 +139,10 @@ func TestIdentityAttestationMultiHopPinAndAddrMismatch(t *testing.T) {
 		t.Fatalf("A pinned its own address %s: self-attestations must be ignored", addrA)
 	}
 
-	// The Phase 4 payoff: the forged claim is refused at the addr<->key
-	// check by every receiver. D is adjacent to the attacker and must see
-	// it; C proves the forged frame also RELAYED (MAC-valid keyed-insider
-	// traffic does flood; rejection is at delivery, not the relay).
+	// The forged claim is refused at the addr<->key check by every
+	// receiver. D is adjacent to the attacker and must see it; C proves
+	// the forged frame also RELAYED (MAC-valid keyed-insider traffic does
+	// flood; rejection is at delivery, not the relay).
 	for _, n := range []string{"C", "D"} {
 		if !mismatches[n] {
 			t.Fatalf("%s never emitted identity_addr_mismatch: the impersonation of %s was "+
@@ -158,11 +159,12 @@ func TestIdentityAttestationMultiHopPinAndAddrMismatch(t *testing.T) {
 
 // TestIdentityAttestationX25519RotationConflict pins what the address does
 // NOT bind: the X25519 (DM) key. A validly signed re-attestation from the
-// SAME node (same Ed key, so the Phase 4 addr<->key check passes) carrying
-// a DIFFERENT X25519 pub must be refused by receivers holding the original
-// pin, as a TOFU CONFLICT: this is the DM-key-continuity red flag the
-// Phase 4 DM gate consumes, and post-rebind it is the only remaining road
-// to a conflict (short of a 2^32-work address-colliding Ed key).
+// SAME node (same Ed key, so the addr<->key check passes) carrying a
+// DIFFERENT X25519 pub must be refused by receivers holding the original
+// pin, as a TOFU CONFLICT: this is the DM-key-continuity red flag the DM
+// session's pin-continuity check consumes, and given address rebinding
+// derives from the Ed25519 identity key, it is the only remaining road to
+// a conflict (short of a 2^32-work address-colliding Ed key).
 func TestIdentityAttestationX25519RotationConflict(t *testing.T) {
 	const scenarioJSON = `{
 		"name": "phase4-identity-x25519-rotation",
@@ -250,11 +252,11 @@ func TestIdentityAttestationX25519RotationConflict(t *testing.T) {
 	}
 }
 
-// TestSimNodeAddressesDeriveFromIdentityKeys pins the Phase 4 rebind
-// invariant inside the sim itself: every scenario-loaded node's address
-// equals SHA256(its Ed25519 identity pub)[0:4], computed independently in
-// Go. This is what entitles gosim attestations to pass the REAL firmware
-// addr<->key check in identity_store_handle_attestation.
+// TestSimNodeAddressesDeriveFromIdentityKeys pins the address-derives-
+// from-key invariant inside the sim itself: every scenario-loaded node's
+// address equals SHA256(its Ed25519 identity pub)[0:4], computed
+// independently in Go. This is what entitles gosim attestations to pass
+// the REAL firmware addr<->key check in identity_store_handle_attestation.
 func TestSimNodeAddressesDeriveFromIdentityKeys(t *testing.T) {
 	const scenarioJSON = `{
 		"name": "phase4-addr-derivation",

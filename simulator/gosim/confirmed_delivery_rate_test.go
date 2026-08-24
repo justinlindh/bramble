@@ -6,12 +6,13 @@ import (
 	"testing"
 )
 
-// TestConfirmedDeliveryRateMatchesReceiptsHome is Phase 2 "save reactive
-// routing" Part A's positive proof: on the same 4-hop line topology
-// confirmation_return_test.go uses (A-B-C-D, one scripted message A->D),
-// the delivery receipt makes it all the way back to A (Phase 1's
-// breadcrumb fix), so confirmed_delivery_rate must be > 0 and must equal
-// the exact fraction of scripted messages whose receipt got home: here 1/1.
+// TestConfirmedDeliveryRateMatchesReceiptsHome asserts the positive case for
+// confirmed_delivery_rate: on the same 4-hop line topology
+// confirmation_return_test.go uses (A-B-C-D, one scripted message A->D), the
+// delivery receipt makes it all the way back to A over the breadcrumb route
+// relays learn on the forward path, so confirmed_delivery_rate must be > 0
+// and must equal the exact fraction of scripted messages whose receipt got
+// home: here 1/1.
 func TestConfirmedDeliveryRateMatchesReceiptsHome(t *testing.T) {
 	const scenarioJSON = `{
 		"name": "phase1-line-4hop",
@@ -61,31 +62,29 @@ func TestConfirmedDeliveryRateMatchesReceiptsHome(t *testing.T) {
 	}
 }
 
-// TestConfirmedDeliveryRateHonestUnderLoad is Phase 2 "save reactive
-// routing" Part A's negative proof: at a saturated/loaded node count some
-// scripted messages reach their destination (message_delivery_rate > 0)
-// without their delivery receipt finding its way all the way back to the
-// originator (confirmed_delivery_rate strictly lower). This is the exact
-// gap Finding 2 (progress.md) identified: message_delivery_rate measures
-// DESTINATION REACH, not sender confirmation, and overstates Bramble's
-// actual differentiator (confirmed delivery) at scale.
+// TestConfirmedDeliveryRateHonestUnderLoad asserts the negative case for
+// confirmed_delivery_rate: at a saturated/loaded node count some scripted
+// messages reach their destination (message_delivery_rate > 0) without their
+// delivery receipt finding its way all the way back to the originator
+// (confirmed_delivery_rate strictly lower). message_delivery_rate measures
+// DESTINATION REACH, not sender confirmation; a caller that reads only that
+// metric overstates Bramble's actual differentiator (confirmed delivery) at
+// scale.
 //
 // 50-node dense grid at SF7/250kHz (45-unit spacing with range pinned to 58
 // units: orthogonal neighbors audible, diagonal ones at 63.6 units not), 5
 // msgs/min traffic: a real, reproducible run where several messages reach
 // their destination but not every one of those receipts makes it back
-// through the loaded reverse path. (Re-tuned from 2 msgs/min when the
-// Phase 4 identity-derived addresses reshuffled the deterministic
-// collision pattern, and again from 3 msgs/min for issue #144: with the
-// ACK retransmit ladder actually firing and destinations re-ACKing
-// duplicate DATA, 3 msgs/min recovered every lost receipt and the gap
-// closed at that load; 5 msgs/min keeps the reverse path lossy enough to
-// exercise it.) The range is pinned rather than derived because this scenario
-// is tuned to a specific reverse-path loss pattern: 58 units is what SF7/250 kHz
-// derived to when it was tuned, and any value in [45, 63.6) gives the same
-// orthogonal-only graph, so pinning it keeps the tuning independent of the
-// derived-range calibration anchor (which tracks the frequency plan's default
-// PHY, see radio_noise_margin_db).
+// through the loaded reverse path. At 3 msgs/min the ACK retransmit ladder
+// recovers every lost receipt and the reach/confirm gap closes at that load,
+// which would make this test vacuous; 5 msgs/min keeps the reverse path
+// lossy enough to exercise it. The range is pinned rather than derived
+// because this scenario is tuned to a specific reverse-path loss pattern: 58
+// units is what SF7/250 kHz derives to (radio_derive_range in sim_radio.c),
+// and any value in [45, 63.6) gives the same orthogonal-only graph, so
+// pinning it keeps the tuning independent of the derived-range calibration
+// anchor (which tracks the frequency plan's default PHY, see
+// radio_noise_margin_db).
 func TestConfirmedDeliveryRateHonestUnderLoad(t *testing.T) {
 	scenarioJSON := generateGridScenarioJSON(t, gridScenarioParams{
 		Name:       "sf7-45u-50-confirmed-test",

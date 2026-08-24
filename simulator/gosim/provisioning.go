@@ -35,18 +35,17 @@ type nodeTrustFlags struct {
 // The flags select which nodes boot in a degraded trust state; every flag
 // defaults false, matching a fleet where each node is fully provisioned:
 //
-//   - "unprovisioned" (mandatory-provisioning Task 2): boots WITHOUT the network
-//     key and is INERT. It originates no network-key-authenticated frame (DATA,
-//     attestation) and drops every inbound frame, while the rest of the fleet
-//     meshes normally.
-//   - "unendorsed" (trust-anchor campaign P2): boots WITHOUT a fleet-anchor
-//     endorsement cert. It holds and uses the network key (so its attestations
-//     still MAC-verify and relay) but carries not_after=0 on the wire, so every
-//     anchored receiver refuses to PIN it.
-//   - "unanchored" (trust-anchor campaign P2 red-team): boots WITHOUT a fleet
-//     anchor, pinning on self-sig alone (TOFU) and ignoring cert fields, exactly
-//     like a node deployed before the operator provisioned an anchor. A later
-//     "provision_anchor" event anchors it and DROPS those stale pins.
+//   - "unprovisioned": boots WITHOUT the network key and is INERT. It
+//     originates no network-key-authenticated frame (DATA, attestation) and
+//     drops every inbound frame, while the rest of the fleet meshes normally.
+//   - "unendorsed": boots WITHOUT a fleet-anchor endorsement cert. It holds
+//     and uses the network key (so its attestations still MAC-verify and
+//     relay) but carries not_after=0 on the wire, so every anchored receiver
+//     refuses to PIN it.
+//   - "unanchored": boots WITHOUT a fleet anchor, pinning on self-sig alone
+//     (TOFU) and ignoring cert fields, exactly like a node deployed before
+//     the operator provisioned an anchor. A later "provision_anchor" event
+//     anchors it and DROPS those stale pins.
 //
 // Read Go-side like the other scenario extensions (loadFloodTransportConfig in
 // flood.go), so no C-side sim_scenario change is needed.

@@ -368,12 +368,12 @@ func TestExtNodeSingleTxNoCollisionDelivered(t *testing.T) {
 	}
 }
 
-// TestBrokerFindByNodeRouting is a fast, same-package regression test for the
-// gosim button-routing fix (Broker.findByNode, extnode.go): it must resolve a
-// bound emu-link hello id to that node's own connection, resolve distinct ids
-// to distinct connections, and return nil (not a stale/wrong connection) for
-// an id nothing has ever attached under. No firmware node, no browser --
-// this alone previously required the full E2E suite to exercise.
+// TestBrokerFindByNodeRouting is a fast, same-package test of
+// Broker.findByNode (extnode.go): it must resolve a bound emu-link hello id
+// to that node's own connection, resolve distinct ids to distinct
+// connections, and return nil (not a stale/wrong connection) for an id
+// nothing has ever attached under. No firmware node, no browser, and no need
+// for the full E2E suite to exercise this routing path.
 func TestBrokerFindByNodeRouting(t *testing.T) {
 	h := newEmuHarness()
 	defer h.close()
@@ -410,13 +410,12 @@ func TestBrokerFindByNodeRouting(t *testing.T) {
 	}
 }
 
-// TestCmdButtonRoutesToCorrectNodeOnly exercises the actual bug fix end to
-// end at the Go level: a "btn" Command (sim.go's cmdButton, wired into
+// TestCmdButtonRoutesToCorrectNodeOnly verifies button routing end to end
+// at the Go level: a "btn" Command (sim.go's cmdButton, wired into
 // handleCommand's "btn" case) must reach ONLY the external firmware
 // connection bound to the target node id, via sendButton, and must not
-// fan out to any other attached node. It also covers the pre-fix failure
-// shape (an unknown node id) as a silent no-op rather than a panic or a
-// misdelivery.
+// fan out to any other attached node. It also covers an unknown node id
+// as a silent no-op rather than a panic or a misdelivery.
 func TestCmdButtonRoutesToCorrectNodeOnly(t *testing.T) {
 	h := newEmuHarness()
 	defer h.close()

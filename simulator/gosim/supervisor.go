@@ -57,7 +57,7 @@ type Supervisor struct {
 type superProc struct {
 	sup      *Supervisor
 	slot     *extSlot
-	nodeType string // "" / "firmware" = linux node; "qemu" = QEMU VM (P2.4b)
+	nodeType string // "" / "firmware" = linux node; "qemu" = QEMU VM
 	binary   string
 	nodeDir  string
 	env      []string
@@ -350,8 +350,8 @@ func (p *superProc) runOnce() {
 	stopped := p.stopped
 	p.mu.Unlock()
 
-	// A node dying mid-scenario used to be invisible (the exit status was
-	// discarded), so a crash-and-restart could only be inferred from a
+	// A node dying mid-scenario is invisible unless its exit status is
+	// logged: without this, a crash-and-restart can only be inferred from a
 	// duplicate attach line, with no evidence of WHY the process died. Log
 	// every unexpected exit with its wait error (which carries the exit code
 	// or signal); teardown kills (p.stopped) stay silent so normal scenario

@@ -360,11 +360,12 @@ func (b *Broker) bindSlot(ec *extConn) *extSlot {
 // prov, send, attest, nmea, time) are not frames: they are the operator acting
 // on the node, nothing retransmits them, and a dropped one simply never
 // happens, which reads as a button press that did nothing or a fleet that
-// refuses to take its key. The old 256 sat close enough to a real burst (three
+// refuses to take its key. A buffer sized close to a real burst (three
 // firmware processes on a contended host, each fed every frame on the ether
-// plus a 1 Hz GNSS feed) that control messages were observed vanishing.
-// Sizing well past the burst keeps the drop path for a node that has genuinely
-// stopped reading, where the alternative is stalling the simulation loop.
+// plus a 1 Hz GNSS feed) drops control messages that were never meant to be
+// dropped. Sizing well past the burst keeps the drop path for a node that has
+// genuinely stopped reading, where the alternative is stalling the simulation
+// loop.
 const nodeSendBuffer = 4096
 
 // writeLoop drains the send channel to the socket.
@@ -445,7 +446,8 @@ func (ec *extConn) dispatch(msg *emuInbound) {
 	case "log":
 		ec.handleLog(msg)
 	default:
-		// Unknown type: ignore (phase 2 forward compatibility).
+		// Unknown type: ignored, so a node speaking a newer message type
+		// than this broker recognizes does not break the connection.
 	}
 }
 
@@ -758,7 +760,7 @@ func (ec *extConn) sendJSON(v any) {
 }
 
 // sendButton delivers a face-button edge (up/down/select/reset) to the node.
-// The frontend and gateway (Task 9) drive these; a "reset" edge is how the UI
+// The frontend and gateway drive these; a "reset" edge is how the UI
 // reboots a node (the firmware exits, the supervisor restarts it).
 func (ec *extConn) sendButton(id, edge string) { ec.sendJSON(btnMsg{T: "btn", ID: id, Edge: edge}) }
 

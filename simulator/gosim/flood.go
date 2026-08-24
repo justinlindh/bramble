@@ -13,10 +13,10 @@ import (
 	"unsafe"
 )
 
-// flood.go implements Phase 2 Task 0's flood-comparison baseline: a
-// Meshtastic-style MANAGED-FLOODING routing mode, selected per-scenario via
-// the top-level "routing":"flood" JSON field (default "reactive", Bramble's
-// real firmware AODV path via bridge.c/bridge_handle_*).
+// flood.go implements a flood-comparison baseline: a Meshtastic-style
+// MANAGED-FLOODING routing mode, selected per-scenario via the top-level
+// "routing":"flood" JSON field (default "reactive", Bramble's real
+// firmware AODV path via bridge.c/bridge_handle_*).
 //
 // This is a SIM-LAYER MODEL of Meshtastic's flood strategy, not Meshtastic
 // firmware: no route discovery, no reverse routes, fire-and-forget
@@ -31,18 +31,18 @@ import (
 // tier for admission -- so the two transports are compared on identical
 // radio conditions, only the routing strategy differs.
 //
-// Approximations documented here (see task0-report.md for the full list):
+// Known approximations against real Meshtastic firmware:
 //   - No periodic beacons/NodeInfo/position broadcasts: managed flooding
 //     has no neighbor table to maintain, so there is nothing for a
 //     Bramble-style beacon to serve; EVT_TICK_NODE is a no-op in flood mode
 //     (see sim.go's handleTickNode).
-//   - The rebroadcast-delay formula (floodRebroadcastDelayMs) is a
-//     documented approximation of Meshtastic's actual contention-window/
-//     SNR heuristic, not a byte-for-byte port of its firmware.
+//   - The rebroadcast-delay formula (floodRebroadcastDelayMs) approximates
+//     Meshtastic's actual contention-window/SNR heuristic, not a
+//     byte-for-byte port of its firmware.
 //   - The flooded ACK (floodMsgAck) models Meshtastic's real want_ack
 //     flooded-acknowledgement behavior (also hop-limited, also flooded, no
-//     reverse route) to give the STRICT delivery-with-confirmation bar a
-//     genuine, non-N/A signal; see task0-report.md's honest-comparison note.
+//     reverse route) so the STRICT delivery-with-confirmation bar has a
+//     genuine, non-N/A signal instead of being N/A.
 
 const (
 	floodMsgData byte = 0
@@ -52,8 +52,7 @@ const (
 	// dest_addr(4) + corr_id(4) = 18 bytes. Deliberately in the same
 	// ballpark as reactive's HEADER_SIZE (12 bytes, packet.h) for the
 	// legacy scenarios' header-only (payload_size=0) DATA frames, so
-	// per-packet ToA is a fair comparison; see task0-report.md for the
-	// exact byte counts used on both sides.
+	// per-packet ToA is a like-for-like comparison.
 	floodFrameSize = 18
 
 	floodDefaultHopLimit = 3 // Meshtastic's shipped default hop_limit.
@@ -220,9 +219,8 @@ func avgUs(xs []uint64) float64 {
 //
 // Read directly off the scenario JSON file with encoding/json, independent
 // of and in addition to the C side's own cJSON parse (sim_scenario.c has no
-// "routing" field and is not touched by Task 0): keeps the flood mode
-// entirely Go-side, per the task's "GO-ONLY if possible" preference. Unknown
-// fields are ignored by both parsers, so this is a strictly additive,
+// "routing" field): keeps the flood mode entirely Go-side. Unknown fields
+// are ignored by both parsers, so this is a strictly additive,
 // backward-compatible scenario schema extension.
 
 type routingConfigJSON struct {
@@ -232,8 +230,9 @@ type routingConfigJSON struct {
 
 // loadRoutingConfig reads the scenario bytes' optional "routing" ("reactive",
 // the default, or "flood") and "flood_hop_limit" fields. Any parse failure or
-// unrecognized value falls back to "reactive" (today's only behavior before
-// this task), never silently changes an existing scenario's interpretation.
+// unrecognized value falls back to "reactive", the behavior for any scenario
+// that does not explicitly opt into flood mode, so loading never silently
+// changes an existing scenario's interpretation.
 func loadRoutingConfig(data []byte) (mode string, hopLimit byte) {
 	hopLimit = floodDefaultHopLimit
 	var cfg routingConfigJSON
@@ -250,10 +249,10 @@ func loadRoutingConfig(data []byte) (mode string, hopLimit byte) {
 	return mode, hopLimit
 }
 
-// intermediateRREPConfigJSON is Phase 2 "save reactive routing" Part B's
-// scenario-level A/B switch for intermediate-node RREP (see bridge.h's
-// bridge_set_intermediate_rrep_enabled doc comment): a pointer so "field
-// omitted" is distinguishable from "field explicitly false".
+// intermediateRREPConfigJSON is the scenario-level A/B switch for
+// intermediate-node RREP (see bridge.h's bridge_set_intermediate_rrep_enabled
+// doc comment): a pointer so "field omitted" is distinguishable from "field
+// explicitly false".
 type intermediateRREPConfigJSON struct {
 	IntermediateRREP *bool `json:"intermediate_rrep"`
 }
@@ -273,8 +272,8 @@ func loadIntermediateRREPConfig(data []byte) bool {
 	return *cfg.IntermediateRREP
 }
 
-// floodTransportConfigJSON is Flooding F1 Task 1's scenario-level switch for
-// the REAL firmware flood transport (main/mesh_task.c's s_flood_transport,
+// floodTransportConfigJSON is the scenario-level switch for the REAL
+// firmware flood transport (main/mesh_task.c's s_flood_transport,
 // driven here through bridge_set_flood_transport_enabled), read the same way
 // as intermediateRREPConfigJSON above: a pointer so "field omitted" (default
 // false, matching firmware's shipped NVS default) is distinguishable from

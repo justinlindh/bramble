@@ -5,7 +5,7 @@ import (
 )
 
 // firmwareNodesConfigJSON reads the scenario's optional top-level
-// "firmware_nodes" array (Task 7). Each entry declares a full-firmware external
+// "firmware_nodes" array. Each entry declares a full-firmware external
 // node group:
 //
 //	"firmware_nodes": [
