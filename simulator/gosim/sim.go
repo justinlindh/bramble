@@ -594,11 +594,12 @@ func (s *Sim) handleReceiptTx(evt *C.sim_event_t) {
 	C.bridge_handle_receipt_tx(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
-// handleChannelFloodRelay fires a jittered channel-flood relay (Task 5): see
-// bridge.c's _handle_data broadcast branch, which schedules these via
-// EVT_SEND_PACKET (repurposed; previously declared but unused). Distinct from
-// handleFloodRelayDue, which rebroadcasts through the Go-only floodSim model
-// rather than the real firmware channel flood.
+// handleChannelFloodRelay fires one jittered relay that bridge.c's shared
+// firmware flood engine (bridge_flood_relay, on top of channel_flood_decide)
+// scheduled as an EVT_SEND_PACKET. Broadcast DATA, unicast DATA under flood
+// transport, delivery receipts, and identity attestations all schedule through
+// that one engine. Distinct from handleFloodRelayDue, which rebroadcasts
+// through the Go-only floodSim model rather than the firmware channel flood.
 func (s *Sim) handleChannelFloodRelay(evt *C.sim_event_t) {
 	C.bridge_handle_flood_relay(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
