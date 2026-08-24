@@ -833,10 +833,7 @@ func (s *Sim) deliverToExternalIfTarget(evt *C.sim_event_t) bool {
 	if outcome == rxOutcomeCollision || outcome == rxOutcomeHalfDuplex {
 		return true // audible but destroyed: the node hears nothing
 	}
-	n := int(pkt.len)
-	if n > 256 {
-		n = 256
-	}
+	n := min(int(pkt.len), 256)
 	payload := make([]byte, n)
 	for i := 0; i < n; i++ {
 		payload[i] = byte(pkt.data[i])

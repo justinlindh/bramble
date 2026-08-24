@@ -229,7 +229,7 @@ func runTwinIO(args []string, out, errw io.Writer) int {
 // rates were probed in increasing order.
 func parseTwinRates(s string) ([]float64, error) {
 	var out []float64
-	for _, field := range strings.Split(s, ",") {
+	for field := range strings.SplitSeq(s, ",") {
 		field = strings.TrimSpace(field)
 		if field == "" {
 			continue
