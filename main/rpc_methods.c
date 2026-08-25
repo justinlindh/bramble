@@ -86,6 +86,15 @@ static const char* bramble_hardware(void) {
     return "unknown";
 }
 
+/* Emit the firmware/protocol/hardware version triple onto result. Both
+   bramble.getStatus and bramble.getVersion report it, so they share one
+   definition rather than two field sets that agree only by inspection. */
+static void add_version_fields(cJSON* result) {
+    cJSON_AddStringToObject(result, "firmware_version", esp_app_get_description()->version);
+    cJSON_AddStringToObject(result, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
+    cJSON_AddStringToObject(result, "hardware", bramble_hardware());
+}
+
 /* Lowercase-hex encode n bytes into out, which must hold 2*n + 1 bytes (the
  * trailing NUL included). Used by the RPC handlers that surface a pubkey,
  * network key, or 4-byte fingerprint as a hex string. */
@@ -170,9 +179,7 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
     mesh_get_state(st);
 
     cJSON_AddStringToObject(result, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
-    cJSON_AddStringToObject(result, "firmware_version", esp_app_get_description()->version);
-    cJSON_AddStringToObject(result, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
-    cJSON_AddStringToObject(result, "hardware", bramble_hardware());
+    add_version_fields(result);
     cJSON_AddBoolToObject(result, "radio_ok", st->radio_ok);
     cJSON_AddNumberToObject(result, "peers", st->neighbors.count);
     cJSON_AddNumberToObject(result, "beacon_tx", st->beacon_tx_count);
@@ -498,9 +505,7 @@ static int handle_set_peer_verified(const cJSON* params, cJSON* result) {
 /* bramble.getVersion */
 static int handle_get_version(const cJSON* params, cJSON* result) {
     (void)params;
-    cJSON_AddStringToObject(result, "firmware_version", esp_app_get_description()->version);
-    cJSON_AddStringToObject(result, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
-    cJSON_AddStringToObject(result, "hardware", bramble_hardware());
+    add_version_fields(result);
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync",
                           mesh_supports_delivery_event_sync());
     return 0;
