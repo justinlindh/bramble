@@ -163,12 +163,6 @@ export default function App() {
   // Show connection overlay for initial connect, not during auto-reconnect
   const showOverlay = connectionState !== 'connected' && connectionState !== 'error';
 
-  const handleConnectionToggle = () => {
-    if (isConnected || connectionState === 'error') {
-      disconnect();
-    }
-  };
-
   // Get node identifier: name if set, otherwise hex address
   const getNodeIdentifier = (): string | null => {
     if (!config?.identity) return null;
@@ -219,7 +213,7 @@ export default function App() {
         {(isConnected || connectionState === 'error') && (
           <button
             className={styles.disconnectBtn}
-            onClick={handleConnectionToggle}
+            onClick={() => disconnect()}
             aria-label="Disconnect"
           >
             Disconnect
