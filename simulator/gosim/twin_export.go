@@ -40,7 +40,6 @@ type twinExportNode struct {
 	Address         string `json:"address"`
 	Name            string `json:"name,omitempty"`
 	FirmwareVersion string `json:"firmware_version"`
-	ProtocolVersion string `json:"protocol_version"`
 	Hardware        string `json:"hardware"`
 	UptimeS         uint64 `json:"uptime_s"`
 }
@@ -86,14 +85,12 @@ type twinNeighbor struct {
 // twinRoute is one routing-table entry. Routes name nodes the exporter can
 // reach, which is not the same as nodes it can hear: a multi-hop route carries
 // no link, so the importer reads routes for the addresses they mention rather
-// than for reachability.
+// than for reachability. The exporter also reports hop count, metric, state,
+// and use count per route; the importer needs only the endpoints, so those
+// fields are left to decode into nothing rather than carried unread.
 type twinRoute struct {
-	Dest     string `json:"dest"`
-	NextHop  string `json:"next_hop"`
-	HopCount int    `json:"hop_count"`
-	Metric   int    `json:"metric"`
-	State    string `json:"state"`
-	UseCount int    `json:"use_count"`
+	Dest    string `json:"dest"`
+	NextHop string `json:"next_hop"`
 }
 
 // rpcEnvelope is the JSON-RPC response an operator gets from a transport that
