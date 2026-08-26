@@ -25,6 +25,7 @@ import type { SavedDevice } from '../lib/deviceBook';
 import { formatAddrHex, formatAddr0x } from '../utils/address';
 import { DEFAULT_CAPABILITIES } from '../lib/connectionMode';
 import { mergeBroadcastRecipient } from '../lib/broadcastRecipients';
+import { BROADCAST_ADDR } from '../lib/addr';
 import { safeGetItem, safeSetItem } from '../utils/safeLocalStorage';
 
 const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
@@ -81,7 +82,7 @@ function conversationTargetForMessage(msg: Message): ConversationTarget {
   if (msg.channelIndex !== undefined && msg.channelIndex >= 0) {
     return { id: `ch:${msg.channelIndex}`, peerAddr: undefined, channelIndex: msg.channelIndex };
   }
-  if (msg.to === 0xffffffff) {
+  if (msg.to === BROADCAST_ADDR) {
     return { id: 'broadcast', peerAddr: undefined, channelIndex: undefined };
   }
   const peerAddr = msg.direction === 'outgoing' ? msg.to : msg.from;
@@ -317,7 +318,7 @@ export const useStore = create<AppState & Actions>((set) => ({
       // Cap message history at 500
       const msgs = [...state.messages, msg].slice(-500);
 
-      const isBroadcast = msg.to === 0xffffffff;
+      const isBroadcast = msg.to === BROADCAST_ADDR;
       const target = conversationTargetForMessage(msg);
       const convId = target.id;
 
