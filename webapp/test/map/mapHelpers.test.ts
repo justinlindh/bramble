@@ -4,7 +4,7 @@ import {
   coarseZoneCenter,
   COARSE_CELL_LAT_DEG,
   COARSE_CELL_LON_DEG,
-} from '../../src/pages/Map/Map';
+} from '../../src/pages/Map/coarseZone';
 
 /**
  * Mirror of location_serialize_coarse / location_deserialize_coarse in
