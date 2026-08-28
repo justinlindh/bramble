@@ -88,7 +88,7 @@ describe('message DB namespace on connect', () => {
   it('uses the NEW node address after switching nodes (no stale snapshot)', async () => {
     // First node: the mock (a distinct address that lingers in the live store).
     setNodeAddress(0x1a2b3c4d);
-    await connect('websocket');
+    await connect('mock');
     expect(messageDb.open).toHaveBeenLastCalledWith('1A2B3C4D');
 
     // Switch to a real node. The DB must open under ITS address, not the mock's.

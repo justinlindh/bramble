@@ -6,6 +6,6 @@ describe('ConnectionOverlay connecting labels', () => {
     expect(connectingLabelFor('ble')).toContain('Scanning');
     expect(connectingLabelFor('serial')).toContain('Opening serial');
     expect(connectingLabelFor('wifi')).toContain('Handshaking');
-    expect(connectingLabelFor('websocket')).toContain('Connecting');
+    expect(connectingLabelFor('mock')).toContain('Connecting');
   });
 });
