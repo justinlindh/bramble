@@ -13,18 +13,14 @@
 
 /**
  * Destination address that reaches every node: a message with `to ===
- * BROADCAST_ADDR` is a broadcast. This is load-bearing protocol semantics, so
- * it lives here once rather than as a bare `0xffffffff` literal repeated across
- * the store, the messaging pipeline, and the chat surfaces.
+ * BROADCAST_ADDR` is a broadcast.
  */
 export const BROADCAST_ADDR = 0xffffffff;
 
 /**
- * Internal sentinel for a channel conversation's destination. It is not sent on
- * the wire: the send path folds it to `BROADCAST_ADDR` and routes it through
- * `sendMessage` with a channel index (unlike a plain broadcast, which has no
- * channel and goes via `sendBroadcast`). One character away from
- * `BROADCAST_ADDR`, which is exactly why it should never be typed by hand.
+ * Destination the app gives a channel conversation. It never reaches the wire:
+ * `sendMessage` folds it to `BROADCAST_ADDR` and sends with a channel index,
+ * where a plain broadcast carries no channel and goes via `sendBroadcast`.
  */
 export const CHANNEL_BROADCAST_ADDR = 0xfffffffe;
 
