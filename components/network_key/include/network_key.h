@@ -11,7 +11,7 @@
  * A node becomes provisioned only by generating a fresh key
  * (network_key_generate_provision), loading a persisted one
  * (network_key_load_from_nvs), or having an operator set one
- * (network_key_set_provisioned via the setNetworkKey RPC). The key is
+ * (network_key_set_from_hex, which the setNetworkKey RPC calls). The key is
  * persisted to NVS on the set and generate paths so it survives reboot.
  *
  * This component is the fail-closed FOUNDATION; it does not on its own make
@@ -22,12 +22,14 @@
 
 /* Marks the node as provisioned with a real, non-public network key and
  * persists it to non-volatile storage (device NVS; in-memory on host) so it
- * survives reboot. Called by generate_provision and the setNetworkKey RPC. */
+ * survives reboot. Takes an already-decoded key: callers holding a hex string
+ * go through network_key_set_from_hex instead. */
 void network_key_set_provisioned(const uint8_t key[32]);
 
 /* Parse a 64-hex-char key and provision it; returns 0 on success, -1 on a
- * malformed string (node state unchanged). Shared by the dev/bench seeding
- * paths so key parsing exists once. */
+ * malformed string (node state unchanged). The only key parser: the
+ * setNetworkKey RPC, the emulator control path and the dev/bench seeding
+ * paths all route through it, so the accepted key format exists once. */
 int network_key_set_from_hex(const char* hex);
 
 /* Reverts to unprovisioned IN MEMORY (does NOT erase persisted storage).

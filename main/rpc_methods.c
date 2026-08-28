@@ -1531,25 +1531,12 @@ static int rpc_set_network_key(const cJSON* params, cJSON* result) {
     if (!key_j || !cJSON_IsString(key_j)) {
         return RPC_ERR_INVALID_PARAMS;
     }
-    const char* hex = key_j->valuestring;
-    if (strlen(hex) != 64) {
+    /* Decode, validation, NVS persist and the wipe of the decoded key all live
+     * in the component's shared parser, so the RPC and the component cannot
+     * disagree on which keys are accepted. */
+    if (network_key_set_from_hex(key_j->valuestring) != 0) {
         return RPC_ERR_INVALID_PARAMS;
     }
-    uint8_t key[32];
-    for (int i = 0; i < 32; i++) {
-        int hi = hex_nibble(hex[i * 2]);
-        int lo = hex_nibble(hex[i * 2 + 1]);
-        if (hi < 0 || lo < 0) {
-            return RPC_ERR_INVALID_PARAMS;
-        }
-        key[i] = (uint8_t)((hi << 4) | lo);
-    }
-
-    /* Single source of truth: the network_key component persists to NVS
-     * (NVS_NS_NETKEY) on set, so this handler does not write NVS itself. One
-     * writer means the RPC and the component cannot disagree on the stored
-     * key. */
-    network_key_set_provisioned(key);
     mesh_rederive_beacon_key(); /* beacons pick up the new key live, no reboot */
     cJSON_AddBoolToObject(result, "ok", true);
     return 0;
