@@ -42,6 +42,29 @@ const TABS: { id: Tab; icon: ReactNode; label: string }[] = [
   { id: 'stats',  icon: <IconStats size={18} />,  label: 'Stats'  },
 ];
 
+// One tab button, shared by the desktop sidebar and the mobile tabbar so the
+// two navs cannot drift in class logic, active-state, or accessibility markup.
+function TabButton({
+  tab,
+  activeTab,
+  setActiveTab,
+}: {
+  tab: (typeof TABS)[number];
+  activeTab: Tab;
+  setActiveTab: (id: Tab) => void;
+}) {
+  return (
+    <button
+      className={`${styles.tab} ${activeTab === tab.id ? styles.active : ''}`}
+      onClick={() => setActiveTab(tab.id)}
+      aria-current={activeTab === tab.id ? 'page' : undefined}
+    >
+      <span className={styles.tabIcon} aria-hidden="true">{tab.icon}</span>
+      <span>{tab.label}</span>
+    </button>
+  );
+}
+
 function TabContent({ activeTab }: { activeTab: Tab }) {
   return (
     <ErrorBoundary name="tab" resetKey={activeTab}>
@@ -238,15 +261,7 @@ export default function App() {
         {/* Desktop sidebar nav */}
         <nav className={styles.sidebar} aria-label="Main navigation">
           {TABS.map(tab => (
-            <button
-              key={tab.id}
-              className={`${styles.tab} ${activeTab === tab.id ? styles.active : ''}`}
-              onClick={() => setActiveTab(tab.id)}
-              aria-current={activeTab === tab.id ? 'page' : undefined}
-            >
-              <span className={styles.tabIcon} aria-hidden="true">{tab.icon}</span>
-              <span>{tab.label}</span>
-            </button>
+            <TabButton key={tab.id} tab={tab} activeTab={activeTab} setActiveTab={setActiveTab} />
           ))}
         </nav>
 
@@ -259,15 +274,7 @@ export default function App() {
       {/* Mobile bottom tabbar */}
       <nav className={styles.tabbar} aria-label="Main navigation">
         {TABS.map(tab => (
-          <button
-            key={tab.id}
-            className={`${styles.tab} ${activeTab === tab.id ? styles.active : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-            aria-current={activeTab === tab.id ? 'page' : undefined}
-          >
-            <span className={styles.tabIcon} aria-hidden="true">{tab.icon}</span>
-            <span>{tab.label}</span>
-          </button>
+          <TabButton key={tab.id} tab={tab} activeTab={activeTab} setActiveTab={setActiveTab} />
         ))}
       </nav>
 
