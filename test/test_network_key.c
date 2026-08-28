@@ -270,9 +270,9 @@ void test_set_provisioned_persists_for_later_load(void) {
     TEST_ASSERT_EQUAL_MEMORY(key, out, sizeof(key));
 }
 
-/* --- network_key_set_from_hex: the entire validation layer for the
- * compile-time bench key (nRF dev provisioning), so every rejection path is
- * pinned here. --- */
+/* --- network_key_set_from_hex: the entire validation layer for every caller
+ * that starts from a hex string, the setNetworkKey RPC included, so every
+ * rejection path is pinned here. --- */
 
 static void test_set_from_hex_provisions_a_valid_key(void) {
     const char* hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";

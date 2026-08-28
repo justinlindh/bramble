@@ -1526,13 +1526,9 @@ static int rpc_set_network_key(const cJSON* params, cJSON* result) {
     if (!key_j || !cJSON_IsString(key_j)) {
         return RPC_ERR_INVALID_PARAMS;
     }
-    /* Single source of truth: network_key_set_from_hex is the shared parser and
-     * validation layer (the nRF bench-seed and emulator control paths already
-     * route through it), and the component persists to NVS (NVS_NS_NETKEY) on
-     * set, so this handler neither re-implements the hex decode nor writes NVS
-     * itself. One parser and one writer mean the RPC and the component cannot
-     * disagree on the accepted key, and the decoded key is zeroed off the stack
-     * inside the component rather than lingering on the RPC task stack. */
+    /* Decode, validation, NVS persist and the wipe of the decoded key all live
+     * in the component's shared parser, so the RPC and the component cannot
+     * disagree on which keys are accepted. */
     if (network_key_set_from_hex(key_j->valuestring) != 0) {
         return RPC_ERR_INVALID_PARAMS;
     }

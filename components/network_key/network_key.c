@@ -126,7 +126,10 @@ int network_key_set_from_hex(const char* hex) {
         key[i] = (uint8_t)((hi << 4) | lo);
     }
     network_key_set_provisioned(key);
-    memset(key, 0, sizeof(key));
+    /* crypto_secure_wipe, not memset: the decoded key is never read again
+     * before the frame dies, exactly the dead store the compiler may drop
+     * (see crypto.h). */
+    crypto_secure_wipe(key, sizeof(key));
     return 0;
 }
 
