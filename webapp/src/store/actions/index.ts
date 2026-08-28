@@ -20,14 +20,18 @@ export {
   normalizeIncomingRealtimeMessage,
   handleIncomingMessage,
   openDM,
-  upsertProbeResponse,
-  sendProbe,
   __resetBroadcastTelemetryForTests,
   __resetActionsForTests,
   __normalizeReplayDeliveryEventForTests,
   __clearDeliveryEventSyncStateForTests,
 } from './messaging';
 export type { FirmwareMergeContext } from './messaging';
+export {
+  upsertProbeResponse,
+  sendProbe,
+  handleProbeAck,
+  handleProbeComplete,
+} from './probe';
 export {
   normalizeConfig,
   loadConfig,
