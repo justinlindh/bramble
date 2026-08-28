@@ -8,6 +8,7 @@ import { useStore } from '../../store/index';
 import { usePeerInfo } from '../../hooks/usePeer';
 import { parseAction } from '../../utils/parseAction';
 import { formatMessageTimestamp } from './chatDateFormatting';
+import { BROADCAST_ADDR } from '../../lib/addr';
 import styles from './MessageBubble.module.css';
 
 interface MessageBubbleProps {
@@ -26,7 +27,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const hasRelayPath =
     message.relayPath &&
     message.relayPath.length > 0;
-  const isOutgoingBroadcast = isOut && message.to === 0xFFFFFFFF;
+  const isOutgoingBroadcast = isOut && message.to === BROADCAST_ADDR;
   const recipientCount = message.broadcastRecipients?.length ?? 0;
 
   const { displayName, fullHex } = usePeerInfo(message.from);
@@ -108,7 +109,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         {message.tier === 'critical' && (
           <span className={styles.tierTag} title="Critical priority"><IconCritical size={14} /></span>
         )}
-        {message.to === 0xFFFFFFFF && (
+        {message.to === BROADCAST_ADDR && (
           <span
             data-testid="broadcast-meta-icon"
             className={`${styles.tierTag} ${styles.broadcastTierTag}`}

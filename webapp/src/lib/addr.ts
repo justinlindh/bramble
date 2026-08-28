@@ -12,6 +12,19 @@
 // `../utils/address.ts`, added for #168. Deliberately not duplicated here.
 
 /**
+ * Destination address that reaches every node: a message with `to ===
+ * BROADCAST_ADDR` is a broadcast.
+ */
+export const BROADCAST_ADDR = 0xffffffff;
+
+/**
+ * Destination the app gives a channel conversation. It never reaches the wire:
+ * `sendMessage` folds it to `BROADCAST_ADDR` and sends with a channel index,
+ * where a plain broadcast carries no channel and goes via `sendBroadcast`.
+ */
+export const CHANNEL_BROADCAST_ADDR = 0xfffffffe;
+
+/**
  * Numeric node address from a hex string (with or without a `0x` prefix), a
  * passthrough number, or 0 when the input is absent, empty, or unparseable.
  * Strings are always hex, matching the firmware wire format: `"12345678"` is

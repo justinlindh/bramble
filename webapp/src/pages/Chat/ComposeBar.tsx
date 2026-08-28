@@ -6,6 +6,7 @@ import { useStore, parseConversationId } from '../../store/index';
 import { IconCritical, IconBroadcast, IconSend } from '../../components/Icons';
 import { showToast } from '../../components/Toast';
 import { friendlyErrorFrom } from '../../lib/errors';
+import { BROADCAST_ADDR, CHANNEL_BROADCAST_ADDR } from '../../lib/addr';
 import {
   utf8Length,
   SINGLE_PACKET_MAX_BYTES,
@@ -35,12 +36,12 @@ function parseConversation(convId: string): { dest: number; channelIndex?: numbe
   const parsed = parseConversationId(convId);
   switch (parsed.kind) {
     case 'channel':
-      return { dest: 0xfffffffe, channelIndex: parsed.index };
+      return { dest: CHANNEL_BROADCAST_ADDR, channelIndex: parsed.index };
     case 'dm':
       return { dest: parsed.addr };
     case 'broadcast':
     case 'unknown':
-      return { dest: 0xffffffff };
+      return { dest: BROADCAST_ADDR };
   }
 }
 
@@ -89,7 +90,7 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
     try {
       await sendMessage(dest, payload, effectiveTier, channelIndex);
       // Attach location if enabled (fire-and-forget)
-      if (locAttach !== 'off' && dest !== 0xFFFFFFFF) {
+      if (locAttach !== 'off' && dest !== BROADCAST_ADDR) {
         const locTier = locAttach === 'exact' ? 'full' : 'coarse';
         shareLocationOnce(dest, locTier as import('../../types/bramble').LocationTier).catch((err) => {
           showToast(`Location attach failed: ${friendlyErrorFrom(err)}`, 'error', 4000);

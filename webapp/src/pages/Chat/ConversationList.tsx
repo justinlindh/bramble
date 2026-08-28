@@ -6,7 +6,7 @@ import { PeerStatusDot, PeerVerificationBadge } from './peerBadges';
 import { addChannel } from '../../store/actions';
 import { useStore, parseConversationId, formatConversationLabel } from '../../store/index';
 import { friendlyErrorFrom } from '../../lib/errors';
-import { tryParseAddr } from '../../lib/addr';
+import { tryParseAddr, BROADCAST_ADDR } from '../../lib/addr';
 import { clampToUtf8Bytes, utf8Length, CHANNEL_NAME_BUDGET_BYTES } from '../../utils/byteLimit';
 import { EscapeDialog } from '../../components/EscapeDialog';
 import styles from './ConversationList.module.css';
@@ -16,9 +16,6 @@ interface ConversationListProps {
   activeId: string;
   onSelect: (id: string) => void;
 }
-
-// Broadcast address constant
-const BROADCAST_ADDR = 0xffffffff;
 
 type ChannelItem = {
   id: string;

@@ -7,7 +7,7 @@ import { messageDb } from '../messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventStore';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { utf8Length, FRAGMENTED_MAX_BYTES } from '../../utils/byteLimit';
-import { parseAddr } from '../../lib/addr';
+import { parseAddr, BROADCAST_ADDR, CHANNEL_BROADCAST_ADDR } from '../../lib/addr';
 import { isUnknownMethodError } from '../../lib/errors';
 import { mergeBroadcastRecipient } from '../../lib/broadcastRecipients';
 import { isAndroidShell } from '../../utils/platform';
@@ -105,7 +105,7 @@ export function mergeFirmwareMessages(
     const isBroadcast =
       dir === 'broadcast_in' ||
       dir === 'broadcast_out' ||
-      (channelIndex === undefined && toAddr === 0xFFFFFFFF);
+      (channelIndex === undefined && toAddr === BROADCAST_ADDR);
     // Skip self-addressed messages (firmware bug: old messages stored with wrong dest)
     if (!isBroadcast && fromAddr === toAddr && fromAddr === ctx.myAddr) return;
     // Convert uptime-based timestamp to wall clock: now - (uptime - msg_time)
@@ -124,7 +124,7 @@ export function mergeFirmwareMessages(
       id: m.msgId ?? fallbackId,
       direction: isOutgoing ? 'outgoing' : 'incoming',
       from: fromAddr,
-      to: isBroadcast ? 0xFFFFFFFF : toAddr,
+      to: isBroadcast ? BROADCAST_ADDR : toAddr,
       text: m.text,
       // Firmware rows do not carry a tier; Message declares it required but
       // this path has always stored undefined for firmware rows, so the cast
@@ -560,9 +560,9 @@ export async function sendMessage(
 
   try {
     const isChannelScoped = channelIndex !== undefined && channelIndex >= 0;
-    const isBroadcast = dest === 0xFFFFFFFF && !isChannelScoped;
+    const isBroadcast = dest === BROADCAST_ADDR && !isChannelScoped;
     const method = isBroadcast ? 'bramble.sendBroadcast' : 'bramble.sendMessage';
-    const wireDest = (dest === 0xFFFFFFFE) ? 0xFFFFFFFF : dest;
+    const wireDest = (dest === CHANNEL_BROADCAST_ADDR) ? BROADCAST_ADDR : dest;
     const params = isBroadcast
       ? { text }
       : {
@@ -656,13 +656,13 @@ export function normalizeIncomingRealtimeMessage(params: unknown) {
   const toAddr = parseAddr(p.to);
   const rawChannel = p.channelIndex ?? (p.channel as number | undefined);
   const channelIndex = rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined;
-  const isBroadcast = channelIndex === undefined && (p.broadcast === true || toAddr === 0xFFFFFFFF);
+  const isBroadcast = channelIndex === undefined && (p.broadcast === true || toAddr === BROADCAST_ADDR);
 
   return {
     id: p.msgId ?? `rt-${Date.now()}`,
     direction: 'incoming' as const,
     from: fromAddr,
-    to: isBroadcast ? 0xFFFFFFFF : toAddr,
+    to: isBroadcast ? BROADCAST_ADDR : toAddr,
     text: p.text,
     // Same as mergeFirmwareMessages: pushes may omit tier and this path has
     // always stored undefined then, so the cast preserves that.
