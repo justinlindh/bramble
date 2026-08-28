@@ -968,8 +968,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		})
 	}
 
-	// Schedule first metrics tick
-	// Note: metrics ticks are pre-scheduled by scenario_load_file, no manual scheduling needed
+	// Metrics ticks need no scheduling here: scenario_load_file pre-schedules them.
 
 	// Broadcast config + sim_ready
 	s.emitJSON(map[string]any{
