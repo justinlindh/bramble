@@ -213,7 +213,7 @@ export default function App() {
         {(isConnected || connectionState === 'error') && (
           <button
             className={styles.disconnectBtn}
-            onClick={() => disconnect()}
+            onClick={() => void disconnect()}
             aria-label="Disconnect"
           >
             Disconnect
