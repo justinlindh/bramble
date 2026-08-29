@@ -67,19 +67,10 @@ export async function loadStatus(): Promise<void> {
   useStore.getState().setStatus(normalizeStatus(result));
 }
 
-// `tiers` is the already-normalized shape some callers pass straight through;
-// the normalizer only checks its presence before returning the input as-is,
-// so its element shape is not inspected here.
-type AirtimeWire = WirePartial<RpcSchemas['AirtimeResponse']> & {
-  tiers?: unknown[];
-};
-
 const REFILL_INTERVAL_MS = 3600000;
 
-export function normalizeAirtime(raw: AirtimeWire): AirtimeStatus {
-  // Firmware returns flat fields; webapp expects { tiers: [...] }
-  if (raw.tiers) return raw as AirtimeStatus;
-
+export function normalizeAirtime(raw: WirePartial<RpcSchemas['AirtimeResponse']>): AirtimeStatus {
+  // Firmware returns flat lane fields; build the { tiers: [...] } shape the webapp renders.
   // next_refill_ms is a duration (ms until next refill). 0 means "just refilled",
   // treat it as a full interval from now. Default to one interval if missing.
   const nextRefillMs = raw.next_refill_ms ?? REFILL_INTERVAL_MS;
