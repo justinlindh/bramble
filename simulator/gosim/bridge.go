@@ -237,7 +237,7 @@ func (lc *lineCapture) snapshot() []string {
 // only bury a test failure or the twin's report under the event stream.
 func runScenario(scenarioPath string) (*scenarioRunResult, error) {
 	var lc lineCapture
-	sim, err := NewSim("", lc.add, false)
+	sim, err := NewSim("", lc.add, false, "", false)
 	if err != nil {
 		return nil, err
 	}
