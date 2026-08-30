@@ -20,9 +20,8 @@ import { QRShareModal } from '../../components/QRShareModal';
 import { useCopyFlash } from '../../hooks/useCopyFlash';
 import { friendlyErrorFrom } from '../../lib/errors';
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../../utils/safeLocalStorage';
+import { normalizeHex64 } from '../../utils/hex';
 import styles from './AnchorSection.module.css';
-
-const HEX64 = /^[0-9a-fA-F]{64}$/;
 
 // Where the operator's SECRET anchor seed lives: localStorage in THIS browser
 // only, mirroring how the app persists other client-side state (bramble:*).
@@ -44,7 +43,7 @@ function clientAnchorFromSeed(seedHex: string): ClientAnchor {
 
 function loadStoredSeed(): string | null {
   const raw = safeGetItem(ANCHOR_SEED_KEY);
-  return raw && HEX64.test(raw.trim()) ? raw.trim().toLowerCase() : null;
+  return raw ? normalizeHex64(raw) : null;
 }
 
 function storeSeed(seedHex: string): void {
@@ -167,7 +166,7 @@ export function AnchorSection() {
   // -- Import / restore an anchor backup --------------------------------------
   const onImport = () => {
     setImportError(null);
-    const seed = parseAnchorBackup(importInput) ?? (HEX64.test(importInput.trim()) ? importInput.trim().toLowerCase() : null);
+    const seed = parseAnchorBackup(importInput) ?? normalizeHex64(importInput);
     if (!seed) {
       setImportError('Enter a bramble://anchor/v1?sk=... backup or 64 hex chars.');
       return;
@@ -245,7 +244,7 @@ export function AnchorSection() {
     if (!clientAnchor) return;
     setRemoteError(null);
     setRemoteCert(null);
-    const pub = parseIdentityShare(remoteInput) ?? (HEX64.test(remoteInput.trim()) ? remoteInput.trim().toLowerCase() : null);
+    const pub = parseIdentityShare(remoteInput) ?? normalizeHex64(remoteInput);
     if (!pub) {
       setRemoteError('Enter a bramble://ident/v1?pk=... identity share or 64 hex chars.');
       return;

@@ -7,9 +7,8 @@ import { QRShareModal } from '../../components/QRShareModal';
 import { QRScanModal } from '../../components/QRScanModal';
 import type { ScanResult } from '../../components/QRScanModal';
 import { friendlyErrorFrom } from '../../lib/errors';
+import { normalizeHex64 } from '../../utils/hex';
 import styles from './NetworkKeySection.module.css';
-
-const HEX64 = /^[0-9a-fA-F]{64}$/;
 
 // Provisioning the control-plane network key. Two honest paths:
 //   - FOUND a network: this node mints a fresh key on-device (entropy-gated,
@@ -80,11 +79,7 @@ export function NetworkKeySection() {
   // ── Join (paste/scan an existing key) ──────────────────────────────────────
   const onProvision = async (input: string) => {
     const parsed = parseNetworkKeyShare(input);
-    const keyHex = parsed.ok
-      ? parsed.data.key
-      : HEX64.test(input.trim())
-        ? input.trim().toLowerCase()
-        : null;
+    const keyHex = parsed.ok ? parsed.data.key : normalizeHex64(input);
     if (!keyHex) {
       setProvisionError('Enter a bramble://net/v1?k=... string or 64 hex chars.');
       return;

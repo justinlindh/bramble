@@ -8,9 +8,9 @@
  * one-way fingerprint (SHA256(key)[0:4]) is surfaced for verification.
  */
 import { parseShareParams, type ParseResult } from './channelShare';
+import { normalizeHex64 } from './hex';
 
 const PREFIX = 'bramble://net/v1?';
-const HEX64 = /^[0-9a-fA-F]{64}$/;
 
 export function encodeNetworkKeyShare(keyHex: string): string {
   const params = new URLSearchParams();
@@ -22,8 +22,9 @@ export function parseNetworkKeyShare(input: string): ParseResult<{ key: string }
   const parsed = parseShareParams(input, PREFIX, 'Not a valid Bramble network-key share string.');
   if (!parsed.ok) return parsed;
   const key = parsed.data.get('k');
-  if (!key || !HEX64.test(key.trim())) {
+  const norm = key ? normalizeHex64(key) : null;
+  if (!norm) {
     return { ok: false, error: 'Missing or malformed network key (need 64 hex chars).' };
   }
-  return { ok: true, data: { key: key.trim().toLowerCase() } };
+  return { ok: true, data: { key: norm } };
 }
