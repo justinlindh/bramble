@@ -23,7 +23,7 @@
 # base image layers and are never rebuilt. The previous revision git-cloned
 # esp-idf and ran install.sh inside the build, which redid the clone plus the
 # full tool install on every cold build and dominated this image's build time.
-FROM espressif/idf:v5.4.1 AS idf-build
+FROM espressif/idf:v6.1 AS idf-build
 # Host-compiler deps for the linux preview target: the base image carries the
 # cross toolchains, cmake, and ninja, but the linux target compiles with the
 # host gcc and links libbsd.
