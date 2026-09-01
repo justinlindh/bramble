@@ -53,7 +53,7 @@ RUN bash -c '. "$IDF_PATH/export.sh" \
 # Stage 2: gosim (Go server embedding Bramble C code via cgo).
 # golang:1.26-bookworm already ships gcc, g++, libc6-dev, and pkg-config;
 # only the OpenSSL headers the cgo build needs are missing.
-FROM golang:1.26-bookworm AS go-build
+FROM golang:1.27-bookworm AS go-build
 RUN apt-get update && apt-get install -y --no-install-recommends libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
