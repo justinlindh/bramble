@@ -122,6 +122,15 @@ jobs:
         # flash-fleet.sh consult before writing an image; a wrong verdict
         # bricks a board, and this is the only hardware-free check of it.
         run: bash scripts/test-crypt-state.sh
+      - name: Anti-rollback consent-gate tests
+        # Sibling of the eFuse-parser test above: fixture tests for
+        # scripts/antirollback-guard.sh, the gate flash.sh consults before it
+        # burns a secure-version eFuse. That burn is irreversible and a wrong
+        # verdict either bricks the rollback path or lets an accidental flash
+        # advance the epoch, and this is the only hardware-free check of it. The
+        # guard and this test landed together but only the eFuse test was wired
+        # in; both are pure functions of a fixture sdkconfig, no IDF, no board.
+        run: bash scripts/test-antirollback-guard.sh
       - name: Ruff (required baseline profile)
         # Baked into the runner image (bramble#222); the uvx invocation this
         # replaced downloaded ruff from PyPI inside an always-run required
