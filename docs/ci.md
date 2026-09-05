@@ -490,10 +490,11 @@ by opening a docs-only PR against this change and observing all four expanded
 contexts report success.
 
 `scripts/lint/check-board-matrix.sh` (a step in the `Static checks` bundle)
-asserts that the matrix board list and the `BOARDS` list in
-`scripts/ci-build-firmware.sh` are identical, so adding a fifth board to the
-release path without adding it to the gate fails the PR rather than quietly
-reopening the hole.
+asserts that the matrix board list, the `is_board()` list in
+`scripts/flash.sh`, and the build loop in `scripts/flash-fleet.sh` each match
+the `BOARDS` list in `scripts/ci-build-firmware.sh` exactly, so adding a
+fifth board to the release path without adding it to the gate or the flash
+tooling fails the PR rather than quietly reopening the hole.
 
 `Docker build (webapp)`, `(simulator)`, `(emulator)`, `(firmware-builder)`
 (issue #195) is a four-way matrix, one leg per shipped Dockerfile. Before this
