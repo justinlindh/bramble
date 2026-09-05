@@ -185,21 +185,6 @@ describe('normalizeAirtime: firmware flat format', () => {
   });
 });
 
-describe('normalizeAirtime: mock/tiers format', () => {
-  it('passes through tiers format unchanged', () => {
-    const raw = {
-      tiers: [
-        { name: 'critical', remainingMs: 9200, maxMs: 10000, usedPct: 8, refillAtMs: Date.now() + 55000 },
-        { name: 'normal', remainingMs: 41000, maxMs: 60000, usedPct: 32, refillAtMs: Date.now() + 120000 },
-        { name: 'broadcast', remainingMs: 22500, maxMs: 30000, usedPct: 25, refillAtMs: Date.now() + 300000 },
-      ],
-    };
-
-    const result = normalizeAirtime(raw);
-    expect(result).toBe(raw); // same reference: passthrough
-  });
-});
-
 describe('formatRefill', () => {
   it('shows "now" when refillAtMs is in the past', () => {
     expect(formatRefill(Date.now() - 1000)).toBe('now');

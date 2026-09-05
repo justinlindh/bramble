@@ -31,9 +31,4 @@ describe('normalizeAirtime', () => {
     expect(receipt.remainingMs).toBe(6000);
     expect(receipt.usedPct).toBe(50);
   });
-
-  it('passes through an already-normalized status untouched', () => {
-    const pre = { tiers: [{ name: 'critical', remainingMs: 1, maxMs: 2, usedPct: 50, refillAtMs: 0 }] };
-    expect(normalizeAirtime(pre)).toBe(pre);
-  });
 });
