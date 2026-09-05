@@ -250,7 +250,7 @@ export function ConnectionOverlay() {
 
   const runtimeBadge = connectionCapabilities.mode === 'local' ? 'Local LAN' : 'Hosted';
 
-  const selectedEntry = transportType === 'websocket' ? { available: true as const } : availability[transportType];
+  const selectedEntry = transportType === 'mock' ? { available: true as const } : availability[transportType];
   const selectedUnavailable: TransportUnavailable | null = selectedEntry.available ? null : selectedEntry;
 
   // The default lands on something that works. A saved IP means the user has
@@ -365,7 +365,7 @@ export function ConnectionOverlay() {
   const hints: Record<TransportType, string> = {
     serial: 'Connect your Bramble node via USB cable, then click Connect.',
     ble: 'Enable Bluetooth on your device, then click Connect to scan. First-time connections may show a pairing code on the node: type it into the browser prompt to finish.',
-    websocket: 'Connects to the local mock node for development and demos.',
+    mock: 'Connects to the local mock node for development and demos.',
     wifi: 'The node must be on the same network (Station mode), or connect to its hotspot first (AP mode).',
   };
 
@@ -431,9 +431,9 @@ export function ConnectionOverlay() {
 
         <div className={styles.mockDivider}><span>or</span></div>
         <button
-          className={`${styles.transportBtn} ${styles.mockBtn} ${transportType === 'websocket' ? styles.active : ''}`}
-          onClick={() => pickTransport('websocket')}
-          aria-pressed={transportType === 'websocket'}
+          className={`${styles.transportBtn} ${styles.mockBtn} ${transportType === 'mock' ? styles.active : ''}`}
+          onClick={() => pickTransport('mock')}
+          aria-pressed={transportType === 'mock'}
         >
           <IconMonitor size={16} /> Mock Node (WebSocket)
         </button>

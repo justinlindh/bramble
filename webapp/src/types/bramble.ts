@@ -326,7 +326,7 @@ export interface Transport {
   onNotification(cb: (method: string, params: unknown) => void): void;
 }
 
-export type TransportType = 'serial' | 'ble' | 'websocket' | 'wifi';
+export type TransportType = 'serial' | 'ble' | 'mock' | 'wifi';
 
 // ─── App state ─────────────────────────────────────────────────────────
 

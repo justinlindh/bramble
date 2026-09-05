@@ -20,7 +20,7 @@ function resolveMockWsUrl(): string {
 
 export function createTransport(type: TransportType, options?: { url?: string; token?: string; bleDevice?: BluetoothDevice }): Transport {
   if (type === 'ble') return new BLETransport(options?.token, options?.bleDevice);
-  if (type === 'websocket') {
+  if (type === 'mock') {
     // Embedded shells (Android WebView, Electron under file://) load the app
     // from a local origin with no mock WebSocket server reachable behind it
     // (resolveMockWsUrl() would build e.g. wss://appassets.androidplatform.net:443/ws,
