@@ -26,6 +26,86 @@ const WIFI_IP_KEY = 'bramble_wifi_ip';
 const REMEMBER_HINT =
   "Saves this node's auth token in this browser so you do not retype it; leave off on shared computers. The device stays in your list either way, and Forget removes it.";
 
+// The WiFi and BLE panels below share three identical sub-forms modulo their
+// state bindings; extracting them keeps the two copies from drifting (the same
+// hazard that first pulled REMEMBER_HINT out above).
+
+function TokenField(props: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  show: boolean;
+  onToggleShow: () => void;
+  authError: boolean;
+  hint: string;
+  onEnter: () => void;
+}) {
+  return (
+    <div className={styles.field}>
+      <label htmlFor={props.id} className={styles.wifiLabel}>Auth Token</label>
+      <div className={styles.tokenRow}>
+        <input
+          id={props.id}
+          aria-label="Auth Token"
+          type={props.show ? 'text' : 'password'}
+          className={`${styles.wifiField} ${props.authError ? styles.authErrorField : ''}`}
+          value={props.value}
+          onChange={e => props.onChange(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && props.onEnter()}
+          autoComplete="off"
+        />
+        <button
+          type="button"
+          className={styles.showHideBtn}
+          onClick={props.onToggleShow}
+          aria-label={props.show ? 'Hide token' : 'Show token'}
+        >
+          {props.show ? 'Hide' : 'Show'}
+        </button>
+      </div>
+      <span className={styles.wifiHint}>{props.hint}</span>
+    </div>
+  );
+}
+
+function NameField(props: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  onEnter: () => void;
+}) {
+  return (
+    <div className={styles.field}>
+      <label htmlFor={props.id} className={styles.wifiLabel}>Name (optional)</label>
+      <input
+        id={props.id}
+        type="text"
+        className={styles.wifiField}
+        value={props.value}
+        onChange={e => props.onChange(e.target.value)}
+        placeholder="e.g. Living room node"
+        onKeyDown={e => e.key === 'Enter' && props.onEnter()}
+      />
+    </div>
+  );
+}
+
+function RememberCheckbox(props: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className={styles.field}>
+      <label className={styles.rememberRow}>
+        <input
+          type="checkbox"
+          checked={props.checked}
+          onChange={e => props.onChange(e.target.checked)}
+        />
+        <span>Remember this device</span>
+      </label>
+      <span className={`${styles.wifiHint} ${styles.rememberHint}`}>{REMEMBER_HINT}</span>
+    </div>
+  );
+}
+
 export function buildWifiUrl(ip: string, protocol: string, host: string): string {
   let url: string;
   if (ip.includes('://')) url = ip;
@@ -469,57 +549,20 @@ export function ConnectionOverlay() {
               )}
             </div>
 
-            <div className={styles.field}>
-              <label htmlFor="ble-token" className={styles.wifiLabel}>Auth Token</label>
-              <div className={styles.tokenRow}>
-                <input
-                  id="ble-token"
-                  aria-label="Auth Token"
-                  type={showBleToken ? 'text' : 'password'}
-                  className={`${styles.wifiField} ${authError ? styles.authErrorField : ''}`}
-                  value={bleToken}
-                  onChange={e => setBleToken(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleConnect()}
-                  autoComplete="off"
-                />
-                <button
-                  type="button"
-                  className={styles.showHideBtn}
-                  onClick={() => setShowBleToken(v => !v)}
-                  aria-label={showBleToken ? 'Hide token' : 'Show token'}
-                >
-                  {showBleToken ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              <span className={styles.wifiHint}>
-                Read it over USB with the bramble CLI (pair command), or from the node's Config page. Leave blank if the node has auth disabled.
-              </span>
-            </div>
+            <TokenField
+              id="ble-token"
+              value={bleToken}
+              onChange={setBleToken}
+              show={showBleToken}
+              onToggleShow={() => setShowBleToken(v => !v)}
+              authError={authError}
+              hint="Read it over USB with the bramble CLI (pair command), or from the node's Config page. Leave blank if the node has auth disabled."
+              onEnter={handleConnect}
+            />
 
-            <div className={styles.field}>
-              <label htmlFor="ble-name" className={styles.wifiLabel}>Name (optional)</label>
-              <input
-                id="ble-name"
-                type="text"
-                className={styles.wifiField}
-                value={bleName}
-                onChange={e => setBleName(e.target.value)}
-                placeholder="e.g. Living room node"
-                onKeyDown={e => e.key === 'Enter' && handleConnect()}
-              />
-            </div>
+            <NameField id="ble-name" value={bleName} onChange={setBleName} onEnter={handleConnect} />
 
-            <div className={styles.field}>
-              <label className={styles.rememberRow}>
-                <input
-                  type="checkbox"
-                  checked={bleRemember}
-                  onChange={e => setBleRemember(e.target.checked)}
-                />
-                <span>Remember this device</span>
-              </label>
-              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>{REMEMBER_HINT}</span>
-            </div>
+            <RememberCheckbox checked={bleRemember} onChange={setBleRemember} />
           </div>
         )}
 
@@ -546,57 +589,20 @@ export function ConnectionOverlay() {
               </span>
             </div>
 
-            <div className={styles.field}>
-              <label htmlFor="wifi-token" className={styles.wifiLabel}>Auth Token</label>
-              <div className={styles.tokenRow}>
-                <input
-                  id="wifi-token"
-                  aria-label="Auth Token"
-                  type={showToken ? 'text' : 'password'}
-                  className={`${styles.wifiField} ${authError ? styles.authErrorField : ''}`}
-                  value={wifiToken}
-                  onChange={e => setWifiToken(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleConnect()}
-                  autoComplete="off"
-                />
-                <button
-                  type="button"
-                  className={styles.showHideBtn}
-                  onClick={() => setShowToken(v => !v)}
-                  aria-label={showToken ? 'Hide token' : 'Show token'}
-                >
-                  {showToken ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              <span className={styles.wifiHint}>
-                Read it over USB with the bramble CLI (pair command), or from the node's Config page.
-              </span>
-            </div>
+            <TokenField
+              id="wifi-token"
+              value={wifiToken}
+              onChange={setWifiToken}
+              show={showToken}
+              onToggleShow={() => setShowToken(v => !v)}
+              authError={authError}
+              hint="Read it over USB with the bramble CLI (pair command), or from the node's Config page."
+              onEnter={handleConnect}
+            />
 
-            <div className={styles.field}>
-              <label htmlFor="wifi-name" className={styles.wifiLabel}>Name (optional)</label>
-              <input
-                id="wifi-name"
-                type="text"
-                className={styles.wifiField}
-                value={wifiName}
-                onChange={e => setWifiName(e.target.value)}
-                placeholder="e.g. Living room node"
-                onKeyDown={e => e.key === 'Enter' && handleConnect()}
-              />
-            </div>
+            <NameField id="wifi-name" value={wifiName} onChange={setWifiName} onEnter={handleConnect} />
 
-            <div className={styles.field}>
-              <label className={styles.rememberRow}>
-                <input
-                  type="checkbox"
-                  checked={wifiRemember}
-                  onChange={e => setWifiRemember(e.target.checked)}
-                />
-                <span>Remember this device</span>
-              </label>
-              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>{REMEMBER_HINT}</span>
-            </div>
+            <RememberCheckbox checked={wifiRemember} onChange={setWifiRemember} />
           </div>
         )}
 
