@@ -54,7 +54,7 @@
     "@types/web-bluetooth": "^0.0.21",
     "@vitejs/plugin-react": "^5.2.0",
     "@vitest/coverage-v8": "^4.1.11",
-    "electron": "^43.3.0",
+    "electron": "^44.1.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "fake-indexeddb": "^6.2.5",
