@@ -19,7 +19,7 @@ RUN npm run build
 # Stage 2: Build Go server (with embedded C via cgo).
 # golang:1.26-bookworm already ships gcc, g++, libc6-dev, and pkg-config;
 # only the OpenSSL headers the cgo build needs are missing.
-FROM golang:1.26-bookworm AS go-build
+FROM golang:1.27-bookworm AS go-build
 RUN apt-get update && apt-get install -y --no-install-recommends libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
