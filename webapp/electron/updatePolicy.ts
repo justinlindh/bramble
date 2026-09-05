@@ -48,8 +48,6 @@ export type UpdateDecision =
 
 const WEBAPP_TAG_RE = /^webapp-v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 
-export { compareSemver };
-
 /** Returns the semver core of a "webapp-vX.Y.Z" tag, or null if it is not one. */
 export function parseWebappTag(tag: string): string | null {
   const trimmed = tag.trim();
