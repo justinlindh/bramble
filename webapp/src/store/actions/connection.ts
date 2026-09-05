@@ -18,9 +18,11 @@ import {
   handleIncomingMessage,
   handleAck,
   handleBroadcastDelivery,
+} from './messaging';
+import {
   handleProbeAck,
   handleProbeComplete,
-} from './messaging';
+} from './probe';
 import {
   loadNeighbors,
   loadRoutes,
