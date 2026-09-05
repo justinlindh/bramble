@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useStore } from '../store/index';
-import { resolvePeerName } from '../store/peerName';
+import { usePeerName } from '../store/peerName';
 import { loadPeerVerification } from '../store/actions';
 import { formatAddr0x, formatAddrShort } from '../utils/address';
 import { formatAge } from './useAgeTick';
@@ -14,9 +14,7 @@ const ONLINE_THRESHOLD_MS = 90_000;
 
 /** Resolve a peer address to a display name + presence status */
 export function usePeerInfo(addr: number) {
-  const resolvedName = useStore((s) =>
-    resolvePeerName(addr, s.peerNames, s.peerLocations),
-  );
+  const resolvedName = usePeerName(addr);
   const neighbor = useStore(s => s.neighbors?.find(n => n.addr === addr));
   const route = useStore(s => s.routes.find(r => r.dest === addr));
 
