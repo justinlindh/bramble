@@ -20,20 +20,20 @@
 import * as ed from '@noble/ed25519';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
+import { normalizeHex64 } from './hex';
 
 // @noble/ed25519 v3 needs a synchronous sha512 hook for sync sign/getPublicKey.
 // Wire it once at module load so signing is deterministic and offline.
 ed.hashes.sha512 = sha512;
 
 const ENDORSE_CONTEXT = new TextEncoder().encode('bramble-endorse-v1'); // 18 bytes
-const HEX64 = /^[0-9a-fA-F]{64}$/;
 
 /** v1 always issues a permanent cert. On the wire this is "ffffffffffffffff". */
 export const PERMANENT_NOT_AFTER = 0xffffffffffffffffn;
 
 function requireHex64(hex: string, label: string): string {
-  const s = hex.trim().toLowerCase();
-  if (!HEX64.test(s)) throw new Error(`${label} must be 64 hex chars`);
+  const s = normalizeHex64(hex);
+  if (s === null) throw new Error(`${label} must be 64 hex chars`);
   return s;
 }
 

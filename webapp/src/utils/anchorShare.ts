@@ -13,11 +13,11 @@
  * input, so callers can branch on a single nullish check.
  */
 import { parseShareParams } from './channelShare';
+import { HEX64 } from './hex';
 
 const ANCHOR_PREFIX = 'bramble://anchor/v1?';
 const IDENT_PREFIX = 'bramble://ident/v1?';
 const ENDORSE_PREFIX = 'bramble://endorse/v1?';
-const HEX64 = /^[0-9a-fA-F]{64}$/;
 const HEX16 = /^[0-9a-fA-F]{16}$/;
 const HEX128 = /^[0-9a-fA-F]{128}$/;
 
