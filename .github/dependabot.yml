@@ -287,6 +287,11 @@ updates:
         update-types:
           - minor
           - patch
+    # Same deliberate ignore as /docker/firmware-builder above: ESP-IDF only
+    # moves by hand, together with .esp-idf-version and everything the
+    # check-idf-version lint gates.
+    ignore:
+      - dependency-name: espressif/idf
 
   - package-ecosystem: docker
     directory: /simulator
