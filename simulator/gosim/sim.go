@@ -25,16 +25,6 @@ import (
 	"bramble-sim/websocket"
 )
 
-// disableCollisionModel forces the collision/half-duplex model off for every
-// loaded scenario (set by the --no-collisions CLI flag).
-var disableCollisionModel bool
-
-// emuListenPath is the emu-link unix socket path (set by the --emu-listen CLI
-// flag). When non-empty, the broker is started for every loaded scenario so
-// external firmware nodes can attach even if the scenario itself declares
-// none; empty means the broker starts only for scenarios with firmware nodes.
-var emuListenPath string
-
 // SimState represents the simulation state machine.
 type SimState int
 
@@ -143,8 +133,15 @@ type Sim struct {
 	// connection so EVT_RECEIVE_PACKET delivery can be routed out to the
 	// node process instead of into the C firmware. Every field
 	// here is read/written only under s.mu, exactly like the C state above.
-	realtime             bool
-	emuListen            string
+	realtime bool
+	// emuListen is the emu-link unix socket path (from the --emu-listen CLI
+	// flag). When non-empty, the broker is started for every loaded scenario so
+	// external firmware nodes can attach even if the scenario itself declares
+	// none; empty means the broker starts only for scenarios with firmware nodes.
+	emuListen string
+	// disableCollisions forces the collision/half-duplex model off for every
+	// loaded scenario (from the --no-collisions CLI flag).
+	disableCollisions    bool
 	broker               *Broker
 	supervisor           *Supervisor
 	extConns             map[uint32]*extConn
@@ -175,8 +172,10 @@ type brokerAction struct {
 	fn    func()
 }
 
-// NewSim creates a new simulation engine.
-func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, error) {
+// NewSim creates a new simulation engine. emuListen and disableCollisions are
+// the two process-wide CLI settings (--emu-listen, --no-collisions); pass ""
+// and false for the defaults used outside the server and headless entry points.
+func NewSim(scenarioDir string, broadcast func([]byte), headless bool, emuListen string, disableCollisions bool) (*Sim, error) {
 	s := &Sim{
 		state:                  StateIdle,
 		speed:                  1.0,
@@ -187,7 +186,8 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 		scenarioDir:            scenarioDir,
 		headless:               headless,
 		broadcastTelemetryMode: "full",
-		emuListen:              emuListenPath,
+		emuListen:              emuListen,
+		disableCollisions:      disableCollisions,
 		extConns:               make(map[uint32]*extConn),
 		lastFB:                 make(map[string][]byte),
 		recentConsole:          make(map[string][][]byte),
@@ -886,7 +886,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 
 	// Seed the RNG (scenario_load_file only seeds for stochastic mode)
 	C.pcg32_seed(&s.rng, scenario.metadata.seed)
-	if disableCollisionModel {
+	if s.disableCollisions {
 		s.radio.collisions_enabled = C.bool(false)
 	}
 	s.duration = uint64(scenario.metadata.duration_us)
@@ -1779,8 +1779,10 @@ func (sim *Sim) loadHeadless(scenarioPath string) error {
 }
 
 // RunHeadless loads a scenario and processes all events instantly, for CLI mode.
-func RunHeadless(scenarioPath string) error {
-	sim, err := NewSim(scenarioPath, nil, true)
+// emuListen and disableCollisions carry the --emu-listen and --no-collisions
+// flags through from main so headless runs honor them.
+func RunHeadless(scenarioPath, emuListen string, disableCollisions bool) error {
+	sim, err := NewSim(scenarioPath, nil, true, emuListen, disableCollisions)
 	if err != nil {
 		return err
 	}

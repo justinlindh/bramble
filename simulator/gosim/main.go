@@ -76,9 +76,6 @@ func main() {
 			"(the zero-hardware first-contact entry point; see docs/playground.md)")
 	flag.Parse()
 
-	disableCollisionModel = *noCollisions
-	emuListenPath = *emuListen
-
 	// Auto-detect scenarios dir
 	if *scenarioDir == "" {
 		*scenarioDir = findDir([]string{"../scenarios", "scenarios", "/scenarios"})
@@ -90,7 +87,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "error: --scenario required in headless mode")
 			os.Exit(1)
 		}
-		if err := RunHeadless(*scenario); err != nil {
+		if err := RunHeadless(*scenario, *emuListen, *noCollisions); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -109,7 +106,7 @@ func main() {
 	}
 
 	// Create sim + hub
-	sim, err := NewSim(*scenarioDir, nil, false)
+	sim, err := NewSim(*scenarioDir, nil, false, *emuListen, *noCollisions)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -22,7 +22,7 @@ type emuHarness struct {
 // stdout when done.
 func newEmuHarness() *emuHarness {
 	h := &emuHarness{}
-	sim, err := NewSim("", h.add, true)
+	sim, err := NewSim("", h.add, true, "", false)
 	if err != nil {
 		panic(err)
 	}
