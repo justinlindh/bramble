@@ -20,21 +20,19 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# shellcheck source=scripts/lib/version-check.sh
+source scripts/lib/version-check.sh
+
 self="scripts/lint/check-arm-gcc-version.sh"
 sot_file=".arm-gcc-version"
+name="check-arm-gcc-version"
 fail=0
-report() { printf 'check-arm-gcc-version: %s\n' "$1" >&2; fail=1; }
-
-if [[ ! -f "$sot_file" ]]; then
-  echo "check-arm-gcc-version: missing source of truth file $sot_file" >&2
-  exit 1
-fi
 
 # The compiler's own `--version` form, `13.2.1`. Arm publishes the same compiler
 # under a release label that reorders the patch field (`13.2.Rel1`), and the
 # download URLs use that label, so derive it rather than storing a second copy
 # that could disagree with the first.
-want="$(tr -d '[:space:]' < "$sot_file")"
+want="$(vc_read_sot "$name" "$sot_file")"
 if [[ ! "$want" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "check-arm-gcc-version: $sot_file must hold a bare MAJOR.MINOR.PATCH gcc version, got '$want'" >&2
   exit 1
@@ -63,19 +61,9 @@ required=(
   "CLAUDE.md::arm-none-eabi-gcc ${want}"
   "docs/quality-policy.md::arm-none-eabi-gcc ${want}"
 )
-for entry in "${required[@]}"; do
-  file="${entry%%::*}"
-  literal="${entry#*::}"
-  if [[ ! -f "$file" ]]; then
-    report "required pin file is missing: $file"
-    continue
-  fi
-  # Case-insensitive: Arm spells its own release label both ways, `13.2.rel1`
-  # in the download path and `13.2.Rel1` in the directory the tarball unpacks to.
-  if ! grep -qiF -- "$literal" "$file"; then
-    report "$file no longer pins the ARM toolchain at ${want} (expected to find: ${literal})"
-  fi
-done
+# Case-insensitive (-i): Arm spells its own release label both ways, `13.2.rel1`
+# in the download path and `13.2.Rel1` in the directory the tarball unpacks to.
+vc_require_pins "$name" "the ARM toolchain at ${want}" -i "${required[@]}" || fail=1
 
 # 2. Tree-wide sweep. Any line that names the ARM cross-toolchain and carries a
 #    version token on the pinned major line must name the pinned version exactly,
@@ -88,8 +76,9 @@ hits="$(git grep -nIiE "(arm-none-eabi|gcc-arm-none-eabi|arm-gnu-toolchain|arm g
         | grep -iE "((^|[^0-9.])${major}\.[0-9]+(\.[0-9]+)?([^0-9.]|$)|[0-9]+\.[0-9]+\.Rel[0-9]+)" \
         | grep -viE "((^|[^0-9.])${want//./\\.}([^0-9.]|$)|(^|[^0-9.])${rel//./\\.}([^0-9.]|$))" || true)"
 if [[ -n "$hits" ]]; then
-  report "ARM toolchain version reference does not match ${sot_file} (${want} / ${rel}):"
+  vc_report "$name" "ARM toolchain version reference does not match ${sot_file} (${want} / ${rel}):"
   printf '%s\n' "$hits" >&2
+  fail=1
 fi
 
 if (( fail )); then
