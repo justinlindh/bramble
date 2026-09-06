@@ -1,7 +1,7 @@
 // Pure state machine for the firmware-update journey. The component owns
 // timers and subscriptions; this owns every transition, so tests cover the
 // journey without mounting React.
-import { compareVersions } from '../../lib/otaIndex';
+import { compareSemver } from '../../lib/semver';
 
 type OtaFlowPhase = 'idle' | 'running' | 'rebooting' | 'done' | 'failed';
 
@@ -64,11 +64,11 @@ export function otaFlowNext(s: OtaFlowState, input: OtaFlowInput): OtaFlowState 
     case 'reconnected': {
       if (s.phase !== 'rebooting') return s;
       // 1. Exactly the target: unambiguous success.
-      if (compareVersions(input.version, s.targetVersion) === 0) {
+      if (compareSemver(input.version, s.targetVersion) === 0) {
         return { ...s, phase: 'done' };
       }
       // 2. Moved to some other version: still a success, reported honestly.
-      if (compareVersions(input.version, s.prevVersion) !== 0) {
+      if (compareSemver(input.version, s.prevVersion) !== 0) {
         return { ...s, phase: 'done', resultVersion: input.version };
       }
       // 3. Still on the old version after a real reboot: it did not stick.

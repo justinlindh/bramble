@@ -5,8 +5,9 @@ import {
 } from '../../store/actions';
 import {
   fetchOtaIndex, hardwareToBoard, relativizeArtifactPath, releasesForBoard,
-  findUpdate, compareVersions, appArtifactForBoard, type OtaArtifact, type OtaRelease,
+  findUpdate, appArtifactForBoard, type OtaArtifact, type OtaRelease,
 } from '../../lib/otaIndex';
+import { compareSemver } from '../../lib/semver';
 import { useStore } from '../../store';
 import { friendlyErrorFrom } from '../../lib/errors';
 import { initialOtaFlow, otaFlowNext } from './otaFlow';
@@ -230,7 +231,7 @@ export function FirmwareUpdateCard({ ota, onOtaChanged, onInstallStart }: Props)
   };
 
   const needsDowngradeAck = !!pending && !!ota.versionFloor
-    && compareVersions(pending.version, ota.versionFloor) < 0;
+    && compareSemver(pending.version, ota.versionFloor) < 0;
 
   const clampedPercent = Math.max(0, Math.min(100, flow.percent));
 
