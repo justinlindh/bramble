@@ -442,7 +442,6 @@ async function hydrateMessagesWithDeliveryEvents(messages: Message[]): Promise<M
 
 interface BroadcastDeliveryNotification {
   broadcastId: string;
-  packetId?: string;
   from: string | number;
   status: 'delivered' | 'pending' | 'failed';
   hopCount: number;
@@ -450,7 +449,6 @@ interface BroadcastDeliveryNotification {
   // firmware snake_case compatibility
   broadcast_id?: string;
   recipient?: string | number;
-  packet_id?: string;
   hop_count?: number;
   delivered_at_ms?: number;
 }
@@ -508,13 +506,11 @@ export function handleBroadcastDelivery(params: unknown): void {
   const p = params as Partial<BroadcastDeliveryNotification>;
   const broadcastId = p.broadcastId ?? p.broadcast_id;
   const from = p.from ?? p.recipient;
-  const packetId = p.packetId ?? p.packet_id;
   const hopCount = p.hopCount ?? p.hop_count ?? 0;
   const deliveredAtMs = p.deliveredAtMs ?? p.delivered_at_ms ?? Date.now();
   if (!broadcastId || !p.status || from === undefined) return;
   applyBroadcastDelivery({
     broadcastId,
-    packetId,
     from,
     status: p.status,
     hopCount,

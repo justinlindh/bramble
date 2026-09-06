@@ -51,7 +51,6 @@ describe('broadcast delivery store plumbing', () => {
 
     handleBroadcastDelivery({
       broadcastId: 'BCAST-2',
-      packetId: 'P1',
       from: '04CAAAF8',
       status: 'delivered',
       hopCount: 2,
@@ -59,7 +58,6 @@ describe('broadcast delivery store plumbing', () => {
     });
     handleBroadcastDelivery({
       broadcastId: 'BCAST-2',
-      packetId: 'P1',
       from: '0000000A',
       status: 'failed',
       hopCount: 3,
@@ -77,7 +75,6 @@ describe('broadcast delivery store plumbing', () => {
   it('handles out-of-order telemetry safely', () => {
     handleBroadcastDelivery({
       broadcastId: 'BCAST-3',
-      packetId: 'P3',
       from: '0000000B',
       status: 'delivered',
       hopCount: 1,
@@ -90,7 +87,6 @@ describe('broadcast delivery store plumbing', () => {
 
     handleBroadcastDelivery({
       broadcastId: 'BCAST-3',
-      packetId: 'P3',
       from: '0000000B',
       status: 'failed',
       hopCount: 9,
