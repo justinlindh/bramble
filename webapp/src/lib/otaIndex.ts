@@ -12,10 +12,6 @@ export function hardwareToBoard(hardware: string): string {
   return hardware.replaceAll('_', '-');
 }
 
-// Version precedence for the OTA journey uses the shared semver comparator so
-// firmware update ordering and the desktop self-updater cannot drift apart.
-export const compareVersions = compareSemver;
-
 export function relativizeArtifactPath(file: string, origin: string): string | null {
   if (!file.startsWith('/')) return file;
   let originPath: string;
@@ -54,7 +50,7 @@ export function releasesForBoard(releases: OtaRelease[], board: string): OtaRele
   return releases
     .filter((r) => appArtifactForBoard(r, board) !== null)
     .sort((x, y) => {
-      const byVersion = compareVersions(y.version, x.version);
+      const byVersion = compareSemver(y.version, x.version);
       if (byVersion !== 0) return byVersion;
       return (Date.parse(y.publishedAt) || 0) - (Date.parse(x.publishedAt) || 0);
     });
@@ -63,7 +59,7 @@ export function releasesForBoard(releases: OtaRelease[], board: string): OtaRele
 export function findUpdate(releases: OtaRelease[], board: string, running: string): OtaRelease | null {
   const candidates = releasesForBoard(releases, board);
   const newest = candidates[0];
-  return newest && compareVersions(newest.version, running) > 0 ? newest : null;
+  return newest && compareSemver(newest.version, running) > 0 ? newest : null;
 }
 
 interface RawOtaArtifact {

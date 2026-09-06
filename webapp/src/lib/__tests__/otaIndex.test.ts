@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
-  appArtifactForBoard, compareVersions, fetchOtaIndex, findUpdate, hardwareToBoard,
+  appArtifactForBoard, fetchOtaIndex, findUpdate, hardwareToBoard,
   relativizeArtifactPath, releasesForBoard, type OtaRelease,
 } from '../otaIndex';
 import type { OtaIndexFetchResult } from '../../types/desktop';
@@ -32,28 +32,6 @@ describe('hardwareToBoard', () => {
   it('maps firmware underscores to index hyphens', () => {
     expect(hardwareToBoard('heltec_v4')).toBe('heltec-v4');
     expect(hardwareToBoard('tdeck_plus')).toBe('tdeck-plus');
-  });
-});
-
-describe('compareVersions', () => {
-  it('orders numerically, not lexically', () => {
-    expect(compareVersions('v1.10.0', 'v1.9.0')).toBeGreaterThan(0);
-  });
-  it('treats prerelease as older than the release core', () => {
-    expect(compareVersions('1.4.0-rc1', '1.4.0')).toBeLessThan(0);
-  });
-  it('handles the dev version string', () => {
-    expect(compareVersions('v1.4.0', '0.0.0-local')).toBeGreaterThan(0);
-  });
-  it('compares numeric prerelease identifiers numerically, not lexically', () => {
-    expect(compareVersions('1.4.0-rc.10', '1.4.0-rc.9')).toBeGreaterThan(0);
-    expect(compareVersions('1.4.0-rc.2', '1.4.0-rc.10')).toBeLessThan(0);
-  });
-  it('ranks a shorter prerelease lower when the shared identifiers are equal', () => {
-    expect(compareVersions('1.4.0-alpha', '1.4.0-alpha.1')).toBeLessThan(0);
-  });
-  it('ranks numeric identifiers below alphanumeric identifiers', () => {
-    expect(compareVersions('1.4.0-1', '1.4.0-alpha')).toBeLessThan(0);
   });
 });
 
