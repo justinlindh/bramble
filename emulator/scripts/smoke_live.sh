@@ -40,9 +40,8 @@ SCENARIO="simulator/scenarios/emulator-3-pagers.json"
 LOG="$(mktemp -t smoke_live.XXXXXX.log)"
 GOSIM_PID=""
 
-red()   { printf '\033[31m%s\033[0m\n' "$*"; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-info()  { printf '  %s\n' "$*"; }
+# shellcheck source=emulator/lib/output.sh
+source "$REPO_ROOT/emulator/lib/output.sh"
 
 cleanup() {
     if [ -n "$GOSIM_PID" ] && kill -0 "$GOSIM_PID" 2>/dev/null; then

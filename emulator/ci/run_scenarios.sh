@@ -85,9 +85,8 @@ GOSIM_DIR="simulator/gosim"
 GOSIM_BIN="$GOSIM_DIR/bramble-gosim"
 SCEN_DIR="simulator/scenarios"
 
-red()   { printf '\033[31m%s\033[0m\n' "$*"; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-info()  { printf '  %s\n' "$*"; }
+# shellcheck source=emulator/lib/output.sh
+source "$REPO_ROOT/emulator/lib/output.sh"
 
 FAILURES=0
 CHILD_PIDS=()
