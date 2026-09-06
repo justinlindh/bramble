@@ -17,17 +17,15 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# shellcheck source=scripts/lib/version-check.sh
+source scripts/lib/version-check.sh
+
 self="scripts/lint/check-node-version.sh"
 sot_file=".nvmrc"
+name="check-node-version"
 fail=0
-report() { printf 'check-node-version: %s\n' "$1" >&2; fail=1; }
 
-if [[ ! -f "$sot_file" ]]; then
-  echo "check-node-version: missing source of truth file $sot_file" >&2
-  exit 1
-fi
-
-want="$(tr -d '[:space:]' < "$sot_file")"
+want="$(vc_read_sot "$name" "$sot_file")"
 if [[ ! "$want" =~ ^[0-9]+$ ]]; then
   echo "check-node-version: $sot_file must hold a bare Node major, got '$want'" >&2
   exit 1
@@ -54,17 +52,7 @@ required=(
   # building the Linux and Windows installers on a Node major nobody chose.
   ".github/workflows/release-components.yml::image: electronuserland/builder:${want}-wine"
 )
-for entry in "${required[@]}"; do
-  file="${entry%%::*}"
-  literal="${entry#*::}"
-  if [[ ! -f "$file" ]]; then
-    report "required pin file is missing: $file"
-    continue
-  fi
-  if ! grep -qF -- "$literal" "$file"; then
-    report "$file no longer pins Node ${want} (expected to find: ${literal})"
-  fi
-done
+vc_require_pins "$name" "Node ${want}" "${required[@]}" || fail=1
 
 # 2. Sweep every actions/setup-node pin in the authoritative workflow tree.
 #    A `node-version:` that disagrees with .nvmrc means CI tests on a runtime
@@ -72,8 +60,9 @@ done
 setup_node_hits="$(git grep -nE '^[[:space:]]*node-version:' -- '.github/workflows' \
                    | grep -vE ":[[:space:]]*node-version:[[:space:]]*'?${want}'?[[:space:]]*$" || true)"
 if [[ -n "$setup_node_hits" ]]; then
-  report "actions/setup-node pin does not match ${sot_file} (${want}):"
+  vc_report "$name" "actions/setup-node pin does not match ${sot_file} (${want}):"
   printf '%s\n' "$setup_node_hits" >&2
+  fail=1
 fi
 
 # 3. Sweep every Node base image in the tracked Dockerfiles and compose files.
@@ -83,8 +72,9 @@ image_hits="$(git grep -nE '(^|[^-[:alnum:]])node:[0-9]+' \
                 ":!${self}" \
               | grep -vE "(^|[^-[:alnum:]])node:${want}[-.[:space:]\"']" || true)"
 if [[ -n "$image_hits" ]]; then
-  report "Node base image does not match ${sot_file} (${want}):"
+  vc_report "$name" "Node base image does not match ${sot_file} (${want}):"
   printf '%s\n' "$image_hits" >&2
+  fail=1
 fi
 
 if (( fail )); then

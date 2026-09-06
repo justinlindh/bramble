@@ -17,18 +17,16 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# shellcheck source=scripts/lib/version-check.sh
+source scripts/lib/version-check.sh
+
 self="scripts/lint/check-idf-version.sh"
 sot_file=".esp-idf-version"
+name="check-idf-version"
 fail=0
-report() { printf 'check-idf-version: %s\n' "$1" >&2; fail=1; }
-
-if [[ ! -f "$sot_file" ]]; then
-  echo "check-idf-version: missing source of truth file $sot_file" >&2
-  exit 1
-fi
 
 # `v5.4.1` (tag form) and `5.4.1` (bare form, used in prose and comments).
-want="$(tr -d '[:space:]' < "$sot_file")"
+want="$(vc_read_sot "$name" "$sot_file")"
 if [[ ! "$want" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "check-idf-version: $sot_file must hold a full vMAJOR.MINOR.PATCH tag, got '$want'" >&2
   exit 1
@@ -52,17 +50,7 @@ required=(
   "docs/ci/idf-node-runner-image.md::espressif/idf:${want}"
   "docs/ci/idf-node-runner-image.md::bramble/idf-node:${want}"
 )
-for entry in "${required[@]}"; do
-  file="${entry%%::*}"
-  literal="${entry#*::}"
-  if [[ ! -f "$file" ]]; then
-    report "required pin file is missing: $file"
-    continue
-  fi
-  if ! grep -qF -- "$literal" "$file"; then
-    report "$file no longer pins ESP-IDF ${want} (expected to find: ${literal})"
-  fi
-done
+vc_require_pins "$name" "ESP-IDF ${want}" "${required[@]}" || fail=1
 
 # 2. Tree-wide sweep. Any line that mentions ESP-IDF and carries a version
 #    token on the pinned major line must name the pinned version exactly.
@@ -73,8 +61,9 @@ hits="$(git grep -nIiE "(esp-?idf|espressif/idf|IDF_VERSION|idf-node|idf_tools|\
         | grep -E "(^|[^0-9.])v?${major}\.[0-9]+(\.[0-9]+)?([^0-9.]|$)" \
         | grep -vE "(^|[^0-9.])v?${bare//./\\.}([^0-9.]|$)" || true)"
 if [[ -n "$hits" ]]; then
-  report "ESP-IDF version reference does not match ${sot_file} (${want}):"
+  vc_report "$name" "ESP-IDF version reference does not match ${sot_file} (${want}):"
   printf '%s\n' "$hits" >&2
+  fail=1
 fi
 
 if (( fail )); then
