@@ -29,9 +29,8 @@ UI_DIR="$REPO_ROOT/simulator/ui"
 NODE_BIN="$REPO_ROOT/emulator/node/build/bramble-node.elf"
 GOSIM_BIN="$REPO_ROOT/simulator/gosim/bramble-gosim"
 
-red()   { printf '\033[31m%s\033[0m\n' "$*"; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-info()  { printf '  %s\n' "$*"; }
+# shellcheck source=emulator/lib/output.sh
+source "$REPO_ROOT/emulator/lib/output.sh"
 
 # GOSIM_PID_FILE mirrors lib/stack.ts's PID_FILE: the pid of the gosim THIS
 # run's globalSetup spawned (gosim's own process group leader; firmware node
