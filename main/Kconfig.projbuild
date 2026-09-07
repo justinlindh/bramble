@@ -22,30 +22,8 @@ menu "Bramble Configuration"
         config BRAMBLE_BOARD_VIRTUAL_HELTEC
             bool "Bramble Virtual Heltec (emulator, IDF linux target, SSD1306 128x64 OLED)"
 
-        config BRAMBLE_BOARD_TTGO_LORA32
-            bool "TTGO LoRa32 (SX1276)"
-
         config BRAMBLE_BOARD_CUSTOM
             bool "Custom board"
-    endchoice
-
-    config BRAMBLE_TX_POWER
-        int "TX power (dBm)"
-        default 17
-        range 2 22
-
-    choice BRAMBLE_RADIO_PROFILE
-        prompt "Radio profile"
-        default BRAMBLE_PROFILE_LONG_RANGE
-
-        config BRAMBLE_PROFILE_LONG_RANGE
-            bool "Long range (SF10, 125kHz)"
-
-        config BRAMBLE_PROFILE_BALANCED
-            bool "Balanced (SF8, 250kHz)"
-
-        config BRAMBLE_PROFILE_FAST
-            bool "Fast (SF7, 500kHz)"
     endchoice
 
     choice BRAMBLE_REGION
