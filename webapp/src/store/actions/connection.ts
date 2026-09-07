@@ -126,8 +126,9 @@ async function pollReady(attempts: number, probe: () => Promise<boolean>): Promi
 // "Connected". A socket that opens but is not a Bramble node (a wrong IP/port
 // that happens to host a WebSocket) would otherwise sit in a permanent empty
 // Connected state while every RPC times out and the client reconnects forever
-// (issue #91). ping/getStatus is on the unauthenticated allowlist, so this also
-// works against an auth-required node.
+// (issue #91). bramble.ping is on the unauthenticated allowlist (rpc_auth.c),
+// so the probe works against an auth-required node with no token; the getStatus
+// fallback in probeRpcReadiness only covers a node too old to answer ping.
 async function verifyBrambleNode(): Promise<boolean> {
   return pollReady(NODE_VERIFY_ATTEMPTS, async () => {
     try {
@@ -204,12 +205,13 @@ export async function connect(
     }
 
     // Fail closed on missing or wrong auth. verifyBrambleNode only proves the
-    // endpoint is a Bramble node: it uses the allowlisted getVersion, which an
-    // auth-required node answers even to an unauthenticated client. Without
+    // endpoint is a Bramble node: it probes the allowlisted bramble.ping, which
+    // an auth-required node answers even to an unauthenticated client. Without
     // this probe a blank BLE/WiFi token would look Connected and then silently
     // reject every real RPC (issue: BLE connects with no token then Unauthorized).
-    // A non-allowlisted RPC returns Unauthorized when the session did not
-    // authenticate (wrong WiFi token closes 1008 earlier; a wrong BLE token is
+    // getStatus is deliberately NOT on the allowlist (rpc_auth.c), so it returns
+    // Unauthorized when the session did not authenticate (wrong WiFi token
+    // closes 1008 earlier; a wrong BLE token is
     // rejected during the transport handshake, so this specifically catches the
     // no-token-on-an-auth-required-node case). Serial is a trusted link.
     if (type === 'ble' || type === 'wifi') {
