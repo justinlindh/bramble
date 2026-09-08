@@ -46,6 +46,16 @@ const TIER_DESCRIPTIONS: Record<LocationTier, string> = {
   full: 'Precise GPS coordinates.',
 };
 
+// Mid-sentence phrasing for the active-sharing preview ("Sharing <phrase>
+// every Ns ..."). Typed as a total map over LocationTier so adding a tier is a
+// compile error here rather than silently falling through to a default.
+const TIER_SHARE_PHRASES: Record<LocationTier, string> = {
+  off: 'off',
+  presence: 'presence only',
+  coarse: 'coarse zone updates',
+  full: 'exact coordinates',
+};
+
 const DEFAULT_INTERVAL = 300;
 
 // Canonical 8-char uppercase hex form of a contact address the user typed, or
@@ -121,7 +131,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
       return 'Sharing is ON but has no targets, so nothing is sent. Add a contact or a channel target below.';
     }
 
-    return `Sharing ${tier === 'full' ? 'exact coordinates' : tier === 'coarse' ? 'coarse zone updates' : tier === 'presence' ? 'presence only' : 'off'} every ${interval}s using ${source}. Active targets: ${targetCount}.`;
+    return `Sharing ${TIER_SHARE_PHRASES[tier]} every ${interval}s using ${source}. Active targets: ${targetCount}.`;
   }, [enabled, tier, interval, source, targetCount]);
 
   const addContactRule = () => {
