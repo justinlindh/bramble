@@ -384,11 +384,17 @@ jobs:
         # and pass against code the pipeline never runs.
         if: needs.detect.outputs.release_config == 'true' || needs.detect.outputs.ci_core == 'true'
         run: npm ci --no-audit --no-fund
-      - name: Release-rule scope-gating regression
-        # Asserts, per component, that an in-scope fix/feat/perf/breaking cuts
-        # the right release level and that out-of-scope / non-releasing commits
-        # do not. Guards the { scope: '*', release: false } catch-all bug that
-        # suppressed every component release.
+      - name: Release config regression
+        # Two harnesses over the real .releaserc.<component>.cjs files. The
+        # scope-gating one asserts, per component, that an in-scope
+        # fix/feat/perf/breaking cuts the right release level and that
+        # out-of-scope / non-releasing commits do not (guards the
+        # { scope: '*', release: false } catch-all bug that suppressed every
+        # component release). The notes-rendering one renders a releasing
+        # commit through each config's release-notes-generator and asserts it
+        # appears in the notes (guards a conventionalcommits preset major that
+        # outruns the conventional-changelog-writer major the generator ships,
+        # which fails generateNotes on main after the release decision).
         if: needs.detect.outputs.release_config == 'true' || needs.detect.outputs.ci_core == 'true'
         run: node scripts/release/semantic-release-squash-expander.test.cjs
       - name: OTA firmware-index validator
