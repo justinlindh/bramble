@@ -13,7 +13,7 @@ import { useStore } from '../../store';
 import { IconLocation, IconLocationOff } from '../../components/Icons';
 import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddrShort } from '../../utils/address';
-import { tryParseAddr } from '../../lib/addr';
+import { parseAddr, tryParseAddr } from '../../lib/addr';
 import { friendlyErrorFrom } from '../../lib/errors';
 import { countEnabledShareTargets } from '../../lib/locationSharing';
 import styles from './LocationSection.module.css';
@@ -75,8 +75,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
   const peerNames = useStore(s => s.peerNames);
 
   const resolveLabel = (hexAddr: string): string | undefined => {
-    const num = parseInt(hexAddr, 16);
-    return peerNames.get(num);
+    return peerNames.get(parseAddr(hexAddr));
   };
 
   useEffect(() => {
@@ -281,7 +280,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
           return (
             <div key={rule.address} className={styles.contactCard}>
               <div className={styles.contactCardHeader}>
-                <AddressLabel addr={parseInt(rule.address, 16)} name={name} />
+                <AddressLabel addr={parseAddr(rule.address)} name={name} />
                 <label className={styles.inlineToggle}>
                   <input
                     type="checkbox"
