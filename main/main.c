@@ -972,11 +972,12 @@ static void render_screen(ui_state_t* ui) {
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
-            /* Row 1: OLED Rotation (placeholder) */
+            /* Row 1: OLED Rotation */
             {
                 const char* sel =
                     (ui->settings_item_cursor == UI_SETTINGS_ITEM_OLED_ROTATION) ? ">" : " ";
-                snprintf(line, sizeof(line), "%sRotation: 0", sel);
+                snprintf(line, sizeof(line), "%sRotation: %s", sel,
+                         display_get_rotated_180() ? "180 deg" : "Normal");
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
