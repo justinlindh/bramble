@@ -71,6 +71,19 @@ updates:
         update-types:
           - minor
           - patch
+    # The conventionalcommits preset major must match the
+    # conventional-changelog-writer major that @semantic-release/
+    # release-notes-generator depends on (preset 9.x renders through writer
+    # 8.x; preset 10.x needs writer 9.x). A preset major ahead of the writer
+    # renders empty release notes at best and throws inside generateNotes at
+    # worst, which fails every component release on main. The Release config
+    # gate in quality.yml renders notes through the real configs and catches
+    # the mismatch on the PR, so a preset major only moves in the same PR as
+    # a release-notes-generator major that pulls the matching writer.
+    ignore:
+      - dependency-name: conventional-changelog-conventionalcommits
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: npm
     directory: /webapp

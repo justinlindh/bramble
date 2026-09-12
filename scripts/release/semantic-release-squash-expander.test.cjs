@@ -418,7 +418,72 @@ async function runReleaseRuleRegression() {
     }
 }
 
+// ── release-notes rendering regression ──────────────────────────────
+//
+// Runs each real .releaserc.<component>.cjs through the wrapped
+// @semantic-release/release-notes-generator with the same preset and
+// writerOpts the release workflow uses, and asserts that a releasing commit
+// renders into notes. The scope-gating regression above stops at
+// analyzeCommits, so it cannot see a break in generateNotes: the
+// conventionalcommits preset and the conventional-changelog-writer that
+// release-notes-generator pulls in are versioned independently in the root
+// lockfile, and a preset that needs a newer writer than the generator ships
+// throws only when the notes are rendered, which on main is after the
+// release decision and before the tag, so every component release fails.
+
+async function runReleaseNotesRegression() {
+    const path = require("path");
+    const REPO_ROOT = path.resolve(__dirname, "..", "..");
+    const COMPONENTS = ["firmware", "webapp", "protocol", "sim"];
+
+    try {
+        require(path.join(REPO_ROOT, ".releaserc.firmware.cjs"));
+    } catch (e) {
+        if (e && e.code === "MODULE_NOT_FOUND") {
+            console.log("SKIP release-notes rendering regression (@semantic-release/* not installed)");
+            return;
+        }
+        throw e;
+    }
+
+    const expander = require("./semantic-release-squash-expander.cjs");
+
+    for (const c of COMPONENTS) {
+        const cfg = require(path.join(REPO_ROOT, `.releaserc.${c}.cjs`));
+        const pluginConfig = cfg.plugins[0][1];
+        const subject = `fix(${c}): render a release note`;
+        const label = `${c}: generateNotes renders ${JSON.stringify(subject)}`;
+        try {
+            const notes = await expander.generateNotes(pluginConfig, {
+                cwd: REPO_ROOT,
+                env: process.env,
+                options: { repositoryUrl: "https://github.com/example/bramble" },
+                lastRelease: { version: "0.0.0", gitTag: "v0.0.0", gitHead: "0000000" },
+                nextRelease: { version: "0.0.1", gitTag: "v0.0.1", gitHead: "1111111", type: "patch" },
+                commits: [{
+                    hash: "1111111111111111111111111111111111111111",
+                    message: `${subject}\n\nbody`,
+                    committerDate: "2026-01-01T00:00:00Z",
+                }],
+                logger: { log() {}, error() {} },
+            });
+            if (typeof notes === "string" && notes.includes("render a release note")) {
+                console.log(`PASS ${label}`);
+            } else {
+                console.error(`FAIL ${label}: notes did not include the commit subject`);
+                console.error(notes);
+                process.exitCode = 1;
+            }
+        } catch (e) {
+            console.error(`FAIL ${label}: generateNotes threw`);
+            console.error(e);
+            process.exitCode = 1;
+        }
+    }
+}
+
 runReleaseRuleRegression()
+    .then(runReleaseNotesRegression)
     .catch((e) => {
         console.error("FAIL release-rule scope-gating regression threw");
         console.error(e);
