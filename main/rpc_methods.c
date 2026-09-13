@@ -3306,43 +3306,14 @@ static int handle_get_audio_status(const cJSON* params, cJSON* result) {
 #include "trackball.h"
 #include "keyboard.h"
 #include "ui.h"
+/* Standard-alphabet padded base64 for the screenshot RPC. This is the same
+ * self-contained encoder the display backends ship (main REQUIRES display and
+ * this file already includes display.h). The screenshot path calls it once
+ * per requested chunk, so each chunk is an independent, self-contained base64
+ * string with its own padding: a caller decodes chunks one at a time and
+ * concatenates the raw bytes without tracking bit alignment across chunks. */
+#include "fb_base64.h"
 #endif
-
-#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
-/* Standard base64 alphabet, padded. Self-contained (no mbedtls dep), same
- * approach as the display backends' fb_base64_encode
- * (components/display/include/fb_base64.h), but chunk-oriented: each call
- * encodes an independent, self-contained base64 string (its own padding),
- * so a caller can decode chunks one at a time and concatenate the raw
- * bytes without needing to track bit alignment across chunks. */
-static const char s_b64_tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static void b64_encode_chunk(const uint8_t* in, size_t len, char* out) {
-    while (len >= 3) {
-        uint32_t v = ((uint32_t)in[0] << 16) | ((uint32_t)in[1] << 8) | in[2];
-        *out++ = s_b64_tab[(v >> 18) & 0x3F];
-        *out++ = s_b64_tab[(v >> 12) & 0x3F];
-        *out++ = s_b64_tab[(v >> 6) & 0x3F];
-        *out++ = s_b64_tab[v & 0x3F];
-        in += 3;
-        len -= 3;
-    }
-    if (len == 1) {
-        uint32_t v = (uint32_t)in[0] << 16;
-        *out++ = s_b64_tab[(v >> 18) & 0x3F];
-        *out++ = s_b64_tab[(v >> 12) & 0x3F];
-        *out++ = '=';
-        *out++ = '=';
-    } else if (len == 2) {
-        uint32_t v = ((uint32_t)in[0] << 16) | ((uint32_t)in[1] << 8);
-        *out++ = s_b64_tab[(v >> 18) & 0x3F];
-        *out++ = s_b64_tab[(v >> 12) & 0x3F];
-        *out++ = s_b64_tab[(v >> 6) & 0x3F];
-        *out++ = '=';
-    }
-    *out = '\0';
-}
-#endif /* CONFIG_BRAMBLE_UI_GRAPHICAL */
 
 /* Serial line-buffer safety cap: each response's DECODED chunk is capped at
  * 6KB regardless of the caller's requested max_len. */
@@ -3402,7 +3373,8 @@ static int handle_screenshot(const cJSON* params, cJSON* result) {
     if (!b64) {
         return RPC_ERR_INTERNAL;
     }
-    b64_encode_chunk(frame + offset, chunk_len, b64);
+    /* chunk_len is capped at SCREENSHOT_CHUNK_CAP (6144), so it fits in int. */
+    fb_base64_encode(frame + offset, (int)chunk_len, b64);
 
     cJSON_AddNumberToObject(result, "width", UI_SCREENSHOT_WIDTH);
     cJSON_AddNumberToObject(result, "height", UI_SCREENSHOT_HEIGHT);
