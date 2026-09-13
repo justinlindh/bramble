@@ -1,4 +1,4 @@
-import type { Transport } from '../types/bramble';
+import type { ReconnectCallbacks, Transport } from '../types/bramble';
 import { RpcCorrelation } from './rpcCorrelation';
 
 const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -9,11 +9,6 @@ const BLE_CHUNK_SIZE = 20;
 interface AuthWaiter {
   resolve: () => void;
   reject: (e: Error) => void;
-}
-
-interface BleReconnectCallbacks {
-  onDisconnect?: () => void;
-  onReconnect?: () => void;
 }
 
 const AUTH_HANDSHAKE_TIMEOUT_MS = 5000;
@@ -120,13 +115,13 @@ export class BLETransport implements Transport {
   // the NEW session was already up).
   private sessionGeneration = 0;
 
-  // Auto-reconnect: mirrors WebSocketTransport so the store's duck-typed
+  // Auto-reconnect: mirrors WebSocketTransport so the store's optional
   // enableAutoReconnect wiring (banner + full state refetch) works unchanged.
   // The device handle survives a GATT drop, so re-establishing the link needs
   // no new device picker: reconnect re-runs gatt.connect + service discovery +
   // the auth handshake against the SAME BluetoothDevice.
   private autoReconnect = false;
-  private reconnectCbs: BleReconnectCallbacks = {};
+  private reconnectCbs: ReconnectCallbacks = {};
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = RECONNECT_INITIAL_DELAY_MS;
   private intentionalClose = false;
@@ -169,7 +164,7 @@ export class BLETransport implements Transport {
 
   get connected() { return this._connected; }
 
-  enableAutoReconnect(cbs: BleReconnectCallbacks): void {
+  enableAutoReconnect(cbs: ReconnectCallbacks): void {
     this.autoReconnect = true;
     this.reconnectCbs = cbs;
     if (typeof document !== 'undefined') {
