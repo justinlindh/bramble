@@ -902,35 +902,6 @@ int ble_server_start(void) {
     return 0;
 }
 
-void ble_server_stop(void) {
-    /* A retry armed just before shutdown must not fire into a deinitialized
-     * host. Delete waits for the timer command queue, so after this returns
-     * the callback can no longer run. */
-    if (s_adv_retry_timer != NULL) {
-        xTimerDelete(s_adv_retry_timer, portMAX_DELAY);
-        s_adv_retry_timer = NULL;
-    }
-#ifdef ESP_PLATFORM
-    int rc = nimble_port_stop();
-    if (rc == 0) {
-        nimble_port_deinit();
-    }
-#else
-    /* Upstream NimBLE exposes no stop/deinit in the porting layer; this
-     * target never tears the stack down (there is no Wi-Fi mode to switch
-     * to), so the honest thing is to say so rather than pretend. */
-    ESP_LOGW(TAG, "ble_server_stop is not supported on this platform");
-#endif
-}
-
-bool ble_server_connected(void) { return s_conn_handle != BLE_HS_CONN_HANDLE_NONE; }
-
-int ble_server_notify(const char* json, size_t len) {
-    /* Public push API: same auth gating as dispatcher notifications */
-    ble_notify_transport_cb(json, len, NULL);
-    return 0;
-}
-
 void ble_server_set_passkey_display_cb(ble_passkey_display_cb_t cb) { s_passkey_display_cb = cb; }
 
 bool ble_server_has_passkey_display(void) { return s_passkey_display_cb != NULL; }
