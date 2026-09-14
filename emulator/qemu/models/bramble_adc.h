@@ -11,7 +11,7 @@
  * Attach the Bramble SAR ADC oneshot stub to the running esp32s3 machine.
  * Overlays the (unmodeled) SENS peripheral window so the IDF oneshot driver's
  * "conversion done" poll completes instead of spinning forever, letting
- * battery_read_mv() return and app_main reach the main loop.
+ * battery_get_status() return and app_main reach the main loop.
  *
  *   sys_mem  the system address space the SENS region lives in.
  *

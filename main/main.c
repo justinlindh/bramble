@@ -1488,8 +1488,8 @@ void app_main(void) {
     ESP_LOGI(TAG, "=== BOOT STAGE: battery_init ===");
     battery_init();
     {
-        /* One status snapshot for both values: battery_read_mv() and
-         * battery_read_pct() each average a fresh set of ADC samples, so
+        /* One status snapshot for both values: reading mv and pct through
+         * separate calls would each average a fresh set of ADC samples, so
          * calling them back to back can log an mv/pct pair that never
          * actually coexisted. */
         battery_status_t boot_bstat;

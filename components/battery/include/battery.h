@@ -12,15 +12,6 @@
 void battery_init(void);
 
 /**
- * Read battery voltage in millivolts.
- * Returns 0 if not initialized or read fails.
- *
- * Thin wrapper over battery_get_status() (see battery_wrappers.c); kept for
- * existing call sites.
- */
-uint32_t battery_read_mv(void);
-
-/**
  * Convert millivolts to percentage (0-100).
  * Uses a LiPo discharge curve approximation.
  */
@@ -29,8 +20,7 @@ uint8_t battery_mv_to_pct(uint32_t mv);
 /**
  * Convenience: read + convert in one call.
  *
- * Thin wrapper over battery_get_status() (see battery_wrappers.c); kept for
- * existing call sites.
+ * Thin wrapper over battery_get_status() (see battery_wrappers.c).
  */
 uint8_t battery_read_pct(void);
 
@@ -74,8 +64,8 @@ bool battery_reading_available(const battery_status_t* status);
 
 /**
  * Fills out with the current battery reading: averaged voltage, curve
- * percentage, and charging state. This is the primary API; battery_read_mv
- * and battery_read_pct are thin wrappers over it.
+ * percentage, and charging state. This is the primary API; battery_read_pct
+ * is a thin wrapper over it.
  *
  * Each target provides its own implementation: components/battery/battery.c
  * (ESP ADC), components/battery/battery_virt.c (emulator, served over
