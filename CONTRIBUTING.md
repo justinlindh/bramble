@@ -178,8 +178,8 @@ Two notes on running them:
 - The emulator scenarios are deterministic by construction. If one flakes, fix
   the flake; do not add a retry loop to absorb it.
 - The `make ci-quality-*` targets are convenience wrappers around parts of the
-  above. They currently exit non-zero without a message when a required tool
-  (`shellcheck`, `cppcheck`, `actionlint`, `uvx`) is not installed. That is a
+  above. They exit non-zero without a message when a required tool
+  (`shellcheck`, `actionlint`, `uvx`) is not installed. That is a
   missing tool, not a failing check; see
   [docs/troubleshooting.md](docs/troubleshooting.md).
 
