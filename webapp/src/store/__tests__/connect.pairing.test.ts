@@ -3,8 +3,9 @@ import { useStore } from '../index';
 import { connect } from '../actions';
 
 // First-time BLE pairing raises the OS passkey prompt DURING transport
-// connect. The transport reports that window via onPairingStateChange
-// (feature-detected structurally, like enableAutoReconnect); connect() must
+// connect. The transport reports that window via onPairingStateChange, which
+// is not on the Transport interface and so is feature-detected structurally;
+// connect() must
 // mirror it into pairingPending so the overlay can tell the user to go type
 // the code, and must never leave a stale true behind on any settle path.
 
