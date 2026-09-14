@@ -3306,12 +3306,6 @@ static int handle_get_audio_status(const cJSON* params, cJSON* result) {
 #include "trackball.h"
 #include "keyboard.h"
 #include "ui.h"
-/* Standard-alphabet padded base64 for the screenshot RPC. This is the same
- * self-contained encoder the display backends ship (main REQUIRES display and
- * this file already includes display.h). The screenshot path calls it once
- * per requested chunk, so each chunk is an independent, self-contained base64
- * string with its own padding: a caller decodes chunks one at a time and
- * concatenates the raw bytes without tracking bit alignment across chunks. */
 #include "fb_base64.h"
 #endif
 
