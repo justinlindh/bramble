@@ -149,9 +149,8 @@ func twinTrafficEvents(addrs []string, durationMs int64, msgsPerMin float64) []t
 	// two-node mesh has exactly one possible destination, so use it. Every
 	// larger fleet keeps the published offset unchanged. With that special
 	// case the offset satisfies 0 < offset < count for every allowed count, so
-	// dest = (msgID+offset)%count is never equal to src = msgID%count: the
-	// construction never names a node as its own destination, so no per-message
-	// guard is needed here.
+	// dest = (msgID+offset)%count is never equal to src = msgID%count and no
+	// per-message guard is needed here.
 	offset := count/2 + 1
 	if count == 2 {
 		offset = 1
