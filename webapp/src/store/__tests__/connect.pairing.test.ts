@@ -5,9 +5,9 @@ import { connect } from '../actions';
 // First-time BLE pairing raises the OS passkey prompt DURING transport
 // connect. The transport reports that window via onPairingStateChange, which
 // is not on the Transport interface and so is feature-detected structurally;
-// connect() must
-// mirror it into pairingPending so the overlay can tell the user to go type
-// the code, and must never leave a stale true behind on any settle path.
+// connect() must mirror it into pairingPending so the overlay can tell the
+// user to go type the code, and must never leave a stale true behind on any
+// settle path.
 
 const rpcMock = vi.fn<(method: string, params?: Record<string, unknown>, timeoutMs?: number) => Promise<any>>();
 const transportConnectMock = vi.fn(async () => {});
