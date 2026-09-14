@@ -75,6 +75,18 @@ void test_nvs_unavailable(void) {
     TEST_ASSERT_FALSE(tz_store_is_configured());
 }
 
+void test_nvs_write_failure(void) {
+    /* The partition opens but will not take the write, so the setter must
+     * report failure rather than leave the caller believing the zone stuck. */
+    nvs_fake_set_write_fails(true);
+    TEST_ASSERT_EQUAL_INT(-2, tz_store_set(VALID_STD_SPEC));
+    nvs_fake_set_write_fails(false);
+    char out[BRAMBLE_TZ_SPEC_MAX];
+    tz_store_get(out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING(BRAMBLE_TZ_DEFAULT_SPEC, out);
+    TEST_ASSERT_FALSE(tz_store_is_configured());
+}
+
 void test_get_ignores_null_and_zero_len(void) {
     /* Guard clauses must not write or crash. */
     tz_store_get(NULL, 8);
@@ -100,6 +112,7 @@ int main(void) {
     RUN_TEST(test_corrupt_stored_spec_falls_back);
     RUN_TEST(test_empty_stored_spec_treated_as_unset);
     RUN_TEST(test_nvs_unavailable);
+    RUN_TEST(test_nvs_write_failure);
     RUN_TEST(test_get_ignores_null_and_zero_len);
     RUN_TEST(test_overwrite_replaces_previous);
     return UNITY_END();
