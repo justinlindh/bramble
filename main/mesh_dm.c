@@ -618,13 +618,23 @@ uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t* data, 
         return pkt_id;
     }
 
-    bool handshake_in_progress = sess && sess->state == DM_STATE_HANDSHAKING;
+    /* A slot already handshaking suppresses this send's INIT, but only while
+     * the attempt is young enough to still be alive: see
+     * dm_handshake_is_stale for why a stalled one is otherwise terminal.
+     * Re-stamping last_active_ms when this send takes the attempt over is
+     * what spaces the retries out at one per DM_HANDSHAKE_STALE_MS however
+     * fast a person presses send. */
+    uint32_t now = now_ms();
+    bool handshake_in_progress = sess && sess->state == DM_STATE_HANDSHAKING &&
+                                 !dm_handshake_is_stale(sess, now, DM_HANDSHAKE_STALE_MS);
     dm_session_t* hs = sess;
     if (!hs) {
-        hs = dm_alloc(s_dm_table, dest_addr, now_ms());
+        hs = dm_alloc(s_dm_table, dest_addr, now);
         if (hs)
             hs->state = DM_STATE_HANDSHAKING;
     }
+    if (hs && !handshake_in_progress)
+        hs->last_active_ms = now;
     DM_MUTEX_GIVE();
 
     if (!hs) {

@@ -97,6 +97,7 @@ module.exports = {
         'test',
         'tdeck',
         'timesync',
+        'timezone',
         'tooling',
         'touch',
         'trackball',

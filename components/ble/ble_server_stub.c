@@ -12,13 +12,6 @@
 bool ble_server_supported(void) { return false; }
 int ble_server_init(void) { return -1; }
 int ble_server_start(void) { return -1; }
-void ble_server_stop(void) {}
-bool ble_server_connected(void) { return false; }
-int ble_server_notify(const char* json, size_t len) {
-    (void)json;
-    (void)len;
-    return -1;
-}
 
 void ble_server_set_passkey_display_cb(ble_passkey_display_cb_t cb) { (void)cb; }
 bool ble_server_has_passkey_display(void) { return false; }

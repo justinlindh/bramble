@@ -70,6 +70,13 @@ bool rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr) {
     return false;
 }
 
+bool rerr_failfast_applies(routing_table_t* table, uint32_t broken_dest, bool route_marked_broken) {
+    if (route_marked_broken)
+        return true;
+    const route_entry_t* r = route_lookup(table, broken_dest);
+    return !(r && r->next_hop == broken_dest && r->state != ROUTE_BROKEN);
+}
+
 data_rx_decision_t data_rx_decide(uint32_t dest_addr, uint32_t self_addr, uint32_t src_addr,
                                   uint32_t prev_hop, uint8_t received_hop_limit,
                                   uint8_t link_metric) {

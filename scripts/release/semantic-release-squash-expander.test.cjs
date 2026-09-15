@@ -255,34 +255,39 @@ if (inGitRepo) {
 // commit does not, and that an in-scope bullet inside a cross-component
 // squash body still releases.
 
-async function runReleaseRuleRegression() {
-    const path = require("path");
-    const REPO_ROOT = path.resolve(__dirname, "..", "..");
-    const COMPONENTS = ["firmware", "webapp", "protocol", "sim"];
+const path = require("path");
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const COMPONENTS = ["firmware", "webapp", "protocol", "sim"];
 
-    // Loading a real .releaserc pulls in @semantic-release/commit-analyzer and
-    // @semantic-release/release-notes-generator. Those live in the ephemeral
-    // node_modules the release workflow installs, not in a bare dev checkout.
-    // When they are absent, skip loudly rather than fail; CI installs them and
-    // runs the real assertions (see the "Release config" gate in quality.yml).
+// Loading a real .releaserc pulls in @semantic-release/commit-analyzer and
+// @semantic-release/release-notes-generator. Those live in the ephemeral
+// node_modules the release workflow installs, not in a bare dev checkout.
+// When they are absent, skip loudly rather than fail; CI installs them and
+// runs the real assertions (see the "Release config" gate in quality.yml).
+function releaseToolchainInstalled(label) {
     try {
         require(path.join(REPO_ROOT, ".releaserc.firmware.cjs"));
+        return true;
     } catch (e) {
         if (e && e.code === "MODULE_NOT_FOUND") {
-            console.log(
-                "SKIP release-rule scope-gating regression (@semantic-release/* not installed)",
-            );
-            return;
+            console.log(`SKIP ${label} (@semantic-release/* not installed)`);
+            return false;
         }
         throw e;
     }
+}
 
-    const expander = require("./semantic-release-squash-expander.cjs");
+// The squash-expander's options object, as the real config hands it to
+// semantic-release.
+function pluginConfigFor(component) {
+    return require(path.join(REPO_ROOT, `.releaserc.${component}.cjs`)).plugins[0][1];
+}
+
+async function runReleaseRuleRegression() {
+    if (!releaseToolchainInstalled("release-rule scope-gating regression")) return;
 
     async function releaseFor(component, message) {
-        const cfg = require(path.join(REPO_ROOT, `.releaserc.${component}.cjs`));
-        const pluginConfig = cfg.plugins[0][1];
-        return expander.analyzeCommits(pluginConfig, {
+        return expander.analyzeCommits(pluginConfigFor(component), {
             commits: [{ hash: "regression", message }],
             logger: { log() {} },
         });
@@ -418,9 +423,54 @@ async function runReleaseRuleRegression() {
     }
 }
 
+// ── release-notes rendering regression ──────────────────────────────
+//
+// The scope-gating regression above stops at analyzeCommits. The
+// conventionalcommits preset and the conventional-changelog-writer that
+// release-notes-generator pulls in are versioned independently in the root
+// lockfile, and a preset major ahead of the writer major renders empty notes
+// or throws, but only inside generateNotes, which on main runs after the
+// release decision and fails every component release. Render a releasing
+// commit through each real config and assert it comes out in the notes.
+
+async function runReleaseNotesRegression() {
+    if (!releaseToolchainInstalled("release-notes rendering regression")) return;
+
+    const description = "render a release note";
+    for (const c of COMPONENTS) {
+        const subject = `fix(${c}): ${description}`;
+        const label = `${c}: generateNotes renders ${JSON.stringify(subject)}`;
+        try {
+            const notes = await expander.generateNotes(pluginConfigFor(c), {
+                cwd: REPO_ROOT,
+                options: { repositoryUrl: "https://github.com/example/bramble" },
+                lastRelease: { gitTag: "v0.0.0" },
+                nextRelease: { version: "0.0.1", gitTag: "v0.0.1" },
+                commits: [{
+                    hash: "1111111111111111111111111111111111111111",
+                    message: `${subject}\n\nbody`,
+                    committerDate: "2026-01-01T00:00:00Z",
+                }],
+            });
+            if (typeof notes === "string" && notes.includes(description)) {
+                console.log(`PASS ${label}`);
+            } else {
+                console.error(`FAIL ${label}: notes did not include the commit description`);
+                console.error(notes);
+                process.exitCode = 1;
+            }
+        } catch (e) {
+            console.error(`FAIL ${label}: generateNotes threw`);
+            console.error(e);
+            process.exitCode = 1;
+        }
+    }
+}
+
 runReleaseRuleRegression()
+    .then(runReleaseNotesRegression)
     .catch((e) => {
-        console.error("FAIL release-rule scope-gating regression threw");
+        console.error("FAIL release config regression threw");
         console.error(e);
         process.exitCode = 1;
     })

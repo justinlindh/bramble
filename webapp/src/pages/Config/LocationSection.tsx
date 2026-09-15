@@ -13,7 +13,7 @@ import { useStore } from '../../store';
 import { IconLocation, IconLocationOff } from '../../components/Icons';
 import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddrShort } from '../../utils/address';
-import { tryParseAddr } from '../../lib/addr';
+import { parseAddr, tryParseAddr } from '../../lib/addr';
 import { friendlyErrorFrom } from '../../lib/errors';
 import { countEnabledShareTargets } from '../../lib/locationSharing';
 import styles from './LocationSection.module.css';
@@ -46,6 +46,16 @@ const TIER_DESCRIPTIONS: Record<LocationTier, string> = {
   full: 'Precise GPS coordinates.',
 };
 
+// Mid-sentence phrasing for the active-sharing preview ("Sharing <phrase>
+// every Ns ..."). Typed as a total map over LocationTier so adding a tier is a
+// compile error here rather than silently falling through to a default.
+const TIER_SHARE_PHRASES: Record<LocationTier, string> = {
+  off: 'off',
+  presence: 'presence only',
+  coarse: 'coarse zone updates',
+  full: 'exact coordinates',
+};
+
 const DEFAULT_INTERVAL = 300;
 
 // Canonical 8-char uppercase hex form of a contact address the user typed, or
@@ -75,8 +85,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
   const peerNames = useStore(s => s.peerNames);
 
   const resolveLabel = (hexAddr: string): string | undefined => {
-    const num = parseInt(hexAddr, 16);
-    return peerNames.get(num);
+    return peerNames.get(parseAddr(hexAddr));
   };
 
   useEffect(() => {
@@ -121,7 +130,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
       return 'Sharing is ON but has no targets, so nothing is sent. Add a contact or a channel target below.';
     }
 
-    return `Sharing ${tier === 'full' ? 'exact coordinates' : tier === 'coarse' ? 'coarse zone updates' : tier === 'presence' ? 'presence only' : 'off'} every ${interval}s using ${source}. Active targets: ${targetCount}.`;
+    return `Sharing ${TIER_SHARE_PHRASES[tier]} every ${interval}s using ${source}. Active targets: ${targetCount}.`;
   }, [enabled, tier, interval, source, targetCount]);
 
   const addContactRule = () => {
@@ -281,7 +290,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
           return (
             <div key={rule.address} className={styles.contactCard}>
               <div className={styles.contactCardHeader}>
-                <AddressLabel addr={parseInt(rule.address, 16)} name={name} />
+                <AddressLabel addr={parseAddr(rule.address)} name={name} />
                 <label className={styles.inlineToggle}>
                   <input
                     type="checkbox"

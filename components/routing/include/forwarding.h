@@ -24,6 +24,18 @@ bramble_rerr_t rerr_build(uint32_t my_addr, uint32_t broken_dest, uint32_t broke
  * gosim's bridge.c does not need the return value). */
 bool rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr);
 
+/* Whether a received RERR may cancel this node's pending reliable frames to
+ * broken_dest. One that broke our own route (route_marked_broken) may, and so
+ * may a forwarded one naming a hop we do not use, because a multi-hop frame's
+ * journey continues past our next hop and can die out there. A destination we
+ * hand the frame to in ONE hop is the exception: that frame never touches the
+ * reported hop, so another node's failure to reach the peer says nothing about
+ * our own link to it, and cancelling on it strands traffic that would have
+ * arrived. Returns true when the fail-fast applies. A destination with no
+ * route entry, or whose one-hop route this node already believes is broken,
+ * counts as unreachable rather than direct, so it applies there too. */
+bool rerr_failfast_applies(routing_table_t* table, uint32_t broken_dest, bool route_marked_broken);
+
 /* The routing decision a received DATA frame resolves to: deliver it to this
  * node's own application layer, or forward it toward dest_addr. Pure and
  * host-testable, mirroring mesh_task.c's mesh_process_rx_packet DATA case

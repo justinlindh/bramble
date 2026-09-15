@@ -36,7 +36,7 @@ void bramble_attach(MemoryRegion *sys_mem, DeviceState *gdma, DeviceState *intc)
      * back and drive. Attached first so its accessors are live for them. */
     bramble_gpio_attach(sys_mem, intc);
 
-    /* SAR ADC oneshot stub so battery_read_mv() completes. */
+    /* SAR ADC oneshot stub so battery_get_status() completes. */
     bramble_adc_attach(sys_mem);
 
     /* GPSPI2 (SPI2_HOST) controller plus its two register-accurate SSI slaves,

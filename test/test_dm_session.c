@@ -676,6 +676,44 @@ void test_verified_cleared_on_pin_disagreement(void) {
     TEST_ASSERT_FALSE(dm_verified_should_clear(&s, new_pin)); /* nothing to clear */
 }
 
+/*
+ * dm_handshake_is_stale is the rule mesh_send_dm applies before it decides
+ * whether this send has to start a handshake. A handshake nothing answered
+ * would otherwise park the slot in DM_STATE_HANDSHAKING for good and every
+ * later DM to that peer would queue and expire against it.
+ */
+void test_handshake_stale_after_the_interval(void) {
+    dm_session_t s;
+    memset(&s, 0, sizeof(s));
+    s.state = DM_STATE_HANDSHAKING;
+    s.last_active_ms = 1000;
+    TEST_ASSERT_FALSE(dm_handshake_is_stale(&s, 1000 + 29999, 30000));
+    TEST_ASSERT_TRUE(dm_handshake_is_stale(&s, 1000 + 30000, 30000));
+}
+
+void test_handshake_stale_only_while_handshaking(void) {
+    dm_session_t s;
+    memset(&s, 0, sizeof(s));
+    s.last_active_ms = 1000;
+    s.state = DM_STATE_ACTIVE; /* an established session never restarts here */
+    TEST_ASSERT_FALSE(dm_handshake_is_stale(&s, 1000 + 600000, 30000));
+    s.state = DM_STATE_NONE;
+    TEST_ASSERT_FALSE(dm_handshake_is_stale(&s, 1000 + 600000, 30000));
+    TEST_ASSERT_FALSE(dm_handshake_is_stale(NULL, 1000 + 600000, 30000));
+}
+
+/* The uptime this runs off is a wrapping 32-bit millisecond counter, so an
+ * attempt started just before a wrap must still age normally across it. */
+void test_handshake_stale_across_uptime_wrap(void) {
+    dm_session_t s;
+    memset(&s, 0, sizeof(s));
+    s.state = DM_STATE_HANDSHAKING;
+    s.last_active_ms = 0xFFFFF000u;
+    /* 4096 ms after the wrap, then 32768 ms after it. */
+    TEST_ASSERT_FALSE(dm_handshake_is_stale(&s, 0x00000000u, 30000));
+    TEST_ASSERT_TRUE(dm_handshake_is_stale(&s, 0x00007000u, 30000));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_quad_dh_both_sides_agree);
@@ -708,5 +746,8 @@ int main(void) {
     RUN_TEST(test_pin_disagrees_matching_key_false);
     RUN_TEST(test_pin_disagrees_non_active_false);
     RUN_TEST(test_verified_cleared_on_pin_disagreement);
+    RUN_TEST(test_handshake_stale_after_the_interval);
+    RUN_TEST(test_handshake_stale_only_while_handshaking);
+    RUN_TEST(test_handshake_stale_across_uptime_wrap);
     return UNITY_END();
 }

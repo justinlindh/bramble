@@ -82,8 +82,7 @@ ci-quality-ruff:
 	uvx --from 'ruff==0.12.10' ruff check scripts --select E9,F63,F7,F82
 
 ci-quality-cppcheck:
-	command -v cppcheck >/dev/null
-	cppcheck --enable=warning,performance,portability --std=c11 --quiet --error-exitcode=2 --suppress=normalCheckLevelMaxBranches main components
+	bash scripts/lint/run-cppcheck.sh
 
 ci-quality-board-build:
 	bash scripts/ci-ensure-idf.sh

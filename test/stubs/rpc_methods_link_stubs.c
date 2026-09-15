@@ -291,11 +291,9 @@ broadcast_telemetry_mode_t mesh_get_broadcast_telemetry_mode(void) {
 uint32_t airtime_budget_remaining(void) { return 0; }
 void airtime_budget_refill(uint32_t n) { (void)n; }
 uint32_t airtime_budget_next_refill_ms(void) { return 0; }
-/* Correct signatures (uint32_t/uint8_t, matching battery.h): the previous
- * `int` return types were a latent UB mismatch against the real
- * declarations rpc_methods.c compiles against (undetected because these
- * two translation units never saw each other's prototype). */
-uint32_t battery_read_mv(void) { return 0; }
+/* Signatures must match battery.h exactly. This translation unit and
+ * rpc_methods.c never see each other's prototypes, so a mismatch here is
+ * silent UB rather than a compile error. */
 uint8_t battery_read_pct(void) { return 0; }
 void battery_get_status(battery_status_t* out) {
     out->mv = 0;

@@ -3,7 +3,7 @@
  *
  * Without this stub the pager firmware boots through show_splash /
  * button_init / battery_init and then WEDGES at the first SAR ADC oneshot
- * conversion in battery_read_mv() (components/battery/battery.c). The IDF
+ * conversion in battery_get_status() (components/battery/battery.c). The IDF
  * oneshot driver kicks a conversion and then spins in
  * adc_oneshot_ll_get_event() waiting on a "done" bit that never sets, because
  * stock QEMU does not model the SAR ADC. (The eFuse image stubs ADC

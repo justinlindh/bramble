@@ -90,6 +90,47 @@ void test_rerr_handle_bumps_fail_count(void) {
     TEST_ASSERT_EQUAL(1, e->fail_count);
 }
 
+/*
+ * rerr_failfast_applies decides whether a RERR may cancel pending reliable
+ * frames to the destination it names. A RERR that broke this node's own route
+ * may, and so may one naming a hop this node does not use, because a frame for
+ * a multi-hop destination still has to cross the break further out. The one
+ * case it must not touch is a destination this node reaches in a single hop:
+ * that frame never goes near the reported hop, and cancelling it throws away a
+ * delivery that would have succeeded (a lost DM handshake response leaves the
+ * two nodes unable to establish a session at all).
+ */
+void test_failfast_applies_when_our_route_broke(void) {
+    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
+    TEST_ASSERT_TRUE(rerr_failfast_applies(&rt, 0xCCCC, true));
+}
+
+void test_failfast_applies_for_a_multihop_destination(void) {
+    /* Our route to 0xCCCC goes through 0xBBBB, and the RERR named a different
+     * hop further along: our own route survives, the frame does not. */
+    route_install(&rt, 0xCCCC, 0xBBBB, 3, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
+    TEST_ASSERT_TRUE(rerr_failfast_applies(&rt, 0xCCCC, false));
+}
+
+void test_failfast_spares_a_one_hop_destination(void) {
+    /* next_hop == dest: we hand the frame straight to the peer. */
+    route_install(&rt, 0xCCCC, 0xCCCC, 1, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
+    TEST_ASSERT_FALSE(rerr_failfast_applies(&rt, 0xCCCC, false));
+    /* Unless it is our own one-hop route that the RERR broke. */
+    TEST_ASSERT_TRUE(rerr_failfast_applies(&rt, 0xCCCC, true));
+}
+
+void test_failfast_applies_with_no_route_entry(void) {
+    TEST_ASSERT_TRUE(rerr_failfast_applies(&rt, 0xDDDD, false));
+}
+
+void test_failfast_applies_to_a_broken_one_hop_route(void) {
+    /* We already believe this neighbour is gone, so the pending frame is not
+     * a delivery worth protecting. */
+    route_install(&rt, 0xCCCC, 0xCCCC, 1, 200, ROUTE_BROKEN, ROUTE_SRC_DISCOVERED, 1000);
+    TEST_ASSERT_TRUE(rerr_failfast_applies(&rt, 0xCCCC, false));
+}
+
 /* Task 3 (Phase 1 delivery-core plan): data_rx_decide extracts the
  * deliver-locally-vs-forward fork out of mesh_task.c's mesh_process_rx_packet
  * PKT_TYPE_DATA case, behavior-preserving. Task 4 turns on reverse-route
@@ -184,6 +225,11 @@ int main(void) {
     RUN_TEST(test_rerr_build_and_handle);
     RUN_TEST(test_rerr_wrong_next_hop_ignored);
     RUN_TEST(test_rerr_handle_bumps_fail_count);
+    RUN_TEST(test_failfast_applies_when_our_route_broke);
+    RUN_TEST(test_failfast_applies_for_a_multihop_destination);
+    RUN_TEST(test_failfast_spares_a_one_hop_destination);
+    RUN_TEST(test_failfast_applies_with_no_route_entry);
+    RUN_TEST(test_failfast_applies_to_a_broken_one_hop_route);
     RUN_TEST(test_data_rx_decide_deliver_self);
     RUN_TEST(test_data_rx_decide_deliver_broadcast);
     RUN_TEST(test_data_rx_decide_forward_other_unicast);

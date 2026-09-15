@@ -24,7 +24,7 @@ stock-QEMU fixes (see `patches/README.md`).
 - `bramble_gpio.c` / `.h`: GPIO observer/injector (buttons, GNSS_EN, LED / vibra
   outputs, the radio soft CS, DIO1). Exposes the shared pin accessors the other
   models read/drive.
-- `bramble_adc.c` / `.h`: SAR ADC oneshot stub so `battery_read_mv()` completes.
+- `bramble_adc.c` / `.h`: SAR ADC oneshot stub so `battery_get_status()` completes.
 - `bramble_gpspi2.c` / `.h`: the GPSPI2 (SPI2_HOST) controller only - register
   file, SPI_USR/done, SSI bus, GDMA data path, CS routing. `bramble_gpspi2_attach`
   also instantiates the two bus slaves below.

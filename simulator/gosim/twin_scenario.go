@@ -147,7 +147,10 @@ func twinTrafficEvents(addrs []string, durationMs int64, msgsPerMin float64) []t
 	// two nodes: it would name the sender as its own destination and the
 	// generator's own src != dest guard would then script no message at all. A
 	// two-node mesh has exactly one possible destination, so use it. Every
-	// larger fleet keeps the published offset unchanged.
+	// larger fleet keeps the published offset unchanged. With that special
+	// case the offset satisfies 0 < offset < count for every allowed count, so
+	// dest = (msgID+offset)%count is never equal to src = msgID%count and no
+	// per-message guard is needed here.
 	offset := count/2 + 1
 	if count == 2 {
 		offset = 1
@@ -157,14 +160,12 @@ func twinTrafficEvents(addrs []string, durationMs int64, msgsPerMin float64) []t
 	for timeMs < float64(durationMs)-10000.0 {
 		src := msgID % count
 		dest := (msgID + offset) % count
-		if src != dest {
-			events = append(events, twinScenarioEvent{
-				AtMs: int64(timeMs),
-				Type: "send_message",
-				Src:  addrs[src],
-				Dest: addrs[dest],
-			})
-		}
+		events = append(events, twinScenarioEvent{
+			AtMs: int64(timeMs),
+			Type: "send_message",
+			Src:  addrs[src],
+			Dest: addrs[dest],
+		})
 		timeMs += interval
 		msgID++
 	}

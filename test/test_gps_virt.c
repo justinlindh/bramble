@@ -122,12 +122,27 @@ static int s_cb_calls = 0;
 static bramble_position_t s_cb_last;
 static void fix_cb(const bramble_position_t* p, void* ctx) {
     (void)ctx;
-    s_cb_calls++;
     s_cb_last = *p;
+    __atomic_fetch_add(&s_cb_calls, 1, __ATOMIC_SEQ_CST);
+}
+
+static int cb_calls(void) { return __atomic_load_n(&s_cb_calls, __ATOMIC_SEQ_CST); }
+
+/* process_sentence publishes the fix under s_mu, drops the lock, and only then
+ * invokes the user callback, all on emu_link's reader thread. gps_has_fix() can
+ * therefore read true before fix_cb has run, so a callback-count assertion
+ * placed right after wait_for_fix races the reader thread. Poll the count. */
+static bool wait_for_cb_calls(int n, int deadline_ms) {
+    for (int waited = 0; waited < deadline_ms; waited += 5) {
+        if (cb_calls() >= n)
+            return true;
+        usleep(5000);
+    }
+    return cb_calls() >= n;
 }
 
 void test_valid_sentence_sets_fix_and_calls_back(void) {
-    s_cb_calls = 0;
+    __atomic_store_n(&s_cb_calls, 0, __ATOMIC_SEQ_CST);
     attach_and_drain_hello("pager-gps-2");
     TEST_ASSERT_EQUAL_INT(0, gps_init(fix_cb, NULL));
     char gate[256];
@@ -141,7 +156,9 @@ void test_valid_sentence_sets_fix_and_calls_back(void) {
     TEST_ASSERT_TRUE(out.valid);
     TEST_ASSERT_INT_WITHIN(10000, 481173000, out.latitude_e7);
     TEST_ASSERT_INT_WITHIN(10000, 115166667, out.longitude_e7);
-    TEST_ASSERT_EQUAL_INT(1, s_cb_calls);
+    TEST_ASSERT_TRUE_MESSAGE(wait_for_cb_calls(1, 2000),
+                             "expected the fix callback after a valid RMC");
+    TEST_ASSERT_EQUAL_INT(1, cb_calls());
     TEST_ASSERT_INT_WITHIN(10000, 481173000, s_cb_last.latitude_e7);
 }
 
@@ -202,7 +219,7 @@ void test_gate_reopen_accepts_nmea(void) {
  *     gpsgate off; gps_set_enabled(true) re-powers it and emits gpsgate on,
  *     and sentences flow again using the callback from the original init. --- */
 void test_gps_set_enabled_toggles_gate(void) {
-    s_cb_calls = 0;
+    __atomic_store_n(&s_cb_calls, 0, __ATOMIC_SEQ_CST);
     attach_and_drain_hello("pager-gps-6");
     TEST_ASSERT_EQUAL_INT(0, gps_init(fix_cb, NULL));
     char gate[256];
@@ -233,7 +250,8 @@ void test_gps_set_enabled_toggles_gate(void) {
 
     write_nmea(RMC);
     TEST_ASSERT_TRUE_MESSAGE(wait_for_fix(2000), "expected a fix after re-enabling GPS");
-    TEST_ASSERT_TRUE(s_cb_calls >= 1);
+    TEST_ASSERT_TRUE_MESSAGE(wait_for_cb_calls(1, 2000),
+                             "expected the retained fix callback after re-enabling GPS");
 }
 
 int main(void) {

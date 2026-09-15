@@ -22,6 +22,7 @@ static nvs_fake_entry_t s_entries[NVS_FAKE_MAX_ENTRIES];
 static char s_open_ns[NVS_FAKE_MAX_NS][16];
 static int s_open_count;
 static bool s_open_fails;
+static bool s_write_fails;
 
 /* An iterator is just a cursor into the entry table plus the namespace it is
  * walking. nvs.h types it as a pointer to an incomplete struct, so define it
@@ -39,9 +40,12 @@ void nvs_fake_reset(void) {
     memset(s_iters, 0, sizeof(s_iters));
     s_open_count = 0;
     s_open_fails = false;
+    s_write_fails = false;
 }
 
 void nvs_fake_set_open_fails(bool fails) { s_open_fails = fails; }
+
+void nvs_fake_set_write_fails(bool fails) { s_write_fails = fails; }
 
 static nvs_fake_entry_t* find_entry(const char* ns, const char* key) {
     for (int i = 0; i < NVS_FAKE_MAX_ENTRIES; i++) {
@@ -147,7 +151,7 @@ esp_err_t nvs_commit(nvs_handle_t h) { return handle_ns(h) ? ESP_OK : ESP_FAIL; 
 
 esp_err_t nvs_set_blob(nvs_handle_t h, const char* key, const void* value, size_t length) {
     const char* ns = handle_ns(h);
-    if (!ns || length > NVS_FAKE_MAX_VALUE)
+    if (!ns || s_write_fails || length > NVS_FAKE_MAX_VALUE)
         return ESP_FAIL;
     nvs_fake_entry_t* e = alloc_entry(ns, key);
     if (!e)
@@ -177,7 +181,7 @@ esp_err_t nvs_get_blob(nvs_handle_t h, const char* key, void* out, size_t* len) 
 
 static esp_err_t fake_set_fixed(nvs_handle_t h, const char* key, const void* v, size_t n) {
     const char* ns = handle_ns(h);
-    if (!ns)
+    if (!ns || s_write_fails)
         return ESP_FAIL;
     nvs_fake_entry_t* e = alloc_entry(ns, key);
     if (!e)

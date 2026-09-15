@@ -23,7 +23,6 @@ export class MockTransport implements Transport {
   private notifyCb: ((method: string, params: unknown) => void) | null = null;
   private fakeWs: MockSocketLike | null = null;
   private messageListener: ((data: string) => void) | null = null;
-  private closeListener: (() => void) | null = null;
 
   get connected(): boolean {
     return this._connected;
@@ -61,7 +60,6 @@ export class MockTransport implements Transport {
 
     this.fakeWs = fakeWs;
     this.messageListener = listeners.message ?? null;
-    this.closeListener = listeners.close ?? null;
     this._connected = true;
   }
 
@@ -96,7 +94,6 @@ export class MockTransport implements Transport {
     try { this.fakeWs?.close(1000, 'client disconnect'); } catch { /* ignore */ }
     this.fakeWs = null;
     this.messageListener = null;
-    this.closeListener = null;
   }
 
   private handleServerMessage(data: string): void {

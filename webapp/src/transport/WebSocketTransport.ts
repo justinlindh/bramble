@@ -1,10 +1,5 @@
-import type { Transport } from '../types/bramble';
+import type { ReconnectCallbacks, Transport } from '../types/bramble';
 import { RpcCorrelation } from './rpcCorrelation';
-
-export interface WsReconnectCallbacks {
-  onDisconnect?: () => void;
-  onReconnect?: () => void;
-}
 
 export class WebSocketTransport implements Transport {
   private ws: WebSocket | null = null;
@@ -18,7 +13,7 @@ export class WebSocketTransport implements Transport {
   private autoReconnect = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
-  private reconnectCbs: WsReconnectCallbacks = {};
+  private reconnectCbs: ReconnectCallbacks = {};
   private intentionalClose = false;
 
   // Keepalive
@@ -168,7 +163,7 @@ export class WebSocketTransport implements Transport {
   private visibilityHandler: (() => void) | null = null;
 
   /** Enable auto-reconnect. Call once after first successful connect(). */
-  enableAutoReconnect(cbs?: WsReconnectCallbacks): void {
+  enableAutoReconnect(cbs?: ReconnectCallbacks): void {
     this.autoReconnect = true;
     this.reconnectDelay = 1000;
     this.reconnectCbs = cbs ?? {};

@@ -1,8 +1,8 @@
 /*
- * battery_wrappers: battery_read_mv/battery_read_pct as thin wrappers over
+ * battery_wrappers: battery_read_pct as a thin wrapper over
  * battery_get_status(), so every target implements the read path exactly
- * once (in battery_get_status) and a call site that needs only one of the
- * two numbers stays a one-liner. Also battery_display_pct(),
+ * once (in battery_get_status) and a call site that needs only the
+ * percentage stays a one-liner. Also battery_display_pct(),
  * the convenience one-argument form of battery_helpers.c's
  * battery_display_pct_ema(): it needs a real clock (esp_timer_get_time()),
  * which is why it lives here rather than in battery_helpers.c, which stays
@@ -11,12 +11,6 @@
  */
 #include "battery.h"
 #include "esp_timer.h"
-
-uint32_t battery_read_mv(void) {
-    battery_status_t st;
-    battery_get_status(&st);
-    return st.mv;
-}
 
 uint8_t battery_read_pct(void) {
     battery_status_t st;

@@ -883,6 +883,14 @@ bool dm_verified_should_clear(const dm_session_t* s, const uint8_t pinned_x25519
     return s->verified && dm_pin_disagrees(s, pinned_x25519);
 }
 
+bool dm_handshake_is_stale(const dm_session_t* s, uint32_t now_ms, uint32_t stale_ms) {
+    if (!s || s->state != DM_STATE_HANDSHAKING)
+        return false;
+    /* Unsigned difference, so a wrapped 32-bit uptime still measures the real
+     * elapsed interval. */
+    return (uint32_t)(now_ms - s->last_active_ms) >= stale_ms;
+}
+
 dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms) {
     /* Reuse an existing slot for this peer: not a new handshake, so no cap
      * check. The slot's existing state already counts toward the cap if it

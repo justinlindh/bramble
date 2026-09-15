@@ -318,12 +318,20 @@ export interface RollCallStart {
 
 // ─── Transport abstraction ─────────────────────────────────────────────
 
+export interface ReconnectCallbacks {
+  onDisconnect?: () => void;
+  onReconnect?: () => void | Promise<void>;
+}
+
 export interface Transport {
   readonly connected: boolean;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   sendRPC<T = unknown>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T>;
   onNotification(cb: (method: string, params: unknown) => void): void;
+  // Only the reconnecting transports (WebSocket/WiFi and BLE) implement this;
+  // callers feature-detect it before use.
+  enableAutoReconnect?(cbs: ReconnectCallbacks): void;
 }
 
 export type TransportType = 'serial' | 'ble' | 'mock' | 'wifi';

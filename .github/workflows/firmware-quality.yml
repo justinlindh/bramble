@@ -148,17 +148,9 @@ jobs:
       - name: Required clang-format (full strict scope)
         run: bash scripts/lint/run-clang-format-check.sh --strict
       - name: cppcheck
-        # The scoped suppressions below are cppcheck 2.13 false positives
-        # (the previous runner shipped 2.7, which did not flag them):
-        # unknownMacro fires because lvgl headers are not on the include path
-        # (LV_SYMBOL_RIGHT), and both uninitvar findings are loops that only
-        # read entries below a count that starts at zero.
-        run: |
-          cppcheck --enable=warning,performance,portability --std=c11 --quiet --error-exitcode=2 --suppress=normalCheckLevelMaxBranches \
-            --suppress=unknownMacro:components/ui_graphics/screens/scr_chat_messages.c \
-            --suppress=uninitvar:components/ui_graphics/screens/scr_map.c \
-            --suppress=uninitvar:components/ui_graphics/screens/scr_nodes.c \
-            main components
+        # Flags and scoped suppressions live in the wrapper so `make
+        # ci-quality-cppcheck` and this job cannot drift apart.
+        run: bash scripts/lint/run-cppcheck.sh
       - name: RPC contract (spec vs firmware registry)
         run: bash scripts/check-rpc-contract.sh
       - name: Actionlint (every workflow)

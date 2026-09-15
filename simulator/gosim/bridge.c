@@ -873,15 +873,16 @@ static void _handle_rerr(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
         }
     }
 
-    /* Fail fast every pending ack for the broken destination, even on a
-     * forwarded RERR with no local next-hop match: same loop and ordering
-     * as firmware's handle_rerr calling rerr_ack_failfast_for_dest
-     * (main/rerr_ack_fastfail.c). Not the real function only because it
-     * hard-links msg_store (NVS message status), which the sim does not
-     * model; the table mutation is identical. Without this the sender
-     * burns its whole retransmit ladder into a route the mesh already
-     * reported dead. */
-    {
+    /* Fail fast every pending ack for the broken destination, including on a
+     * forwarded RERR whose next hop we do not use, since a multi-hop frame
+     * still has to cross the break: same rule (rerr_failfast_applies), same
+     * loop and ordering as firmware's handle_rerr calling
+     * rerr_ack_failfast_for_dest (main/rerr_ack_fastfail.c). Not the real
+     * function only because it hard-links msg_store (NVS message status),
+     * which the sim does not model; the table mutation is identical. Without
+     * this the sender burns its whole retransmit ladder into a route the mesh
+     * already reported dead. */
+    if (rerr_failfast_applies(&rx->routes, rerr.broken_dest, route_marked_broken)) {
         rerr_failfast_ctx_t ctx = {rx->id, rerr.broken_dest, now_us, metrics};
         for (int i = 0; i < MAX_PENDING_ACKS; i++) {
             pending_ack_t* pa = &rx->pending_acks.entries[i];

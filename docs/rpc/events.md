@@ -417,8 +417,10 @@ Relay path object fields: `addr` (string).
 
 ### Correlation and telemetry-mode guidance
 
-Correlate delivery telemetry with `(broadcast_id, packet_id)` as the primary
-key across firmware, RPC, SDK, CLI, simulator, and web UI surfaces.
+Correlate delivery telemetry with `(broadcast_id, recipient)` as the primary
+key across firmware, RPC, SDK, CLI, simulator, and web UI surfaces. The
+`onBroadcastDelivery` event carries no `packet_id`; that field is the
+correlation key for the unicast `onAck` path, not for broadcast delivery.
 
 Telemetry modes:
 
@@ -431,7 +433,7 @@ Telemetry modes:
   nodes and time windows only.
 
 For dense meshes or high-rate publishers: bound retained in-memory history by
-`(broadcast_id, packet_id)` and age, aggregate in rolling windows for
+`(broadcast_id, recipient)` and age, aggregate in rolling windows for
 dashboards, and batch interactive UI updates (100 to 250 ms coalescing).
 
 ## `bramble.onGpsEvent`

@@ -492,13 +492,19 @@ void handle_rerr(const uint8_t* data, uint8_t len) {
         }
     }
 
-    /* Fail fast for pending packets to the destination, even on forwarded RERRs */
-    size_t failed = rerr_ack_failfast_for_dest(&s_pending_acks, rerr.broken_dest, "route_broken",
-                                               rerr_fastfail_notify);
-    if (failed > 0) {
-        ESP_LOGW(TAG, "RERR fast-failed %u pending ACK(s) for dest %08" PRIX32 "%s",
-                 (unsigned)failed, rerr.broken_dest,
-                 route_marked_broken ? "" : " (forwarded RERR/no local next-hop match)");
+    /* Fail fast for pending packets to the destination, on forwarded RERRs
+     * too: a frame bound for a multi-hop destination dies at the break even
+     * when our own next hop is healthy. components/routing/forwarding.c's
+     * rerr_failfast_applies holds the one exception, a destination we reach
+     * in a single hop. */
+    if (rerr_failfast_applies(&s_routes, rerr.broken_dest, route_marked_broken)) {
+        size_t failed = rerr_ack_failfast_for_dest(&s_pending_acks, rerr.broken_dest,
+                                                   "route_broken", rerr_fastfail_notify);
+        if (failed > 0) {
+            ESP_LOGW(TAG, "RERR fast-failed %u pending ACK(s) for dest %08" PRIX32 "%s",
+                     (unsigned)failed, rerr.broken_dest,
+                     route_marked_broken ? "" : " (forwarded RERR/no local next-hop match)");
+        }
     }
 }
 

@@ -415,6 +415,8 @@ export const useStore = create<AppState & Actions>((set) => ({
     status: null,
     airtime: null,
     probeResult: null,
+    trafficEvents: [],
+    trafficDebugStatus: null,
     peerLocations: [],
     mapFocusAddr: null,
     peerVerifications: new Map(),
