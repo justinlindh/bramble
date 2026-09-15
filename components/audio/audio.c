@@ -80,20 +80,11 @@ static void nvs_load_prefs(void) {
     ESP_LOGI(TAG, "Audio prefs loaded: volume=%u muted=%d", s_audio.volume, s_audio.muted);
 }
 
-static void nvs_save_volume(uint8_t vol) {
+static void nvs_save_u8(const char* key, uint8_t val) {
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
         return;
-    nvs_set_u8(h, NVS_KEY_VOLUME, vol);
-    nvs_commit(h);
-    nvs_close(h);
-}
-
-static void nvs_save_muted(bool muted) {
-    nvs_handle_t h;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
-        return;
-    nvs_set_u8(h, NVS_KEY_MUTED, (uint8_t)muted);
+    nvs_set_u8(h, key, val);
     nvs_commit(h);
     nvs_close(h);
 }
@@ -383,7 +374,7 @@ void audio_set_volume(uint8_t volume) {
     if (volume > 100)
         volume = 100;
     s_audio.volume = volume;
-    nvs_save_volume(volume);
+    nvs_save_u8(NVS_KEY_VOLUME, volume);
     ESP_LOGI(TAG, "Volume set to %u", volume);
 }
 
@@ -391,7 +382,7 @@ uint8_t audio_get_volume(void) { return s_audio.volume; }
 
 void audio_set_muted(bool muted) {
     s_audio.muted = muted;
-    nvs_save_muted(muted);
+    nvs_save_u8(NVS_KEY_MUTED, (uint8_t)muted);
     ESP_LOGI(TAG, "Audio %s", muted ? "muted" : "unmuted");
 }
 
