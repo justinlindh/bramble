@@ -972,11 +972,12 @@ static void render_screen(ui_state_t* ui) {
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
-            /* Row 1: OLED Rotation (placeholder) */
+            /* Row 1: OLED Rotation */
             {
                 const char* sel =
                     (ui->settings_item_cursor == UI_SETTINGS_ITEM_OLED_ROTATION) ? ">" : " ";
-                snprintf(line, sizeof(line), "%sRotation: 0", sel);
+                snprintf(line, sizeof(line), "%sRotation: %s", sel,
+                         display_get_rotated_180() ? "180 deg" : "Normal");
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
@@ -1487,10 +1488,9 @@ void app_main(void) {
     ESP_LOGI(TAG, "=== BOOT STAGE: battery_init ===");
     battery_init();
     {
-        /* One status snapshot for both values: battery_read_mv() and
-         * battery_read_pct() each average a fresh set of ADC samples, so
-         * calling them back to back can log an mv/pct pair that never
-         * actually coexisted. */
+        /* One status snapshot for both values: every battery read averages a
+         * fresh set of ADC samples, so fetching mv and pct separately would
+         * log a pair that never actually coexisted. */
         battery_status_t boot_bstat;
         battery_get_status(&boot_bstat);
         ESP_LOGI(TAG, "Battery: %" PRIu32 " mV (%u%%)", boot_bstat.mv, boot_bstat.pct);

@@ -1,8 +1,8 @@
 /*
  * Battery backend for the SenseCAP T1000-E: gated cell-voltage reads plus
  * CHRG/VBUS charge detect. Satisfies components/battery/include/battery.h
- * (battery_get_status is the primary API; battery_read_mv/battery_read_pct
- * come from the shared battery_wrappers.c) plus the nRF arm hook in
+ * (battery_get_status is the primary API; battery_read_pct comes from the
+ * shared battery_wrappers.c) plus the nRF arm hook in
  * shim/include/battery_nrf.h.
  *
  * VOLTAGE. The cell reaches P0.02/AIN0 through a 2x divider that hangs off

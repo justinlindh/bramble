@@ -59,9 +59,6 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
   const isConnected = useStore(s => s.connectionState === 'connected');
   const gpsEnabled = useStore(s => s.config?.location?.enabled ?? false);
 
-  // Parse conversation to get dest
-  const { dest } = parseConversation(conversationId);
-
   // For broadcast conversation, force tier to 'broadcast'
   const isBroadcastConv = parseConversationId(conversationId).kind === 'broadcast';
   const effectiveTier: MessageTier = isBroadcastConv ? 'broadcast' : tier;

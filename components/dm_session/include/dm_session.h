@@ -264,6 +264,36 @@ bool dm_pin_disagrees(const dm_session_t* s, const uint8_t pinned_x25519[32]);
 bool dm_verified_should_clear(const dm_session_t* s, const uint8_t pinned_x25519[32]);
 
 /*
+ * How long a slot may sit in DM_STATE_HANDSHAKING before a fresh send treats
+ * the attempt as dead and starts a new one. A healthy first contact completes
+ * in a few seconds (one INIT, one RESP), so this is an order of magnitude of
+ * headroom, not a target.
+ */
+#define DM_HANDSHAKE_STALE_MS 30000u
+
+/*
+ * Whether a slot's handshake attempt has gone stale, extracted so the rule is
+ * host-testable (the mesh_task caller is board-build-only). True only for a
+ * DM_STATE_HANDSHAKING slot whose attempt started at least stale_ms ago;
+ * every other state is false, since only a handshake can stall this way.
+ *
+ * Nothing acknowledges a handshake at the session layer. The initiator's INIT
+ * is retransmitted, but the responder drops a retransmitted INIT as a
+ * duplicate (its ephemeral key is unchanged) rather than re-answering it, so a
+ * single lost RESP ends the exchange with the initiator parked in
+ * DM_STATE_HANDSHAKING and the responder holding an ACTIVE session it will
+ * never use. Without this bound that slot is terminal: it suppresses the INIT
+ * of every later send to that peer, the desync self-heal cannot fire (it needs
+ * an undecryptable DM from the peer, which never comes), and DMs to that peer
+ * queue and expire forever no matter how many times a person re-sends.
+ *
+ * The age comes from last_active_ms, which dm_alloc stamps when the slot is
+ * taken and the caller re-stamps on each fresh INIT, so it measures the age of
+ * the attempt rather than of the session.
+ */
+bool dm_handshake_is_stale(const dm_session_t* s, uint32_t now_ms, uint32_t stale_ms);
+
+/*
  * Returns a slot for peer_addr: an existing slot for that peer if one
  * already exists (no cap check; not a new handshake), else a free
  * (DM_STATE_NONE) slot, else the slot with the smallest last_active_ms that
