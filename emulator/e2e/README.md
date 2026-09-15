@@ -62,12 +62,15 @@ bash emulator/e2e/run_e2e.sh
 
 ## Node resolution note
 
-The spec tree lives in `emulator/e2e/`, not inside `simulator/ui/` (where
-`@playwright/test` is installed, reusing `webapp/`'s pinned version per the
-task brief). Node resolves bare-specifier imports (`@playwright/test`) by
-walking up from each importing *file's* own directory, not the invoking
-shell's cwd -- `emulator/e2e/specs/../../../simulator/ui/node_modules` is
-never on that walk. `run_e2e.sh` fixes this the standard way for a spec tree
+The spec tree lives in `emulator/e2e/`, not inside `simulator/ui/`, which is
+the package that owns `@playwright/test` and pins its version. `webapp/` pins
+its own `playwright` separately and the two move independently, so the
+browser revision this suite runs comes from `simulator/ui/package-lock.json`
+alone, which is what the baked-chromium assert in `run_e2e.sh` is keyed to.
+Node resolves bare-specifier imports (`@playwright/test`) by walking up from
+each importing *file's* own directory, not the invoking shell's cwd --
+`emulator/e2e/specs/../../../simulator/ui/node_modules` is never on that
+walk. `run_e2e.sh` fixes this the standard way for a spec tree
 living outside its dependency's package: `ln -sfn` a `node_modules` symlink
 in `emulator/e2e/` pointing at `simulator/ui/node_modules`. `make clean`
 removes it.

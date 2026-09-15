@@ -27,7 +27,7 @@ func newEmuHarness() *emuHarness {
 		panic(err)
 	}
 	radioConfigInit(&sim.radio)
-	pcg32Seed(&sim.rng, 42)
+	C.pcg32_seed(&sim.rng, C.uint64_t(42))
 	sim.startPipeReader()
 	h.sim = sim
 	return h

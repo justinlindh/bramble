@@ -172,12 +172,6 @@ func partitionComponents(nodes *C.node_array_t, radio *C.radio_config_t) ([]int,
 	return out, count
 }
 
-// --- RNG ---
-
-func pcg32Seed(rng *C.pcg32_state_t, seed uint64) {
-	C.pcg32_seed(rng, C.uint64_t(seed))
-}
-
 // --- Scenario-level test harness ---
 //
 // _test.go files in this package avoid "C" directly (see radio_harness.go),

@@ -71,6 +71,16 @@ updates:
         update-types:
           - minor
           - patch
+    # The conventionalcommits preset major must match the
+    # conventional-changelog-writer major that release-notes-generator
+    # depends on, and npm cannot see that coupling. A preset major moves by
+    # hand in the same PR as the release-notes-generator major that pulls the
+    # matching writer; the Release config gate in quality.yml renders notes
+    # through the real configs and fails a mismatch on the PR.
+    ignore:
+      - dependency-name: conventional-changelog-conventionalcommits
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: npm
     directory: /webapp

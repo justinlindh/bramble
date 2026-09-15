@@ -20,8 +20,8 @@
 #include <stdint.h>
 
 /* Allow rail-gated voltage reads from now on. Called once by app_init after
- * BT_BOOT_DONE. Before this call battery_read_mv() returns 0 and touches no
- * hardware. */
+ * BT_BOOT_DONE. Before this call battery_get_status() reports 0 mv and
+ * touches no hardware. */
 void battery_runtime_arm(void);
 
 /* Persisted survival-latch verdict, for the boot trace (aux of
