@@ -10,6 +10,7 @@ set -u
 # image (bramble#222) bakes this same version; the assert below fails loud on
 # image drift instead of silently linting with a different ruff.
 RUFF_VERSION="0.12.10"
+RUFF_ARGS=(check scripts --select "E9,F63,F7,F82")
 
 # Analysis roots are repo-relative, so run from the repo root regardless of the
 # caller's working directory.
@@ -25,7 +26,7 @@ if [[ "${RUFF_USE_UVX:-0}" == "1" ]]; then
     echo "[ruff] FAIL: uvx not found. Install uv (https://docs.astral.sh/uv/) to run this gate locally." >&2
     exit 1
   fi
-  exec uvx --from "ruff==${RUFF_VERSION}" ruff check scripts --select E9,F63,F7,F82
+  exec uvx --from "ruff==${RUFF_VERSION}" ruff "${RUFF_ARGS[@]}"
 fi
 
 if ! command -v ruff >/dev/null 2>&1; then
@@ -39,4 +40,4 @@ if [[ "$got" != "$RUFF_VERSION" ]]; then
   exit 1
 fi
 
-exec ruff check scripts --select E9,F63,F7,F82
+exec ruff "${RUFF_ARGS[@]}"
