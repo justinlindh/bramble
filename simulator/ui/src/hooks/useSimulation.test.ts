@@ -98,3 +98,87 @@ describe('useSimulation btn wiring', () => {
     expect(dev!.addr).toBe('0x0000AB12');
   });
 });
+
+describe('useSimulation metrics decoding', () => {
+  // A frame carrying both the required counters and every optional counter, so
+  // a dropped field shows up as a missing key rather than a coincidental zero.
+  const frame = {
+    timestamp_us: 4_000_000,
+    active_nodes: 6,
+    total_packets: 240,
+    messages_sent: 50,
+    delivered: 40,
+    dropped: 10,
+    avg_latency_ms: 312.5,
+    retried: 7,
+    delivered_on_retry: 5,
+    dedup_dropped: 3,
+    airtime_deferred: 2,
+    fragments_sent: 9,
+    fragments_reassembled: 8,
+    crypto_encrypted: 11,
+    crypto_decrypted: 12,
+  };
+
+  beforeEach(() => {
+    MockWebSocket.last = null;
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function decode(type: string, raw: Record<string, unknown>) {
+    const { result } = renderHook(() => useSimulation());
+    act(() => {
+      MockWebSocket.last!.emit({ type, ...raw });
+    });
+    return result.current.state.metrics;
+  }
+
+  it('maps every counter and derives the delivery rate', () => {
+    expect(decode('metrics', frame)).toEqual({
+      timestamp_us: 4_000_000,
+      activeNodes: 6,
+      totalPackets: 240,
+      messagesSent: 50,
+      delivered: 40,
+      dropped: 10,
+      avgLatencyMs: 312.5,
+      deliveryRate: 80,
+      retried: 7,
+      deliveredOnRetry: 5,
+      dedupDropped: 3,
+      airtimeDeferred: 2,
+      fragmentsSent: 9,
+      fragmentsReassembled: 8,
+      cryptoEncrypted: 11,
+      cryptoDecrypted: 12,
+    });
+  });
+
+  it('decodes final_metrics the same way as metrics', () => {
+    expect(decode('final_metrics', frame)).toEqual(decode('metrics', frame));
+  });
+
+  it('defaults absent counters and avoids dividing by zero messages sent', () => {
+    expect(decode('metrics', { timestamp_us: 1_000 })).toEqual({
+      timestamp_us: 1_000,
+      activeNodes: 0,
+      totalPackets: 0,
+      messagesSent: 0,
+      delivered: 0,
+      dropped: 0,
+      avgLatencyMs: 0,
+      deliveryRate: 0,
+      retried: undefined,
+      deliveredOnRetry: undefined,
+      dedupDropped: undefined,
+      airtimeDeferred: undefined,
+      fragmentsSent: undefined,
+      fragmentsReassembled: undefined,
+      cryptoEncrypted: undefined,
+      cryptoDecrypted: undefined,
+    });
+  });
+});
