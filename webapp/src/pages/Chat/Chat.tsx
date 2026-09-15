@@ -12,6 +12,7 @@ import { ChannelDetailPanel } from './ChannelDetailPanel';
 import { VerifySafetyNumber } from './VerifySafetyNumber';
 import { loadPeerVerification, setPeerVerified } from '../../store/actions';
 import { formatDaySeparatorLabel, shouldInsertDaySeparator } from './chatDateFormatting';
+import { parseAddr } from '../../lib/addr';
 import styles from './Chat.module.css';
 
 export function isNearBottom(el: { scrollTop: number; clientHeight: number; scrollHeight: number }, threshold = 100): boolean {
@@ -149,7 +150,7 @@ function VerifySafetyNumberPanel({ addr, onClose }: { addr: number; onClose: () 
       sas={verification?.sas ?? ''}
       verified={verification?.verified ?? false}
       keyChanged={verification?.keyChanged ?? false}
-      onSetVerified={(peerAddr, v) => setPeerVerified(parseInt(peerAddr, 16), v)}
+      onSetVerified={(peerAddr, v) => setPeerVerified(parseAddr(peerAddr), v)}
       onClose={onClose}
     />
   );

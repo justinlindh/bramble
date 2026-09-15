@@ -102,7 +102,7 @@ const FIRMWARE_SCOPES = [
   // Radio, mesh, and transport layer.
   'airtime', 'ble', 'channel', 'channels', 'crypto', 'delivery', 'flooding',
   'mesh', 'msg_store', 'network_key', 'packet', 'radio', 'reliability',
-  'routing', 'timesync', 'wifi', 'ws',
+  'routing', 'timesync', 'timezone', 'wifi', 'ws',
   // Messaging features (dm, chat) and the identity/security layer under
   // them.
   'auth', 'dm', 'chat', 'identity', 'security',

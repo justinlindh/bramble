@@ -26,22 +26,6 @@ int ble_server_init(void);
 int ble_server_start(void);
 
 /**
- * Stop BLE advertising and disconnect any clients.
- */
-void ble_server_stop(void);
-
-/**
- * Check if a BLE client is connected.
- */
-bool ble_server_connected(void);
-
-/**
- * Send a JSON-RPC notification to the connected BLE client.
- * Data is chunked to fit BLE MTU.
- */
-int ble_server_notify(const char* json, size_t len);
-
-/**
  * Passkey display hook. When registered (display boards), pairing runs in
  * passkey-display mode: a fresh random 6-digit code per pairing attempt is
  * passed to the callback with show=true, and show=false clears it when the

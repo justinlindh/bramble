@@ -21,6 +21,11 @@ void nvs_fake_reset(void);
 /* Make nvs_open fail, standing in for a partition that is not there yet. */
 void nvs_fake_set_open_fails(bool fails);
 
+/* Make every setter fail after a successful open, standing in for a full or
+ * worn partition. Reads still work, so a store can be driven down the path
+ * where it holds a handle but cannot persist. */
+void nvs_fake_set_write_fails(bool fails);
+
 /* Direct access for test setup and assertions, bypassing the handle API. */
 void nvs_fake_put_blob(const char* ns, const char* key, const void* value, size_t len);
 bool nvs_fake_read_blob(const char* ns, const char* key, void* out, size_t* len);

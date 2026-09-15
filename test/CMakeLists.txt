@@ -2358,6 +2358,23 @@ target_include_directories(test_timezone PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
 )
 
+# Zone persistence. Links stubs/nvs_fake.c instead of esp_stubs.c's no-op NVS
+# block (they define the same symbols, so never both): the store test reads
+# back what it wrote and injects a corrupt value the setter would reject, to
+# prove a stored spec that no longer parses degrades to the default.
+add_executable(test_tz_store
+    test_tz_store.c
+    unity/unity.c
+    stubs/nvs_fake.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/tz_store.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/bramble_tz.c
+)
+target_include_directories(test_tz_store PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timezone/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+)
+
 # OTA URL policy tests (pure, no ESP deps)
 add_executable(test_ota_url
     test_ota_url.c

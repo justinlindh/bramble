@@ -532,12 +532,8 @@ export async function sendMessage(
     throw new Error(`Message too long (${messageBytes} bytes). Max is ${FRAGMENTED_MAX_BYTES} bytes.`);
   }
 
-  const fallbackAddr = (() => {
-    const raw = safeGetItem(LAST_NODE_ADDR_KEY);
-    if (!raw) return undefined;
-    const parsed = parseInt(raw, 16);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  })();
+  const raw = safeGetItem(LAST_NODE_ADDR_KEY);
+  const fallbackAddr = raw ? parseAddr(raw) : undefined;
   const myAddr = store.config?.identity?.address ?? fallbackAddr ?? 0;
   const msg = {
     id: uuid(),

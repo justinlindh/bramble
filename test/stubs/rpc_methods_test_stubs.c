@@ -398,11 +398,9 @@ uint32_t airtime_budget_next_refill_ms(const airtime_budget_t* ab, uint32_t now_
     (void)now_ms;
     return 0;
 }
-/* Correct signatures (uint32_t/uint8_t, matching battery.h): the previous
- * `int` return types were a latent UB mismatch against the real
- * declarations rpc_methods.c compiles against (undetected because these
- * two translation units never saw each other's prototype). */
-uint32_t battery_read_mv(void) { return 3700; }
+/* Signatures must match battery.h exactly. This translation unit and
+ * rpc_methods.c never see each other's prototypes, so a mismatch here is
+ * silent UB rather than a compile error. */
 uint8_t battery_read_pct(void) { return 85; }
 void battery_get_status(battery_status_t* out) {
     out->mv = 3700;
