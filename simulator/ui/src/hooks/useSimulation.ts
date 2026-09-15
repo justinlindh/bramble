@@ -400,6 +400,31 @@ function resolveAddrToId(addr: string, nodes: Map<string, SimNode>): string | nu
   return null;
 }
 
+// The `metrics` (periodic) and `final_metrics` (end-of-run) events carry the
+// identical field set, so both decode through here.
+function buildMetrics(raw: RawSimEvent, timestamp_us: number): Metrics {
+  const messagesSent = (raw.messages_sent as number) ?? 0;
+  const delivered = (raw.delivered as number) ?? 0;
+  return {
+    timestamp_us,
+    activeNodes: (raw.active_nodes as number) ?? 0,
+    totalPackets: (raw.total_packets as number) ?? 0,
+    messagesSent,
+    delivered,
+    dropped: (raw.dropped as number) ?? 0,
+    avgLatencyMs: (raw.avg_latency_ms as number) ?? 0,
+    deliveryRate: messagesSent > 0 ? (delivered / messagesSent) * 100 : 0,
+    retried: raw.retried as number | undefined,
+    deliveredOnRetry: raw.delivered_on_retry as number | undefined,
+    dedupDropped: raw.dedup_dropped as number | undefined,
+    airtimeDeferred: raw.airtime_deferred as number | undefined,
+    fragmentsSent: raw.fragments_sent as number | undefined,
+    fragmentsReassembled: raw.fragments_reassembled as number | undefined,
+    cryptoEncrypted: raw.crypto_encrypted as number | undefined,
+    cryptoDecrypted: raw.crypto_decrypted as number | undefined,
+  };
+}
+
 function parseEvent(raw: RawSimEvent, nodes: Map<string, SimNode>): SimAction[] {
   const actions: SimAction[] = [];
 
@@ -458,29 +483,7 @@ function parseEvent(raw: RawSimEvent, nodes: Map<string, SimNode>): SimAction[] 
       break;
     }
     case 'metrics': {
-      const totalPackets = (raw.total_packets as number) ?? 0;
-      const messagesSent = (raw.messages_sent as number) ?? 0;
-      const delivered = (raw.delivered as number) ?? 0;
-      const dropped = (raw.dropped as number) ?? 0;
-      const metrics: Metrics = {
-        timestamp_us,
-        activeNodes: (raw.active_nodes as number) ?? 0,
-        totalPackets,
-        messagesSent,
-        delivered,
-        dropped,
-        avgLatencyMs: (raw.avg_latency_ms as number) ?? 0,
-        deliveryRate: messagesSent > 0 ? (delivered / messagesSent) * 100 : 0,
-        retried: raw.retried as number | undefined,
-        deliveredOnRetry: raw.delivered_on_retry as number | undefined,
-        dedupDropped: raw.dedup_dropped as number | undefined,
-        airtimeDeferred: raw.airtime_deferred as number | undefined,
-        fragmentsSent: raw.fragments_sent as number | undefined,
-        fragmentsReassembled: raw.fragments_reassembled as number | undefined,
-        cryptoEncrypted: raw.crypto_encrypted as number | undefined,
-        cryptoDecrypted: raw.crypto_decrypted as number | undefined,
-      };
-      actions.push({ type: 'UPDATE_METRICS', metrics });
+      actions.push({ type: 'UPDATE_METRICS', metrics: buildMetrics(raw, timestamp_us) });
       break;
     }
     case 'sim_ended': {
@@ -488,30 +491,7 @@ function parseEvent(raw: RawSimEvent, nodes: Map<string, SimNode>): SimAction[] 
       break;
     }
     case 'final_metrics': {
-      // Treat same as metrics
-      const totalPackets = (raw.total_packets as number) ?? 0;
-      const messagesSent = (raw.messages_sent as number) ?? 0;
-      const delivered = (raw.delivered as number) ?? 0;
-      const dropped = (raw.dropped as number) ?? 0;
-      const metrics: Metrics = {
-        timestamp_us,
-        activeNodes: (raw.active_nodes as number) ?? 0,
-        totalPackets,
-        messagesSent,
-        delivered,
-        dropped,
-        avgLatencyMs: (raw.avg_latency_ms as number) ?? 0,
-        deliveryRate: messagesSent > 0 ? (delivered / messagesSent) * 100 : 0,
-        retried: raw.retried as number | undefined,
-        deliveredOnRetry: raw.delivered_on_retry as number | undefined,
-        dedupDropped: raw.dedup_dropped as number | undefined,
-        airtimeDeferred: raw.airtime_deferred as number | undefined,
-        fragmentsSent: raw.fragments_sent as number | undefined,
-        fragmentsReassembled: raw.fragments_reassembled as number | undefined,
-        cryptoEncrypted: raw.crypto_encrypted as number | undefined,
-        cryptoDecrypted: raw.crypto_decrypted as number | undefined,
-      };
-      actions.push({ type: 'UPDATE_METRICS', metrics });
+      actions.push({ type: 'UPDATE_METRICS', metrics: buildMetrics(raw, timestamp_us) });
       break;
     }
     case 'packet_sent': {
