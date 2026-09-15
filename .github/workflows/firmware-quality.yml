@@ -132,19 +132,13 @@ jobs:
         # in; both are pure functions of a fixture sdkconfig, no IDF, no board.
         run: bash scripts/test-antirollback-guard.sh
       - name: Ruff (required baseline profile)
-        # Baked into the runner image (bramble#222); the uvx invocation this
-        # replaced downloaded ruff from PyPI inside an always-run required
-        # gate on every PR (and the 16-runner startup herd DNS incident broke
-        # exactly that path once). The version assert fails loud on image
-        # drift instead of silently linting with a different ruff.
-        run: |
-          want="0.12.10"
-          got="$(ruff --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-          if [[ "$got" != "$want" ]]; then
-            echo "::error::ruff version mismatch: runner image has ${got:-unknown}, pinned version is ${want}. Bump RUFF_VERSION in the private runner-image definition or this pin so they agree."
-            exit 1
-          fi
-          ruff check scripts --select E9,F63,F7,F82
+        # Single-sourced with make ci-quality-ruff through
+        # scripts/lint/run-ruff.sh, so the pin and the rule profile cannot drift
+        # between a local `make ci` and this gate. ruff is baked into the runner
+        # image (bramble#222); the script asserts the image version and lints,
+        # rather than the uvx download that an always-run required gate turned
+        # into the 16-runner startup-herd DNS failure.
+        run: bash scripts/lint/run-ruff.sh
       - name: Required clang-format (full strict scope)
         run: bash scripts/lint/run-clang-format-check.sh --strict
       - name: cppcheck
