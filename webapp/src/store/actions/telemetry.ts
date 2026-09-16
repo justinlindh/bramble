@@ -69,6 +69,14 @@ export async function loadStatus(): Promise<void> {
 
 const REFILL_INTERVAL_MS = 3600000;
 
+// Build one rendered lane from its flat firmware fields, computing usedPct
+// (the 0-100 fraction of the budget consumed) once at construction. maxMs 0
+// means the lane has no budget, so nothing is used.
+function airtimeTier(name: AirtimeTier['name'], remainingMs: number, maxMs: number, refillAtMs: number): AirtimeTier {
+  const usedPct = maxMs > 0 ? Math.round(100 * (maxMs - remainingMs) / maxMs) : 0;
+  return { name, remainingMs, maxMs, usedPct, refillAtMs };
+}
+
 export function normalizeAirtime(raw: WirePartial<RpcSchemas['AirtimeResponse']>): AirtimeStatus {
   // Firmware returns flat lane fields; build the { tiers: [...] } shape the webapp renders.
   // next_refill_ms is a duration (ms until next refill). 0 means "just refilled",
@@ -77,18 +85,16 @@ export function normalizeAirtime(raw: WirePartial<RpcSchemas['AirtimeResponse']>
   const refillAtMs = Date.now() + (nextRefillMs > 0 ? nextRefillMs : REFILL_INTERVAL_MS);
 
   const tiers: AirtimeTier[] = [
-    { name: 'critical', remainingMs: raw.critical_remaining_ms ?? 0, maxMs: raw.critical_max_ms ?? 36000, usedPct: 0, refillAtMs },
-    { name: 'normal', remainingMs: raw.normal_remaining_ms ?? 0, maxMs: raw.normal_max_ms ?? 18000, usedPct: 0, refillAtMs },
-    { name: 'broadcast', remainingMs: raw.broadcast_remaining_ms ?? 0, maxMs: raw.broadcast_max_ms ?? 18000, usedPct: 0, refillAtMs },
+    airtimeTier('critical', raw.critical_remaining_ms ?? 0, raw.critical_max_ms ?? 36000, refillAtMs),
+    airtimeTier('normal', raw.normal_remaining_ms ?? 0, raw.normal_max_ms ?? 18000, refillAtMs),
+    airtimeTier('broadcast', raw.broadcast_remaining_ms ?? 0, raw.broadcast_max_ms ?? 18000, refillAtMs),
   ];
   // The receipt lane (PR #82, firmware getAirtime) only appears when the
   // firmware reports it; older firmware omits it and we keep three lanes.
   if (raw.receipt_max_ms !== undefined || raw.receipt_remaining_ms !== undefined) {
-    tiers.push({ name: 'receipt', remainingMs: raw.receipt_remaining_ms ?? 0, maxMs: raw.receipt_max_ms ?? 12000, usedPct: 0, refillAtMs });
+    tiers.push(airtimeTier('receipt', raw.receipt_remaining_ms ?? 0, raw.receipt_max_ms ?? 12000, refillAtMs));
   }
-  return {
-    tiers: tiers.map(t => ({ ...t, usedPct: t.maxMs > 0 ? Math.round(100 * (t.maxMs - t.remainingMs) / t.maxMs) : 0 })),
-  };
+  return { tiers };
 }
 
 export async function loadAirtime(): Promise<void> {
