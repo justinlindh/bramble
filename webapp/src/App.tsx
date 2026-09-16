@@ -4,6 +4,7 @@ import { disconnect, loadConnectionCapabilities, loadNeighbors, loadNetworkKeySt
 import { usePoll } from './hooks/usePoll';
 import { isAndroidShell } from './utils/platform';
 import { formatAddr0x } from './utils/address';
+import { resolveNodeName } from './utils/nodeName';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { DevicePickerModal } from './components/DevicePickerModal';
 import { UnprovisionedBanner } from './components/UnprovisionedBanner';
@@ -189,8 +190,8 @@ export default function App() {
   // Get node identifier: name if set, otherwise hex address
   const getNodeIdentifier = (): string | null => {
     if (!config?.identity) return null;
-    const name = config.identity.name?.trim();
-    if (name && name !== '' && name !== '(unnamed)') {
+    const name = resolveNodeName(config.identity.name);
+    if (name) {
       return name;
     }
     // Fallback to hex address
