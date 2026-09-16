@@ -5,6 +5,7 @@ import { useStore } from '../../store/index';
 import type { PeerLocation, Route } from '../../types/bramble';
 import { IconRoutes } from '../../components/Icons';
 import { formatAddr0x } from '../../utils/address';
+import { resolveNodeName } from '../../utils/nodeName';
 import { countEnabledShareTargets } from '../../lib/locationSharing';
 import { coarseZoneBounds, coarseZoneCenter } from './coarseZone';
 import styles from './Map.module.css';
@@ -76,10 +77,8 @@ export function Map() {
   const setMapFocusAddr = useStore(s => s.setMapFocusAddr);
 
   const selfAddr = config?.identity?.address;
-  const configuredSelfName = config?.identity?.name?.trim();
-  const selfName = configuredSelfName && configuredSelfName !== '(unnamed)'
-    ? configuredSelfName
-    : (selfAddr !== undefined ? peerNames.get(selfAddr) : undefined);
+  const selfName = resolveNodeName(config?.identity?.name)
+    ?? (selfAddr !== undefined ? peerNames.get(selfAddr) : undefined);
   const selfPeerLocation = selfAddr === undefined
     ? undefined
     : peerLocations.find(p => p.addr === selfAddr && p.tier === 'full' && !!p.position);
