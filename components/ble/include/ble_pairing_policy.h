@@ -28,10 +28,10 @@ typedef enum {
 
 ble_pairing_mode_t ble_pairing_mode_resolve(bool display_cb_registered, bool static_passkey_set);
 
-/* Exactly 6 ASCII digits; leading zeros significant. */
-bool ble_pairing_passkey_valid(const char* s);
-
-/* Valid string -> numeric passkey 0..999999. False on invalid input. */
+/* Parse exactly 6 ASCII digits (leading zeros significant) into a numeric
+ * passkey 0..999999. False (out untouched) on any other input. This is the
+ * single passkey-validity check: a caller that only needs the yes/no answer
+ * passes a scratch out and reads the bool. */
 bool ble_pairing_passkey_parse(const char* s, uint32_t* out);
 
 /* Advertising-restart delay after N consecutive failed pairing attempts:
