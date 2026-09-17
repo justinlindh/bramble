@@ -20,16 +20,17 @@ void test_mode_just_works_bootstrap(void) {
     TEST_ASSERT_EQUAL(BLE_PAIRING_JUST_WORKS, ble_pairing_mode_resolve(false, false));
 }
 
-void test_passkey_valid_exactly_six_digits(void) {
-    TEST_ASSERT_TRUE(ble_pairing_passkey_valid("123456"));
-    TEST_ASSERT_TRUE(ble_pairing_passkey_valid("000000"));
-    TEST_ASSERT_TRUE(ble_pairing_passkey_valid("999999"));
-    TEST_ASSERT_FALSE(ble_pairing_passkey_valid("12345"));
-    TEST_ASSERT_FALSE(ble_pairing_passkey_valid("1234567"));
-    TEST_ASSERT_FALSE(ble_pairing_passkey_valid("12345a"));
-    TEST_ASSERT_FALSE(ble_pairing_passkey_valid(" 12345"));
-    TEST_ASSERT_FALSE(ble_pairing_passkey_valid(""));
-    TEST_ASSERT_FALSE(ble_pairing_passkey_valid(NULL));
+void test_passkey_parse_accepts_six_digits_rejects_malformed(void) {
+    uint32_t scratch;
+    TEST_ASSERT_TRUE(ble_pairing_passkey_parse("123456", &scratch));
+    TEST_ASSERT_TRUE(ble_pairing_passkey_parse("000000", &scratch));
+    TEST_ASSERT_TRUE(ble_pairing_passkey_parse("999999", &scratch));
+    TEST_ASSERT_FALSE(ble_pairing_passkey_parse("12345", &scratch));
+    TEST_ASSERT_FALSE(ble_pairing_passkey_parse("1234567", &scratch));
+    TEST_ASSERT_FALSE(ble_pairing_passkey_parse("12345a", &scratch));
+    TEST_ASSERT_FALSE(ble_pairing_passkey_parse(" 12345", &scratch));
+    TEST_ASSERT_FALSE(ble_pairing_passkey_parse("", &scratch));
+    TEST_ASSERT_FALSE(ble_pairing_passkey_parse(NULL, &scratch));
 }
 
 void test_passkey_parse_preserves_leading_zeros(void) {
@@ -101,7 +102,7 @@ int main(void) {
     RUN_TEST(test_mode_display_cb_wins_over_static);
     RUN_TEST(test_mode_static_without_display);
     RUN_TEST(test_mode_just_works_bootstrap);
-    RUN_TEST(test_passkey_valid_exactly_six_digits);
+    RUN_TEST(test_passkey_parse_accepts_six_digits_rejects_malformed);
     RUN_TEST(test_passkey_parse_preserves_leading_zeros);
     RUN_TEST(test_backoff_schedule);
     RUN_TEST(test_mode_names_match_rpc_contract);
