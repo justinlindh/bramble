@@ -751,6 +751,7 @@ func (s *Sim) putSharedMetrics(m map[string]any) {
 	m["crypto_encrypted"] = uint64(s.metrics.crypto_encrypted)
 	m["crypto_decrypted"] = uint64(s.metrics.crypto_decrypted)
 	m["crypto_auth_failed"] = uint64(s.metrics.crypto_auth_failed)
+	m["frames_lost"] = uint64(s.metrics.dropped_packets)
 	m["collisions"] = uint64(s.metrics.collisions)
 	m["half_duplex_drops"] = uint64(s.metrics.half_duplex_drops)
 	m["capture_wins"] = uint64(s.metrics.capture_wins)
@@ -775,19 +776,18 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 	}
 	C.metrics_update_active_nodes(&s.metrics, C.int(active))
 
-	sent := uint64(s.metrics.messages_sent)
-	delivered := uint64(s.metrics.delivered_packets)
-	dropped := uint64(s.metrics.dropped_packets)
+	out := s.messageOutcomes()
 	metrics := map[string]any{
 		"type":          "metrics",
 		"timestamp_us":  ts,
 		"active_nodes":  active,
-		"messages_sent": sent,
-		"delivered":     delivered,
-		"dropped":       dropped,
+		"messages_sent": out.sent,
+		"delivered":     out.delivered,
+		"dropped":       out.dropped,
+		"undelivered":   out.undelivered,
 		// The same definition final_metrics reports, so a live reader and an
 		// end-of-run reader never disagree on what "delivery rate" means.
-		"message_delivery_rate": messageDeliveryRate(delivered, dropped, undeliveredCount(sent, delivered)),
+		"message_delivery_rate": messageDeliveryRate(out.delivered, out.dropped, out.undelivered),
 	}
 	s.putSharedMetrics(metrics)
 	s.emitJSON(metrics)
@@ -1293,8 +1293,8 @@ func (s *Sim) cmdSetBroadcastTelemetryMode(cmd Command) {
 func (s *Sim) complete() {
 	s.state = StateCompleted
 
-	sent := uint64(s.metrics.messages_sent)
-	delivered := uint64(s.metrics.delivered_packets)
+	out := s.messageOutcomes()
+	sent, delivered, dropped, undelivered := out.sent, out.delivered, out.dropped, out.undelivered
 	// confirmed is the TRUE confirmed-delivery count (bridge.c's
 	// bridge_msg_track_confirm, fired only when a delivery receipt reaches
 	// the true ORIGINATOR), as opposed to delivered above (destination reach
@@ -1302,9 +1302,6 @@ func (s *Sim) complete() {
 	// comment). confirmed <= delivered always, since a receipt can only
 	// exist after the destination decoded the message.
 	confirmed := uint64(s.metrics.confirmed_packets)
-	dropped := uint64(s.metrics.dropped_packets)
-	undelivered := undeliveredCount(sent, delivered)
-
 	// Per-node airtime distribution (real time-on-air transmitted), plus
 	// per-tier/per-limiter denial counts: budget_denied and
 	// rreq_rate_denied/rreq_fwd_denied live on each sim_node_t, summed here
@@ -1493,13 +1490,40 @@ func (s *Sim) complete() {
 	s.emitJSON(map[string]any{"type": "sim_ended"})
 }
 
-// undeliveredCount is the messages that went on air and never reached their
-// destination: sent - delivered, floored at zero.
-func undeliveredCount(sent, delivered uint64) uint64 {
-	if sent > delivered {
-		return sent - delivered
+// messageOutcomes partitions the scripted messages into the three terminal
+// states message_delivery_rate is defined over, so that
+// delivered + dropped + undelivered is the number of scripted messages.
+//
+// dropped is message-level only: messages that never reached the air plus
+// messages abandoned after sending. It is NOT metrics.dropped_packets, which
+// counts radio-level frame losses per receiver for every packet type and grows
+// with link loss and node count rather than with messages. A message abandoned
+// after sending is a subset of sent, so it leaves undelivered rather than being
+// counted in both.
+type messageOutcomes struct {
+	sent, delivered, dropped, undelivered uint64
+}
+
+func (s *Sim) messageOutcomes() messageOutcomes {
+	return partitionMessages(
+		uint64(s.metrics.messages_sent),
+		uint64(s.metrics.delivered_packets),
+		uint64(s.metrics.messages_dropped_presend),
+		uint64(s.metrics.messages_failed_postsend),
+	)
+}
+
+func partitionMessages(sent, delivered, droppedPreSend, failedPostSend uint64) messageOutcomes {
+	var undelivered uint64
+	if sent > delivered+failedPostSend {
+		undelivered = sent - delivered - failedPostSend
 	}
-	return 0
+	return messageOutcomes{
+		sent:        sent,
+		delivered:   delivered,
+		dropped:     droppedPreSend + failedPostSend,
+		undelivered: undelivered,
+	}
 }
 
 // messageDeliveryRate is delivered / (delivered + dropped + undelivered):
@@ -1853,7 +1877,7 @@ func (s *Sim) drainInstant() {
 // types past the duration are simply discarded.
 func (s *Sim) recordDropIfMessage(evt *C.sim_event_t) {
 	if evt._type == C.EVT_GENERATE_MESSAGE {
-		C.metrics_record_packet_dropped(&s.metrics)
+		C.metrics_record_message_dropped_presend(&s.metrics)
 		s.emitJSON(map[string]any{
 			"type": "message_dropped", "timestamp_us": s.duration,
 			"reason": "sim_ended",

@@ -35,7 +35,17 @@ typedef struct {
      * receipt can only return after the destination decoded the
      * message. */
     uint64_t confirmed_packets;
+    /* Radio-level frame losses, one per receiver that could not decode a frame,
+     * for every packet type. NOT a message count: see the two fields below. */
     uint64_t dropped_packets;
+    /* Scripted messages that never reached the air (no route before the retry
+     * limit, airtime budget denial, still queued at sim end). Disjoint from
+     * messages_sent. */
+    uint64_t messages_dropped_presend;
+    /* Scripted messages that were sent and then abandoned undelivered (route
+     * reported broken). A subset of messages_sent, so it must never be added
+     * to a denominator that already counts sent minus delivered. */
+    uint64_t messages_failed_postsend;
     uint64_t total_latency_us;
     uint64_t latency_count;
     uint64_t messages_retried;         /* ACK retransmissions triggered */
@@ -76,6 +86,8 @@ void metrics_record_packet_delivered(metrics_state_t* metrics, uint64_t latency_
  * packet_id only increments this once. */
 void metrics_record_packet_confirmed(metrics_state_t* metrics);
 void metrics_record_packet_dropped(metrics_state_t* metrics);
+void metrics_record_message_dropped_presend(metrics_state_t* metrics);
+void metrics_record_message_failed_postsend(metrics_state_t* metrics);
 void metrics_record_beacon_sent(metrics_state_t* metrics);
 void metrics_record_rreq_sent(metrics_state_t* metrics);
 void metrics_record_rrep_sent(metrics_state_t* metrics);

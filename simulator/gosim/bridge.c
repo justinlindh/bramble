@@ -580,6 +580,16 @@ static bool bridge_msg_track_is_broadcast(msg_tracker_t* track, int count, uint3
     return false;
 }
 
+/* True while packet_id is a scripted message that was sent and has not reached
+ * its destination. */
+static bool bridge_msg_track_is_pending(msg_tracker_t* track, int count, uint32_t packet_id) {
+    for (int i = 0; i < count; i++) {
+        if (track[i].active && track[i].packet_id == packet_id)
+            return true;
+    }
+    return false;
+}
+
 bool bridge_msg_track_complete(msg_tracker_t* track, int count, uint32_t packet_id, uint64_t now_us,
                                metrics_state_t* metrics) {
     for (int i = 0; i < count; i++) {
@@ -826,11 +836,17 @@ typedef struct {
     uint32_t broken_dest;
     uint64_t now_us;
     metrics_state_t* metrics;
+    msg_tracker_t* msg_track;
+    int msg_track_count;
 } rerr_failfast_ctx_t;
 
 static void _rerr_failfast_notify(uint32_t packet_id, const char* reason, void* ctx) {
     rerr_failfast_ctx_t* c = (rerr_failfast_ctx_t*)ctx;
-    metrics_record_packet_dropped(c->metrics);
+    /* Only a scripted message that has not reached its destination is a message
+     * failure. One that already arrived stays delivered, and a pending ack with
+     * no tracker entry (a roll-call answer) is not a scripted message at all. */
+    if (bridge_msg_track_is_pending(c->msg_track, c->msg_track_count, packet_id))
+        metrics_record_message_failed_postsend(c->metrics);
     fprintf(stdout,
             "{\"type\":\"message_dropped\",\"timestamp_us\":%llu"
             ",\"node\":\"%s\",\"dest\":\"0x%08X\",\"packet_id\":\"0x%08X\""
@@ -841,7 +857,8 @@ static void _rerr_failfast_notify(uint32_t packet_id, const char* reason, void* 
 
 static void _handle_rerr(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint64_t now_us,
                          uint32_t now_ms, node_array_t* nodes, radio_config_t* radio,
-                         pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics) {
+                         pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics,
+                         msg_tracker_t* msg_track, int msg_track_count) {
     (void)now_ms;
     bramble_rerr_t rerr;
     if (bramble_rerr_deserialize(&rerr, buf, len) != ESP_OK)
@@ -883,7 +900,14 @@ static void _handle_rerr(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
      * this the sender burns its whole retransmit ladder into a route the mesh
      * already reported dead. */
     if (rerr_failfast_applies(&rx->routes, rerr.broken_dest, route_marked_broken)) {
-        rerr_failfast_ctx_t ctx = {rx->id, rerr.broken_dest, now_us, metrics};
+        rerr_failfast_ctx_t ctx = {
+            .node_id = rx->id,
+            .broken_dest = rerr.broken_dest,
+            .now_us = now_us,
+            .metrics = metrics,
+            .msg_track = msg_track,
+            .msg_track_count = msg_track_count,
+        };
         for (int i = 0; i < MAX_PENDING_ACKS; i++) {
             pending_ack_t* pa = &rx->pending_acks.entries[i];
             if (!pa->active || pa->dest_addr != rerr.broken_dest)
@@ -2409,7 +2433,8 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
                      anomaly);
         break;
     case PKT_TYPE_RERR:
-        _handle_rerr(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng, events, metrics);
+        _handle_rerr(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng, events, metrics,
+                     msg_track, msg_track_count);
         break;
     case PKT_TYPE_DATA:
         _handle_data(rx, buf, len, event->data.packet.src_addr, rssi, event->data.packet.snr,
@@ -2521,14 +2546,26 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
                                     metrics_state_t* metrics, node_anomaly_tracker_t* anomaly,
                                     msg_tracker_t* msg_track, int msg_track_count) {
     sim_node_t* src = node_array_find_by_id(nodes, event->data.node.node_id);
-    if (!src || !src->active)
+    if (!src || !src->active) {
+        /* A scripted message whose source cannot originate it (killed, possibly
+         * while the message was still in its route-discovery retry ladder) is a
+         * message that never reached the air, not one that never existed. */
+        metrics_record_message_dropped_presend(metrics);
+        fprintf(stdout,
+                "{\"type\":\"message_dropped\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"dest\":\"0x%08X\",\"reason\":\"source_inactive\"}\n",
+                (unsigned long long)event->timestamp_us, event->data.node.node_id,
+                (unsigned)event->data.node.addr);
+        fflush(stdout);
         return;
+    }
 
     /* Mandatory-provisioning (Task 2): an unprovisioned node is INERT -- it
      * holds no network key, so it originates no authenticated DATA. */
     {
         bridge_node_ext_t* sext = bridge_node_ext_get((int)(src - nodes->nodes));
         if (sext && !sext->provisioned) {
+            metrics_record_message_dropped_presend(metrics);
             fprintf(stdout,
                     "{\"type\":\"unprovisioned_inert\",\"timestamp_us\":%llu"
                     ",\"node\":\"%s\",\"frame\":\"data\"}\n",
@@ -2596,7 +2633,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
                     ",\"node\":\"%s\",\"dest\":\"broadcast\",\"packet_id\":\"0x%08X\"}\n",
                     (unsigned long long)event->timestamp_us, src->id, hdr.packet_id);
         } else {
-            metrics_record_packet_dropped(metrics);
+            metrics_record_message_dropped_presend(metrics);
             emit_packet_dropped(stdout, event->timestamp_us, src->id, "airtime_budget");
         }
         fflush(stdout);
@@ -2609,7 +2646,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     int retry_count = (int)event->data.node.y;
 
     if (retry_count >= MAX_MSG_RETRIES) {
-        metrics_record_packet_dropped(metrics);
+        metrics_record_message_dropped_presend(metrics);
         fprintf(stdout,
                 "{\"type\":\"message_dropped\",\"timestamp_us\":%llu"
                 ",\"node\":\"%s\",\"dest\":\"0x%08X\",\"reason\":\"retry_timeout\""

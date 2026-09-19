@@ -17,6 +17,12 @@ void metrics_record_packet_delivered(metrics_state_t* metrics, uint64_t latency_
 void metrics_record_packet_confirmed(metrics_state_t* metrics) { metrics->confirmed_packets++; }
 
 void metrics_record_packet_dropped(metrics_state_t* metrics) { metrics->dropped_packets++; }
+void metrics_record_message_dropped_presend(metrics_state_t* metrics) {
+    metrics->messages_dropped_presend++;
+}
+void metrics_record_message_failed_postsend(metrics_state_t* metrics) {
+    metrics->messages_failed_postsend++;
+}
 
 void metrics_update_active_nodes(metrics_state_t* metrics, int count) {
     metrics->active_nodes = count;
