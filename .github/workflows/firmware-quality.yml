@@ -40,10 +40,21 @@ jobs:
     # Fork-head PRs run GitHub-hosted so fork code never reaches the
     # self-hosted pool; same-repo PRs, pushes, and dispatches follow
     # RUNNER_LABEL.
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork || contains(github.event.pull_request.labels.*.name, 'ci:hosted')) && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Set up Node on a GitHub-hosted runner
+        if: runner.environment == 'github-hosted'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Provision lint tools on a GitHub-hosted runner
+        # A fork pull request runs GitHub-hosted, where none of the baked tools
+        # exist. Self-hosted runs skip this and stay free of network installs;
+        # the asserts below check the result either way.
+        if: runner.environment == 'github-hosted'
+        run: bash scripts/ci-ensure-hosted-tools.sh static-checks
       - name: Assert required tools are pre-baked on the runner
         # ruff and markdownlint-cli2 joined this list with the bramble#222 bake
         # wave (runner image 1.2.0): both were previously fetched at run time
