@@ -79,6 +79,16 @@ int network_key_load_from_nvs(void);
 int network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t out[8]);
 
 /*
+ * Verify a received network_key_mac: returns 1 when mac matches the MAC of
+ * data under label, 0 otherwise. Rejects when network_key_mac fails BEFORE
+ * comparing, because the unprovisioned all-zero sentinel would otherwise match
+ * a forged all-zero mac. The compare is constant-time. Every verifier of a
+ * network_key_mac goes through here instead of pairing the two calls by hand.
+ */
+int network_key_mac_verify(const char* label, const uint8_t* data, size_t len,
+                           const uint8_t mac[8]);
+
+/*
  * One-way fingerprint of the current network key: SHA256(key)[0:4] when
  * provisioned. Safe to expose (does not reveal the key); identical on nodes
  * that share a key, so an operator can confirm a fleet converged without

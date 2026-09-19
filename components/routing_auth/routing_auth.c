@@ -1,22 +1,6 @@
 #include "routing_auth.h"
 #include "network_key.h"
-#include "crypto.h"
 #include <string.h>
-
-/* Shared verify tail for every network-key authenticator below: recompute the
- * expected 8-byte MAC over buf under domain and constant-time compare it
- * against the received hmac.
- *
- * CRITICAL: reject BEFORE the constant-time compare. When unprovisioned,
- * network_key_mac writes the all-zero sentinel and returns nonzero; comparing
- * that sentinel against a received all-zero MAC would otherwise ACCEPT a
- * forgery. Centralizing the check here means no authenticator can forget it. */
-static int verify_auth(const char* domain, const uint8_t* buf, size_t len, const uint8_t hmac[8]) {
-    uint8_t expect[8];
-    if (network_key_mac(domain, buf, len, expect) != 0)
-        return 0;
-    return crypto_ct_memeq(expect, hmac, sizeof(expect));
-}
 
 /* reporter_addr(4) || broken_dest(4) || broken_next_hop(4) || seq(6),
  * big-endian for the multi-byte fields, 18 bytes in all.
@@ -53,7 +37,7 @@ int rerr_sign(bramble_rerr_t* r) {
 int rerr_verify(const bramble_rerr_t* r) {
     uint8_t buf[18];
     rerr_build_auth_buf(r, buf);
-    return verify_auth("bramble-rerr-v2", buf, sizeof(buf), r->auth_hmac);
+    return network_key_mac_verify("bramble-rerr-v2", buf, sizeof(buf), r->auth_hmac);
 }
 
 /* src_addr(4) || ack_packet_id(4) || seq(6), big-endian for the
@@ -83,7 +67,7 @@ int ack_sign(bramble_ack_t* a) {
 int ack_verify(const bramble_ack_t* a) {
     uint8_t buf[14];
     ack_build_auth_buf(a, buf);
-    return verify_auth("bramble-ack-v2", buf, sizeof(buf), a->auth_hmac);
+    return network_key_mac_verify("bramble-ack-v2", buf, sizeof(buf), a->auth_hmac);
 }
 
 /* src_addr(4) || orig_packet_id(4) || seq(6), big-endian for the
@@ -113,7 +97,7 @@ int receipt_sign(bramble_delivery_receipt_t* r) {
 int receipt_verify(const bramble_delivery_receipt_t* r) {
     uint8_t buf[14];
     receipt_build_auth_buf(r, buf);
-    return verify_auth("bramble-receipt-v2", buf, sizeof(buf), r->auth_hmac);
+    return network_key_mac_verify("bramble-receipt-v2", buf, sizeof(buf), r->auth_hmac);
 }
 
 /* DATA origin authentication. The MAC covers exactly the
@@ -137,9 +121,9 @@ int data_auth_sign(const bramble_header_t* h, uint32_t src_addr, uint8_t out[8])
 int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t hmac[8]) {
     uint8_t buf[HEADER_SIZE + 4];
     data_build_auth_buf(h, src_addr, buf);
-    /* verify_auth rejects the unprovisioned all-zero MAC before comparing, so a
-     * keyless attacker never lays a reverse-route breadcrumb here. */
-    return verify_auth("bramble-data-v1", buf, sizeof(buf), hmac);
+    /* An unprovisioned node rejects every MAC, so a keyless attacker's
+     * all-zero MAC never lays a reverse-route breadcrumb here. */
+    return network_key_mac_verify("bramble-data-v1", buf, sizeof(buf), hmac);
 }
 
 /* src_addr(4, BE) || x25519_pub(32) || ed25519_pub(32) || sig(64) ||
@@ -176,7 +160,7 @@ int ident_relay_sign(bramble_identity_attestation_t* a) {
 int ident_relay_verify(const bramble_identity_attestation_t* a) {
     uint8_t buf[210];
     ident_relay_build_auth_buf(a, buf);
-    /* verify_auth rejects the unprovisioned all-zero MAC before comparing, so an
-     * unprovisioned relay never propagates an attestation. */
-    return verify_auth("bramble-ident-relay-v1", buf, sizeof(buf), a->auth_hmac);
+    /* An unprovisioned node rejects every MAC, so an unprovisioned relay
+     * never propagates an attestation. */
+    return network_key_mac_verify("bramble-ident-relay-v1", buf, sizeof(buf), a->auth_hmac);
 }

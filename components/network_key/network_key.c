@@ -181,6 +181,14 @@ int network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t 
     return 0;
 }
 
+int network_key_mac_verify(const char* label, const uint8_t* data, size_t len,
+                           const uint8_t mac[8]) {
+    uint8_t expect[8];
+    if (network_key_mac(label, data, len, expect) != 0)
+        return 0;
+    return crypto_ct_memeq(expect, mac, sizeof(expect));
+}
+
 void network_key_fingerprint(uint8_t out[4]) {
     uint8_t key[32];
     if (network_key_get(key) != 0) {
