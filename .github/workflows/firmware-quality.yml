@@ -82,11 +82,10 @@ jobs:
       - name: No em dash
         run: bash scripts/lint/check-no-em-dash.sh
       - name: Markdownlint
-        # markdownlint-cli2 is baked into the runner image (bramble#222). The
-        # wrapper uses the PATH binary after asserting it matches the pinned
-        # version (fail-loud on image drift), and keeps its pinned `npx`
-        # fallback for environments without the bake, so this step still needs
-        # no install step of its own.
+        # The wrapper uses the markdownlint-cli2 baked into the runner image
+        # (bramble#222) and fails on a version mismatch, so this required gate
+        # has no network dependency. Its pinned `npx` fallback is for local
+        # runs only.
         run: bash scripts/lint/run-markdownlint.sh
       - name: Board matrix covers every shipped board
         # Guards the gating hole this check was added for: if a board is added
