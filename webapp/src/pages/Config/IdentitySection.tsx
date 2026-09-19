@@ -5,6 +5,7 @@ import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
 import { encodeNodeShare } from '../../utils/channelShare';
 import { formatAddr0x } from '../../utils/address';
+import { resolveNodeName } from '../../utils/nodeName';
 import { clampToUtf8Bytes, NODE_NAME_MAX_BYTES } from '../../utils/byteLimit';
 import { IconKey, IconNodes } from '../../components/Icons';
 import { useTimedFlag } from '../../hooks/useTimedFlag';
@@ -16,12 +17,15 @@ interface IdentitySectionProps {
 }
 
 export function IdentitySection({ identity }: IdentitySectionProps) {
-  const [name, setName] = useState(identity.name);
+  // The firmware's "(unnamed)" sentinel is not a name: the field starts empty
+  // for it, and nothing exported or shared from here carries it.
+  const userName = resolveNodeName(identity.name) ?? '';
+  const [name, setName] = useState(userName);
 
   // Sync local name state when identity prop changes (e.g. after node applies validation/truncation)
   useEffect(() => {
-    setName(identity.name);
-  }, [identity.name]);
+    setName(userName);
+  }, [userName]);
   const [saving, setSaving] = useState(false);
   const [saved, flashSaved, resetSaved] = useTimedFlag(2000);
   const [error, setError] = useState('');
@@ -52,7 +56,7 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
         address: formatAddr0x(identity.address),
         pubkeyHash: formatAddr0x(identity.pubkeyHash),
         pubkey: identity.pubkeyB64,
-        name: identity.name,
+        name: userName,
         exportedAt: new Date().toISOString(),
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
@@ -155,8 +159,8 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
     {/* ── Node identity share modal ── */}
     {showNodeShare && (
       <QRShareModal
-        title={`Share node "${identity.name || addrHex}"`}
-        shareString={encodeNodeShare(identity.name, identity.address, identity.pubkeyB64)}
+        title={`Share node "${userName || addrHex}"`}
+        shareString={encodeNodeShare(userName, identity.address, identity.pubkeyB64)}
         description="Share this QR so others can save your public key and verify your identity. Does not expose private keys."
         onClose={() => setShowNodeShare(false)}
       />
