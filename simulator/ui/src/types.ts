@@ -75,7 +75,7 @@ export interface Metrics {
   delivered: number;
   dropped: number;
   avgLatencyMs: number;
-  deliveryRate: number; // 0-100 (messages delivered / messages sent)
+  deliveryRate: number; // 0-100, the simulator's message_delivery_rate
   // Enhanced metrics from component integration
   retried?: number;
   deliveredOnRetry?: number;
@@ -182,8 +182,8 @@ export type SimAction =
   | { type: 'ADD_NODE'; node: SimNode }
   | { type: 'UPDATE_NODE'; id: string; x: number; y: number; timestamp_us: number }
   | { type: 'REMOVE_NODE'; id: string; timestamp_us: number }
-  | { type: 'UPDATE_METRICS'; metrics: Metrics }
-  | { type: 'ADD_EVENT'; event: Omit<SimEvent, 'id'> }
+  | { type: 'UPDATE_METRICS'; metrics: Metrics; countersOnly?: boolean }
+  | { type: 'ADD_EVENT'; event: Omit<SimEvent, 'id' | 'timestamp_us'> & { timestamp_us?: number } }
   | { type: 'ADD_PACKET_ANIM'; from: string; to: string; pkt_type: string }
   | { type: 'EXPIRE_PACKETS'; now: number }
   | { type: 'SIM_ENDED' }

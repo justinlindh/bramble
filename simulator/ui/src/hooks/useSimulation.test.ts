@@ -33,15 +33,15 @@ class MockWebSocket {
   }
 }
 
-describe('useSimulation btn wiring', () => {
-  beforeEach(() => {
-    MockWebSocket.last = null;
-    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+beforeEach(() => {
+  MockWebSocket.last = null;
+  vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
+describe('useSimulation btn wiring', () => {
   it('sendButton emits the exact { type:"btn", node, id, edge } frame', () => {
     const { result } = renderHook(() => useSimulation());
     act(() => {
@@ -96,5 +96,119 @@ describe('useSimulation btn wiring', () => {
     expect(dev!.fbBusyMs).toBe(2600);
     expect(dev!.fbSeq).toBe(1);
     expect(dev!.addr).toBe('0x0000AB12');
+  });
+});
+
+describe('useSimulation metrics decoding', () => {
+  // A frame carrying both the required counters and every optional counter, so
+  // a dropped field shows up as a missing key rather than a coincidental zero.
+  const frame = {
+    timestamp_us: 4_000_000,
+    active_nodes: 6,
+    total_packets: 240,
+    messages_sent: 50,
+    delivered: 30,
+    dropped: 10,
+    avg_latency_ms: 312.5,
+    // 30 / (30 delivered + 10 dropped + 20 undelivered); delivered / sent would be 0.6.
+    message_delivery_rate: 0.5,
+    retried: 7,
+    delivered_on_retry: 5,
+    dedup_dropped: 3,
+    airtime_deferred: 2,
+    fragments_sent: 9,
+    fragments_reassembled: 8,
+    crypto_encrypted: 11,
+    crypto_decrypted: 12,
+  };
+
+  // The counters final_metrics carries. It has no timestamp_us and no
+  // active_nodes, matching what the simulator emits at the end of a run.
+  const { timestamp_us: _ts, active_nodes: _active, ...finalFrame } = {
+    ...frame,
+    delivered: 45,
+    dropped: 10,
+    message_delivery_rate: 0.75,
+  };
+
+  function decode(...frames: Record<string, unknown>[]) {
+    const { result } = renderHook(() => useSimulation());
+    act(() => {
+      for (const f of frames) MockWebSocket.last!.emit(f);
+    });
+    return result.current.state.metrics;
+  }
+
+  it('maps every counter and scales the delivery rate to a percentage', () => {
+    expect(decode({ type: 'metrics', ...frame })).toEqual({
+      timestamp_us: 4_000_000,
+      activeNodes: 6,
+      totalPackets: 240,
+      messagesSent: 50,
+      delivered: 30,
+      dropped: 10,
+      avgLatencyMs: 312.5,
+      deliveryRate: 50,
+      retried: 7,
+      deliveredOnRetry: 5,
+      dedupDropped: 3,
+      airtimeDeferred: 2,
+      fragmentsSent: 9,
+      fragmentsReassembled: 8,
+      cryptoEncrypted: 11,
+      cryptoDecrypted: 12,
+    });
+  });
+
+  it('takes the counters from final_metrics and keeps the clock and node count', () => {
+    const metrics = decode(
+      { type: 'metrics', ...frame },
+      { type: 'final_metrics', ...finalFrame },
+    );
+    expect(metrics).toMatchObject({
+      timestamp_us: 4_000_000,
+      activeNodes: 6,
+      delivered: 45,
+      dropped: 10,
+      deliveryRate: 75,
+      cryptoDecrypted: 12,
+    });
+  });
+
+  it('decodes a final_metrics that arrives with no periodic tick before it', () => {
+    expect(decode({ type: 'final_metrics', ...finalFrame })).toMatchObject({
+      timestamp_us: 0,
+      activeNodes: 0,
+      delivered: 45,
+      totalPackets: 240,
+    });
+  });
+
+  it('logs events that carry no timestamp at the current sim time', () => {
+    const { result } = renderHook(() => useSimulation());
+    act(() => {
+      MockWebSocket.last!.emit({ type: 'metrics', ...frame });
+      MockWebSocket.last!.emit({ type: 'final_metrics', ...finalFrame });
+      MockWebSocket.last!.emit({ type: 'sim_ended' });
+    });
+    const logged = result.current.state.events.map((e) => [e.type, e.timestamp_us]);
+    expect(logged).toEqual([
+      ['metrics', 4_000_000],
+      ['final_metrics', 4_000_000],
+      ['sim_ended', 4_000_000],
+    ]);
+  });
+
+  it('defaults absent counters and an absent delivery rate to zero', () => {
+    expect(decode({ type: 'metrics', timestamp_us: 1_000 })).toEqual({
+      timestamp_us: 1_000,
+      activeNodes: 0,
+      totalPackets: 0,
+      messagesSent: 0,
+      delivered: 0,
+      dropped: 0,
+      avgLatencyMs: 0,
+      deliveryRate: 0,
+    });
   });
 });
