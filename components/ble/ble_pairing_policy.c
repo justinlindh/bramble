@@ -31,11 +31,6 @@ bool ble_pairing_passkey_parse(const char* s, uint32_t* out) {
     return true;
 }
 
-bool ble_pairing_passkey_valid(const char* s) {
-    uint32_t scratch;
-    return ble_pairing_passkey_parse(s, &scratch);
-}
-
 uint32_t ble_pairing_backoff_ms(unsigned consecutive_failures) {
     if (consecutive_failures == 0) {
         return 0;
