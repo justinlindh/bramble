@@ -255,7 +255,7 @@ That is a missing tool, not a failing check. The tools these targets need:
 | `ci-quality-shellcheck`, `ci-fw-shellcheck` | `shellcheck` | <https://www.shellcheck.net/> or your package manager |
 | `ci-quality-cppcheck` | `cppcheck` | <https://cppcheck.sourceforge.io/> or your package manager |
 | `ci-quality-actionlint`, `ci-fw-actionlint` | `actionlint` | <https://github.com/rhysd/actionlint> (`ci-fw-actionlint` falls back to `go run` if Go is installed) |
-| `ci-quality-ruff` | `uvx` | <https://docs.astral.sh/uv/> |
+| `ci-quality-ruff` | `ruff` at the version pinned in `scripts/lint/run-ruff.sh`, or `uvx` to fetch it | <https://docs.astral.sh/uv/> |
 | `ci-fw-clang-format` | `clang-format` | your LLVM package |
 | `ci-quality-board-build` | ESP-IDF v5.4.1 | [BUILDING.md](BUILDING.md) |
 

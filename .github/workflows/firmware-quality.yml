@@ -132,12 +132,10 @@ jobs:
         # in; both are pure functions of a fixture sdkconfig, no IDF, no board.
         run: bash scripts/test-antirollback-guard.sh
       - name: Ruff (required baseline profile)
-        # Single-sourced with make ci-quality-ruff through
-        # scripts/lint/run-ruff.sh, so the pin and the rule profile cannot drift
-        # between a local `make ci` and this gate. ruff is baked into the runner
-        # image (bramble#222); the script asserts the image version and lints,
-        # rather than the uvx download that an always-run required gate turned
-        # into the 16-runner startup-herd DNS failure.
+        # The wrapper holds the ruff pin and rule profile, shared with `make
+        # ci-quality-ruff`. It uses the ruff baked into the runner image
+        # (bramble#222) and fails on a version mismatch, so this required gate
+        # has no network dependency.
         run: bash scripts/lint/run-ruff.sh
       - name: Required clang-format (full strict scope)
         run: bash scripts/lint/run-clang-format-check.sh --strict

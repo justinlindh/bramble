@@ -78,7 +78,7 @@ ci-quality-shellcheck:
 		scripts/validate-broadcast-telemetry.sh
 
 ci-quality-ruff:
-	RUFF_USE_UVX=1 bash scripts/lint/run-ruff.sh
+	bash scripts/lint/run-ruff.sh
 
 ci-quality-cppcheck:
 	bash scripts/lint/run-cppcheck.sh
