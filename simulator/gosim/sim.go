@@ -733,7 +733,7 @@ func (s *Sim) handleInterferenceEnd(evt *C.sim_event_t) {
 
 // putSharedMetrics fills the counter and rate fields the periodic "metrics"
 // tick and the terminal "final_metrics" event report identically into m.
-// Both events call this instead of inlining these 19 key/value pairs
+// Both events call this instead of inlining these key/value pairs
 // verbatim, so a change to one field (a renamed counter, a different
 // divisor) cannot land in only one of the two payloads and let them silently
 // drift. The fields that legitimately differ between the two events
