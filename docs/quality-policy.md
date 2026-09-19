@@ -197,8 +197,8 @@ actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-f
 
 bash scripts/lint/check-no-internal-refs.sh
 bash scripts/lint/check-no-em-dash.sh
-bash scripts/lint/run-markdownlint.sh         # uses markdownlint-cli2 on PATH if present,
-                                               # else falls back to a pinned npx invocation
+bash scripts/lint/run-markdownlint.sh         # uses markdownlint-cli2 on PATH when it matches the pin,
+                                               # else (outside CI) a pinned npx invocation
 
 # Local-only helpers (not wired into CI)
 bash scripts/lint/run-clang-format-check.sh
