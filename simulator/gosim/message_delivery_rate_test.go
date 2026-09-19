@@ -49,14 +49,13 @@ func TestMetricsTickCarriesTheTerminalStateDeliveryRate(t *testing.T) {
 		if !ok {
 			t.Fatalf("metrics tick has no message_delivery_rate: %s", line)
 		}
-		sent, _ := evt["messages_sent"].(float64)
 		delivered, _ := evt["delivered"].(float64)
 		dropped, _ := evt["dropped"].(float64)
-		want := messageDeliveryRate(uint64(delivered), uint64(dropped),
-			undeliveredCount(uint64(sent), uint64(delivered)))
+		undelivered, _ := evt["undelivered"].(float64)
+		want := messageDeliveryRate(uint64(delivered), uint64(dropped), uint64(undelivered))
 		if diff := rate - want; diff > 1e-9 || diff < -1e-9 {
-			t.Fatalf("tick message_delivery_rate = %v, want %v (sent=%v delivered=%v dropped=%v)",
-				rate, want, sent, delivered, dropped)
+			t.Fatalf("tick message_delivery_rate = %v, want %v (delivered=%v dropped=%v undelivered=%v)",
+				rate, want, delivered, dropped, undelivered)
 		}
 		if rate > 0 {
 			nonZero++

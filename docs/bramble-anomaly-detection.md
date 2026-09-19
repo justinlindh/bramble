@@ -104,9 +104,10 @@ If a route exists but the DATA packet is lost in transit (e.g., swallowed by a b
 
 - **`messages_sent`**: total messages that produced a DATA packet
 - **`delivered`**: messages confirmed received at the destination
-- **`undelivered`**: `messages_sent - delivered` (route existed but delivery failed)
-- **`dropped`**: messages that could never find a route and timed out
+- **`undelivered`**: sent messages with no outcome by the end of the run, `messages_sent - delivered` minus the sent messages counted under `dropped`
+- **`dropped`**: messages given up on. Most never reached the air: no route before the retry limit (`retry_timeout`), refused by the airtime budget, still pending retry when the simulation ends (`sim_ended`), scripted from a node that is down (`source_inactive`), or scripted from an unprovisioned node (which emits `unprovisioned_inert` rather than a `message_dropped` event). The rest were sent and then abandoned when the mesh reported the route broken (`route_broken`)
+- **`frames_lost`**: radio-level frame losses, one per receiver that failed to decode a frame, across every packet type. This is a channel figure, not a message figure, and grows with link loss and node count
 
-Messages pending retry when the simulation ends are also counted as dropped.
+Every scripted message lands in exactly one of `delivered`, `dropped` and `undelivered`, so the three sum to the scripted message count, and `message_delivery_rate` is `delivered` over that sum. `frames_lost` is deliberately outside it.
 
 **Note:** gosim now runs the firmware's real reliability machinery (3-tier: fire-and-forget, acknowledged, reliable) and measures ACK retransmission and receipt return paths under loss; see the `reliability-ack-retry` and `reliability-path-trace` scenarios, both gated in `simulator/gosim/scenario_gate_test.go`, and [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md). The detection timings quoted in this document are from the February simulation runs that introduced the detectors and have not been re-measured since.
