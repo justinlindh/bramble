@@ -158,12 +158,23 @@ function simReducer(state: SimState, action: SimAction): SimState {
       return { ...state, nodes, currentTime: Math.max(state.currentTime, action.timestamp_us) };
     }
 
-    case 'UPDATE_METRICS':
+    case 'UPDATE_METRICS': {
+      // final_metrics reports counters only, with no timestamp_us or
+      // active_nodes, so the clock and the node count hold their last values
+      // instead of falling to zero at the end of a run.
+      const metrics = action.countersOnly
+        ? {
+            ...action.metrics,
+            timestamp_us: state.currentTime,
+            activeNodes: state.metrics?.activeNodes ?? 0,
+          }
+        : action.metrics;
       return {
         ...state,
-        metrics: action.metrics,
-        currentTime: Math.max(state.currentTime, action.metrics.timestamp_us),
+        metrics,
+        currentTime: Math.max(state.currentTime, metrics.timestamp_us),
       };
+    }
 
     case 'ADD_EVENT': {
       const id = state.eventCounter + 1;
@@ -400,8 +411,9 @@ function resolveAddrToId(addr: string, nodes: Map<string, SimNode>): string | nu
   return null;
 }
 
-// The `metrics` (periodic) and `final_metrics` (end-of-run) events carry the
-// identical field set, so both decode through here.
+// Decodes the counters the `metrics` (periodic) and `final_metrics`
+// (end-of-run) events share. Only the periodic event carries timestamp_us and
+// active_nodes; the reducer fills those in for the final one.
 function buildMetrics(raw: RawSimEvent, timestamp_us: number): Metrics {
   const messagesSent = (raw.messages_sent as number) ?? 0;
   const delivered = (raw.delivered as number) ?? 0;
@@ -491,7 +503,11 @@ function parseEvent(raw: RawSimEvent, nodes: Map<string, SimNode>): SimAction[] 
       break;
     }
     case 'final_metrics': {
-      actions.push({ type: 'UPDATE_METRICS', metrics: buildMetrics(raw, timestamp_us) });
+      actions.push({
+        type: 'UPDATE_METRICS',
+        metrics: buildMetrics(raw, timestamp_us),
+        countersOnly: true,
+      });
       break;
     }
     case 'packet_sent': {

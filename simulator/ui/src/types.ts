@@ -182,7 +182,7 @@ export type SimAction =
   | { type: 'ADD_NODE'; node: SimNode }
   | { type: 'UPDATE_NODE'; id: string; x: number; y: number; timestamp_us: number }
   | { type: 'REMOVE_NODE'; id: string; timestamp_us: number }
-  | { type: 'UPDATE_METRICS'; metrics: Metrics }
+  | { type: 'UPDATE_METRICS'; metrics: Metrics; countersOnly?: boolean }
   | { type: 'ADD_EVENT'; event: Omit<SimEvent, 'id'> }
   | { type: 'ADD_PACKET_ANIM'; from: string; to: string; pkt_type: string }
   | { type: 'EXPIRE_PACKETS'; now: number }

@@ -33,15 +33,15 @@ class MockWebSocket {
   }
 }
 
-describe('useSimulation btn wiring', () => {
-  beforeEach(() => {
-    MockWebSocket.last = null;
-    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+beforeEach(() => {
+  MockWebSocket.last = null;
+  vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
+describe('useSimulation btn wiring', () => {
   it('sendButton emits the exact { type:"btn", node, id, edge } frame', () => {
     const { result } = renderHook(() => useSimulation());
     act(() => {
@@ -120,24 +120,24 @@ describe('useSimulation metrics decoding', () => {
     crypto_decrypted: 12,
   };
 
-  beforeEach(() => {
-    MockWebSocket.last = null;
-    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  // The counters final_metrics carries. It has no timestamp_us and no
+  // active_nodes, matching what the simulator emits at the end of a run.
+  const { timestamp_us: _ts, active_nodes: _active, ...finalFrame } = {
+    ...frame,
+    delivered: 45,
+    dropped: 5,
+  };
 
-  function decode(type: string, raw: Record<string, unknown>) {
+  function decode(...frames: Record<string, unknown>[]) {
     const { result } = renderHook(() => useSimulation());
     act(() => {
-      MockWebSocket.last!.emit({ type, ...raw });
+      for (const f of frames) MockWebSocket.last!.emit(f);
     });
     return result.current.state.metrics;
   }
 
   it('maps every counter and derives the delivery rate', () => {
-    expect(decode('metrics', frame)).toEqual({
+    expect(decode({ type: 'metrics', ...frame })).toEqual({
       timestamp_us: 4_000_000,
       activeNodes: 6,
       totalPackets: 240,
@@ -157,12 +157,32 @@ describe('useSimulation metrics decoding', () => {
     });
   });
 
-  it('decodes final_metrics the same way as metrics', () => {
-    expect(decode('final_metrics', frame)).toEqual(decode('metrics', frame));
+  it('takes the counters from final_metrics and keeps the clock and node count', () => {
+    const metrics = decode(
+      { type: 'metrics', ...frame },
+      { type: 'final_metrics', ...finalFrame },
+    );
+    expect(metrics).toMatchObject({
+      timestamp_us: 4_000_000,
+      activeNodes: 6,
+      delivered: 45,
+      dropped: 5,
+      deliveryRate: 90,
+      cryptoDecrypted: 12,
+    });
+  });
+
+  it('decodes a final_metrics that arrives with no periodic tick before it', () => {
+    expect(decode({ type: 'final_metrics', ...finalFrame })).toMatchObject({
+      timestamp_us: 0,
+      activeNodes: 0,
+      delivered: 45,
+      totalPackets: 240,
+    });
   });
 
   it('defaults absent counters and avoids dividing by zero messages sent', () => {
-    expect(decode('metrics', { timestamp_us: 1_000 })).toEqual({
+    expect(decode({ type: 'metrics', timestamp_us: 1_000 })).toEqual({
       timestamp_us: 1_000,
       activeNodes: 0,
       totalPackets: 0,
@@ -171,14 +191,6 @@ describe('useSimulation metrics decoding', () => {
       dropped: 0,
       avgLatencyMs: 0,
       deliveryRate: 0,
-      retried: undefined,
-      deliveredOnRetry: undefined,
-      dedupDropped: undefined,
-      airtimeDeferred: undefined,
-      fragmentsSent: undefined,
-      fragmentsReassembled: undefined,
-      cryptoEncrypted: undefined,
-      cryptoDecrypted: undefined,
     });
   });
 });
