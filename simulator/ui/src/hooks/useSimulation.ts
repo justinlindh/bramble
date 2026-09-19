@@ -682,46 +682,41 @@ export function useSimulation() {
     const wsUrl = `ws://${window.location.host}`;
     console.log(`[useSimulation] Connecting to ${wsUrl}`);
 
-    let ws: WebSocket;
-    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    // Open the broker socket once. A closed connection dispatches DISCONNECTED
+    // and stays down: the dev server serving this UI is the sim process, so a
+    // close means the run ended, not a transient drop to retry through.
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
 
-    function connect() {
-      ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+    ws.addEventListener('open', () => {
+      console.log('[useSimulation] Connected');
+      dispatch({ type: 'CONNECTED' });
+    });
 
-      ws.addEventListener('open', () => {
-        console.log('[useSimulation] Connected');
-        dispatch({ type: 'CONNECTED' });
-      });
-
-      ws.addEventListener('message', (event: MessageEvent<string>) => {
-        try {
-          const raw = JSON.parse(event.data) as RawSimEvent;
-          const actions = parseEvent(raw, stateRef.current.nodes);
-          for (const action of actions) {
-            dispatch(action);
-          }
-        } catch (err) {
-          console.warn('[useSimulation] Failed to parse message:', event.data, err);
+    ws.addEventListener('message', (event: MessageEvent<string>) => {
+      try {
+        const raw = JSON.parse(event.data) as RawSimEvent;
+        const actions = parseEvent(raw, stateRef.current.nodes);
+        for (const action of actions) {
+          dispatch(action);
         }
-      });
+      } catch (err) {
+        console.warn('[useSimulation] Failed to parse message:', event.data, err);
+      }
+    });
 
-      ws.addEventListener('close', () => {
-        console.log('[useSimulation] Connection closed');
-        dispatch({ type: 'DISCONNECTED' });
-        wsRef.current = null;
-      });
+    ws.addEventListener('close', () => {
+      console.log('[useSimulation] Connection closed');
+      dispatch({ type: 'DISCONNECTED' });
+      wsRef.current = null;
+    });
 
-      ws.addEventListener('error', (err) => {
-        console.error('[useSimulation] WebSocket error:', err);
-      });
-    }
-
-    connect();
+    ws.addEventListener('error', (err) => {
+      console.error('[useSimulation] WebSocket error:', err);
+    });
 
     return () => {
-      clearTimeout(reconnectTimer);
-      ws?.close();
+      ws.close();
       wsRef.current = null;
     };
   }, []);
