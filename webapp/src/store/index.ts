@@ -23,6 +23,7 @@ import type {
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 import type { SavedDevice } from '../lib/deviceBook';
 import { formatAddrHex, formatAddr0x } from '../utils/address';
+import { resolveNodeName } from '../utils/nodeName';
 import { DEFAULT_CAPABILITIES } from '../lib/connectionMode';
 import { mergeBroadcastRecipient } from '../lib/broadcastRecipients';
 import { BROADCAST_ADDR } from '../lib/addr';
@@ -262,8 +263,9 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   setConfig: (c) => set(state => {
     const names = new Map(state.peerNames);
-    if (c.identity?.name && c.identity.name !== '(unnamed)') {
-      names.set(c.identity.address, c.identity.name);
+    const selfName = resolveNodeName(c.identity?.name);
+    if (selfName && c.identity) {
+      names.set(c.identity.address, selfName);
     }
 
     // Build set of valid channel indexes from config
