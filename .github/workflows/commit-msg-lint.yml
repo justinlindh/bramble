@@ -28,6 +28,9 @@ defaults:
 jobs:
   commitlint:
     name: Commitlint
+    env:
+      # The major this repo's commitlint configs are written for.
+      COMMITLINT_MAJOR: 19
     # Deliberately unconditional. A job-level skip is sound only where its
     # predicate is a pure function of the head SHA (see docs/ci.md), and the PR
     # title this job lints is not one: the same SHA carries different titles
@@ -38,7 +41,7 @@ jobs:
 
     # Fork-head PRs run GitHub-hosted so fork code never reaches the
     # self-hosted pool; same-repo PRs and dispatches follow RUNNER_LABEL.
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork || contains(github.event.pull_request.labels.*.name, 'ci:hosted')) && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
     # Every other job on the self-hosted pool bounds itself; this one inherited
     # the 360-minute default, so a hung checkout could hold a pool pod for six
     # hours. The work here is a checkout and two commitlint invocations.
@@ -49,6 +52,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node on a GitHub-hosted runner
+        if: runner.environment == 'github-hosted'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Provision commitlint on a GitHub-hosted runner
+        # A fork pull request runs GitHub-hosted, where commitlint is not baked.
+        if: runner.environment == 'github-hosted'
+        run: bash scripts/ci-ensure-hosted-tools.sh commitlint "$COMMITLINT_MAJOR"
       - name: Assert baked commitlint matches the pinned major
         # @commitlint/cli and @commitlint/config-conventional are baked into
         # the runner image (bramble#222, image 1.2.0), replacing an npm
@@ -60,8 +72,8 @@ jobs:
           command -v commitlint >/dev/null || { echo "::error::commitlint missing from runner image (bramble#222 bake contract)"; exit 1; }
           got="$(commitlint --version)"
           case "$got" in
-            *@19.*) echo "commitlint ${got} matches pinned major 19" ;;
-            *) echo "::error::commitlint version ${got} does not match pinned major 19. Bump COMMITLINT_MAJOR in the private runner-image definition or this pin so they agree."; exit 1 ;;
+            *@"${COMMITLINT_MAJOR}".*) echo "commitlint ${got} matches pinned major ${COMMITLINT_MAJOR}" ;;
+            *) echo "::error::commitlint version ${got} does not match pinned major ${COMMITLINT_MAJOR}. Bump COMMITLINT_MAJOR in the private runner-image definition or this workflow so they agree."; exit 1 ;;
           esac
 
       - name: Pick the commitlint config

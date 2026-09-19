@@ -73,12 +73,37 @@ contract and restore the policy if it ever drifts.
 Second, every job that targets the pool selects its runner with
 
 ```yaml
-runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
+runs-on: ${{ (github.event.pull_request.head.repo.fork || contains(github.event.pull_request.labels.*.name, 'ci:hosted')) && 'ubuntu-latest' || vars.RUNNER_LABEL || 'ubuntu-latest' }}
 ```
 
 so an approved fork-head run executes on GitHub-hosted runners and fork code
 never reaches the pool; for same-repo PRs, `main` pushes, and dispatches the
 fork test is false or absent, so they follow `RUNNER_LABEL`.
+
+The `ci:hosted` label sends a same-repo PR down the same GitHub-hosted path. It
+exists so that path can be exercised without a fork: label the PR when opening
+it (`gh pr create --label ci:hosted`), since a label added later only takes
+effect on the next push. Only the hosted direction is reachable this way, so
+the label cannot move untrusted code onto the pool.
+
+The self-hosted runner image bakes every tool these jobs need and the jobs
+assert that rather than install. A GitHub-hosted runner has none of it, so the
+jobs that assert a baked tool provision it first, in steps gated on
+`runner.environment == 'github-hosted'` that self-hosted runs never execute:
+
+- `Static checks`, `Commitlint` and `nRF52840 build` run
+  `scripts/ci-ensure-hosted-tools.sh <profile>`, which installs the versions
+  the repo already pins (`.clang-format-version`, the lint wrappers, the
+  Makefile's actionlint fallback, `COMMITLINT_MAJOR` in the workflow, and the
+  Ubuntu 24.04 ARM toolchain `.arm-gcc-version` names).
+- `Board build smoke` and `Emulator suite` run inside the public
+  `espressif/idf` image at the `.esp-idf-version` tag, selected by a
+  `container:` expression that is empty on the pool. The emulator job adds the
+  packages `emulator/Dockerfile` adds to that same base, and the Playwright
+  browser its lockfile resolves.
+
+The baked-tool asserts run after provisioning on both kinds of runner, so a
+drifted hosted install fails the same way a drifted image does.
 The expression is defense-in-depth, not the boundary: a `pull_request` run
 takes its workflow definitions from the PR's merge ref, so a fork PR can edit
 the expression out. The approval gate above is what stands between an
