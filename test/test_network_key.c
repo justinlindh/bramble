@@ -232,6 +232,49 @@ void test_mac_bound_is_checked_before_key_material_is_touched(void) {
     TEST_ASSERT_EQUAL_MEMORY(zero, out, sizeof(out));
 }
 
+/* ── network_key_mac_verify ──────────────────────────────────────────── */
+
+void test_mac_verify_unprovisioned_rejects_the_all_zero_forgery(void) {
+    /* The hazard the helper exists for: unprovisioned network_key_mac emits an
+     * all-zero sentinel, so a naive compare would ACCEPT an all-zero mac. */
+    const uint8_t data[] = "rrep-body";
+    const uint8_t zero[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    TEST_ASSERT_EQUAL(0, network_key_mac_verify("bramble-rrep-v2", data, sizeof(data), zero));
+}
+
+void test_mac_verify_accepts_a_genuine_mac_and_rejects_a_tampered_one(void) {
+    uint8_t key[32];
+    crypto_random(key, 32);
+    network_key_set_provisioned(key);
+
+    const uint8_t data[] = "ack-body";
+    uint8_t mac[8];
+    TEST_ASSERT_EQUAL(0, network_key_mac("bramble-ack-v2", data, sizeof(data), mac));
+    TEST_ASSERT_EQUAL(1, network_key_mac_verify("bramble-ack-v2", data, sizeof(data), mac));
+
+    /* Wrong domain label, flipped MAC bit, and flipped data bit all fail. */
+    TEST_ASSERT_EQUAL(0, network_key_mac_verify("bramble-rerr-v2", data, sizeof(data), mac));
+    mac[7] ^= 0x01;
+    TEST_ASSERT_EQUAL(0, network_key_mac_verify("bramble-ack-v2", data, sizeof(data), mac));
+    mac[7] ^= 0x01;
+    uint8_t tampered[sizeof(data)];
+    memcpy(tampered, data, sizeof(data));
+    tampered[0] ^= 0x01;
+    TEST_ASSERT_EQUAL(0, network_key_mac_verify("bramble-ack-v2", tampered, sizeof(tampered), mac));
+}
+
+void test_mac_verify_rejects_the_all_zero_forgery_on_oversized_data(void) {
+    /* Provisioned, but the request is past the data bound, so network_key_mac
+     * fails closed with the same sentinel. The forgery must still be refused. */
+    uint8_t key[32];
+    crypto_random(key, 32);
+    network_key_set_provisioned(key);
+
+    static uint8_t data[256];
+    const uint8_t zero[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    TEST_ASSERT_EQUAL(0, network_key_mac_verify("bramble-rrep-v2", data, sizeof(data), zero));
+}
+
 /* ── NVS persistence round-trip ──────────────────────────────────────── */
 
 void test_load_from_nvs_returns_nonzero_when_nothing_stored(void) {
@@ -351,6 +394,9 @@ int main(void) {
     RUN_TEST(test_mac_accepts_the_maximum_data_length);
     RUN_TEST(test_mac_rejects_oversized_label_at_runtime);
     RUN_TEST(test_mac_bound_is_checked_before_key_material_is_touched);
+    RUN_TEST(test_mac_verify_unprovisioned_rejects_the_all_zero_forgery);
+    RUN_TEST(test_mac_verify_accepts_a_genuine_mac_and_rejects_a_tampered_one);
+    RUN_TEST(test_mac_verify_rejects_the_all_zero_forgery_on_oversized_data);
     RUN_TEST(test_set_from_hex_provisions_a_valid_key);
     RUN_TEST(test_set_from_hex_accepts_mixed_case);
     RUN_TEST(test_set_from_hex_rejects_wrong_length);
