@@ -178,13 +178,16 @@ function simReducer(state: SimState, action: SimAction): SimState {
 
     case 'ADD_EVENT': {
       const id = state.eventCounter + 1;
-      const newEvent = { ...action.event, id };
+      // An event the simulator sends without a timestamp (the end-of-run
+      // summaries, sim_ended) happened at the current sim time, not at zero.
+      const timestamp_us = action.event.timestamp_us ?? state.currentTime;
+      const newEvent = { ...action.event, timestamp_us, id };
       const events = [...state.events, newEvent].slice(-MAX_EVENTS);
       return {
         ...state,
         events,
         eventCounter: id,
-        currentTime: Math.max(state.currentTime, action.event.timestamp_us),
+        currentTime: Math.max(state.currentTime, timestamp_us),
       };
     }
 
@@ -415,17 +418,17 @@ function resolveAddrToId(addr: string, nodes: Map<string, SimNode>): string | nu
 // (end-of-run) events share. Only the periodic event carries timestamp_us and
 // active_nodes; the reducer fills those in for the final one.
 function buildMetrics(raw: RawSimEvent, timestamp_us: number): Metrics {
-  const messagesSent = (raw.messages_sent as number) ?? 0;
-  const delivered = (raw.delivered as number) ?? 0;
   return {
     timestamp_us,
     activeNodes: (raw.active_nodes as number) ?? 0,
     totalPackets: (raw.total_packets as number) ?? 0,
-    messagesSent,
-    delivered,
+    messagesSent: (raw.messages_sent as number) ?? 0,
+    delivered: (raw.delivered as number) ?? 0,
     dropped: (raw.dropped as number) ?? 0,
     avgLatencyMs: (raw.avg_latency_ms as number) ?? 0,
-    deliveryRate: messagesSent > 0 ? (delivered / messagesSent) * 100 : 0,
+    // The simulator owns the definition (delivered over every message that
+    // reached a terminal state); both events report it as a 0-1 fraction.
+    deliveryRate: ((raw.message_delivery_rate as number) ?? 0) * 100,
     retried: raw.retried as number | undefined,
     deliveredOnRetry: raw.delivered_on_retry as number | undefined,
     dedupDropped: raw.dedup_dropped as number | undefined,
@@ -449,7 +452,7 @@ function parseEvent(raw: RawSimEvent, nodes: Map<string, SimNode>): SimAction[] 
   if (!deviceStreamTypes.has(type)) {
     actions.push({
       type: 'ADD_EVENT',
-      event: { type, timestamp_us, details: rest },
+      event: { type, timestamp_us: typeof rawTs === 'number' ? rawTs : undefined, details: rest },
     });
   }
 

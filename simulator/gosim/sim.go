@@ -775,13 +775,19 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 	}
 	C.metrics_update_active_nodes(&s.metrics, C.int(active))
 
+	sent := uint64(s.metrics.messages_sent)
+	delivered := uint64(s.metrics.delivered_packets)
+	dropped := uint64(s.metrics.dropped_packets)
 	metrics := map[string]any{
 		"type":          "metrics",
 		"timestamp_us":  ts,
 		"active_nodes":  active,
-		"messages_sent": uint64(s.metrics.messages_sent),
-		"delivered":     uint64(s.metrics.delivered_packets),
-		"dropped":       uint64(s.metrics.dropped_packets),
+		"messages_sent": sent,
+		"delivered":     delivered,
+		"dropped":       dropped,
+		// The same definition final_metrics reports, so a live reader and an
+		// end-of-run reader never disagree on what "delivery rate" means.
+		"message_delivery_rate": messageDeliveryRate(delivered, dropped, undeliveredCount(sent, delivered)),
 	}
 	s.putSharedMetrics(metrics)
 	s.emitJSON(metrics)
@@ -1297,10 +1303,7 @@ func (s *Sim) complete() {
 	// exist after the destination decoded the message.
 	confirmed := uint64(s.metrics.confirmed_packets)
 	dropped := uint64(s.metrics.dropped_packets)
-	undelivered := uint64(0)
-	if sent > delivered {
-		undelivered = sent - delivered
-	}
+	undelivered := undeliveredCount(sent, delivered)
 
 	// Per-node airtime distribution (real time-on-air transmitted), plus
 	// per-tier/per-limiter denial counts: budget_denied and
@@ -1488,6 +1491,15 @@ func (s *Sim) complete() {
 	}
 
 	s.emitJSON(map[string]any{"type": "sim_ended"})
+}
+
+// undeliveredCount is the messages that went on air and never reached their
+// destination: sent - delivered, floored at zero.
+func undeliveredCount(sent, delivered uint64) uint64 {
+	if sent > delivered {
+		return sent - delivered
+	}
+	return 0
 }
 
 // messageDeliveryRate is delivered / (delivered + dropped + undelivered):

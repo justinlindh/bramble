@@ -107,9 +107,11 @@ describe('useSimulation metrics decoding', () => {
     active_nodes: 6,
     total_packets: 240,
     messages_sent: 50,
-    delivered: 40,
+    delivered: 30,
     dropped: 10,
     avg_latency_ms: 312.5,
+    // 30 / (30 delivered + 10 dropped + 20 undelivered); delivered / sent would be 0.6.
+    message_delivery_rate: 0.5,
     retried: 7,
     delivered_on_retry: 5,
     dedup_dropped: 3,
@@ -125,7 +127,8 @@ describe('useSimulation metrics decoding', () => {
   const { timestamp_us: _ts, active_nodes: _active, ...finalFrame } = {
     ...frame,
     delivered: 45,
-    dropped: 5,
+    dropped: 10,
+    message_delivery_rate: 0.75,
   };
 
   function decode(...frames: Record<string, unknown>[]) {
@@ -136,16 +139,16 @@ describe('useSimulation metrics decoding', () => {
     return result.current.state.metrics;
   }
 
-  it('maps every counter and derives the delivery rate', () => {
+  it('maps every counter and scales the delivery rate to a percentage', () => {
     expect(decode({ type: 'metrics', ...frame })).toEqual({
       timestamp_us: 4_000_000,
       activeNodes: 6,
       totalPackets: 240,
       messagesSent: 50,
-      delivered: 40,
+      delivered: 30,
       dropped: 10,
       avgLatencyMs: 312.5,
-      deliveryRate: 80,
+      deliveryRate: 50,
       retried: 7,
       deliveredOnRetry: 5,
       dedupDropped: 3,
@@ -166,8 +169,8 @@ describe('useSimulation metrics decoding', () => {
       timestamp_us: 4_000_000,
       activeNodes: 6,
       delivered: 45,
-      dropped: 5,
-      deliveryRate: 90,
+      dropped: 10,
+      deliveryRate: 75,
       cryptoDecrypted: 12,
     });
   });
@@ -181,7 +184,22 @@ describe('useSimulation metrics decoding', () => {
     });
   });
 
-  it('defaults absent counters and avoids dividing by zero messages sent', () => {
+  it('logs events that carry no timestamp at the current sim time', () => {
+    const { result } = renderHook(() => useSimulation());
+    act(() => {
+      MockWebSocket.last!.emit({ type: 'metrics', ...frame });
+      MockWebSocket.last!.emit({ type: 'final_metrics', ...finalFrame });
+      MockWebSocket.last!.emit({ type: 'sim_ended' });
+    });
+    const logged = result.current.state.events.map((e) => [e.type, e.timestamp_us]);
+    expect(logged).toEqual([
+      ['metrics', 4_000_000],
+      ['final_metrics', 4_000_000],
+      ['sim_ended', 4_000_000],
+    ]);
+  });
+
+  it('defaults absent counters and an absent delivery rate to zero', () => {
     expect(decode({ type: 'metrics', timestamp_us: 1_000 })).toEqual({
       timestamp_us: 1_000,
       activeNodes: 0,
