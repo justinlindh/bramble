@@ -1,4 +1,4 @@
-/** The user's contact names: the key PeerManager writes and the store seeds peerNames from. */
+/** The user's contact names in localStorage. The store is their only reader and writer. */
 import { loadAddrMap, saveAddrMap } from '../utils/persistedAddrMap';
 
 const CONTACT_NAMES_KEY = 'bramble:peerNames';

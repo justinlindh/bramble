@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useStore } from '../../store/index';
+import { resolvePeerName } from '../../store/peerName';
 import type { PeerLocation, Route } from '../../types/bramble';
 import { IconRoutes } from '../../components/Icons';
 import { formatAddr0x } from '../../utils/address';
@@ -70,6 +71,7 @@ export function Map() {
   const peerLocations = useStore(s => s.peerLocations);
   const status = useStore(s => s.status);
   const peerNames = useStore(s => s.peerNames);
+  const contactNames = useStore(s => s.contactNames);
   const routes = useStore(s => s.routes);
   const showRoutes = useStore(s => s.showRoutes);
   const setShowRoutes = useStore(s => s.setShowRoutes);
@@ -156,7 +158,7 @@ export function Map() {
     // Peers
     for (const peer of peerLocations) {
       if (selfAddr !== undefined && peer.addr === selfAddr) continue;
-      const peerDisplayName = peer.name || peerNames.get(peer.addr);
+      const peerDisplayName = resolvePeerName(peer.addr, peerNames, peerLocations, contactNames);
 
       if (peer.tier === 'full' && peer.position) {
         const ll = L.latLng(peer.position.lat, peer.position.lon);
@@ -191,7 +193,7 @@ export function Map() {
       map.fitBounds(L.latLngBounds(bounds).pad(0.2));
       lastFitPeerKeyRef.current = visiblePeerKey;
     }
-  }, [selfPos, selfAddr, selfName, peerLocations, peerNames]);
+  }, [selfPos, selfAddr, selfName, peerLocations, peerNames, contactNames]);
 
   // Draw route lines
   useEffect(() => {

@@ -4,6 +4,7 @@ import { render } from '@testing-library/react';
 const fitBoundsMock = vi.fn();
 const circleMarkerMock = vi.fn();
 const rectangleMock = vi.fn();
+const tooltipTexts: string[] = [];
 
 const mapMock = {
   setView: vi.fn(function () { return mapMock; }),
@@ -15,7 +16,10 @@ const mapMock = {
 const markerLikeLayer = () => {
   const layer: any = {
     bindPopup: vi.fn(() => layer),
-    bindTooltip: vi.fn(() => layer),
+    bindTooltip: vi.fn((text: string) => {
+      tooltipTexts.push(text);
+      return layer;
+    }),
     addTo: vi.fn(() => layer),
   };
   return layer;
@@ -58,6 +62,7 @@ describe('Map behavior', () => {
     fitBoundsMock.mockClear();
     circleMarkerMock.mockClear();
     rectangleMock.mockClear();
+    tooltipTexts.length = 0;
     state = {
       config: { identity: { address: 0x11111111, name: 'Self' }, location: { enabled: true, default_tier: 'coarse', interval_s: 300, source: 'gps' } },
       peerLocations: [
@@ -104,6 +109,22 @@ describe('Map behavior', () => {
 
     const { getByText } = render(<MapPage />);
     expect(getByText(/Sharing coarse updates every 300s via gps/i)).toBeTruthy();
+  });
+
+  it('labels a peer with its contact name over the name its telemetry carries', () => {
+    state = {
+      ...state,
+      peerLocations: [
+        { addr: 0x22222222, name: 'Beacon Name', tier: 'full', position: { lat: 10, lon: 20, accuracy: 15 } },
+      ],
+      contactNames: new globalThis.Map<number, string>([[0x22222222, 'My Peer']]),
+      peerNames: new globalThis.Map<number, string>([[0x22222222, 'My Peer']]),
+    };
+
+    render(<MapPage />);
+
+    expect(tooltipTexts.some((t) => t.includes('My Peer'))).toBe(true);
+    expect(tooltipTexts.some((t) => t.includes('Beacon Name'))).toBe(false);
   });
 
   it('draws a coarse-tier peer as a zone rectangle around its quantized position', () => {

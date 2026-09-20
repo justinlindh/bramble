@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PeerManager } from '../../src/pages/Config/PeerManager';
 import { useStore } from '../../src/store';
 import type { Neighbor, PeerLocation, Route } from '../../src/types/bramble';
@@ -9,13 +9,22 @@ describe('PeerManager contact import/export', () => {
   const routes: Route[] = [];
   const peerLocations: PeerLocation[] = [];
 
+  // Contact names live in the store, which persists them; seed both the way a
+  // page load with these names already saved would leave them.
+  function seedContacts(contacts: Record<number, string>) {
+    localStorage.setItem('bramble:peerNames', JSON.stringify(contacts));
+    const contactNames = new Map(Object.entries(contacts).map(([addr, name]) => [Number(addr), name]));
+    useStore.setState({ contactNames, learnedNames: new Map(), peerNames: new Map(contactNames) });
+  }
+
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
+    seedContacts({});
   });
 
   it('exports contacts from localStorage as JSON download', async () => {
-    localStorage.setItem('bramble:peerNames', JSON.stringify({ [0x1234abcd]: 'Alice' }));
+    seedContacts({ [0x1234abcd]: 'Alice' });
 
     const createObjectURL = vi.fn(() => 'blob:test');
     const revokeObjectURL = vi.fn();
@@ -34,7 +43,7 @@ describe('PeerManager contact import/export', () => {
   });
 
   it('imports contacts and keeps existing names when conflicts are declined', async () => {
-    localStorage.setItem('bramble:peerNames', JSON.stringify({ [0x1234abcd]: 'Existing' }));
+    seedContacts({ [0x1234abcd]: 'Existing' });
     vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(<PeerManager neighbors={neighbors} routes={routes} peerLocations={peerLocations} />);
@@ -60,8 +69,7 @@ describe('PeerManager contact import/export', () => {
   });
 
   it('pushes imported names into the store and leaves a declined overwrite out of it', async () => {
-    localStorage.setItem('bramble:peerNames', JSON.stringify({ [0x1234abcd]: 'Existing' }));
-    useStore.setState({ peerNames: new Map([[0x1234abcd, 'Existing']]) });
+    seedContacts({ [0x1234abcd]: 'Existing' });
     vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(<PeerManager neighbors={neighbors} routes={routes} peerLocations={peerLocations} />);
@@ -80,8 +88,17 @@ describe('PeerManager contact import/export', () => {
     expect(useStore.getState().peerNames.get(0x1234abcd)).toBe('Existing');
   });
 
+  it('lists a contact name assigned through the store while it is mounted', () => {
+    render(<PeerManager neighbors={neighbors} routes={routes} peerLocations={peerLocations} />);
+    expect(screen.queryByText('Alice')).not.toBeInTheDocument();
+
+    act(() => useStore.getState().setContactName(0x1234abcd, 'Alice'));
+
+    expect(screen.getByText('Alice')).toBeInTheDocument();
+  });
+
   it('allows editing and persisting notes for a peer', async () => {
-    localStorage.setItem('bramble:peerNames', JSON.stringify({ [0x1234abcd]: 'Alice' }));
+    seedContacts({ [0x1234abcd]: 'Alice' });
 
     render(<PeerManager neighbors={neighbors} routes={routes} peerLocations={peerLocations} />);
 
@@ -96,7 +113,7 @@ describe('PeerManager contact import/export', () => {
   });
 
   it('lists a peer known only through location telemetry', () => {
-    localStorage.setItem('bramble:peerNames', JSON.stringify({ [0x89abcdef]: 'LocOnly' }));
+    seedContacts({ [0x89abcdef]: 'LocOnly' });
     const locationOnly: PeerLocation[] = [
       { addr: 0x89abcdef, name: '', tier: 'presence', position: null, online: true, lastUpdatedMs: 500 },
     ];
