@@ -317,6 +317,8 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
 
         if (canWrite) {
           nextNames.set(addr, record.name);
+          // Same store sync handleSaveName does, so the name shows outside Config at once.
+          useStore.getState().setPeerName(addr, record.name);
           importedCount += 1;
         }
 

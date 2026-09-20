@@ -237,10 +237,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   activeTab: loadActiveTab(),
   showRoutes: loadShowRoutes(),
   probeResult: null,
-  // Seed from the persisted user-assigned contact names so a peer's name shows
-  // app-wide (chat, nodes, map) immediately after a reload, not only once the
-  // user re-opens Config. Live beacon and message names merge in on top during
-  // the session.
   peerNames: loadContactNames(),
   devices: [],
   peerLocations: [],
@@ -417,7 +413,8 @@ export const useStore = create<AppState & Actions>((set) => ({
     conversations: new Map(),
     neighbors: undefined,
     routes: [],
-    peerNames: new Map(),
+    // Names learned from the previous node go; the user's contact names stay.
+    peerNames: loadContactNames(),
     config: null,
     status: null,
     airtime: null,
