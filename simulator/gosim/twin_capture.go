@@ -27,10 +27,12 @@ type twinObservedExport struct {
 	JSON       []byte
 }
 
-// captureTwinExports serializes every active node's observed mesh state at the
-// simulation's current time, exactly as calling bramble.exportTopology on each
-// device would.
-func captureTwinExports(s *Sim) []twinObservedExport {
+// TwinExports serializes every active node's observed mesh state at the end of
+// a finished run, exactly as calling bramble.exportTopology on each device
+// would. It is the Go-typed entry point _test.go files use (they avoid "C"
+// directly; see radio_harness.go).
+func (r *scenarioRunResult) TwinExports() []twinObservedExport {
+	s := r.sim
 	var out []twinObservedExport
 	for i := 0; i < int(s.nodes.count); i++ {
 		node := C.node_array_get(&s.nodes, C.int(i))
@@ -50,22 +52,11 @@ func captureTwinExports(s *Sim) []twinObservedExport {
 	return out
 }
 
-// TwinExports is captureTwinExports over a finished run, the Go-typed entry
-// point _test.go files use (they avoid "C" directly; see radio_harness.go).
-func (r *scenarioRunResult) TwinExports() []twinObservedExport {
-	return captureTwinExports(r.sim)
-}
-
-// AudibleLinks is twinAudibleLinks over a finished run, the ground truth a
-// reconstruction is compared against.
+// AudibleLinks reports, for a finished run, every ordered node pair the radio
+// model would actually carry a frame across: the ground truth an imported
+// reconstruction is measured against. Keys are scenario ids.
 func (r *scenarioRunResult) AudibleLinks() map[[2]string]bool {
-	return twinAudibleLinks(r.sim)
-}
-
-// twinAudibleLinks reports, for a finished run, every ordered node pair the
-// radio model would actually carry a frame across: the ground truth an
-// imported reconstruction is measured against. Keys are scenario ids.
-func twinAudibleLinks(s *Sim) map[[2]string]bool {
+	s := r.sim
 	out := map[[2]string]bool{}
 	for i := 0; i < int(s.nodes.count); i++ {
 		tx := C.node_array_get(&s.nodes, C.int(i))
