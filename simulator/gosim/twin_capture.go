@@ -14,6 +14,9 @@ import "C"
 // That is what the twin's round-trip check rests on: the reconstruction is fed
 // documents written by firmware code, not by a second implementation of the
 // schema that could agree with itself and disagree with a device.
+//
+// The methods here are the Go-typed entry points _test.go files use, because a
+// _test.go file cannot import "C" (see radio_harness.go).
 
 import "unsafe"
 
@@ -29,12 +32,11 @@ type twinObservedExport struct {
 
 // TwinExports serializes every active node's observed mesh state at the end of
 // a finished run, exactly as calling bramble.exportTopology on each device
-// would. It is the Go-typed entry point _test.go files use (they avoid "C"
-// directly; see radio_harness.go).
+// would.
 func (r *scenarioRunResult) TwinExports() []twinObservedExport {
 	s := r.sim
 	var out []twinObservedExport
-	for i := 0; i < int(s.nodes.count); i++ {
+	for i := 0; i < nodeCount(&s.nodes); i++ {
 		node := C.node_array_get(&s.nodes, C.int(i))
 		if !bool(node.active) {
 			continue
@@ -57,13 +59,14 @@ func (r *scenarioRunResult) TwinExports() []twinObservedExport {
 // reconstruction is measured against. Keys are scenario ids.
 func (r *scenarioRunResult) AudibleLinks() map[[2]string]bool {
 	s := r.sim
+	n := nodeCount(&s.nodes)
 	out := map[[2]string]bool{}
-	for i := 0; i < int(s.nodes.count); i++ {
+	for i := 0; i < n; i++ {
 		tx := C.node_array_get(&s.nodes, C.int(i))
 		if !bool(tx.active) {
 			continue
 		}
-		for j := 0; j < int(s.nodes.count); j++ {
+		for j := 0; j < n; j++ {
 			if i == j {
 				continue
 			}
