@@ -26,12 +26,21 @@ import (
 // many to spawn. env carries optional extra environment for the process on top
 // of the always-set NODE_DIR and EMU_BROKER.
 type firmwareNodeSpec struct {
-	Type      string
-	Binary    string
-	Count     int
-	Positions [][2]float32
-	Label     string
-	Env       map[string]string
+	Type      string            `json:"type"`
+	Binary    string            `json:"binary"`
+	Count     int               `json:"count"`
+	Positions [][2]float32      `json:"positions"`
+	Label     string            `json:"label"`
+	Env       map[string]string `json:"env"`
+}
+
+// instances is how many processes the group spawns: Count, or 1 when the
+// scenario omits it or gives a non-positive value.
+func (g firmwareNodeSpec) instances() int {
+	if g.Count <= 0 {
+		return 1
+	}
+	return g.Count
 }
 
 // Supervisor spawns and babysits the firmware node processes for a scenario. It
@@ -105,10 +114,7 @@ func (s *Supervisor) run() {
 	defer s.wg.Done()
 	for gi := range s.groups {
 		g := s.groups[gi]
-		count := g.Count
-		if count <= 0 {
-			count = 1
-		}
+		count := g.instances()
 		label := g.Label
 		if label == "" {
 			label = fmt.Sprintf("fw%d", gi)
