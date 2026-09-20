@@ -6,7 +6,7 @@ import { useStore } from '../index';
 import { formatAddrHex } from '../../utils/address';
 import { parseAddr } from '../../lib/addr';
 import type { BrambleConfig, LocationConfig, LocationTier, TimezoneInfo } from '../../types/bramble';
-import type { RpcSchemas, WirePartial } from '../../types/rpc';
+import type { RpcMethod, RpcParams, RpcResult, RpcSchemas, WirePartial } from '../../types/rpc';
 import { loadPeerLocations, loadStatus } from './telemetry';
 
 // Wire types: the contract schema made deep-optional plus every legacy key
@@ -114,56 +114,50 @@ function assertOk(result: unknown, fallback: string): void {
   }
 }
 
-export async function saveRadio(radio: import('../../types/bramble').RadioConfig): Promise<void> {
-  const client = requireClient();
-  const result = await client.rpc('bramble.setRadio', radio as unknown as Record<string, unknown>);
-  assertOk(result, 'Radio config failed');
+/** Run a config-mutating RPC, throw on ok:false, reload config; returns the result. */
+async function mutateThenReloadConfig<M extends RpcMethod>(
+  method: M,
+  params: RpcParams<M>,
+  errMsg: string,
+): Promise<RpcResult<M>> {
+  const result = await requireClient().rpc(method, params);
+  assertOk(result, errMsg);
   await loadConfig();
+  return result;
+}
+
+export async function saveRadio(radio: import('../../types/bramble').RadioConfig): Promise<void> {
+  await mutateThenReloadConfig('bramble.setRadio', radio, 'Radio config failed');
 }
 
 export async function saveNodeName(name: string): Promise<void> {
-  const client = requireClient();
-  await client.rpc('bramble.setNodeName', { name });
-  await loadConfig();
+  await mutateThenReloadConfig('bramble.setNodeName', { name }, 'Failed to set node name');
 }
 
 export async function addChannel(name: string, psk?: string): Promise<number> {
-  const client = requireClient();
-  const result = await client.rpc<{ ok: boolean; index: number; error?: string }>('bramble.addChannel', {
-    name,
-    ...(psk ? { psk } : {}),
-  });
-  assertOk(result, 'Failed to add channel');
-  await loadConfig();
-  return result.index;
+  const { index } = await mutateThenReloadConfig(
+    'bramble.addChannel',
+    { name, ...(psk ? { psk } : {}) },
+    'Failed to add channel',
+  );
+  if (index === undefined) throw new Error('Failed to add channel');
+  return index;
 }
 
 export async function removeChannel(index: number): Promise<void> {
-  const client = requireClient();
-  const result = await client.rpc('bramble.removeChannel', { index });
-  assertOk(result, 'Failed to remove channel');
-  await loadConfig();
+  await mutateThenReloadConfig('bramble.removeChannel', { index }, 'Failed to remove channel');
 }
 
 export async function setMailbox(enabled: boolean): Promise<void> {
-  const client = requireClient();
-  const result = await client.rpc('bramble.setMailbox', { enabled });
-  assertOk(result, 'Failed to set mailbox');
-  await loadConfig();
+  await mutateThenReloadConfig('bramble.setMailbox', { enabled }, 'Failed to set mailbox');
 }
 
 export async function setDefaultChannel(index: number): Promise<void> {
-  const client = requireClient();
-  const result = await client.rpc('bramble.setDefaultChannel', { index });
-  assertOk(result, 'Failed to set default channel');
-  await loadConfig();
+  await mutateThenReloadConfig('bramble.setDefaultChannel', { index }, 'Failed to set default channel');
 }
 
 export async function setLocationConfig(config: Partial<LocationConfig>): Promise<void> {
-  const client = requireClient();
-  const result = await client.rpc('bramble.setLocationConfig', config as unknown as Record<string, unknown>);
-  assertOk(result, 'Failed to save location config');
-  await loadConfig();
+  await mutateThenReloadConfig('bramble.setLocationConfig', config, 'Failed to save location config');
   await loadPeerLocations().catch(() => {});
 }
 

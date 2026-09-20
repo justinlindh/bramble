@@ -745,7 +745,7 @@ paths:
     post:
       operationId: addChannel
       summary: Add a channel
-      description: Adds a new channel with the given name and pre-shared key.
+      description: Adds a new channel with the given name, keyed from the optional passphrase or from a random key.
       tags: [config]
       requestBody:
         content:
@@ -3602,14 +3602,14 @@ components:
 
     AddChannelParams:
       type: object
-      required: [name, psk]
+      required: [name]
       properties:
         name:
           type: string
           description: Channel display name.
         psk:
           type: string
-          description: Pre-shared key (base64 or hex encoded).
+          description: Passphrase the channel key is derived from. When omitted or empty, the node generates a random key.
 
     AddChannelResponse:
       type: object
