@@ -81,6 +81,21 @@ export interface FirmwareMergeContext {
 }
 
 /**
+ * Parse a wire message's from/to addresses and channel index. An absent or
+ * negative index means no channel, a direct message. Broadcast stays with the
+ * callers: history rows carry `direction`, which wins over a channel index,
+ * and pushes carry a `broadcast` flag, which a channel index wins over.
+ */
+function parseWireEndpoints(m: FirmwareMessageWire) {
+  const rawChannel = m.channelIndex ?? m.channel;
+  return {
+    fromAddr: parseAddr(m.from),
+    toAddr: parseAddr(m.to),
+    channelIndex: rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined,
+  };
+}
+
+/**
  * Normalize a `bramble.getMessages` batch into store messages, dropping any
  * that duplicate an existing message or an earlier entry in the same batch.
  *
@@ -96,12 +111,9 @@ export function mergeFirmwareMessages(
 ): Message[] {
   const accepted: Message[] = [];
   raw.forEach((m, ringIndex) => {
-    const fromAddr = parseAddr(m.from);
-    const toAddr = parseAddr(m.to);
+    const { fromAddr, toAddr, channelIndex } = parseWireEndpoints(m);
     const dir = m.direction;
     const isOutgoing = dir === 'outgoing' || dir === 'broadcast_out';
-    const rawChannel = m.channelIndex ?? m.channel;
-    const channelIndex = rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined;
     const isBroadcast =
       dir === 'broadcast_in' ||
       dir === 'broadcast_out' ||
@@ -644,10 +656,7 @@ type IncomingRealtimeWire = FirmwareMessageWire & {
 
 export function normalizeIncomingRealtimeMessage(params: unknown) {
   const p = params as IncomingRealtimeWire;
-  const fromAddr = parseAddr(p.from);
-  const toAddr = parseAddr(p.to);
-  const rawChannel = p.channelIndex ?? (p.channel as number | undefined);
-  const channelIndex = rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined;
+  const { fromAddr, toAddr, channelIndex } = parseWireEndpoints(p);
   const isBroadcast = channelIndex === undefined && (p.broadcast === true || toAddr === BROADCAST_ADDR);
 
   return {
