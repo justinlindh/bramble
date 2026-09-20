@@ -425,7 +425,9 @@ export const useStore = create<AppState & Actions>((set) => ({
   }),
 
   setContactName: (addr, name) => set(state => {
-    const contacts = new Map(state.contactNames);
+    // Start from what is persisted, not this tab's copy, so a name another tab
+    // saved is kept.
+    const contacts = loadContactNames();
     if (name) {
       contacts.set(addr, name);
     } else {

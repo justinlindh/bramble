@@ -15,7 +15,7 @@ export function resolvePeerName(
   addr: number,
   peerNames: Map<number, string> | undefined,
   peerLocations: PeerLocation[] | undefined,
-  contactNames?: Map<number, string>,
+  contactNames: Map<number, string> | undefined,
 ): string | undefined {
   const contact = contactNames?.get(addr);
   if (contact) return contact;

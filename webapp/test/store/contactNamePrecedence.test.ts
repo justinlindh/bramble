@@ -57,6 +57,17 @@ describe('contact name precedence in the store', () => {
     expect(JSON.parse(localStorage.getItem('bramble:peerNames') ?? '{}')).toEqual({});
   });
 
+  it('keeps a contact name another tab saved since this store loaded', async () => {
+    const BOB = 0x89abcdef;
+    const useStore = await loadStore();
+    localStorage.setItem('bramble:peerNames', JSON.stringify({ [BOB]: 'Bob' }));
+
+    useStore.getState().setContactName(ALICE, 'Alice');
+
+    expect(JSON.parse(localStorage.getItem('bramble:peerNames') ?? '{}')).toEqual({ [ALICE]: 'Alice', [BOB]: 'Bob' });
+    expect(useStore.getState().peerNames.get(BOB)).toBe('Bob');
+  });
+
   it('labels a DM conversation with the contact name over a learned one', async () => {
     const useStore = await loadStore();
     useStore.getState().addMessage({
