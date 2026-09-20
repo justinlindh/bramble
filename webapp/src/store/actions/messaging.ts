@@ -90,18 +90,37 @@ export interface FirmwareMergeContext {
  * the dedup check. Accumulating into a local array and matching against both
  * it and `ctx.existing` closes that hole without re-reading global state.
  */
+/**
+ * Parse a wire message's endpoints and resolve its channel index the one way
+ * both the settled-history merge and the realtime push path must agree on:
+ * parse the hex from/to addresses, and treat a channel index only when it is
+ * present and non-negative (a negative or absent index means "no channel",
+ * i.e. a direct message). This rule has been a repeated source of
+ * double-bucketing bugs, so both paths derive it here rather than inline. The
+ * broadcast decision is deliberately NOT folded in: the two callers key it off
+ * different wire fields (direction vs the push `broadcast` flag).
+ */
+function parseWireEndpoints(m: FirmwareMessageWire): {
+  fromAddr: number;
+  toAddr: number;
+  channelIndex: number | undefined;
+} {
+  const fromAddr = parseAddr(m.from);
+  const toAddr = parseAddr(m.to);
+  const rawChannel = m.channelIndex ?? m.channel;
+  const channelIndex = rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined;
+  return { fromAddr, toAddr, channelIndex };
+}
+
 export function mergeFirmwareMessages(
   raw: FirmwareMessageWire[],
   ctx: FirmwareMergeContext,
 ): Message[] {
   const accepted: Message[] = [];
   raw.forEach((m, ringIndex) => {
-    const fromAddr = parseAddr(m.from);
-    const toAddr = parseAddr(m.to);
+    const { fromAddr, toAddr, channelIndex } = parseWireEndpoints(m);
     const dir = m.direction;
     const isOutgoing = dir === 'outgoing' || dir === 'broadcast_out';
-    const rawChannel = m.channelIndex ?? m.channel;
-    const channelIndex = rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined;
     const isBroadcast =
       dir === 'broadcast_in' ||
       dir === 'broadcast_out' ||
@@ -644,10 +663,7 @@ type IncomingRealtimeWire = FirmwareMessageWire & {
 
 export function normalizeIncomingRealtimeMessage(params: unknown) {
   const p = params as IncomingRealtimeWire;
-  const fromAddr = parseAddr(p.from);
-  const toAddr = parseAddr(p.to);
-  const rawChannel = p.channelIndex ?? (p.channel as number | undefined);
-  const channelIndex = rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined;
+  const { fromAddr, toAddr, channelIndex } = parseWireEndpoints(p);
   const isBroadcast = channelIndex === undefined && (p.broadcast === true || toAddr === BROADCAST_ADDR);
 
   return {
