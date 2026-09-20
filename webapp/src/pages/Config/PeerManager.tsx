@@ -9,13 +9,13 @@ import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { tryParseAddr } from '../../lib/addr';
 import { buildKnownPeers } from '../Nodes/knownPeers';
-import { safeGetItem, safeSetItem } from '../../utils/safeLocalStorage';
+import { loadContactNames, saveContactNames } from '../../store/contactNames';
+import { loadAddrMap, saveAddrMap } from '../../utils/persistedAddrMap';
 import { formatAge } from '../../hooks/useAgeTick';
 import styles from './PeerManager.module.css';
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
 
-const LS_KEY = 'bramble:peerNames';
 const LS_NOTES_KEY = 'bramble:peerNotes';
 
 type ContactRecord = { name: string; note?: string };
@@ -25,39 +25,12 @@ type ContactsExport = {
   contacts: Record<string, ContactRecord>;
 };
 
-function loadStringMap(key: string): Map<number, string> {
-  const raw = safeGetItem(key);
-  if (!raw) return new Map();
-  try {
-    const obj = JSON.parse(raw) as Record<string, string>;
-    return new Map(Object.entries(obj).map(([k, v]) => [Number(k), String(v)]));
-  } catch {
-    return new Map();
-  }
-}
-
-function saveStringMap(key: string, m: Map<number, string>): void {
-  const obj: Record<string, string> = {};
-  m.forEach((v, k) => {
-    if (v) obj[k] = v;
-  });
-  safeSetItem(key, JSON.stringify(obj));
-}
-
-function loadNames(): Map<number, string> {
-  return loadStringMap(LS_KEY);
-}
-
-function saveNames(m: Map<number, string>): void {
-  saveStringMap(LS_KEY, m);
-}
-
 function loadNotes(): Map<number, string> {
-  return loadStringMap(LS_NOTES_KEY);
+  return loadAddrMap(LS_NOTES_KEY);
 }
 
 function saveNotes(m: Map<number, string>): void {
-  saveStringMap(LS_NOTES_KEY, m);
+  saveAddrMap(LS_NOTES_KEY, m);
 }
 
 async function readFileText(file: File): Promise<string> {
@@ -205,7 +178,7 @@ interface PeerManagerProps {
 }
 
 export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerProps) {
-  const [names, setNames] = useState<Map<number, string>>(loadNames);
+  const [names, setNames] = useState<Map<number, string>>(loadContactNames);
   const [notes, setNotes] = useState<Map<number, string>>(loadNotes);
   const [addAddr, setAddAddr] = useState('');
   const [addName, setAddName] = useState('');
@@ -236,7 +209,7 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
       } else {
         next.delete(addr);
       }
-      saveNames(next);
+      saveContactNames(next);
       return next;
     });
     // Sync to Zustand store so Chat/Map reflect the name immediately (BUG-09)
@@ -344,6 +317,8 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
 
         if (canWrite) {
           nextNames.set(addr, record.name);
+          // Same store sync handleSaveName does, so the name shows outside Config at once.
+          useStore.getState().setPeerName(addr, record.name);
           importedCount += 1;
         }
 
@@ -357,7 +332,7 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
 
       setNames(nextNames);
       setNotes(nextNotes);
-      saveNames(nextNames);
+      saveContactNames(nextNames);
       saveNotes(nextNotes);
       setImportStatus(`Imported ${importedCount} contact(s).`);
     } catch {

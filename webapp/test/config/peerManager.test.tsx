@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PeerManager } from '../../src/pages/Config/PeerManager';
+import { useStore } from '../../src/store';
 import type { Neighbor, PeerLocation, Route } from '../../src/types/bramble';
 
 describe('PeerManager contact import/export', () => {
@@ -56,6 +57,27 @@ describe('PeerManager contact import/export', () => {
       expect(stored[String(0x1234abcd)]).toBe('Existing');
       expect(stored[String(0x89abcdef)]).toBe('New Contact');
     });
+  });
+
+  it('pushes imported names into the store and leaves a declined overwrite out of it', async () => {
+    localStorage.setItem('bramble:peerNames', JSON.stringify({ [0x1234abcd]: 'Existing' }));
+    useStore.setState({ peerNames: new Map([[0x1234abcd, 'Existing']]) });
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<PeerManager neighbors={neighbors} routes={routes} peerLocations={peerLocations} />);
+
+    const file = new File([
+      JSON.stringify({
+        version: 1,
+        contacts: { '1234ABCD': { name: 'Imported' }, '89ABCDEF': { name: 'New Contact' } },
+      }),
+    ], 'contacts.json', { type: 'application/json' });
+    fireEvent.change(screen.getByLabelText('Import contacts file'), { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(useStore.getState().peerNames.get(0x89abcdef)).toBe('New Contact');
+    });
+    expect(useStore.getState().peerNames.get(0x1234abcd)).toBe('Existing');
   });
 
   it('allows editing and persisting notes for a peer', async () => {

@@ -21,6 +21,7 @@ import type {
   AnchorStatus,
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
+import { loadContactNames } from './contactNames';
 import type { SavedDevice } from '../lib/deviceBook';
 import { formatAddrHex, formatAddr0x } from '../utils/address';
 import { resolveNodeName } from '../utils/nodeName';
@@ -236,7 +237,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   activeTab: loadActiveTab(),
   showRoutes: loadShowRoutes(),
   probeResult: null,
-  peerNames: new Map(),
+  peerNames: loadContactNames(),
   devices: [],
   peerLocations: [],
   mapFocusAddr: null,
@@ -412,7 +413,8 @@ export const useStore = create<AppState & Actions>((set) => ({
     conversations: new Map(),
     neighbors: undefined,
     routes: [],
-    peerNames: new Map(),
+    // Names learned from the previous node go; the user's contact names stay.
+    peerNames: loadContactNames(),
     config: null,
     status: null,
     airtime: null,
