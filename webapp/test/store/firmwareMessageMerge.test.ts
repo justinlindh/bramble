@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mergeFirmwareMessages } from '../../src/store/actions';
+import { mergeFirmwareMessages, normalizeIncomingRealtimeMessage } from '../../src/store/actions';
 import { useStore } from '../../src/store/index';
 import type { Message } from '../../src/types/bramble';
 
@@ -132,5 +132,24 @@ describe('mergeFirmwareMessages', () => {
     );
 
     expect(merged).toHaveLength(0);
+  });
+});
+
+// A pushed message is read back from the device's history on the next connect
+// and deduped against the pushed copy by channel index, so the two decode paths
+// must resolve the same index from the same wire fields.
+describe('history and realtime channel index', () => {
+  it.each([
+    ['negative channel', { channel: -1 }, undefined],
+    ['absent channel', { channel: undefined }, undefined],
+    ['channel zero', { channel: 0 }, 0],
+    ['positive channel', { channel: 2 }, 2],
+    ['channelIndex wins over channel', { channelIndex: 3, channel: 1 }, 3],
+  ])('%s', (_name, fields, expected) => {
+    const row = fwRow(fields);
+    const [fromHistory] = mergeFirmwareMessages([row], ctx());
+
+    expect(fromHistory!.channelIndex).toBe(expected);
+    expect(normalizeIncomingRealtimeMessage(row).channelIndex).toBe(expected);
   });
 });
