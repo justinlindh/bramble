@@ -9,7 +9,6 @@ import { AddressLabel } from '../../components/AddressLabel';
 import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { tryParseAddr } from '../../lib/addr';
 import { buildKnownPeers } from '../Nodes/knownPeers';
-import { loadContactNames, saveContactNames } from '../../store/contactNames';
 import { loadAddrMap, saveAddrMap } from '../../utils/persistedAddrMap';
 import { formatAge } from '../../hooks/useAgeTick';
 import styles from './PeerManager.module.css';
@@ -178,7 +177,7 @@ interface PeerManagerProps {
 }
 
 export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerProps) {
-  const [names, setNames] = useState<Map<number, string>>(loadContactNames);
+  const names = useStore((s) => s.contactNames);
   const [notes, setNotes] = useState<Map<number, string>>(loadNotes);
   const [addAddr, setAddAddr] = useState('');
   const [addName, setAddName] = useState('');
@@ -202,18 +201,7 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
   );
 
   const handleSaveName = (addr: number, name: string) => {
-    setNames((prev) => {
-      const next = new Map(prev);
-      if (name) {
-        next.set(addr, name);
-      } else {
-        next.delete(addr);
-      }
-      saveContactNames(next);
-      return next;
-    });
-    // Sync to Zustand store so Chat/Map reflect the name immediately (BUG-09)
-    useStore.getState().setPeerName(addr, name);
+    useStore.getState().setContactName(addr, name);
   };
 
   const handleSaveNote = (addr: number, note: string) => {
@@ -307,18 +295,12 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
         ? window.confirm(`${conflictCount} contact(s) already have names. Click OK to overwrite existing names, or Cancel to keep existing names.`)
         : false;
 
-      const nextNames = new Map(names);
       const nextNotes = new Map(notes);
       let importedCount = 0;
 
       imported.forEach((record, addr) => {
-        const existing = nextNames.get(addr);
-        const canWrite = !existing || overwriteExisting;
-
-        if (canWrite) {
-          nextNames.set(addr, record.name);
-          // Same store sync handleSaveName does, so the name shows outside Config at once.
-          useStore.getState().setPeerName(addr, record.name);
+        if (!names.get(addr) || overwriteExisting) {
+          useStore.getState().setContactName(addr, record.name);
           importedCount += 1;
         }
 
@@ -330,9 +312,7 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
         }
       });
 
-      setNames(nextNames);
       setNotes(nextNotes);
-      saveContactNames(nextNames);
       saveNotes(nextNotes);
       setImportStatus(`Imported ${importedCount} contact(s).`);
     } catch {

@@ -24,23 +24,29 @@ describe('resolvePeerName', () => {
     expect(resolvePeerName(ADDR, undefined, undefined)).toBeUndefined();
   });
 
-  it('resolves a name from location telemetry when no contact name exists', () => {
+  it('resolves a name from location telemetry when no other name exists', () => {
     const locs: PeerLocation[] = [makePeerLocation(ADDR, 'Alice')];
     expect(resolvePeerName(ADDR, new Map(), locs)).toBe('Alice');
   });
 
-  it('resolves a name from the peerNames contact map when no location name exists', () => {
+  it('resolves a name from peerNames when no location name exists', () => {
     const names = new Map([[ADDR, 'Bob']]);
     expect(resolvePeerName(ADDR, names, [])).toBe('Bob');
   });
 
-  it('prefers location telemetry name over contact name', () => {
+  it('prefers a contact name over a location telemetry name', () => {
+    const contacts = new Map([[ADDR, 'Bob']]);
+    const locs: PeerLocation[] = [makePeerLocation(ADDR, 'Alice')];
+    expect(resolvePeerName(ADDR, new Map(contacts), locs, contacts)).toBe('Bob');
+  });
+
+  it('prefers a location telemetry name over a learned name', () => {
     const names = new Map([[ADDR, 'Bob']]);
     const locs: PeerLocation[] = [makePeerLocation(ADDR, 'Alice')];
     expect(resolvePeerName(ADDR, names, locs)).toBe('Alice');
   });
 
-  it('skips location entry with empty/whitespace name and falls back to contact', () => {
+  it('skips a location entry with a blank name and falls back to peerNames', () => {
     const names = new Map([[ADDR, 'Bob']]);
     const locs: PeerLocation[] = [makePeerLocation(ADDR, '   ')];
     expect(resolvePeerName(ADDR, names, locs)).toBe('Bob');

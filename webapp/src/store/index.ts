@@ -21,7 +21,7 @@ import type {
   AnchorStatus,
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
-import { loadContactNames } from './contactNames';
+import { loadContactNames, saveContactNames } from './contactNames';
 import type { SavedDevice } from '../lib/deviceBook';
 import { formatAddrHex, formatAddr0x } from '../utils/address';
 import { resolveNodeName } from '../utils/nodeName';
@@ -208,13 +208,41 @@ interface Actions {
   setMapFocusAddr: (addr: number | null) => void;
   setPeerVerification: (addr: number, v: PeerVerification) => void;
   loadCachedMessages: (msgs: Message[]) => void;
+  /** Names the user assigned. They win over every other source. */
+  contactNames: Map<number, string>;
+  /** Names the firmware reported: beacons, incoming messages, this node's config. */
+  learnedNames: Map<number, string>;
+  /** learnedNames with contactNames laid over it; what display code reads. */
   peerNames: Map<number, string>;
-  setPeerName: (addr: number, name: string) => void;
+  learnPeerName: (addr: number, name: string) => void;
+  setContactName: (addr: number, name: string) => void;
   resetNodeData: () => void;
   setTrafficDebugStatus: (s: TrafficDebugStatus) => void;
   addTrafficEvents: (events: TrafficEvent[]) => void;
   setNetworkKeyStatus: (s: NetworkKeyStatus | null) => void;
   setAnchorStatus: (s: AnchorStatus | null) => void;
+}
+
+/** The two name sources plus the merged map display code reads: a contact name wins. */
+function namesState(learnedNames: Map<number, string>, contactNames: Map<number, string>) {
+  return { learnedNames, contactNames, peerNames: new Map([...learnedNames, ...contactNames]) };
+}
+
+/** namesState after one peer's name changed, with that peer's DM conversation relabeled. */
+function renamedPeer(
+  state: Pick<AppState, 'conversations' | 'config'>,
+  addr: number,
+  learnedNames: Map<number, string>,
+  contactNames: Map<number, string>,
+) {
+  const names = namesState(learnedNames, contactNames);
+  const conversations = new Map(state.conversations);
+  const dmKey = `dm:${addr}`;
+  const conv = conversations.get(dmKey);
+  if (conv) {
+    conversations.set(dmKey, { ...conv, label: formatConversationLabel(dmKey, names.peerNames, state.config) });
+  }
+  return { ...names, conversations };
 }
 
 export const useStore = create<AppState & Actions>((set) => ({
@@ -237,7 +265,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   activeTab: loadActiveTab(),
   showRoutes: loadShowRoutes(),
   probeResult: null,
-  peerNames: loadContactNames(),
+  ...namesState(new Map(), loadContactNames()),
   devices: [],
   peerLocations: [],
   mapFocusAddr: null,
@@ -263,11 +291,12 @@ export const useStore = create<AppState & Actions>((set) => ({
   setConnectionCapabilities: (c) => set({ connectionCapabilities: c, capabilitiesLoaded: true }),
 
   setConfig: (c) => set(state => {
-    const names = new Map(state.peerNames);
+    const learned = new Map(state.learnedNames);
     const selfName = resolveNodeName(c.identity?.name);
     if (selfName && c.identity) {
-      names.set(c.identity.address, selfName);
+      learned.set(c.identity.address, selfName);
     }
+    const { peerNames: names } = namesState(learned, state.contactNames);
 
     // Build set of valid channel indexes from config
     const validChannelIndexes = new Set(c.channels?.map(ch => ch.index) ?? []);
@@ -291,6 +320,7 @@ export const useStore = create<AppState & Actions>((set) => ({
 
     return {
       config: c,
+      learnedNames: learned,
       peerNames: names,
       conversations: convs,
       ...(activeGone ? { activeConversationId: 'broadcast' } : {}),
@@ -302,14 +332,14 @@ export const useStore = create<AppState & Actions>((set) => ({
   setAirtime: (a) => set({ airtime: a }),
 
   setNeighbors: (n) => set(state => {
-    const names = new Map(state.peerNames);
+    const learned = new Map(state.learnedNames);
     for (const nb of n) {
       // normalizeNeighbor (store/actions/telemetry.ts) attaches the firmware's
       // display name when present; the store's Neighbor type does not carry it.
       const { name } = nb as Neighbor & { name?: string };
-      if (name) names.set(nb.addr, name);
+      if (name) learned.set(nb.addr, name);
     }
-    return { neighbors: n, peerNames: names };
+    return { neighbors: n, ...namesState(learned, state.contactNames) };
   }),
 
   setRoutes: (r) => set({ routes: r }),
@@ -388,33 +418,30 @@ export const useStore = create<AppState & Actions>((set) => ({
     set({ showRoutes: show });
   },
 
-  setPeerName: (addr, name) => set(state => {
-    const names = new Map(state.peerNames);
-    if (name) {
-      names.set(addr, name);
-    } else {
-      names.delete(addr);
-    }
-    // Update labels on any DM conversation for this peer. Route through the
-    // shared labeler (reading the just-updated names map) instead of
-    // re-deriving the DM label here, so this path cannot drift from the
-    // classifier every other labeling path uses.
-    const convs = new Map(state.conversations);
-    const dmKey = `dm:${addr}`;
-    const conv = convs.get(dmKey);
-    if (conv) {
-      convs.set(dmKey, { ...conv, label: formatConversationLabel(dmKey, names, state.config) });
-    }
-    return { peerNames: names, conversations: convs };
+  learnPeerName: (addr, name) => set(state => {
+    if (!name) return state;
+    const learned = new Map(state.learnedNames).set(addr, name);
+    return renamedPeer(state, addr, learned, state.contactNames);
   }),
 
-  resetNodeData: () => set({
+  setContactName: (addr, name) => set(state => {
+    const contacts = new Map(state.contactNames);
+    if (name) {
+      contacts.set(addr, name);
+    } else {
+      contacts.delete(addr);
+    }
+    saveContactNames(contacts);
+    return renamedPeer(state, addr, state.learnedNames, contacts);
+  }),
+
+  resetNodeData: () => set(state => ({
     messages: [],
     conversations: new Map(),
     neighbors: undefined,
     routes: [],
     // Names learned from the previous node go; the user's contact names stay.
-    peerNames: loadContactNames(),
+    ...namesState(new Map(), state.contactNames),
     config: null,
     status: null,
     airtime: null,
@@ -426,7 +453,7 @@ export const useStore = create<AppState & Actions>((set) => ({
     peerVerifications: new Map(),
     networkKeyStatus: null,
     anchorStatus: null,
-  }),
+  })),
 
   setProbeResult: (r) => set({ probeResult: r }),
   setDevices: (devices) => set({ devices }),

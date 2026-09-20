@@ -15,6 +15,7 @@ export function Nodes() {
   const routes = useStore((s) => s.routes);
   const peerLocations = useStore((s) => s.peerLocations);
   const peerNames = useStore((s) => s.peerNames);
+  const contactNames = useStore((s) => s.contactNames);
   const connected = useStore((s) => s.connectionState === 'connected');
   // undefined = never fetched since connect; [] = fetched, no neighbors found.
   const neighborsLoading = connected && neighbors === undefined;
@@ -74,7 +75,7 @@ export function Nodes() {
           <p className={styles.empty}>Known from routing and location telemetry. Live neighbors are marked below.</p>
           <ul className={styles.knownList}>
             {knownPeers.map((peer) => {
-              const name = resolvePeerName(peer.addr, peerNames, peerLocations);
+              const name = resolvePeerName(peer.addr, peerNames, peerLocations, contactNames);
               const canShowOnMap = Boolean(peer.peerLocation?.position);
               return (
                 <li key={peer.addr} className={styles.knownRow}>

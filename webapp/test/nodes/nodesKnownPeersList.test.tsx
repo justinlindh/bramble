@@ -73,4 +73,20 @@ describe('Nodes known peers list', () => {
     fireEvent.click(within(alphaRow as HTMLElement).getByRole('button', { name: /show on map/i }));
     expect(showOnMap).toHaveBeenCalledWith(0x11111111);
   });
+
+  it('shows the contact name for a peer whose telemetry carries another name', () => {
+    const now = Date.now();
+    mockState.neighbors = [];
+    mockState.routes = [];
+    mockState.peerLocations = [
+      { addr: 0x11111111, name: 'Alpha', tier: 'presence', position: null, online: true, lastUpdatedMs: now },
+    ];
+    mockState.contactNames = new Map([[0x11111111, 'My Alpha']]);
+    mockState.peerNames = new Map([[0x11111111, 'My Alpha']]);
+
+    render(<Nodes />);
+
+    expect(screen.getByText('My Alpha')).toBeInTheDocument();
+    expect(screen.queryByText('Alpha')).not.toBeInTheDocument();
+  });
 });

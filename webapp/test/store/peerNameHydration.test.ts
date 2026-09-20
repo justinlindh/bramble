@@ -27,7 +27,7 @@ describe('peer name hydration', () => {
 
   it('keeps contact names and drops learned ones across resetNodeData', async () => {
     const useStore = await loadStoreWith(JSON.stringify({ [ALICE]: 'Alice' }));
-    useStore.getState().setPeerName(BOB, 'learned-from-beacon');
+    useStore.getState().learnPeerName(BOB, 'learned-from-beacon');
 
     useStore.getState().resetNodeData();
 
