@@ -13,14 +13,8 @@ import (
 //	   "count": 3, "positions": [[0,0],[100,0],[50,80]], "label": "pager"}
 //	]
 //
-// The array unmarshals straight into firmwareNodeSpec (its json tags are the
-// single source of the wire shape), exactly like the other scenario extensions
-// (loadNodeTrustFlags, loadRoutingConfig), so the C scenario loader
-// (sim_scenario.c) needs no change and every existing scenario, which has no
-// "firmware_nodes" key, is entirely unaffected. Any parse failure (or a
-// scenario with no "firmware_nodes" key) returns nil, the same
-// fail-open-to-today's-default convention as the other Go-side scenario
-// loaders, so a pure harness scenario stays on the untouched virtual-time path.
+// Groups with no binary are dropped. A parse failure or an absent key returns
+// nil, which keeps a pure harness scenario on the virtual-time path.
 func loadFirmwareNodes(data []byte) []firmwareNodeSpec {
 	var cfg struct {
 		FirmwareNodes []firmwareNodeSpec `json:"firmware_nodes"`
@@ -30,13 +24,9 @@ func loadFirmwareNodes(data []byte) []firmwareNodeSpec {
 	}
 	var out []firmwareNodeSpec
 	for _, n := range cfg.FirmwareNodes {
-		if n.Binary == "" {
-			continue
+		if n.Binary != "" {
+			out = append(out, n)
 		}
-		if n.Count <= 0 {
-			n.Count = 1
-		}
-		out = append(out, n)
 	}
 	return out
 }
