@@ -595,7 +595,7 @@ export interface paths {
         put?: never;
         /**
          * Add a channel
-         * @description Adds a new channel with the given name and pre-shared key.
+         * @description Adds a new channel with the given name, keyed from the optional passphrase or from a random key.
          */
         post: operations["addChannel"];
         delete?: never;
@@ -2316,8 +2316,8 @@ export interface components {
         AddChannelParams: {
             /** @description Channel display name. */
             name: string;
-            /** @description Pre-shared key (base64 or hex encoded). */
-            psk: string;
+            /** @description Passphrase the channel key is derived from. When omitted or empty, the node generates a random key. */
+            psk?: string;
         };
         AddChannelResponse: {
             ok: boolean;
