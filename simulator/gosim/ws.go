@@ -59,19 +59,26 @@ func (h *Hub) Broadcast(msg []byte) {
 	}
 }
 
-func (h *Hub) register(c *Client) {
+// register adds c to the hub and returns the resulting client count, read
+// under the same lock that mutates the map so the caller can log it without a
+// second, unsynchronized read of h.clients.
+func (h *Hub) register(c *Client) int {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.clients[c] = true
-	h.mu.Unlock()
+	return len(h.clients)
 }
 
-func (h *Hub) unregister(c *Client) {
+// unregister removes c from the hub (closing its send channel) and returns the
+// resulting client count under the lock, for the same reason as register.
+func (h *Hub) unregister(c *Client) int {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	if _, ok := h.clients[c]; ok {
 		delete(h.clients, c)
 		close(c.send)
 	}
-	h.mu.Unlock()
+	return len(h.clients)
 }
 
 // HandleWS upgrades the connection and starts read/write goroutines.
@@ -108,8 +115,8 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.register(client)
-	log.Printf("ws client connected (%d total)", len(h.clients))
+	total := h.register(client)
+	log.Printf("ws client connected (%d total)", total)
 
 	go h.writePump(client)
 	go h.readPump(client)
@@ -126,9 +133,9 @@ func (h *Hub) writePump(c *Client) {
 
 func (h *Hub) readPump(c *Client) {
 	defer func() {
-		h.unregister(c)
+		remaining := h.unregister(c)
 		c.conn.Close()
-		log.Printf("ws client disconnected (%d remaining)", len(h.clients))
+		log.Printf("ws client disconnected (%d remaining)", remaining)
 	}()
 
 	for {
