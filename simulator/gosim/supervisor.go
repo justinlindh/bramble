@@ -26,12 +26,12 @@ import (
 // many to spawn. env carries optional extra environment for the process on top
 // of the always-set NODE_DIR and EMU_BROKER.
 type firmwareNodeSpec struct {
-	Type      string
-	Binary    string
-	Count     int
-	Positions [][2]float32
-	Label     string
-	Env       map[string]string
+	Type      string            `json:"type"`
+	Binary    string            `json:"binary"`
+	Count     int               `json:"count"`
+	Positions [][2]float32      `json:"positions"`
+	Label     string            `json:"label"`
+	Env       map[string]string `json:"env"`
 }
 
 // Supervisor spawns and babysits the firmware node processes for a scenario. It
