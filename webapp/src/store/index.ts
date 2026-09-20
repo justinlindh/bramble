@@ -21,6 +21,7 @@ import type {
   AnchorStatus,
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
+import { loadContactNames } from './contactNames';
 import type { SavedDevice } from '../lib/deviceBook';
 import { formatAddrHex, formatAddr0x } from '../utils/address';
 import { resolveNodeName } from '../utils/nodeName';
@@ -236,7 +237,11 @@ export const useStore = create<AppState & Actions>((set) => ({
   activeTab: loadActiveTab(),
   showRoutes: loadShowRoutes(),
   probeResult: null,
-  peerNames: new Map(),
+  // Seed from the persisted user-assigned contact names so a peer's name shows
+  // app-wide (chat, nodes, map) immediately after a reload, not only once the
+  // user re-opens Config. Live beacon and message names merge in on top during
+  // the session.
+  peerNames: loadContactNames(),
   devices: [],
   peerLocations: [],
   mapFocusAddr: null,

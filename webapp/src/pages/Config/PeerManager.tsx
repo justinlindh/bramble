@@ -10,12 +10,12 @@ import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import { tryParseAddr } from '../../lib/addr';
 import { buildKnownPeers } from '../Nodes/knownPeers';
 import { safeGetItem, safeSetItem } from '../../utils/safeLocalStorage';
+import { loadContactNames, saveContactNames } from '../../store/contactNames';
 import { formatAge } from '../../hooks/useAgeTick';
 import styles from './PeerManager.module.css';
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
 
-const LS_KEY = 'bramble:peerNames';
 const LS_NOTES_KEY = 'bramble:peerNotes';
 
 type ContactRecord = { name: string; note?: string };
@@ -42,14 +42,6 @@ function saveStringMap(key: string, m: Map<number, string>): void {
     if (v) obj[k] = v;
   });
   safeSetItem(key, JSON.stringify(obj));
-}
-
-function loadNames(): Map<number, string> {
-  return loadStringMap(LS_KEY);
-}
-
-function saveNames(m: Map<number, string>): void {
-  saveStringMap(LS_KEY, m);
 }
 
 function loadNotes(): Map<number, string> {
@@ -205,7 +197,7 @@ interface PeerManagerProps {
 }
 
 export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerProps) {
-  const [names, setNames] = useState<Map<number, string>>(loadNames);
+  const [names, setNames] = useState<Map<number, string>>(loadContactNames);
   const [notes, setNotes] = useState<Map<number, string>>(loadNotes);
   const [addAddr, setAddAddr] = useState('');
   const [addName, setAddName] = useState('');
@@ -236,7 +228,7 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
       } else {
         next.delete(addr);
       }
-      saveNames(next);
+      saveContactNames(next);
       return next;
     });
     // Sync to Zustand store so Chat/Map reflect the name immediately (BUG-09)
@@ -357,7 +349,7 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
 
       setNames(nextNames);
       setNotes(nextNotes);
-      saveNames(nextNames);
+      saveContactNames(nextNames);
       saveNotes(nextNotes);
       setImportStatus(`Imported ${importedCount} contact(s).`);
     } catch {
