@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
 import type { NodeStatus, BrambleConfig } from '../../types/bramble';
 import { formatAddr0x } from '../../utils/address';
 import { copyWithFallback } from '../../utils/clipboard';
+import { useTimedValue } from '../../hooks/useTimedValue';
 import styles from './SystemInfo.module.css';
 
 function formatUptime(seconds: number): string {
@@ -97,26 +97,12 @@ function hasBattery(status: NodeStatus): boolean {
 
 export function SystemInfo({ status, config }: Props) {
   const { identity } = config;
-  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
-  const copiedTimer = useRef<number | null>(null);
-
-  useEffect(() => () => {
-    if (copiedTimer.current !== null) {
-      window.clearTimeout(copiedTimer.current);
-    }
-  }, []);
+  const [copiedLabel, showCopiedLabel] = useTimedValue<string | null>(null, 1200);
 
   const onCopy = async (label: string, text: string) => {
     const ok = await copyWithFallback(text);
     if (!ok) return;
-
-    setCopiedLabel(label);
-    if (copiedTimer.current !== null) {
-      window.clearTimeout(copiedTimer.current);
-    }
-    copiedTimer.current = window.setTimeout(() => {
-      setCopiedLabel(null);
-    }, 1200);
+    showCopiedLabel(label);
   };
 
   // Heap health indicator
