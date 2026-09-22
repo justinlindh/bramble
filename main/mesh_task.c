@@ -1920,14 +1920,13 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                         ui_graphics_notify(UI_EVT_MSG_STATUS);
 #endif
                     }
-                    /* Notify webapp of failure */
-                    cJSON* params = cJSON_CreateObject();
-                    char pkt_buf[12];
-                    snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, pa->packet_id);
-                    cJSON_AddStringToObject(params, "packet_id", pkt_buf);
-                    cJSON_AddStringToObject(params, "status", "failed");
-                    rpc_notify("bramble.onAck", params);
-                    cJSON_Delete(params);
+                    /* Notify webapp of failure: the same bramble.onAck
+                     * {packet_id, status:"failed"} shape the RERR fast-fail
+                     * path emits, built by the shared helper so the failed-ack
+                     * wire format has one definition. No reason is attached, to
+                     * preserve the exact notification this timeout path already
+                     * sent. */
+                    rerr_fastfail_notify(pa->packet_id, NULL);
                     pa->active = false;
                 } else {
                     ESP_LOGI(TAG, "Retransmit pkt %08" PRIX32 " to %08" PRIX32 " (attempt %u/%u)",
