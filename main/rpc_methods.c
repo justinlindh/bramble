@@ -560,7 +560,7 @@ static int handle_get_delivery_events(const cJSON* params, cJSON* result) {
         cJSON_AddStringToObject(obj, "event_id", id_buf);
 
         char msg_buf[9];
-        snprintf(msg_buf, sizeof(msg_buf), "%08" PRIX32, e->message_id);
+        addr_hex(e->message_id, msg_buf, sizeof(msg_buf));
 
         cJSON* payload = cJSON_CreateObject();
         if (e->event_type == 2u) {
@@ -865,7 +865,7 @@ static int handle_send_message(const cJSON* params, cJSON* result) {
     }
 
     char pkt_id_str[12];
-    snprintf(pkt_id_str, sizeof(pkt_id_str), "%08" PRIX32, pkt_id);
+    addr_hex(pkt_id, pkt_id_str, sizeof(pkt_id_str));
     cJSON_AddStringToObject(result, "packetId", pkt_id_str);
     cJSON_AddStringToObject(result, "status", "sent");
 
@@ -917,7 +917,7 @@ static int handle_send_broadcast(const cJSON* params, cJSON* result) {
     }
 
     char bcast_id_buf[12];
-    snprintf(bcast_id_buf, sizeof(bcast_id_buf), "%08" PRIX32, broadcast_id);
+    addr_hex(broadcast_id, bcast_id_buf, sizeof(bcast_id_buf));
     cJSON_AddStringToObject(result, "broadcast_id", bcast_id_buf);
     cJSON_AddStringToObject(result, "status", "sent");
     cJSON_AddBoolToObject(result, "broadcast", true);
@@ -975,7 +975,7 @@ static int handle_send_probe(const cJSON* params, cJSON* result) {
         return RPC_ERR_INTERNAL;
     }
     char buf[12];
-    snprintf(buf, sizeof(buf), "%08" PRIX32, probe_id);
+    addr_hex(probe_id, buf, sizeof(buf));
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "probe_id", buf);
     cJSON_AddNumberToObject(result, "ack_window", 5);
@@ -1040,7 +1040,7 @@ static int handle_start_rollcall(const cJSON* params, cJSON* result) {
 
     const rollcall_ledger_t* l = mesh_rollcall_ledger();
     char buf[12];
-    snprintf(buf, sizeof(buf), "%08" PRIX32, rollcall_id);
+    addr_hex(rollcall_id, buf, sizeof(buf));
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "rollcall_id", buf);
     cJSON_AddNumberToObject(result, "window_ms", rollcall_window_ms());
@@ -1080,7 +1080,7 @@ static int handle_get_rollcall(const cJSON* params, cJSON* result) {
     }
 
     char buf[12];
-    snprintf(buf, sizeof(buf), "%08" PRIX32, l->rollcall_id);
+    addr_hex(l->rollcall_id, buf, sizeof(buf));
     cJSON_AddBoolToObject(result, "active", true);
     cJSON_AddStringToObject(result, "rollcall_id", buf);
     cJSON_AddBoolToObject(result, "open", l->open);
@@ -2400,7 +2400,7 @@ static int handle_share_location_once(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(result, "lon", pos.longitude_e7 / 1e7);
     cJSON_AddStringToObject(result, "tier", location_tier_to_string(tier));
     char pkt_buf[12];
-    snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, pkt_id);
+    addr_hex(pkt_id, pkt_buf, sizeof(pkt_buf));
     cJSON_AddStringToObject(result, "packetId", pkt_buf);
     return 0;
 }
