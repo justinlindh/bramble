@@ -14,6 +14,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -193,7 +194,7 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool, emuListen
 		recentConsole:          make(map[string][][]byte),
 	}
 
-	// Firmware-default beacon policy until a scenario overrides it (cmdLoad)
+	// Firmware-default beacon policy until a scenario overrides it (loadScenarioPath)
 	C.sim_beacon_policy_init(&s.beacon)
 
 	// Create pipe to capture C stdout output
@@ -297,7 +298,7 @@ func (s *Sim) handleCommand(cmd Command) {
 		// transmission until a human presses Play, with no UI cue that Play is
 		// required (this read as "devices show but messages never get sent").
 		// Auto-start on the interactive load path so a loaded firmware
-		// scenario just works. This is deliberately NOT inside cmdLoad, which
+		// scenario just works. This is deliberately NOT inside loadScenarioPath, which
 		// RunHeadless also calls and which contractually must leave the sim in
 		// StateLoaded; the headless path does its own state management. Pure
 		// virtual-time scenarios leave s.realtime false and still start paused.
@@ -804,17 +805,29 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 
 // --- Command handlers ---
 
-func (s *Sim) cmdLoad(cmd Command) {
-	scenarioName := cmd.Scenario
-	if scenarioName == "" {
-		scenarioName = "10-node-grid"
-	}
-	// Resolve scenario path: if it's just a name, look in scenarioDir
-	scenarioPath := scenarioName
-	if !strings.Contains(scenarioName, "/") {
-		scenarioPath = fmt.Sprintf("%s/%s.json", s.scenarioDir, scenarioName)
-	}
+// isScenarioName reports whether name is a bare scenario name (no directory
+// component), the only form a client may use to pick a file in scenarioDir.
+func isScenarioName(name string) bool {
+	return filepath.IsLocal(name) && !strings.ContainsAny(name, `/\`)
+}
 
+// cmdLoad loads a client-named scenario from scenarioDir. The name arrives over
+// the WebSocket, so anything but a bare name is refused rather than opened.
+func (s *Sim) cmdLoad(cmd Command) {
+	name := cmd.Scenario
+	if name == "" {
+		name = "10-node-grid"
+	}
+	if !isScenarioName(name) {
+		log.Printf("refusing to load scenario %q: not a bare scenario name", name)
+		return
+	}
+	s.loadScenarioPath(filepath.Join(s.scenarioDir, name+".json"))
+}
+
+// loadScenarioPath loads the scenario file at scenarioPath. Callers pass a
+// trusted path: the headless CLI's --scenario flag or a resolved prior load.
+func (s *Sim) loadScenarioPath(scenarioPath string) {
 	// Tear down any emulator state from a prior load before rebuilding.
 	// Safe to call under s.mu (it stops the supervisor, which never takes s.mu,
 	// and leaves the broker listener up for reuse).
@@ -1031,7 +1044,11 @@ func (s *Sim) cmdPause() {
 }
 
 func (s *Sim) cmdRestart() {
-	s.cmdLoad(Command{Scenario: s.lastScenario})
+	if s.lastScenario == "" {
+		s.cmdLoad(Command{})
+		return
+	}
+	s.loadScenarioPath(s.lastScenario)
 }
 
 func (s *Sim) cmdSpeed(cmd Command) {
@@ -1804,7 +1821,7 @@ func (sim *Sim) loadHeadless(scenarioPath string) error {
 	sim.startPipeReader()
 
 	sim.mu.Lock()
-	sim.cmdLoad(Command{Scenario: scenarioPath})
+	sim.loadScenarioPath(scenarioPath)
 	sim.mu.Unlock()
 
 	if sim.State() != StateLoaded {

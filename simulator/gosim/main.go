@@ -41,11 +41,9 @@ func findDir(candidates []string) string {
 	return ""
 }
 
-// scenarioUploadHandler stores a multipart-uploaded scenario file under
-// scenarioDir. It stores under filepath.Base of the client-supplied filename,
-// never the raw name, so a crafted name (say "../../etc/cron.d/x") cannot walk
-// out of scenarioDir and write elsewhere, and it requires a "<name>.json"
-// filename so an upload matches what /api/scenarios lists and serves back.
+// scenarioUploadHandler stores a multipart-uploaded "<name>.json" scenario in
+// scenarioDir, the form /api/scenarios lists and cmdLoad accepts. Writes go
+// through os.Root so neither the name nor a symlink can land outside the dir.
 func scenarioUploadHandler(scenarioDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -67,19 +65,29 @@ func scenarioUploadHandler(scenarioDir string) http.HandlerFunc {
 		}
 		defer file.Close()
 
-		name := filepath.Base(header.Filename)
-		if name == ".json" || !strings.HasSuffix(name, ".json") {
+		name := header.Filename
+		base, ok := strings.CutSuffix(name, ".json")
+		if !ok || !isScenarioName(base) {
 			http.Error(w, "scenario filename must be <name>.json", http.StatusBadRequest)
 			return
 		}
 
-		dst, err := os.Create(filepath.Join(scenarioDir, name))
+		root, err := os.OpenRoot(scenarioDir)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		defer dst.Close()
-		if _, err := io.Copy(dst, file); err != nil {
+		defer root.Close()
+		dst, err := root.Create(name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, err = io.Copy(dst, file)
+		if cerr := dst.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

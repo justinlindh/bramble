@@ -903,7 +903,7 @@ func (s *Sim) emitConsole(node, line string) {
 // stops the supervisor (which never takes s.mu, so this is deadlock-safe) but
 // leaves the broker listener up for reuse; the broker's slot list is cleared so
 // fresh firmware nodes bind fresh slots. Any still-connected external node from
-// the prior scenario is orphaned (its C node entry was reset by cmdLoad) and
+// the prior scenario is orphaned (its C node entry was reset by loadScenarioPath) and
 // drops out when its connection next closes.
 func (s *Sim) resetEmulatorForReload() {
 	if s.supervisor != nil {
@@ -928,7 +928,7 @@ func (s *Sim) resetEmulatorForReload() {
 
 // startEmulator brings up the broker (once) and a fresh supervisor for the
 // scenario's firmware nodes, and flips the sim into real-time mode. Called from
-// cmdLoad under s.mu.
+// loadScenarioPath under s.mu.
 func (s *Sim) startEmulator(fwNodes []firmwareNodeSpec) {
 	s.realtime = true
 	if s.broker == nil {

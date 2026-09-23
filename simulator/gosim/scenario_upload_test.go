@@ -49,21 +49,25 @@ func TestScenarioUploadStoresJSON(t *testing.T) {
 	}
 }
 
-func TestScenarioUploadRejectsTraversal(t *testing.T) {
+// siblingDirs creates "scenarios" and "outside" side by side under one temp
+// dir, so an escape from scenarios/ is observable in outside/.
+func siblingDirs(t *testing.T) (scenarioDir, outside string) {
+	t.Helper()
 	dir := t.TempDir()
-	outside := filepath.Join(dir, "outside")
-	if err := os.Mkdir(outside, 0o755); err != nil {
-		t.Fatal(err)
+	scenarioDir = filepath.Join(dir, "scenarios")
+	outside = filepath.Join(dir, "outside")
+	for _, d := range []string{scenarioDir, outside} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	scenarioDir := filepath.Join(dir, "scenarios")
-	if err := os.Mkdir(scenarioDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	return scenarioDir, outside
+}
+
+func TestScenarioUploadConfinesTraversalName(t *testing.T) {
+	scenarioDir, outside := siblingDirs(t)
 
 	rec := httptest.NewRecorder()
-	// A name that would walk out of scenarioDir into a sibling directory if
-	// joined verbatim. filepath.Base collapses it to "evil.json", so the file
-	// lands inside scenarioDir and never in outside/.
 	scenarioUploadHandler(scenarioDir)(rec, uploadRequest(t, "../outside/evil.json", "x"))
 
 	if rec.Code != http.StatusOK {
@@ -73,7 +77,74 @@ func TestScenarioUploadRejectsTraversal(t *testing.T) {
 		t.Fatalf("traversal escaped: file written into sibling directory (err %v)", err)
 	}
 	if _, err := os.Stat(filepath.Join(scenarioDir, "evil.json")); err != nil {
-		t.Fatalf("sanitized file not stored inside scenarios dir: %v", err)
+		t.Fatalf("file not stored inside scenarios dir: %v", err)
+	}
+}
+
+func TestScenarioUploadRefusesEscapingSymlink(t *testing.T) {
+	scenarioDir, outside := siblingDirs(t)
+	target := filepath.Join(outside, "evil.json")
+	if err := os.Symlink(target, filepath.Join(scenarioDir, "evil.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	scenarioUploadHandler(scenarioDir)(rec, uploadRequest(t, "evil.json", "x"))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("symlink escaped: file written outside scenarios dir (err %v)", err)
+	}
+}
+
+func TestIsScenarioName(t *testing.T) {
+	for name, want := range map[string]bool{
+		"10-node-grid":    true,
+		"":                false,
+		"..":              false,
+		"../outside/grid": false,
+		"sub/grid":        false,
+		`sub\grid`:        false,
+		"/etc/passwd":     false,
+	} {
+		if got := isScenarioName(name); got != want {
+			t.Errorf("isScenarioName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestCmdLoadRefusesPathScenario(t *testing.T) {
+	scenarioDir, outside := siblingDirs(t)
+	grid, err := os.ReadFile(filepath.Join("..", "scenarios", "3-node-linear.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{filepath.Join(scenarioDir, "grid.json"), filepath.Join(outside, "grid.json")} {
+		if err := os.WriteFile(p, grid, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sim, err := NewSim(scenarioDir, func([]byte) {}, false, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sim.startPipeReader()
+	defer sim.restoreStdout()
+	sim.mu.Lock()
+	defer sim.mu.Unlock()
+
+	for _, name := range []string{"../outside/grid", filepath.Join(outside, "grid.json")} {
+		sim.cmdLoad(Command{Scenario: name})
+		if sim.state == StateLoaded {
+			t.Fatalf("cmdLoad(%q) loaded a scenario from outside scenarioDir", name)
+		}
+	}
+	sim.cmdLoad(Command{Scenario: "grid"})
+	if sim.state != StateLoaded {
+		t.Fatalf("state = %v after loading a bare name, want loaded", sim.state)
 	}
 }
 

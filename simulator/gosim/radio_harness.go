@@ -178,7 +178,7 @@ func (h *radioHarness) dutyCycleSet() bool     { return bool(h.radio.duty_cycle_
 func (h *radioHarness) dutyCycleCapPct() uint8 { return uint8(h.radio.duty_cycle_pct) }
 
 // applyBridgeDutyCycleCap calls the real bridge_apply_duty_cycle_cap,
-// exactly the function sim.go's cmdLoad/handleNodeJoin/cmdAddNode call
+// exactly the function sim.go's loadScenarioPath/handleNodeJoin/cmdAddNode call
 // after every node_activate. No-ops if the harness's shared radio config
 // has no duty cap set, matching sim.go's own guard.
 func (h *radioHarness) applyBridgeDutyCycleCap(node *C.sim_node_t) {
