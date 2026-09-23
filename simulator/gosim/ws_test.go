@@ -46,8 +46,7 @@ func TestHubUnregisterUnknownClientIsNoop(t *testing.T) {
 	h := NewHub(nil)
 	c := newTestClient(1)
 	// Never registered: unregister must not close its channel or change the
-	// count, so a duplicate teardown (readPump's deferred unregister after an
-	// explicit one) cannot double-close the send channel.
+	// count, so a repeated unregister cannot double-close the send channel.
 	if got := h.unregister(c); got != 0 {
 		t.Fatalf("unregister of unknown client: count = %d, want 0", got)
 	}
@@ -103,10 +102,10 @@ func TestHubConcurrentAccess(t *testing.T) {
 	const workers = 16
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for i := 0; i < workers; i++ {
+	for range workers {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				c := newTestClient(4)
 				h.register(c)
 				h.Broadcast([]byte("tick"))

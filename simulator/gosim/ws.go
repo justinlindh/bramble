@@ -59,9 +59,8 @@ func (h *Hub) Broadcast(msg []byte) {
 	}
 }
 
-// register adds c to the hub and returns the resulting client count, read
-// under the same lock that mutates the map so the caller can log it without a
-// second, unsynchronized read of h.clients.
+// register adds c and returns the client count, read under the lock so
+// callers never touch h.clients unsynchronized.
 func (h *Hub) register(c *Client) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -69,8 +68,8 @@ func (h *Hub) register(c *Client) int {
 	return len(h.clients)
 }
 
-// unregister removes c from the hub (closing its send channel) and returns the
-// resulting client count under the lock, for the same reason as register.
+// unregister removes c, closing its send channel, and returns the client
+// count read under the lock. Unknown clients are a no-op.
 func (h *Hub) unregister(c *Client) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
