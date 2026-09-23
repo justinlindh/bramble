@@ -1511,6 +1511,21 @@ static int hex_nibble(char c) {
     return -1;
 }
 
+/* Decode exactly n bytes from a hex string (which the caller has already
+ * length-checked to hold 2*n characters) into out. Returns false if any
+ * character is not a hex digit. */
+static bool hex_to_bytes(const char* hex, uint8_t* out, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        int hi = hex_nibble(hex[i * 2]);
+        int lo = hex_nibble(hex[i * 2 + 1]);
+        if (hi < 0 || lo < 0) {
+            return false;
+        }
+        out[i] = (uint8_t)((hi << 4) | lo);
+    }
+    return true;
+}
+
 /* bramble.setNetworkKey: params {"key": "<64 lowercase/uppercase hex chars>"}.
  * Provisions the control-plane network key (STAGED, see network_key.h): this
  * does NOT by itself close SEC-H1, SEC-H2, NEW-SEC-4, or NEW-SEC-8; those
@@ -1614,13 +1629,8 @@ static int rpc_set_anchor(const cJSON* params, cJSON* result) {
         return RPC_ERR_INVALID_PARAMS;
     }
     uint8_t pub[BRAMBLE_ED25519_PUBKEY_SIZE];
-    for (int i = 0; i < BRAMBLE_ED25519_PUBKEY_SIZE; i++) {
-        int hi = hex_nibble(hex[i * 2]);
-        int lo = hex_nibble(hex[i * 2 + 1]);
-        if (hi < 0 || lo < 0) {
-            return RPC_ERR_INVALID_PARAMS;
-        }
-        pub[i] = (uint8_t)((hi << 4) | lo);
+    if (!hex_to_bytes(hex, pub, sizeof(pub))) {
+        return RPC_ERR_INVALID_PARAMS;
     }
     identity_anchor_set(pub);
     /* Push the anchor into the live pin store so it pins only endorsed
@@ -1721,13 +1731,8 @@ static int rpc_set_endorsement(const cJSON* params, cJSON* result) {
     }
 
     uint8_t sig[BRAMBLE_ED25519_SIG_SIZE];
-    for (int i = 0; i < BRAMBLE_ED25519_SIG_SIZE; i++) {
-        int hi = hex_nibble(sig_hex[i * 2]);
-        int lo = hex_nibble(sig_hex[i * 2 + 1]);
-        if (hi < 0 || lo < 0) {
-            return RPC_ERR_INVALID_PARAMS;
-        }
-        sig[i] = (uint8_t)((hi << 4) | lo);
+    if (!hex_to_bytes(sig_hex, sig, sizeof(sig))) {
+        return RPC_ERR_INVALID_PARAMS;
     }
 
     /* Verify against this node's own identity key + the provisioned anchor
@@ -3787,13 +3792,8 @@ static int handle_phy_tx(const cJSON* params, cJSON* result) {
     }
     uint8_t frame[255];
     size_t n = hlen / 2;
-    for (size_t i = 0; i < n; i++) {
-        int hi = hex_nibble(hex[i * 2]);
-        int lo = hex_nibble(hex[i * 2 + 1]);
-        if (hi < 0 || lo < 0) {
-            return RPC_ERR_INVALID_PARAMS;
-        }
-        frame[i] = (uint8_t)((hi << 4) | lo);
+    if (!hex_to_bytes(hex, frame, n)) {
+        return RPC_ERR_INVALID_PARAMS;
     }
 
     int rc = tx_gate_send(frame, (uint8_t)n, TX_KIND_FORWARD);
