@@ -6,7 +6,8 @@
 #include <stdio.h>
 
 /**
- * Format a 32-bit address as an 8-digit uppercase hex string.
+ * Format a 32-bit address or packet/message id as an 8-digit uppercase hex
+ * string.
  *
  * Dependency-free (no cJSON, no traffic_debug) on purpose, so files that need
  * only the address format can share one definition. topology_export.c is the
