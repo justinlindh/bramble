@@ -472,7 +472,9 @@ func (ec *extConn) handleHello(msg *emuInbound) {
 	b.mu.Unlock()
 
 	ec.slot = slot
-	slot.label = firstNonEmpty(slot.label, msg.Node)
+	if slot.label == "" {
+		slot.label = msg.Node
+	}
 
 	if slot.nodeIndex < 0 {
 		id := msg.Node
@@ -1038,11 +1040,4 @@ func (s *Sim) shutdownEmulator() {
 // when a firmware scenario is loaded without an explicit --emu-listen.
 func defaultEmuSocketPath() string {
 	return fmt.Sprintf("%s/bramble-emu-%d.sock", os.TempDir(), os.Getpid())
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }

@@ -357,7 +357,7 @@ void process_flood_relay_queue(uint32_t t);
 void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr);
 void handle_rrep(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr);
 void handle_rerr(const uint8_t* data, uint8_t len);
-void rerr_fastfail_notify(uint32_t packet_id, const char* reason);
+void notify_ack_failed(uint32_t packet_id, const char* reason);
 void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_header_t* header);
 
 /* ── mesh_location.c ────────────────────────────────────────────────── */

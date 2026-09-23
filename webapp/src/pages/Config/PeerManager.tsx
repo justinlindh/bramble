@@ -11,6 +11,7 @@ import { tryParseAddr } from '../../lib/addr';
 import { buildKnownPeers } from '../Nodes/knownPeers';
 import { loadAddrMap, saveAddrMap } from '../../utils/persistedAddrMap';
 import { formatAge } from '../../hooks/useAgeTick';
+import { useTimedValue } from '../../hooks/useTimedValue';
 import styles from './PeerManager.module.css';
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
@@ -182,7 +183,7 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
   const [addAddr, setAddAddr] = useState('');
   const [addName, setAddName] = useState('');
   const [addError, setAddError] = useState('');
-  const [addSuccess, setAddSuccess] = useState('');
+  const [addSuccess, showAddSuccess, resetAddSuccess] = useTimedValue('', 5000);
   const [importStatus, setImportStatus] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -220,7 +221,7 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
   const handleAddContact = (e: React.FormEvent) => {
     e.preventDefault();
     setAddError('');
-    setAddSuccess('');
+    resetAddSuccess();
     const addr = tryParseAddr(addAddr);
     if (addr === null) {
       setAddError('Invalid address (use hex, e.g. 0xDEADBEEF)');
@@ -231,10 +232,9 @@ export function PeerManager({ neighbors, routes, peerLocations }: PeerManagerPro
     }
     const hex = formatAddr0x(addr);
     const label = addName.trim() || hex;
-    setAddSuccess(`Name saved for ${label}; will appear in chat when discovered on mesh.`);
+    showAddSuccess(`Name saved for ${label}; will appear in chat when discovered on mesh.`);
     setAddAddr('');
     setAddName('');
-    setTimeout(() => setAddSuccess(''), 5000);
   };
 
   const handleExport = () => {

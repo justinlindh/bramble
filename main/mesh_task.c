@@ -1800,7 +1800,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                 if (s_queued_msgs[i].reason == QUEUE_REASON_SESSION) {
                     ESP_LOGW(TAG, "Queued DM for %08" PRIX32 " expired (no secure session)",
                              s_queued_msgs[i].dest_addr);
-                    rerr_fastfail_notify(s_queued_msgs[i].pkt_id, "no_secure_session");
+                    notify_ack_failed(s_queued_msgs[i].pkt_id, "no_secure_session");
                 } else {
                     ESP_LOGW(TAG, "Queued msg for %08" PRIX32 " expired",
                              s_queued_msgs[i].dest_addr);
@@ -1921,13 +1921,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
 #endif
                     }
                     /* Notify webapp of failure */
-                    cJSON* params = cJSON_CreateObject();
-                    char pkt_buf[12];
-                    snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, pa->packet_id);
-                    cJSON_AddStringToObject(params, "packet_id", pkt_buf);
-                    cJSON_AddStringToObject(params, "status", "failed");
-                    rpc_notify("bramble.onAck", params);
-                    cJSON_Delete(params);
+                    notify_ack_failed(pa->packet_id, NULL);
                     pa->active = false;
                 } else {
                     ESP_LOGI(TAG, "Retransmit pkt %08" PRIX32 " to %08" PRIX32 " (attempt %u/%u)",
