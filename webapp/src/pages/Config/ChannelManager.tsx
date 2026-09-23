@@ -13,6 +13,7 @@ import type { ScanResult } from '../../components/QRScanModal';
 import { encodeChannelShare } from '../../utils/channelShare';
 import { clampToUtf8Bytes, utf8Length, CHANNEL_NAME_BUDGET_BYTES } from '../../utils/byteLimit';
 import { friendlyErrorFrom } from '../../lib/errors';
+import { useTimedValue } from '../../hooks/useTimedValue';
 import styles from './ChannelManager.module.css';
 
 interface ChannelManagerProps {
@@ -88,7 +89,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
 
   // Import / scan state
   const [showScan, setShowScan] = useState(false);
-  const [importSuccess, setImportSuccess] = useState('');
+  const [importSuccess, showImportSuccess, resetImportSuccess] = useTimedValue('', 3000);
 
   // ── Add channel ──────────────────────────────────────────────────────────
   const handleAdd = async (e: React.FormEvent) => {
@@ -171,8 +172,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
     setError('');
     try {
       await addChannel(name, psk || undefined);
-      setImportSuccess(`Channel "${name}" added!`);
-      setTimeout(() => setImportSuccess(''), 3000);
+      showImportSuccess(`Channel "${name}" added!`);
     } catch (err) {
       setError(friendlyErrorFrom(err));
     }
@@ -273,7 +273,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
         <button
           type="button"
           className={styles.importBtn}
-          onClick={() => { setError(''); setImportSuccess(''); setShowScan(true); }}
+          onClick={() => { setError(''); resetImportSuccess(); setShowScan(true); }}
           title="Import channel from QR code or share string"
         >
           ⬇ Import
