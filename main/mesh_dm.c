@@ -404,7 +404,7 @@ static int hs_dedup_check_and_record(uint32_t src_addr, const uint8_t eph_pub[32
  * send_dm_packet (which mints its own pkt_id via next_packet_id, matching
  * every other send_*_packet in this file). A caller polling status by the
  * placeholder id will not see the real send's ack/delivery events; it will
- * see a failure notification via rerr_fastfail_notify if the queue entry
+ * see a failure notification via notify_ack_failed if the queue entry
  * expires or is evicted, and nothing further if it is flushed successfully.
  */
 static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t* data, size_t len,
@@ -453,7 +453,7 @@ static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t* data, s
         }
         ESP_LOGW(TAG, "Message queue full, evicting oldest awaiting-session entry for %08" PRIX32,
                  s_queued_msgs[oldest].dest_addr);
-        rerr_fastfail_notify(s_queued_msgs[oldest].pkt_id, "queue_full");
+        notify_ack_failed(s_queued_msgs[oldest].pkt_id, "queue_full");
         msg_store_update_by_uid(s_queued_msgs[oldest].uid, 0, MSG_STATUS_FAILED);
         free_idx = oldest;
     }
@@ -513,7 +513,7 @@ static void flush_session_queue(uint32_t dest_addr) {
             }
         } else {
             ESP_LOGW(TAG, "Failed to flush queued DM to %08" PRIX32, dest_addr);
-            rerr_fastfail_notify(s_queued_msgs[i].pkt_id, "session_send_failed");
+            notify_ack_failed(s_queued_msgs[i].pkt_id, "session_send_failed");
             msg_store_update_by_uid(s_queued_msgs[i].uid, 0, MSG_STATUS_FAILED);
         }
         s_queued_msgs[i].used = false;

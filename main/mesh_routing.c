@@ -428,7 +428,7 @@ void handle_rrep(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     }
 }
 
-void rerr_fastfail_notify(uint32_t packet_id, const char* reason) {
+void notify_ack_failed(uint32_t packet_id, const char* reason) {
     cJSON* params = cJSON_CreateObject();
     if (!params) {
         return;
@@ -499,7 +499,7 @@ void handle_rerr(const uint8_t* data, uint8_t len) {
      * in a single hop. */
     if (rerr_failfast_applies(&s_routes, rerr.broken_dest, route_marked_broken)) {
         size_t failed = rerr_ack_failfast_for_dest(&s_pending_acks, rerr.broken_dest,
-                                                   "route_broken", rerr_fastfail_notify);
+                                                   "route_broken", notify_ack_failed);
         if (failed > 0) {
             ESP_LOGW(TAG, "RERR fast-failed %u pending ACK(s) for dest %08" PRIX32 "%s",
                      (unsigned)failed, rerr.broken_dest,
