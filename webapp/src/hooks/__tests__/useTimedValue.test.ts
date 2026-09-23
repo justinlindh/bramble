@@ -49,11 +49,11 @@ describe('useTimedValue', () => {
     expect(result.current[0]).toBe(null);
   });
 
-  it('cancels the pending timer on unmount (no setState after unmount)', () => {
+  it('cancels the pending timer on unmount', () => {
     const { result, unmount } = renderHook(() => useTimedValue('', 1000));
     act(() => result.current[1]('saved'));
+    expect(vi.getTimerCount()).toBe(1);
     unmount();
-    // Advancing past the delay must not throw or warn: the timer was cancelled.
-    expect(() => act(() => vi.advanceTimersByTime(2000))).not.toThrow();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

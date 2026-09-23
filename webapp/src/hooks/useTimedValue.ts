@@ -1,15 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-// useTimedValue backs a transient, self-clearing UI value: an inline "saved"
-// message, a "Copied" row label, any signal that should show for a moment and
-// then disappear on its own. `show(value)` sets the value and schedules it back
-// to `cleared` after ms; a second show restarts the window; reset clears it
-// immediately (e.g. before starting a fresh action); and the pending timer is
-// cancelled on unmount, so a component torn down mid-window (a closing modal, a
-// tab the user leaves) never runs its timeout callback against a dead component.
-// The hand-rolled `setX(v); setTimeout(() => setX(cleared), ms)` copies this
-// replaces omitted that cleanup. useTimedFlag is this hook specialized to a
-// boolean flag.
+// useTimedValue holds a transient UI value that clears itself. `show(value)`
+// sets it and schedules a revert to `cleared` after ms; a second show restarts
+// the window; reset clears it immediately; the pending timer is cancelled on
+// unmount. Pass a primitive or stable `cleared`, or show/reset change identity
+// every render.
 export function useTimedValue<T>(
   cleared: T,
   ms: number,
