@@ -112,10 +112,10 @@ func TestDutyCycleCapScenarioSchemaAppliesThroughBridge(t *testing.T) {
 	// Scenario-loaded nodes get addresses derived from their Ed25519 identity
 	// keys (deterministic per node id, not a fixed constant); this scenario
 	// has exactly one node, so take it by index and activate it the way
-	// cmdLoad does.
+	// loadScenarioPath does.
 	n := h.nodeAtIndex(0)
 	nodeActivate(n)
-	h.applyBridgeDutyCycleCap(n) // exactly what cmdLoad does after nodeActivate
+	h.applyBridgeDutyCycleCap(n) // exactly what loadScenarioPath does after nodeActivate
 	h.forceBeaconDue(n, 0)
 
 	now := uint64(0)

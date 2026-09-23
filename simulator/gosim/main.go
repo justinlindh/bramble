@@ -41,6 +41,62 @@ func findDir(candidates []string) string {
 	return ""
 }
 
+// scenarioUploadHandler stores a multipart-uploaded "<name>.json" scenario in
+// scenarioDir, the form /api/scenarios lists and cmdLoad accepts. Writes go
+// through os.Root so neither the name nor a symlink can land outside the dir.
+func scenarioUploadHandler(scenarioDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if scenarioDir == "" {
+			http.Error(w, "no scenarios directory", http.StatusInternalServerError)
+			return
+		}
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		name := header.Filename
+		base, ok := strings.CutSuffix(name, ".json")
+		if !ok || !isScenarioName(base) {
+			http.Error(w, "scenario filename must be <name>.json", http.StatusBadRequest)
+			return
+		}
+
+		root, err := os.OpenRoot(scenarioDir)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer root.Close()
+		dst, err := root.Create(name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, err = io.Copy(dst, file)
+		if cerr := dst.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "filename": name})
+	}
+}
+
 func main() {
 	// Subcommands come before the server flags. `screen-assert` replays a
 	// headless event log and asserts rendered-screen content (cmd_screen_assert.go),
@@ -184,34 +240,7 @@ func main() {
 		json.NewEncoder(w).Encode(files)
 	})
 
-	mux.HandleFunc("/api/scenarios/upload", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if *scenarioDir == "" {
-			http.Error(w, "no scenarios directory", http.StatusInternalServerError)
-			return
-		}
-		r.ParseMultipartForm(10 << 20)
-		file, header, err := r.FormFile("file")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		defer file.Close()
-
-		dst, err := os.Create(filepath.Join(*scenarioDir, header.Filename))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer dst.Close()
-		io.Copy(dst, file)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "filename": header.Filename})
-	})
+	mux.HandleFunc("/api/scenarios/upload", scenarioUploadHandler(*scenarioDir))
 
 	// Root handler: WebSocket upgrade or static files
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

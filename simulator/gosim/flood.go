@@ -145,7 +145,7 @@ type floodOrigin struct {
 // floodSim is the whole of the managed-flooding routing mode's state,
 // separate from and parallel to the reactive path's sim_node_t fields
 // (routing_table_t etc, all unused in flood mode). One instance per loaded
-// scenario, reset in sim.go's cmdLoad.
+// scenario, reset in sim.go's loadScenarioPath.
 type floodSim struct {
 	hopLimit byte
 
