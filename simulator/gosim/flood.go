@@ -137,9 +137,7 @@ type floodOrigin struct {
 	srcAddr, destAddr uint32
 	sentUs            uint64
 	reached           bool
-	reachedUs         uint64
 	confirmed         bool
-	confirmedUs       uint64
 }
 
 // floodSim is the whole of the managed-flooding routing mode's state,
@@ -425,7 +423,6 @@ func (s *Sim) floodOnDataReached(rx *C.sim_node_t, f floodFrame, ts uint64) {
 		return
 	}
 	o.reached = true
-	o.reachedUs = ts
 	fl.reachedCount++
 	fl.reachedLatUs = append(fl.reachedLatUs, ts-o.sentUs)
 
@@ -458,7 +455,6 @@ func (s *Sim) floodOnAckReached(rx *C.sim_node_t, f floodFrame, ts uint64) {
 		return
 	}
 	o.confirmed = true
-	o.confirmedUs = ts
 	fl.confirmedCount++
 	fl.confirmedLatUs = append(fl.confirmedLatUs, ts-o.sentUs)
 
