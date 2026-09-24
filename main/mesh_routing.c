@@ -434,9 +434,8 @@ void notify_ack_failed(uint32_t packet_id, const char* reason) {
         return;
     }
 
-    char pkt_buf[12];
-    snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, packet_id);
-    cJSON_AddStringToObject(params, "packet_id", pkt_buf);
+    char pkt_buf[9];
+    cJSON_AddStringToObject(params, "packet_id", addr_hex(packet_id, pkt_buf, sizeof(pkt_buf)));
     cJSON_AddStringToObject(params, "status", "failed");
     if (reason) {
         cJSON_AddStringToObject(params, "reason", reason);
