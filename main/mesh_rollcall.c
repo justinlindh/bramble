@@ -262,8 +262,7 @@ uint32_t mesh_rollcall_retry_after_ms(void) {
 static void rollcall_emit_complete(const rollcall_ledger_t* l) {
     cJSON* params = cJSON_CreateObject();
     char buf[12];
-    snprintf(buf, sizeof(buf), "%08" PRIX32, l->rollcall_id);
-    cJSON_AddStringToObject(params, "rollcall_id", buf);
+    cJSON_AddStringToObject(params, "rollcall_id", addr_hex(l->rollcall_id, buf, sizeof(buf)));
     cJSON_AddNumberToObject(params, "responded", rollcall_ledger_responded_count(l));
     cJSON_AddNumberToObject(params, "expected", l->expected_count);
     cJSON_AddBoolToObject(params, "anchored", l->anchored);
@@ -359,8 +358,7 @@ bool mesh_rollcall_handle_announce(uint32_t src_addr, int channel_idx, const uin
      * primitive look like traffic somebody sent. */
     cJSON* params = cJSON_CreateObject();
     char buf[12];
-    snprintf(buf, sizeof(buf), "%08" PRIX32, ann.rollcall_id);
-    cJSON_AddStringToObject(params, "rollcall_id", buf);
+    cJSON_AddStringToObject(params, "rollcall_id", addr_hex(ann.rollcall_id, buf, sizeof(buf)));
     cJSON_AddStringToObject(params, "from", addr_hex(src_addr, buf, sizeof(buf)));
     cJSON_AddStringToObject(params, "text", ann.text);
     cJSON_AddNumberToObject(params, "round", ann.round);
@@ -493,8 +491,7 @@ void mesh_rollcall_handle_response(uint32_t src_addr, const uint8_t* data, size_
 
     cJSON* params = cJSON_CreateObject();
     char buf[12];
-    snprintf(buf, sizeof(buf), "%08" PRIX32, resp.rollcall_id);
-    cJSON_AddStringToObject(params, "rollcall_id", buf);
+    cJSON_AddStringToObject(params, "rollcall_id", addr_hex(resp.rollcall_id, buf, sizeof(buf)));
     cJSON_AddStringToObject(params, "address", addr_hex(resp.responder_addr, buf, sizeof(buf)));
     cJSON_AddNumberToObject(params, "round", resp.round);
     cJSON_AddNumberToObject(params, "responded", rollcall_ledger_responded_count(&s_rc->ledger));
