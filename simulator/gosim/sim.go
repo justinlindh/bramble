@@ -1835,7 +1835,12 @@ func (sim *Sim) loadHeadless(scenarioPath string) error {
 // emuListen and disableCollisions carry the --emu-listen and --no-collisions
 // flags through from main so headless runs honor them.
 func RunHeadless(scenarioPath, emuListen string, disableCollisions bool) error {
-	sim, err := NewSim(scenarioPath, nil, true, emuListen, disableCollisions)
+	// scenarioDir is left empty: headless mode loads the scenario by its full
+	// path via loadHeadless below, never a client-named file under scenarioDir
+	// (that path runs only through cmdLoad, which headless never reaches). The
+	// embedded-sim callers (runScenario, emu harness) pass "" for the same
+	// reason.
+	sim, err := NewSim("", nil, true, emuListen, disableCollisions)
 	if err != nil {
 		return err
 	}
