@@ -338,8 +338,7 @@ void handle_probe_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr
     cJSON_AddNumberToObject(params, "latency_ms", latency);
     cJSON_AddNumberToObject(params, "probe_round", probe_round);
     char pid_buf[12];
-    snprintf(pid_buf, sizeof(pid_buf), "%08" PRIX32, s_probe_id);
-    cJSON_AddStringToObject(params, "probe_id", pid_buf);
+    cJSON_AddStringToObject(params, "probe_id", addr_hex(s_probe_id, pid_buf, sizeof(pid_buf)));
     rpc_notify("bramble.onProbeResult", params);
     cJSON_Delete(params);
 }
