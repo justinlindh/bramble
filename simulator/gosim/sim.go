@@ -834,9 +834,9 @@ func (s *Sim) loadScenarioPath(scenarioPath string) {
 	s.resetEmulatorForReload()
 
 	// Reset C state
-	nodeArrayInit(&s.nodes)
+	C.node_array_init(&s.nodes)
 	radioConfigInit(&s.radio)
-	eventQueueInit(&s.events)
+	C.event_queue_init(&s.events)
 	C.metrics_init(&s.metrics)
 	C.bridge_msg_track_init(&s.msgTrack[0], C.MAX_MSG_TRACK)
 	for i := 0; i < C.MAX_NODES; i++ {

@@ -44,10 +44,6 @@ func loadScenario(path string, nodes *C.node_array_t, radio *C.radio_config_t,
 
 // --- Node operations ---
 
-func nodeArrayInit(arr *C.node_array_t) {
-	C.node_array_init(arr)
-}
-
 func nodeArrayAdd(arr *C.node_array_t, id string, addr uint32, x, y float32) int {
 	cid := C.CString(id)
 	defer C.free(unsafe.Pointer(cid))
@@ -101,10 +97,6 @@ func nodeMarkUnanchored(idx int) {
 }
 
 // --- Event queue ---
-
-func eventQueueInit(q *C.event_queue_t) {
-	C.event_queue_init(q)
-}
 
 func eventQueuePush(q *C.event_queue_t, e *C.sim_event_t) bool {
 	return C.event_queue_push(q, e) == C.bool(true)
