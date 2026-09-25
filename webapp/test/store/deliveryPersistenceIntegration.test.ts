@@ -3,7 +3,7 @@ import { useStore } from '../../src/store';
 import { messageDb } from '../../src/store/messageDb';
 import { deliveryEventStore } from '../../src/store/deliveryEventStore';
 import {
-  __resetBroadcastTelemetryForTests,
+  __resetCorrelationStateForTests,
   handleAck,
   handleBroadcastDelivery,
   initMessageStore,
@@ -58,7 +58,7 @@ describe('delivery persistence hydration + live merge', () => {
     await deliveryEventStore.open(NODE_ADDR);
     await messageDb.clearAll();
     await deliveryEventStore.clearAll();
-    __resetBroadcastTelemetryForTests();
+    __resetCorrelationStateForTests();
   });
 
   it('hydrates cached message delivery metadata from persisted delivery events', async () => {

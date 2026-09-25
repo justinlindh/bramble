@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { useStore } from '../index';
 import {
-  __resetBroadcastTelemetryForTests,
+  __resetCorrelationStateForTests,
   handleBroadcastDelivery,
   registerBroadcastSendTelemetry,
 } from '../actions';
@@ -22,12 +22,12 @@ function makeOutgoingBroadcast(id: string): Message {
 
 describe('broadcast delivery store plumbing', () => {
   beforeEach(() => {
-    __resetBroadcastTelemetryForTests();
+    __resetCorrelationStateForTests();
     useStore.setState({ messages: [], conversations: new Map() });
   });
 
   afterEach(() => {
-    __resetBroadcastTelemetryForTests();
+    __resetCorrelationStateForTests();
   });
 
   it('broadcast send stores broadcastId', () => {
