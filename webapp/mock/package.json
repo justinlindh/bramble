@@ -9,6 +9,6 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
-    "ws": "^8.21.3"
+    "ws": "^8.22.0"
   }
 }
