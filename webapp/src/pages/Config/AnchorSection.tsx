@@ -56,6 +56,53 @@ function clearStoredSeed(): void {
   safeRemoveItem(ANCHOR_SEED_KEY);
 }
 
+// A read-only share string (a signed cert, this node's identity) laid out as a
+// select-on-focus input beside a "Show QR" button that reveals the same string
+// as a scannable code. The QR modal's open state is owned here so each field is
+// self-contained: the cert and identity rows are byte-identical apart from their
+// labels and copy, so the coupling lives in one place instead of two.
+function ShareField({
+  label,
+  value,
+  ariaLabel,
+  qrTitle,
+  qrDescription,
+}: {
+  label: string;
+  value: string;
+  ariaLabel: string;
+  qrTitle: string;
+  qrDescription: string;
+}) {
+  const [showQR, setShowQR] = useState(false);
+  return (
+    <>
+      <div className={styles.row}>
+        <span className={styles.label}>{label}</span>
+        <input
+          className={styles.input}
+          type="text"
+          readOnly
+          value={value}
+          onFocus={(e) => e.target.select()}
+          aria-label={ariaLabel}
+        />
+        <button className={styles.ghostBtn} type="button" onClick={() => setShowQR(true)}>
+          Show QR
+        </button>
+      </div>
+      {showQR && (
+        <QRShareModal
+          title={qrTitle}
+          shareString={value}
+          description={qrDescription}
+          onClose={() => setShowQR(false)}
+        />
+      )}
+    </>
+  );
+}
+
 // The trust anchor is the fleet's Sybil-scarcity root. The operator's client
 // holds the anchor PRIVATE seed offline (localStorage, this browser only),
 // provisions the anchor PUBLIC key to each node, and enrolls a node by signing
@@ -79,12 +126,13 @@ export function AnchorSection() {
   // backup. Cancelling discards it. This is the critical custody step.
   const [pendingAnchor, setPendingAnchor] = useState<ClientAnchor | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const [showPendingQR, setShowPendingQR] = useState(false);
+  // One boolean drives the anchor-backup QR for both the pending-confirmation and
+  // already-held states (see backupAnchor below for why one modal serves both).
+  const [showBackupQR, setShowBackupQR] = useState(false);
   const [backupCopied, copyBackup, resetBackupCopied] = useCopyFlash(2000);
 
   const [importInput, setImportInput] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
-  const [showExport, setShowExport] = useState(false);
   const [confirmForget, setConfirmForget] = useState(false);
 
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -99,11 +147,9 @@ export function AnchorSection() {
   const [remoteInput, setRemoteInput] = useState('');
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [remoteCert, setRemoteCert] = useState<{ uri: string; fp: string } | null>(null);
-  const [showRemoteQR, setShowRemoteQR] = useState(false);
 
   const [identityShare, setIdentityShare] = useState<string | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
-  const [showIdentityQR, setShowIdentityQR] = useState(false);
 
   const [applyInput, setApplyInput] = useState('');
   const [applyError, setApplyError] = useState<string | null>(null);
@@ -131,6 +177,10 @@ export function AnchorSection() {
     clientAnchor && nodeFingerprint && nodeFingerprint !== clientAnchor.fp,
   );
 
+  // The anchor the backup QR reveals: a held anchor, or one still pending backup
+  // confirmation. The two states are mutually exclusive, so one modal serves both.
+  const backupAnchor = clientAnchor ?? pendingAnchor;
+
   // -- Generate a new anchor (mandatory-backup flow) --------------------------
   const onGenerate = () => {
     setGenerateError(null);
@@ -150,13 +200,13 @@ export function AnchorSection() {
     storeSeed(pendingAnchor.seedHex);
     setClientAnchor(pendingAnchor);
     setPendingAnchor(null);
-    setShowPendingQR(false);
+    setShowBackupQR(false);
   };
 
   const onCancelPending = () => {
     // Discard the unsaved anchor entirely; it was never persisted.
     setPendingAnchor(null);
-    setShowPendingQR(false);
+    setShowBackupQR(false);
   };
 
   const handleCopyBackup = () => {
@@ -307,7 +357,7 @@ export function AnchorSection() {
               stored only in this browser and is never sent to a node.
             </p>
             <div className={styles.row}>
-              <button className={styles.primaryBtn} type="button" onClick={() => setShowExport(true)}>
+              <button className={styles.primaryBtn} type="button" onClick={() => setShowBackupQR(true)}>
                 Show backup again
               </button>
               {confirmForget ? (
@@ -358,7 +408,7 @@ export function AnchorSection() {
               string above (password manager, printed QR) somewhere durable and offline.
             </p>
             <div className={styles.row}>
-              <button className={styles.ghostBtn} type="button" onClick={() => setShowPendingQR(true)}>
+              <button className={styles.ghostBtn} type="button" onClick={() => setShowBackupQR(true)}>
                 Show QR
               </button>
               <button className={styles.primaryBtn} type="button" onClick={onConfirmBackup}>
@@ -504,20 +554,13 @@ export function AnchorSection() {
         {remoteError && <p className={styles.error}>{remoteError}</p>}
         {remoteCert && (
           <>
-            <div className={styles.row}>
-              <span className={styles.label}>Cert</span>
-              <input
-                className={styles.input}
-                type="text"
-                readOnly
-                value={remoteCert.uri}
-                onFocus={(e) => e.target.select()}
-                aria-label="Signed endorsement cert"
-              />
-              <button className={styles.ghostBtn} type="button" onClick={() => setShowRemoteQR(true)}>
-                Show QR
-              </button>
-            </div>
+            <ShareField
+              label="Cert"
+              value={remoteCert.uri}
+              ariaLabel="Signed endorsement cert"
+              qrTitle="Endorsement cert"
+              qrDescription={`Permanent cert for node ${remoteCert.fp}. Send it back to that node's operator to apply.`}
+            />
             <p className={styles.hint}>
               Permanent cert for node <span className={styles.fingerprint}>{remoteCert.fp}</span>.
               Send this back to that node's operator.
@@ -539,20 +582,13 @@ export function AnchorSection() {
         </div>
         {identityError && <p className={styles.error}>{identityError}</p>}
         {identityShare && (
-          <div className={styles.row}>
-            <span className={styles.label}>Identity</span>
-            <input
-              className={styles.input}
-              type="text"
-              readOnly
-              value={identityShare}
-              onFocus={(e) => e.target.select()}
-              aria-label="This node identity share"
-            />
-            <button className={styles.ghostBtn} type="button" onClick={() => setShowIdentityQR(true)}>
-              Show QR
-            </button>
-          </div>
+          <ShareField
+            label="Identity"
+            value={identityShare}
+            ariaLabel="This node identity share"
+            qrTitle="This node's identity"
+            qrDescription="Public identity key. Send it to an anchor operator so they can enroll this node."
+          />
         )}
         <form
           className={styles.row}
@@ -579,36 +615,12 @@ export function AnchorSection() {
       </div>
 
       {/* -- Modals -- */}
-      {showPendingQR && pendingAnchor && (
+      {showBackupQR && backupAnchor && (
         <QRShareModal
           title="Anchor backup (SECRET)"
-          shareString={encodeAnchorBackup(pendingAnchor.seedHex)}
-          description={`Fingerprint ${pendingAnchor.fp}. This QR carries the fleet's root secret. Store it offline; do not share it.`}
-          onClose={() => setShowPendingQR(false)}
-        />
-      )}
-      {showExport && clientAnchor && (
-        <QRShareModal
-          title="Anchor backup (SECRET)"
-          shareString={encodeAnchorBackup(clientAnchor.seedHex)}
-          description={`Fingerprint ${clientAnchor.fp}. This QR carries the fleet's root secret. Store it offline; do not share it.`}
-          onClose={() => setShowExport(false)}
-        />
-      )}
-      {showRemoteQR && remoteCert && (
-        <QRShareModal
-          title="Endorsement cert"
-          shareString={remoteCert.uri}
-          description={`Permanent cert for node ${remoteCert.fp}. Send it back to that node's operator to apply.`}
-          onClose={() => setShowRemoteQR(false)}
-        />
-      )}
-      {showIdentityQR && identityShare && (
-        <QRShareModal
-          title="This node's identity"
-          shareString={identityShare}
-          description="Public identity key. Send it to an anchor operator so they can enroll this node."
-          onClose={() => setShowIdentityQR(false)}
+          shareString={encodeAnchorBackup(backupAnchor.seedHex)}
+          description={`Fingerprint ${backupAnchor.fp}. This QR carries the fleet's root secret. Store it offline; do not share it.`}
+          onClose={() => setShowBackupQR(false)}
         />
       )}
     </div>

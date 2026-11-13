@@ -745,7 +745,7 @@ function resetCorrelationState(): void {
   clearAllSentStatusTimers();
 }
 
-export function __resetBroadcastTelemetryForTests(): void {
+export function __resetCorrelationStateForTests(): void {
   resetCorrelationState();
 }
 

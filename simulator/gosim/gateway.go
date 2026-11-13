@@ -56,7 +56,7 @@ type Gateway struct {
 	brokerPath string // emu-link unix socket to dial
 	nodeName   string // hello id presented to the ether
 	baud       int
-	force      bool // enable with force:true even if the node holds an identity
+	force      bool // force flag the initial enable settled on, replayed on keepalive and reconnect
 
 	idc atomic.Uint64 // JSON-RPC id counter
 
@@ -154,8 +154,10 @@ func (g *Gateway) bridge(node io.ReadWriteCloser) error {
 
 	// 1. Enable passthrough on the real node. Over serial the node treats the
 	//    caller as authenticated (physical access); it still refuses if it
-	//    holds a live identity, so escalate to force once if asked to.
-	if err := g.enable(nr, g.force); err != nil {
+	//    holds a live identity, and enable() escalates to force once on that
+	//    refusal. Always start non-force; g.force is populated by whatever the
+	//    first enable settled on, for keepalive and reconnect.
+	if err := g.enable(nr, false); err != nil {
 		return fmt.Errorf("gateway: enable passthrough: %w", err)
 	}
 	log.Printf("gateway: passthrough enabled on %s", g.deviceLabel())

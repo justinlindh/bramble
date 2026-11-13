@@ -4,16 +4,22 @@
  * Precedence (highest first):
  *   1. Contact name the user assigned (contactNames)
  *   2. Location telemetry name (peerLocation.name, non-empty)
- *   3. Name the firmware reported (peerNames)
+ *   3. Name the firmware reported (learnedNames)
  *   4. undefined (caller chooses its own fallback)
  */
 import { useStore } from './index';
 import type { PeerLocation } from '../types/bramble';
 
-/** Resolve a peer's display name from raw store slices; `undefined` when none is known. */
+/**
+ * Resolve a peer's display name from raw store slices; `undefined` when none is
+ * known. Takes learnedNames (the firmware-reported layer), not the merged
+ * peerNames map: contactNames is already the top of the precedence chain here,
+ * so consulting the merged map, which lays contactNames over learnedNames,
+ * would fold the same source in twice.
+ */
 export function resolvePeerName(
   addr: number,
-  peerNames: Map<number, string> | undefined,
+  learnedNames: Map<number, string> | undefined,
   peerLocations: PeerLocation[] | undefined,
   contactNames: Map<number, string> | undefined,
 ): string | undefined {
@@ -23,7 +29,7 @@ export function resolvePeerName(
   const loc = peerLocations?.find((l) => l.addr === addr);
   if (loc?.name?.trim()) return loc.name.trim();
 
-  return peerNames?.get(addr) || undefined;
+  return learnedNames?.get(addr) || undefined;
 }
 
 /**
@@ -33,6 +39,6 @@ export function resolvePeerName(
  */
 export function usePeerName(addr: number): string | undefined {
   return useStore((s) =>
-    resolvePeerName(addr, s.peerNames, s.peerLocations, s.contactNames),
+    resolvePeerName(addr, s.learnedNames, s.peerLocations, s.contactNames),
   );
 }

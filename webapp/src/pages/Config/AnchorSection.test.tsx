@@ -214,3 +214,38 @@ describe('AnchorSection custody (component level)', () => {
     expect(setAnchor).toHaveBeenCalledWith(anchorPubFromSeed(seed));
   });
 });
+
+describe('AnchorSection QR share affordances', () => {
+  it('opens the SECRET backup QR from the pending gate', () => {
+    render(<AnchorSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate anchor' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show QR' }));
+    expect(screen.getByRole('dialog', { name: 'Anchor backup (SECRET)' })).toBeInTheDocument();
+  });
+
+  it('opens the same backup QR again from the held anchor', () => {
+    seedClientAnchor();
+    render(<AnchorSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show backup again' }));
+    expect(screen.getByRole('dialog', { name: 'Anchor backup (SECRET)' })).toBeInTheDocument();
+  });
+
+  it('opens the endorsement-cert QR after signing a remote cert', () => {
+    seedClientAnchor();
+    render(<AnchorSection />);
+    fireEvent.change(screen.getByLabelText('Remote node identity share'), {
+      target: { value: encodeIdentityShare(KAT_NODE_PUB) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign cert' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show QR' }));
+    expect(screen.getByRole('dialog', { name: 'Endorsement cert' })).toBeInTheDocument();
+  });
+
+  it("opens this node's identity QR after revealing the identity", async () => {
+    render(<AnchorSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show my identity' }));
+    await screen.findByLabelText('This node identity share');
+    fireEvent.click(screen.getByRole('button', { name: 'Show QR' }));
+    expect(screen.getByRole('dialog', { name: "This node's identity" })).toBeInTheDocument();
+  });
+});
