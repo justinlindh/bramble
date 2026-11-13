@@ -20,7 +20,7 @@ export {
   normalizeIncomingRealtimeMessage,
   handleIncomingMessage,
   openDM,
-  __resetBroadcastTelemetryForTests,
+  __resetCorrelationStateForTests,
   __resetActionsForTests,
   __normalizeReplayDeliveryEventForTests,
   __clearDeliveryEventSyncStateForTests,
