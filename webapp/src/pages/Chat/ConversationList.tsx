@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { BrambleConfig, Channel, Conversation } from '../../types/bramble';
 import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock } from '../../components/Icons';
 import { usePeerInfo, usePeerVerification } from '../../hooks/usePeer';
+import { buildKnownPeers } from '../Nodes/knownPeers';
 import { PeerStatusDot, PeerVerificationBadge } from './peerBadges';
 import { addChannel } from '../../store/actions';
 import { useStore, parseConversationId, formatConversationLabel } from '../../store/index';
@@ -111,15 +112,11 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
   const routes = useStore(s => s.routes);
   const peerLocations = useStore(s => s.peerLocations);
 
-  const knownPeerAddrs = new Set<number>();
-  for (const n of neighbors ?? []) knownPeerAddrs.add(n.addr);
-  for (const r of routes) {
-    if (r.dest !== BROADCAST_ADDR) knownPeerAddrs.add(r.dest);
-    if (r.nextHop !== BROADCAST_ADDR) knownPeerAddrs.add(r.nextHop);
-  }
-  for (const p of peerLocations) knownPeerAddrs.add(p.addr);
-
-  const knownPeers = [...knownPeerAddrs].filter(addr => addr !== BROADCAST_ADDR).sort((a, b) => a - b);
+  // The same neighbors + route-destinations + peer-locations union the Nodes
+  // and Config surfaces show, resolved through the shared buildKnownPeers so
+  // this third surface cannot drift from them on membership or order.
+  const knownPeers = buildKnownPeers(neighbors ?? [], routes, peerLocations).map(p => p.addr);
+  const knownPeerAddrs = new Set(knownPeers);
 
   // Separate out channels and DMs
   // Broadcasts are filed under 'broadcast' in the map, never as 'dm:0xFFFFFFFF'
