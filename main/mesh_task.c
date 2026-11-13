@@ -1967,9 +1967,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
     if (s_probe_collecting && !s_probe_complete_emitted &&
         (t - s_probe_sent_ms) >= PROBE_COLLECTION_WINDOW_MS) {
         cJSON* params = cJSON_CreateObject();
-        char pid_buf[12];
-        snprintf(pid_buf, sizeof(pid_buf), "%08" PRIX32, s_probe_id);
-        cJSON_AddStringToObject(params, "probe_id", pid_buf);
+        char pid_buf[9];
+        cJSON_AddStringToObject(params, "probe_id", addr_hex(s_probe_id, pid_buf, sizeof(pid_buf)));
         cJSON_AddNumberToObject(params, "unique_count", s_probe_result_count);
         cJSON_AddNumberToObject(params, "duration_ms", t - s_probe_sent_ms);
         cJSON_AddNumberToObject(params, "rounds_total", PROBE_SWEEP_ROUNDS);

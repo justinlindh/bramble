@@ -648,8 +648,8 @@ void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
         cJSON* params = cJSON_CreateObject();
         cJSON_AddStringToObject(params, "from", addr_hex(ack.src_addr, addr_buf, sizeof(addr_buf)));
         char pkt_buf[9];
-        snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, ack.ack_packet_id);
-        cJSON_AddStringToObject(params, "packet_id", pkt_buf);
+        cJSON_AddStringToObject(params, "packet_id",
+                                addr_hex(ack.ack_packet_id, pkt_buf, sizeof(pkt_buf)));
         cJSON_AddStringToObject(params, "status", "delivered");
         cJSON_AddNumberToObject(params, "rssi_at_dest", ack.rssi_at_dest);
 
@@ -875,9 +875,8 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr, uint32_t broad
 
     char src_buf[9], id_buf[9];
     cJSON* params = cJSON_CreateObject();
-    snprintf(id_buf, sizeof(id_buf), "%08" PRIX32, broadcast_id);
     cJSON_AddStringToObject(params, "recipient", addr_hex(src_addr, src_buf, sizeof(src_buf)));
-    cJSON_AddStringToObject(params, "broadcast_id", id_buf);
+    cJSON_AddStringToObject(params, "broadcast_id", addr_hex(broadcast_id, id_buf, sizeof(id_buf)));
     cJSON_AddStringToObject(params, "status", "delivered");
     cJSON_AddNumberToObject(params, "rssi_at_dest", rssi_at_dest);
 
