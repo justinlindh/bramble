@@ -71,6 +71,7 @@ export function Map() {
   const peerLocations = useStore(s => s.peerLocations);
   const status = useStore(s => s.status);
   const peerNames = useStore(s => s.peerNames);
+  const learnedNames = useStore(s => s.learnedNames);
   const contactNames = useStore(s => s.contactNames);
   const routes = useStore(s => s.routes);
   const showRoutes = useStore(s => s.showRoutes);
@@ -158,7 +159,7 @@ export function Map() {
     // Peers
     for (const peer of peerLocations) {
       if (selfAddr !== undefined && peer.addr === selfAddr) continue;
-      const peerDisplayName = resolvePeerName(peer.addr, peerNames, peerLocations, contactNames);
+      const peerDisplayName = resolvePeerName(peer.addr, learnedNames, peerLocations, contactNames);
 
       if (peer.tier === 'full' && peer.position) {
         const ll = L.latLng(peer.position.lat, peer.position.lon);
@@ -193,7 +194,7 @@ export function Map() {
       map.fitBounds(L.latLngBounds(bounds).pad(0.2));
       lastFitPeerKeyRef.current = visiblePeerKey;
     }
-  }, [selfPos, selfAddr, selfName, peerLocations, peerNames, contactNames]);
+  }, [selfPos, selfAddr, selfName, peerLocations, learnedNames, contactNames]);
 
   // Draw route lines
   useEffect(() => {
