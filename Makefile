@@ -49,7 +49,7 @@ help:
 	@echo "  make ci-quality         # host tests, board build, broader script sweep"
 	@echo "  make ci-firmware-quality# the strict lint gates CI runs in Static checks"
 	@echo "  make ci-webapp-quality  # webapp typecheck, unit tests, build, smoke"
-	@echo "  make check-fast         # webapp typecheck + unit tests (what the pre-commit hook runs)"
+	@echo "  make check-fast         # webapp typecheck + unit tests (pre-commit runs it on webapp/ or api/ commits)"
 	@echo "Packaging targets"
 	@echo "  make package-linux      # Electron AppImage + deb + pacman (webapp/release/)"
 	@echo "  make package-android    # webapp -> android assets -> debug APK"

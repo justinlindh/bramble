@@ -148,12 +148,14 @@ The hook then checks, on every commit:
 
 - clang-format on staged C and H files (skipped if `clang-format` is absent),
 - em dashes in added lines (banned repo-wide, see below),
-- `make check-fast`, which is the webapp typecheck plus unit tests.
+- `make check-fast`, which is the webapp typecheck plus unit tests, only when
+  the commit stages a file under `webapp/` or `api/` (CI's webapp and api
+  change areas).
 
-Because the hook runs `make check-fast`, it needs `webapp/node_modules` to
-exist. Run `npm ci` in `webapp/` once, even if you are not touching the
-webapp, or your commits will fail on a missing dependency rather than on your
-change.
+A commit that stages no `webapp/` or `api/` file does not need
+`webapp/node_modules`. A commit that does needs it, so run `npm ci` in
+`webapp/` before your first such commit; without it the hook fails on the
+missing dependency rather than skipping the check.
 
 Skipping the hooks means your first PR fails CI on rules your machine never
 checked. Install them.

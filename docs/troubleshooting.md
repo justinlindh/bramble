@@ -290,9 +290,10 @@ you; one you add will.
 
 ### My commit fails on a missing webapp dependency
 
-The pre-commit hook runs `make check-fast`, which typechecks and unit-tests
-the webapp. That needs `webapp/node_modules`, so run `npm ci` in `webapp/`
-once even if you are not touching webapp code.
+When a commit stages a file under `webapp/` or `api/`, the pre-commit hook
+runs `make check-fast`, which typechecks and unit-tests the webapp. That needs
+`webapp/node_modules`, so run `npm ci` in `webapp/` once. Commits that stage
+neither path skip this step and need no webapp dependencies.
 
 ### The hooks never run
 
