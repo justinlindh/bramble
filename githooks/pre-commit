@@ -13,5 +13,10 @@ if git diff --cached -U0 | grep -q $'^+.*\xe2\x80\x94'; then
     exit 1
 fi
 
-# Typecheck + unit tests
-make -s check-fast
+# Webapp typecheck + unit tests, only when the commit stages a path the
+# Webapp checks job covers: the webapp and api areas in
+# .github/workflows/_detect-changes.yml (api because a webapp unit test pins
+# the generated RPC types against api/openapi.yaml). Keep the two in step.
+if git diff --cached --name-only --no-renames --diff-filter=ACMD | grep -Eq '^(webapp|api)/'; then
+    make -s check-fast
+fi
