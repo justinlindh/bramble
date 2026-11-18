@@ -56,6 +56,35 @@ void test_full_buffer_evicts_oldest(void) {
     TEST_ASSERT_FALSE(dedup_check_and_add(&buf, 1, 50001));
 }
 
+/*
+ * now_ms is a uint32 uptime that wraps. With a full buffer stamped on both
+ * sides of the wrap, eviction must remove the entry with the greatest age
+ * (now - timestamp), not the smallest raw timestamp: the post-wrap entries
+ * have small raw values but are the newest.
+ */
+void test_full_buffer_evicts_oldest_across_wrap(void) {
+    /* Entries i = 0..199 land before the wrap, i = 200..255 after it. */
+    const uint32_t start = 0xFFFFFFFFu - 20000u + 1u;
+    for (uint32_t i = 0; i < DEDUP_MAX_ENTRIES; i++) {
+        dedup_check_and_add(&buf, i + 1, start + i * 100u);
+    }
+    TEST_ASSERT_EQUAL_INT(DEDUP_MAX_ENTRIES, dedup_count(&buf));
+
+    /* Every entry is well within DEDUP_EXPIRY_MS of now, so none is purged. */
+    const uint32_t now = start + DEDUP_MAX_ENTRIES * 100u;
+    TEST_ASSERT_FALSE(dedup_check_and_add(&buf, 9999, now));
+    TEST_ASSERT_EQUAL_INT(DEDUP_MAX_ENTRIES, dedup_count(&buf));
+
+    /* The oldest entry (id=1, first pre-wrap stamp) is the one evicted. */
+    TEST_ASSERT_FALSE(dedup_contains(&buf, 1, now));
+    TEST_ASSERT_TRUE(dedup_contains(&buf, 9999, now));
+
+    /* Every other entry, post-wrap ones included, is still a duplicate. */
+    for (uint32_t id = 2; id <= DEDUP_MAX_ENTRIES; id++) {
+        TEST_ASSERT_TRUE_MESSAGE(dedup_contains(&buf, id, now), "entry evicted out of age order");
+    }
+}
+
 /* Task 6: dedup_contains is a pure, non-inserting peek, used by the
  * duplicate-DATA re-ACK decision (mesh_task.c) to ask "did I already record
  * this key" without polluting the table on a miss. */
@@ -118,6 +147,7 @@ int main(void) {
     RUN_TEST(test_expired_entry_not_duplicate);
     RUN_TEST(test_purge_removes_old);
     RUN_TEST(test_full_buffer_evicts_oldest);
+    RUN_TEST(test_full_buffer_evicts_oldest_across_wrap);
     RUN_TEST(test_contains_false_when_absent);
     RUN_TEST(test_contains_true_after_add);
     RUN_TEST(test_contains_false_after_expiry);

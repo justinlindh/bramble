@@ -20,11 +20,16 @@ bool dedup_check_and_add(dedup_buffer_t* buf, uint32_t packet_id, uint32_t now_m
         buf->entries[buf->count].timestamp_ms = now_ms;
         buf->count++;
     } else {
-        /* Evict oldest entry */
+        /* Evict the entry with the greatest age. Age is now - timestamp in
+         * uint32 arithmetic, as in dedup_purge, so it stays correct across
+         * the millisecond counter's wrap where raw timestamps do not. */
         int oldest = 0;
+        uint32_t oldest_age = now_ms - buf->entries[0].timestamp_ms;
         for (int i = 1; i < buf->count; i++) {
-            if (buf->entries[i].timestamp_ms < buf->entries[oldest].timestamp_ms) {
+            uint32_t age = now_ms - buf->entries[i].timestamp_ms;
+            if (age > oldest_age) {
                 oldest = i;
+                oldest_age = age;
             }
         }
         buf->entries[oldest].packet_id = packet_id;
